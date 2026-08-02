@@ -420,8 +420,8 @@ func TestBuildFetchModelsHeadersUsesCompatibilityIdentities(t *testing.T) {
 			assertions: func(t *testing.T, headers http.Header) {
 				assert.Equal(t, "Bearer test-key", headers.Get("Authorization"))
 				assert.Equal(t, "responses=experimental", headers.Get("OpenAI-Beta"))
-				assert.Equal(t, "pi", headers.Get("Originator"))
-				assert.Equal(t, "pi (new-api)", headers.Get("User-Agent"))
+				assert.Equal(t, "codex_cli_rs", headers.Get("Originator"))
+			assert.Equal(t, "codex_cli_rs/0.146.0", headers.Get("User-Agent"))
 			},
 		},
 		{

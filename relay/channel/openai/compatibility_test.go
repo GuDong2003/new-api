@@ -33,7 +33,7 @@ func TestCodexCompatibilityBuildsPiCompatibleResponsesRequest(t *testing.T) {
 	require.NoError(t, adaptor.SetupRequestHeader(c, &headers, info))
 	assert.Equal(t, "Bearer test-key", headers.Get("Authorization"))
 	assert.Equal(t, "responses=experimental", headers.Get("OpenAI-Beta"))
-	assert.Equal(t, "pi", headers.Get("Originator"))
+	assert.Equal(t, "codex_cli_rs", headers.Get("Originator"))
 	assert.Equal(t, "text/event-stream", headers.Get("Accept"))
 
 	maxOutputTokens := uint(4096)

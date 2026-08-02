@@ -8,8 +8,8 @@ import (
 )
 
 const (
-	codexCompatibilityOriginator = "pi"
-	codexCompatibilityUserAgent  = "pi (new-api)"
+	codexCompatibilityOriginator = "codex_cli_rs"
+	codexCompatibilityUserAgent  = "codex_cli_rs/0.146.0"
 	claudeCodeCompatibilityUA    = "2.1.178 (Claude Code)"
 )
 
