@@ -204,6 +204,7 @@ func buildFetchModelsHeaders(channel *model.Channel, key string) (http.Header, e
 	default:
 		headers = GetAuthHeader(key)
 	}
+	relaychannel.ApplyCompatibilityHeaders(channel.Type, headers, key, false)
 
 	if err := applyFetchModelsHeaderOverrides(channel, key, headers); err != nil {
 		return nil, err
@@ -488,8 +489,10 @@ func validateChannel(channel *model.Channel, isAdd bool) error {
 		return fmt.Errorf("渠道额外设置[channel setting] 格式错误：%s", err.Error())
 	}
 
-	if channel.Type == constant.ChannelTypeNewAPI && strings.TrimSpace(channel.GetBaseURL()) == "" {
-		return fmt.Errorf("New API channel base URL cannot be empty")
+	if (channel.Type == constant.ChannelTypeNewAPI ||
+		channel.Type == constant.ChannelTypeCodexCompatibility ||
+		channel.Type == constant.ChannelTypeClaudeCode) && strings.TrimSpace(channel.GetBaseURL()) == "" {
+		return fmt.Errorf("%s channel base URL cannot be empty", constant.GetChannelTypeName(channel.Type))
 	}
 
 	// 如果是添加操作，检查 channel 和 key 是否为空

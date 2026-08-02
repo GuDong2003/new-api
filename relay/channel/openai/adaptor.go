@@ -164,6 +164,15 @@ func (a *Adaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {
 			requestURL = fmt.Sprintf("/openai/realtime?deployment=%s&api-version=%s", model_, apiVersion)
 		}
 		return relaycommon.GetFullRequestURL(info.ChannelBaseUrl, requestURL, info.ChannelType), nil
+	case constant.ChannelTypeCodexCompatibility:
+		baseURL := strings.TrimRight(info.ChannelBaseUrl, "/")
+		if strings.HasSuffix(baseURL, "/codex/responses") {
+			return baseURL, nil
+		}
+		if strings.HasSuffix(baseURL, "/codex") {
+			return baseURL + "/responses", nil
+		}
+		return baseURL + "/codex/responses", nil
 	//case constant.ChannelTypeMiniMax:
 	//	return minimax.GetRequestURL(info)
 	case constant.ChannelTypeCustom:
@@ -230,6 +239,7 @@ func (a *Adaptor) SetupRequestHeader(c *gin.Context, header *http.Header, info *
 			header.Set("Authorization", "Bearer "+info.ApiKey)
 		}
 	}
+	channel.ApplyCompatibilityHeaders(info.ChannelType, *header, info.ApiKey, info.IsStream)
 	if info.ChannelType == constant.ChannelTypeOpenRouter {
 		if header.Get("HTTP-Referer") == "" {
 			header.Set("HTTP-Referer", "https://www.newapi.ai")
@@ -616,6 +626,26 @@ func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommo
 	}
 	if info != nil && request.Reasoning != nil && request.Reasoning.Effort != "" {
 		info.SetReasoningEffort(request.Reasoning.Effort)
+	}
+	if info != nil && info.ChannelType == constant.ChannelTypeCodexCompatibility {
+		// Codex Responses requires store=false and expects an instructions field.
+		request.Store = json.RawMessage("false")
+		request.MaxOutputTokens = nil
+		if len(request.Instructions) == 0 {
+			request.Instructions = json.RawMessage(`"You are a helpful assistant."`)
+		}
+		if len(request.Text) == 0 {
+			request.Text = json.RawMessage(`{"verbosity":"low"}`)
+		}
+		if len(request.Include) == 0 {
+			request.Include = json.RawMessage(`["reasoning.encrypted_content"]`)
+		}
+		if len(request.ToolChoice) == 0 {
+			request.ToolChoice = json.RawMessage(`"auto"`)
+		}
+		if len(request.ParallelToolCalls) == 0 {
+			request.ParallelToolCalls = json.RawMessage("true")
+		}
 	}
 	return request, nil
 }

@@ -408,6 +408,44 @@ func TestFetchNewAPIModelsUsesOpenAIContract(t *testing.T) {
 	require.Equal(t, []string{"gpt-5", "gpt-5-mini"}, models)
 }
 
+func TestBuildFetchModelsHeadersUsesCompatibilityIdentities(t *testing.T) {
+	tests := []struct {
+		name        string
+		channelType int
+		assertions  func(t *testing.T, headers http.Header)
+	}{
+		{
+			name:        "Codex",
+			channelType: constant.ChannelTypeCodexCompatibility,
+			assertions: func(t *testing.T, headers http.Header) {
+				assert.Equal(t, "Bearer test-key", headers.Get("Authorization"))
+				assert.Equal(t, "responses=experimental", headers.Get("OpenAI-Beta"))
+				assert.Equal(t, "pi", headers.Get("Originator"))
+				assert.Equal(t, "pi (new-api)", headers.Get("User-Agent"))
+			},
+		},
+		{
+			name:        "Claude Code",
+			channelType: constant.ChannelTypeClaudeCode,
+			assertions: func(t *testing.T, headers http.Header) {
+				assert.Equal(t, "Bearer test-key", headers.Get("Authorization"))
+				assert.Empty(t, headers.Get("x-api-key"))
+				assert.Equal(t, "2.1.178 (Claude Code)", headers.Get("User-Agent"))
+				assert.Equal(t, "2023-06-01", headers.Get("Anthropic-Version"))
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			headers, err := buildFetchModelsHeaders(&model.Channel{Type: test.channelType}, "test-key")
+
+			require.NoError(t, err)
+			test.assertions(t, headers)
+		})
+	}
+}
+
 func TestNormalizeModelNames(t *testing.T) {
 	result := normalizeModelNames([]string{
 		" gpt-4o ",

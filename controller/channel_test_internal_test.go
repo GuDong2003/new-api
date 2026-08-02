@@ -56,31 +56,68 @@ func TestValidateChannelProxy(t *testing.T) {
 	}
 }
 
-func TestValidateChannelRequiresNewAPIBaseURL(t *testing.T) {
+func TestValidateChannelRequiresCustomBaseURL(t *testing.T) {
 	tests := []struct {
-		name    string
-		baseURL *string
-		wantErr bool
+		name        string
+		channelType int
+		baseURL     *string
+		wantErr     bool
+		errMessage  string
 	}{
-		{name: "missing", wantErr: true},
-		{name: "blank", baseURL: common.GetPointer("  "), wantErr: true},
-		{name: "configured", baseURL: common.GetPointer("https://new-api.example")},
+		{name: "New API missing", channelType: constant.ChannelTypeNewAPI, wantErr: true, errMessage: "New API channel base URL cannot be empty"},
+		{name: "Codex blank", channelType: constant.ChannelTypeCodexCompatibility, baseURL: common.GetPointer("  "), wantErr: true, errMessage: "Codex channel base URL cannot be empty"},
+		{name: "Claude Code configured", channelType: constant.ChannelTypeClaudeCode, baseURL: common.GetPointer("https://proxy.example")},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			channel := &model.Channel{
-				Type:    constant.ChannelTypeNewAPI,
+				Type:    test.channelType,
 				BaseURL: test.baseURL,
 			}
 
 			err := validateChannel(channel, false)
 
 			if test.wantErr {
-				require.ErrorContains(t, err, "New API channel base URL cannot be empty")
+				require.ErrorContains(t, err, test.errMessage)
 				return
 			}
 			require.NoError(t, err)
+		})
+	}
+}
+
+func TestCompatibilityChannelRegistration(t *testing.T) {
+	tests := []struct {
+		name        string
+		channelType int
+		apiType     int
+		endpoints   []constant.EndpointType
+	}{
+		{
+			name:        "Codex",
+			channelType: constant.ChannelTypeCodexCompatibility,
+			apiType:     constant.APITypeOpenAI,
+			endpoints:   []constant.EndpointType{constant.EndpointTypeOpenAIResponse},
+		},
+		{
+			name:        "Claude Code",
+			channelType: constant.ChannelTypeClaudeCode,
+			apiType:     constant.APITypeAnthropic,
+			endpoints:   []constant.EndpointType{constant.EndpointTypeAnthropic, constant.EndpointTypeOpenAI},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			apiType, ok := common.ChannelType2APIType(test.channelType)
+
+			require.True(t, ok)
+			assert.Equal(t, test.apiType, apiType)
+			require.NotEqual(t, "Unknown", constant.GetChannelTypeName(test.channelType))
+			require.Greater(t, len(constant.ChannelBaseURLs), test.channelType)
+			assert.Empty(t, constant.ChannelBaseURLs[test.channelType])
+			assert.Equal(t, test.endpoints, common.GetEndpointTypesByChannelType(test.channelType, "gpt-5"))
 		})
 	}
 }
