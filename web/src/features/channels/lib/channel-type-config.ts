@@ -187,7 +187,7 @@ export const CHANNEL_TYPE_CONFIGS: Record<number, ChannelTypeConfig> = {
   63: {
     id: 63,
     name: CHANNEL_TYPES[63],
-    icon: 'openai',
+    icon: 'CodeBuddy',
     hints: {
       baseUrl: CODE_BUDDY_BASE_URL_HELP,
       key: 'Enter API key for this channel',

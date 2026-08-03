@@ -72,10 +72,13 @@ describe('compatibility channels', () => {
     assert.equal(MODEL_FETCHABLE_TYPES.has(CHANNEL_TYPE_CODE_BUDDY), true)
     assert.equal(MODEL_FETCHABLE_TYPES.has(CHANNEL_TYPE_CLAUDE_CODE), true)
     assert.equal(getChannelTypeIcon(CHANNEL_TYPE_CODEX), 'OpenAI')
-    assert.equal(getChannelTypeIcon(CHANNEL_TYPE_CODE_BUDDY), 'OpenAI')
+    assert.equal(getChannelTypeIcon(CHANNEL_TYPE_CODE_BUDDY), 'CodeBuddy')
     assert.equal(getChannelTypeIcon(CHANNEL_TYPE_CLAUDE_CODE), 'Claude')
     assert.equal(getChannelTypeConfig(CHANNEL_TYPE_CODEX).icon, 'openai')
-    assert.equal(getChannelTypeConfig(CHANNEL_TYPE_CODE_BUDDY).icon, 'openai')
+    assert.equal(
+      getChannelTypeConfig(CHANNEL_TYPE_CODE_BUDDY).icon,
+      'CodeBuddy'
+    )
     assert.equal(
       getChannelTypeConfig(CHANNEL_TYPE_CODE_BUDDY).hints?.baseUrl,
       CODE_BUDDY_BASE_URL_HELP
