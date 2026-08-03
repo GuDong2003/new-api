@@ -239,7 +239,12 @@ func (a *Adaptor) SetupRequestHeader(c *gin.Context, header *http.Header, info *
 			header.Set("Authorization", "Bearer "+info.ApiKey)
 		}
 	}
-	channel.ApplyCompatibilityHeaders(info.ChannelType, *header, info.ApiKey, info.IsStream)
+	if info.ChannelType == constant.ChannelTypeCodeBuddy {
+		conversationID := channel.ResolveCodeBuddyConversationID(c.Request.Header, info.Request)
+		channel.ApplyCompatibilityHeadersWithConversation(info.ChannelType, *header, info.ApiKey, info.IsStream, conversationID)
+	} else {
+		channel.ApplyCompatibilityHeaders(info.ChannelType, *header, info.ApiKey, info.IsStream)
+	}
 	if info.ChannelType == constant.ChannelTypeOpenRouter {
 		if header.Get("HTTP-Referer") == "" {
 			header.Set("HTTP-Referer", "https://www.newapi.ai")

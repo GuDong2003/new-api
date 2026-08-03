@@ -1,6 +1,7 @@
 package openai
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -97,6 +98,36 @@ func TestCodeBuddyCompatibilityBuildsWorkBuddyRequest(t *testing.T) {
 	assert.Equal(t, "low", request.ReasoningEffort)
 	require.NotNil(t, request.StreamOptions)
 	assert.True(t, request.StreamOptions.IncludeUsage)
+}
+
+func TestCodeBuddyCompatibilityReusesConversationIdentityFromPromptCacheKey(t *testing.T) {
+	oldMode := gin.Mode()
+	gin.SetMode(gin.TestMode)
+	t.Cleanup(func() { gin.SetMode(oldMode) })
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	request := &dto.OpenAIResponsesRequest{
+		Model:          "gpt-5.6-sol",
+		PromptCacheKey: json.RawMessage(`"session-123"`),
+	}
+	info := &relaycommon.RelayInfo{
+		Request: request,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType: constant.ChannelTypeCodeBuddy,
+			ApiKey:      "test-key",
+		},
+	}
+	adaptor := &Adaptor{}
+	adaptor.Init(info)
+
+	first := http.Header{}
+	second := http.Header{}
+	require.NoError(t, adaptor.SetupRequestHeader(c, &first, info))
+	require.NoError(t, adaptor.SetupRequestHeader(c, &second, info))
+
+	assert.NotEmpty(t, first.Get("X-Conversation-ID"))
+	assert.Equal(t, first.Get("X-Conversation-ID"), second.Get("X-Conversation-ID"))
+	assert.NotEqual(t, first.Get("X-Request-ID"), second.Get("X-Request-ID"))
 }
 
 func TestCodexCompatibilityResolvesPiResponsesPath(t *testing.T) {

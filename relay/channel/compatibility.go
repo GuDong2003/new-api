@@ -16,9 +16,15 @@ const (
 // ApplyCompatibilityHeaders applies the fixed upstream identity for API-key
 // compatibility channels. Channel header overrides are applied afterward.
 func ApplyCompatibilityHeaders(channelType int, headers http.Header, apiKey string, isStream bool) {
+	ApplyCompatibilityHeadersWithConversation(channelType, headers, apiKey, isStream, "")
+}
+
+// ApplyCompatibilityHeadersWithConversation preserves WorkBuddy's stable
+// session identity while keeping request/message IDs unique per turn.
+func ApplyCompatibilityHeadersWithConversation(channelType int, headers http.Header, apiKey string, isStream bool, conversationID string) {
 	switch channelType {
 	case constant.ChannelTypeCodeBuddy:
-		applyCodeBuddyHeaders(headers, apiKey)
+		applyCodeBuddyHeaders(headers, apiKey, conversationID)
 	case constant.ChannelTypeCodexCompatibility:
 		headers.Set("Authorization", "Bearer "+apiKey)
 		headers.Set("OpenAI-Beta", "responses=experimental")

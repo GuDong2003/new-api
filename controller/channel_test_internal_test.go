@@ -124,6 +124,31 @@ func TestCompatibilityChannelRegistration(t *testing.T) {
 	}
 }
 
+func TestCodexCompatibilityChannelTestUsesStreamingResponses(t *testing.T) {
+	channel := &model.Channel{Type: constant.ChannelTypeCodexCompatibility}
+
+	assert.Equal(t,
+		string(constant.EndpointTypeOpenAIResponse),
+		normalizeChannelTestEndpoint(channel, "gpt-5.6-sol", ""),
+	)
+	assert.Equal(t,
+		string(constant.EndpointTypeOpenAI),
+		normalizeChannelTestEndpoint(channel, "gpt-5.6-sol", string(constant.EndpointTypeOpenAI)),
+	)
+	assert.True(t, shouldUseStreamForAutomaticChannelTest(channel))
+
+	request := buildTestRequest(
+		"gpt-5.6-sol",
+		string(constant.EndpointTypeOpenAIResponse),
+		channel,
+		true,
+	)
+	responsesRequest, ok := request.(*dto.OpenAIResponsesRequest)
+	require.True(t, ok)
+	require.NotNil(t, responsesRequest.Stream)
+	assert.True(t, *responsesRequest.Stream)
+}
+
 func TestCodeBuddyChannelUsesOpenAIChatCompletions(t *testing.T) {
 	apiType, ok := common.ChannelType2APIType(constant.ChannelTypeCodeBuddy)
 

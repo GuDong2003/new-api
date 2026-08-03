@@ -1,6 +1,7 @@
 package channel
 
 import (
+	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
@@ -112,4 +113,29 @@ func TestApplyCodeBuddyRequestProfile(t *testing.T) {
 	assert.Equal(t, "low", request.ReasoningEffort)
 	require.NotNil(t, request.StreamOptions)
 	assert.True(t, request.StreamOptions.IncludeUsage)
+}
+
+func TestCodeBuddyConversationIdentityIsStableAcrossTurns(t *testing.T) {
+	conversationID := ResolveCodeBuddyConversationID(nil, &dto.OpenAIResponsesRequest{
+		PromptCacheKey: json.RawMessage(`"session-123"`),
+	})
+	require.NotEmpty(t, conversationID)
+
+	first := http.Header{}
+	second := http.Header{}
+	ApplyCompatibilityHeadersWithConversation(constant.ChannelTypeCodeBuddy, first, "test-key", true, conversationID)
+	ApplyCompatibilityHeadersWithConversation(constant.ChannelTypeCodeBuddy, second, "test-key", true, conversationID)
+
+	assert.Equal(t, conversationID, first.Get("X-Conversation-ID"))
+	assert.Equal(t, first.Get("X-Conversation-ID"), second.Get("X-Conversation-ID"))
+	assert.Equal(t, first.Get("Acp-Connection-ID"), second.Get("Acp-Connection-ID"))
+	assert.NotEqual(t, first.Get("X-Request-ID"), second.Get("X-Request-ID"))
+}
+
+func TestResolveCodeBuddyConversationIDPrefersIncomingHeader(t *testing.T) {
+	incomingID := "a66fe5d5-ceb0-4f54-a69d-060e98bfb0c6"
+	headers := http.Header{"X-Conversation-Id": []string{incomingID}}
+	request := &dto.GeneralOpenAIRequest{PromptCacheKey: "different-session"}
+
+	assert.Equal(t, incomingID, ResolveCodeBuddyConversationID(headers, request))
 }

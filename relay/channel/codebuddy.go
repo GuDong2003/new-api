@@ -3,6 +3,7 @@ package channel
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"net/http"
 	"strings"
 
@@ -91,9 +92,12 @@ func ApplyCodeBuddyRequestProfile(request *dto.GeneralOpenAIRequest) {
 	request.StreamOptions = &dto.StreamOptions{IncludeUsage: true}
 }
 
-func applyCodeBuddyHeaders(headers http.Header, apiKey string) {
-	acpConnectionID := uuid.NewString()
-	conversationID := uuid.NewString()
+func applyCodeBuddyHeaders(headers http.Header, apiKey, conversationID string) {
+	conversationID = strings.TrimSpace(conversationID)
+	if conversationID == "" {
+		conversationID = uuid.NewString()
+	}
+	acpConnectionID := uuid.NewSHA1(uuid.NameSpaceURL, []byte("workbuddy-acp:"+conversationID)).String()
 	requestID := strings.ReplaceAll(uuid.NewString(), "-", "")
 	traceID := codeBuddyRandomHex(16)
 	spanID := codeBuddyRandomHex(8)
@@ -133,6 +137,54 @@ func applyCodeBuddyHeaders(headers http.Header, apiKey string) {
 	headers.Set("X-B3-SpanID", spanID)
 	headers.Set("X-B3-TraceID", traceID)
 	headers.Set("X-Trace-ID", traceID)
+}
+
+// ResolveCodeBuddyConversationID maps a caller's stable conversation key to
+// the UUID-shaped session ID emitted by the official WorkBuddy client. The
+// raw key is never sent upstream.
+func ResolveCodeBuddyConversationID(incoming http.Header, request dto.Request) string {
+	if incoming != nil {
+		if value := strings.TrimSpace(incoming.Get("X-Conversation-ID")); value != "" {
+			if parsed, err := uuid.Parse(value); err == nil {
+				return parsed.String()
+			}
+			return codeBuddyConversationUUID(value)
+		}
+	}
+
+	var key string
+	switch value := request.(type) {
+	case *dto.GeneralOpenAIRequest:
+		if value != nil {
+			key = value.PromptCacheKey
+		}
+	case *dto.OpenAIResponsesRequest:
+		if value != nil {
+			key = codeBuddyJSONString(value.PromptCacheKey)
+			if key == "" {
+				key = codeBuddyJSONString(value.Conversation)
+			}
+		}
+	}
+	if key == "" {
+		return ""
+	}
+	return codeBuddyConversationUUID(key)
+}
+
+func codeBuddyConversationUUID(key string) string {
+	return uuid.NewSHA1(uuid.NameSpaceURL, []byte("workbuddy-conversation:"+strings.TrimSpace(key))).String()
+}
+
+func codeBuddyJSONString(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var value string
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(value)
 }
 
 func codeBuddyRandomHex(bytes int) string {
