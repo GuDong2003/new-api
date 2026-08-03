@@ -17,6 +17,8 @@ const (
 // compatibility channels. Channel header overrides are applied afterward.
 func ApplyCompatibilityHeaders(channelType int, headers http.Header, apiKey string, isStream bool) {
 	switch channelType {
+	case constant.ChannelTypeCodeBuddy:
+		applyCodeBuddyHeaders(headers, apiKey)
 	case constant.ChannelTypeCodexCompatibility:
 		headers.Set("Authorization", "Bearer "+apiKey)
 		headers.Set("OpenAI-Beta", "responses=experimental")

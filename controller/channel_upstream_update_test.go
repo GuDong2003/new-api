@@ -421,7 +421,7 @@ func TestBuildFetchModelsHeadersUsesCompatibilityIdentities(t *testing.T) {
 				assert.Equal(t, "Bearer test-key", headers.Get("Authorization"))
 				assert.Equal(t, "responses=experimental", headers.Get("OpenAI-Beta"))
 				assert.Equal(t, "codex_cli_rs", headers.Get("Originator"))
-			assert.Equal(t, "codex_cli_rs/0.146.0", headers.Get("User-Agent"))
+				assert.Equal(t, "codex_cli_rs/0.146.0", headers.Get("User-Agent"))
 			},
 		},
 		{
@@ -432,6 +432,17 @@ func TestBuildFetchModelsHeadersUsesCompatibilityIdentities(t *testing.T) {
 				assert.Empty(t, headers.Get("x-api-key"))
 				assert.Equal(t, "2.1.178 (Claude Code)", headers.Get("User-Agent"))
 				assert.Equal(t, "2023-06-01", headers.Get("Anthropic-Version"))
+			},
+		},
+		{
+			name:        "CodeBuddy",
+			channelType: constant.ChannelTypeCodeBuddy,
+			assertions: func(t *testing.T, headers http.Header) {
+				assert.Equal(t, "Bearer test-key", headers.Get("Authorization"))
+				assert.Equal(t, "test-key", headers.Get("X-API-Key"))
+				assert.Equal(t, "WorkBuddy/5.3.5 WorkBuddy/5.3.5 CLI/2.115.0", headers.Get("User-Agent"))
+				assert.Equal(t, "1", headers.Get("X-CodeBuddy-Request"))
+				assert.Empty(t, headers.Get("X-API-Mock-WorkBuddy-Compatible"))
 			},
 		},
 	}

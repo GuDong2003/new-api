@@ -915,6 +915,8 @@
     "CNY": "元",
     "CNY per USD": "人民币兑美元汇率",
     "Code": "代码",
+    "Code Buddy": "Code Buddy",
+    "Configure the WorkBuddy upstream root URL without /v1. New API adds /v1/chat/completions and applies the built-in WorkBuddy request profile.": "配置 WorkBuddy 上游根地址，不要带 /v1。New API 会追加 /v1/chat/completions，并使用内置 WorkBuddy 请求画像。",
     "Code generation, refactoring, autocomplete": "代码生成、重构、自动补全",
     "Code interpreter": "代码解释器",
     "Code samples": "调用示例",

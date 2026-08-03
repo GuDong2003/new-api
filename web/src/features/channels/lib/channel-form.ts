@@ -21,6 +21,7 @@ import { z } from 'zod'
 import {
   CLAUDE_FIELD_PASSTHROUGH_TYPES,
   CHANNEL_TYPE_CLAUDE_CODE,
+  CHANNEL_TYPE_CODE_BUDDY,
   CHANNEL_TYPE_CODEX,
   CHANNEL_TYPE_NEW_API,
   CHANNEL_STATUS,
@@ -295,6 +296,7 @@ export const channelFormSchema = z
         CHANNEL_TYPE_NEW_API,
         CHANNEL_TYPE_CODEX,
         CHANNEL_TYPE_CLAUDE_CODE,
+        CHANNEL_TYPE_CODE_BUDDY,
       ].includes(data.type) &&
       !data.base_url?.trim()
     ) {

@@ -255,8 +255,13 @@ func (a *Adaptor) ConvertOpenAIRequest(c *gin.Context, info *relaycommon.RelayIn
 	if request == nil {
 		return nil, errors.New("request is nil")
 	}
-	if info.ChannelType != constant.ChannelTypeOpenAI && info.ChannelType != constant.ChannelTypeAzure {
+	if info.ChannelType != constant.ChannelTypeOpenAI &&
+		info.ChannelType != constant.ChannelTypeAzure &&
+		info.ChannelType != constant.ChannelTypeCodeBuddy {
 		request.StreamOptions = nil
+	}
+	if info.ChannelType == constant.ChannelTypeCodeBuddy {
+		channel.ApplyCodeBuddyRequestProfile(request)
 	}
 	if info.ChannelType == constant.ChannelTypeOpenRouter {
 		if len(request.Usage) == 0 {

@@ -53,6 +53,52 @@ func TestCodexCompatibilityBuildsPiCompatibleResponsesRequest(t *testing.T) {
 	assert.JSONEq(t, `true`, string(request.ParallelToolCalls))
 }
 
+func TestCodeBuddyCompatibilityBuildsWorkBuddyRequest(t *testing.T) {
+	oldMode := gin.Mode()
+	gin.SetMode(gin.TestMode)
+	t.Cleanup(func() { gin.SetMode(oldMode) })
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	info := &relaycommon.RelayInfo{
+		IsStream: false,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType: constant.ChannelTypeCodeBuddy,
+			ApiKey:      "test-key",
+		},
+	}
+	adaptor := &Adaptor{}
+	adaptor.Init(info)
+
+	headers := http.Header{}
+	require.NoError(t, adaptor.SetupRequestHeader(c, &headers, info))
+	assert.Equal(t, "Bearer test-key", headers.Get("Authorization"))
+	assert.Equal(t, "test-key", headers.Get("X-API-Key"))
+	assert.Equal(t, "conversation", headers.Get("X-Agent-Purpose"))
+	assert.Equal(t, "1", headers.Get("X-CodeBuddy-Request"))
+	assert.Empty(t, headers.Get("X-API-Mock-WorkBuddy-Compatible"))
+
+	stream := false
+	temperature := 0.0
+	converted, err := adaptor.ConvertOpenAIRequest(c, info, &dto.GeneralOpenAIRequest{
+		Messages:    []dto.Message{{Role: "user", Content: "hello"}},
+		Stream:      &stream,
+		Temperature: &temperature,
+	})
+	require.NoError(t, err)
+	request, ok := converted.(*dto.GeneralOpenAIRequest)
+	require.True(t, ok)
+	require.Len(t, request.Messages, 2)
+	assert.Equal(t, "system", request.Messages[0].Role)
+	assert.NotEmpty(t, request.Messages[0].StringContent())
+	require.NotNil(t, request.Stream)
+	assert.True(t, *request.Stream)
+	require.NotNil(t, request.Temperature)
+	assert.Equal(t, 1.0, *request.Temperature)
+	assert.Equal(t, "low", request.ReasoningEffort)
+	require.NotNil(t, request.StreamOptions)
+	assert.True(t, request.StreamOptions.IncludeUsage)
+}
+
 func TestCodexCompatibilityResolvesPiResponsesPath(t *testing.T) {
 	adaptor := &Adaptor{}
 	tests := []struct {

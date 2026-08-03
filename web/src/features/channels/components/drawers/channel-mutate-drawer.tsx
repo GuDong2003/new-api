@@ -139,7 +139,9 @@ import {
 import {
   ADD_MODE_OPTIONS,
   CLAUDE_FIELD_PASSTHROUGH_TYPES,
+  CODE_BUDDY_BASE_URL_HELP,
   CHANNEL_TYPE_CLAUDE_CODE,
+  CHANNEL_TYPE_CODE_BUDDY,
   CHANNEL_TYPE_CODEX,
   CHANNEL_STATUS_LABELS,
   CHANNEL_TYPE_OPTIONS,
@@ -978,6 +980,7 @@ export function ChannelMutateDrawer({
     45,
     CHANNEL_TYPE_CODEX,
     CHANNEL_TYPE_CLAUDE_CODE,
+    CHANNEL_TYPE_CODE_BUDDY,
   ].includes(currentType)
   const providerRequiresOther = [3, 18, 21, 39, 41, 49].includes(currentType)
   const identityComplete = Boolean(currentName?.trim() && currentType > 0)
@@ -2791,16 +2794,21 @@ export function ChannelMutateDrawer({
                                     <FormLabel>{t('Base URL')}</FormLabel>
                                     <FormControl>
                                       <Input
-                                        placeholder={t(
-                                          FIELD_PLACEHOLDERS.BASE_URL
-                                        )}
+                                        placeholder={
+                                          currentType ===
+                                          CHANNEL_TYPE_CODE_BUDDY
+                                            ? 'http://127.0.0.1:13100'
+                                            : t(FIELD_PLACEHOLDERS.BASE_URL)
+                                        }
                                         {...field}
                                       />
                                     </FormControl>
                                     <FormDescription>
-                                      {t(
-                                        'Custom API base URL. For official channels, New API has built-in addresses. Only fill this for third-party proxy sites or special endpoints. Do not add /v1 or trailing slash.'
-                                      )}
+                                      {currentType === CHANNEL_TYPE_CODE_BUDDY
+                                        ? t(CODE_BUDDY_BASE_URL_HELP)
+                                        : t(
+                                            'Custom API base URL. For official channels, New API has built-in addresses. Only fill this for third-party proxy sites or special endpoints. Do not add /v1 or trailing slash.'
+                                          )}
                                     </FormDescription>
                                     <FormMessage />
                                   </FormItem>

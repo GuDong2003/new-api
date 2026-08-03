@@ -109,8 +109,10 @@ export const STATIC_I18N_KEYS = [
   'Successfully created {{count}} API Key(s)',
   'Successfully deleted {{count}} API key(s)',
   'Enter API key for this channel',
+  'Code Buddy',
   'Codex',
   'Claude Code',
+  'Configure the WorkBuddy upstream root URL without /v1. New API adds /v1/chat/completions and applies the built-in WorkBuddy request profile.',
 
   // Users
   'Root',

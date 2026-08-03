@@ -913,6 +913,8 @@
     "CNY": "CNY",
     "CNY per USD": "CNY per USD",
     "Code": "Code",
+    "Code Buddy": "Code Buddy",
+    "Configure the WorkBuddy upstream root URL without /v1. New API adds /v1/chat/completions and applies the built-in WorkBuddy request profile.": "Configure the WorkBuddy upstream root URL without /v1. New API adds /v1/chat/completions and applies the built-in WorkBuddy request profile.",
     "Code generation, refactoring, autocomplete": "Code generation, refactoring, autocomplete",
     "Code interpreter": "Code interpreter",
     "Code samples": "Code samples",
