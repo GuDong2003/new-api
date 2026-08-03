@@ -72,11 +72,16 @@ func TestCodeBuddyCompatibilityBuildsWorkBuddyProfile(t *testing.T) {
 
 	assert.Equal(t, "Bearer upstream-key", headers.Get("Authorization"))
 	assert.Equal(t, "upstream-key", headers.Get("X-API-Key"))
-	assert.Equal(t, "WorkBuddy/5.3.5 WorkBuddy/5.3.5 CLI/2.115.0", headers.Get("User-Agent"))
+	assert.Equal(t, "WorkBuddy/5.3.8 WorkBuddy/5.3.8 CLI/2.115.0", headers.Get("User-Agent"))
 	assert.Equal(t, "conversation", headers.Get("X-Agent-Purpose"))
 	assert.Equal(t, "1", headers.Get("X-CodeBuddy-Request"))
+	assert.Equal(t, "5.3.8", headers.Get("X-Product-Version"))
 	assert.Empty(t, headers.Get("X-API-Mock-WorkBuddy-Compatible"))
 	assert.Len(t, headers.Get("Acp-Connection-ID"), 36)
+	assert.Len(t, headers.Get("X-Conversation-ID"), 36)
+	assert.Regexp(t, `^[0-9a-f]{32}$`, headers.Get("X-Conversation-Message-ID"))
+	assert.Equal(t, headers.Get("X-Conversation-Message-ID"), headers.Get("X-Conversation-Request-ID"))
+	assert.Equal(t, headers.Get("X-Conversation-Message-ID"), headers.Get("X-Request-ID"))
 
 	traceID := headers.Get("X-Trace-ID")
 	assert.Regexp(t, `^[0-9a-f]{32}$`, traceID)

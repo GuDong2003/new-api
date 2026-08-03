@@ -10,7 +10,11 @@ import (
 	"github.com/google/uuid"
 )
 
-const codeBuddyModelInstructions = `You are a coding agent operating in a local workspace. Inspect, implement,
+const (
+	codeBuddyProductVersion = "5.3.8"
+	codeBuddyCLIUserAgent   = "2.115.0"
+
+	codeBuddyModelInstructions = `You are a coding agent operating in a local workspace. Inspect, implement,
 verify, and complete the user's request using only the tools available in the
 current request.
 
@@ -60,6 +64,7 @@ the requested task with a different one.
   successful live validation.
 - Report material changes, validation, and remaining limitations.
 - Do not claim completion while required work or verification remains pending.`
+)
 
 // ApplyCodeBuddyRequestProfile applies the public WorkBuddy relay profile used
 // by the reference implementation. Private prompt templates and tool catalogs
@@ -88,6 +93,8 @@ func ApplyCodeBuddyRequestProfile(request *dto.GeneralOpenAIRequest) {
 
 func applyCodeBuddyHeaders(headers http.Header, apiKey string) {
 	acpConnectionID := uuid.NewString()
+	conversationID := uuid.NewString()
+	requestID := strings.ReplaceAll(uuid.NewString(), "-", "")
 	traceID := codeBuddyRandomHex(16)
 	spanID := codeBuddyRandomHex(8)
 	parentSpanID := codeBuddyRandomHex(8)
@@ -96,15 +103,16 @@ func applyCodeBuddyHeaders(headers http.Header, apiKey string) {
 	headers.Set("X-API-Key", apiKey)
 	headers.Set("Accept", "application/json")
 	headers.Set("Content-Type", "application/json")
-	headers.Set("User-Agent", "WorkBuddy/5.3.5 WorkBuddy/5.3.5 CLI/2.115.0")
+	headers.Set("User-Agent", "WorkBuddy/"+codeBuddyProductVersion+" WorkBuddy/"+codeBuddyProductVersion+" CLI/"+codeBuddyCLIUserAgent)
 	headers.Set("X-Agent-Intent", "craft")
 	headers.Set("X-Agent-Purpose", "conversation")
 	headers.Set("X-CodeBuddy-Request", "1")
 	headers.Set("X-Domain", "www.codebuddy.cn")
 	headers.Set("X-IDE-Name", "WorkBuddy")
 	headers.Set("X-IDE-Type", "WorkBuddy")
-	headers.Set("X-IDE-Version", "5.3.5")
+	headers.Set("X-IDE-Version", codeBuddyProductVersion)
 	headers.Set("X-Product", "SaaS")
+	headers.Set("X-Product-Version", codeBuddyProductVersion)
 	headers.Set("X-Requested-With", "XMLHttpRequest")
 	headers.Set("X-Stainless-Arch", "x64")
 	headers.Set("X-Stainless-Lang", "js")
@@ -114,6 +122,10 @@ func applyCodeBuddyHeaders(headers http.Header, apiKey string) {
 	headers.Set("X-Stainless-Runtime", "node")
 	headers.Set("X-Stainless-Runtime-Version", "v22.21.1")
 	headers.Set("Acp-Connection-ID", acpConnectionID)
+	headers.Set("X-Conversation-ID", conversationID)
+	headers.Set("X-Conversation-Message-ID", requestID)
+	headers.Set("X-Conversation-Request-ID", requestID)
+	headers.Set("X-Request-ID", requestID)
 	headers.Set("B3", traceID+"-"+spanID+"-1-"+parentSpanID)
 	headers.Set("Traceparent", "00-"+traceID+"-"+spanID+"-01")
 	headers.Set("X-B3-ParentSpanID", parentSpanID)
