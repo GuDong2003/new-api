@@ -3,7 +3,6 @@ package channel
 import (
 	"encoding/json"
 	"net/http"
-	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/constant"
@@ -117,21 +116,33 @@ func TestCodeBuddyCompatibilityBuildsWorkBuddyProfile(t *testing.T) {
 
 	assert.Equal(t, "Bearer upstream-key", headers.Get("Authorization"))
 	assert.Equal(t, "upstream-key", headers.Get("X-API-Key"))
+	assert.Equal(t, "application/json", headers.Get("Accept"))
 	assert.Equal(t, "WorkBuddy/5.3.8 WorkBuddy/5.3.8 CLI/2.115.0", headers.Get("User-Agent"))
 	assert.Equal(t, "conversation", headers.Get("X-Agent-Purpose"))
+	assert.Equal(t, "www.codebuddy.cn", headers.Get("X-Domain"))
+	assert.Equal(t, "SaaS", headers.Get("X-Product"))
 	assert.Equal(t, "1", headers.Get("X-CodeBuddy-Request"))
-	assert.Equal(t, "5.3.8", headers.Get("X-Product-Version"))
-	assert.Empty(t, headers.Get("X-API-Mock-WorkBuddy-Compatible"))
 	assert.Len(t, headers.Get("Acp-Connection-ID"), 36)
+	assert.Equal(t, "6.25.0", headers.Get("X-Stainless-Package-Version"))
+	assert.Equal(t, "XMLHttpRequest", headers.Get("X-Requested-With"))
+	assert.Empty(t, headers.Get("X-Product-Version"))
+	assert.Empty(t, headers.Get("X-Session-ID"))
 	assert.Len(t, headers.Get("X-Conversation-ID"), 36)
 	assert.Regexp(t, `^[0-9a-f]{32}$`, headers.Get("X-Conversation-Message-ID"))
-	assert.Equal(t, headers.Get("X-Conversation-Message-ID"), headers.Get("X-Conversation-Request-ID"))
 	assert.Equal(t, headers.Get("X-Conversation-Message-ID"), headers.Get("X-Request-ID"))
+	assert.Regexp(t, `^[0-9a-f]{32}$`, headers.Get("X-Conversation-Request-ID"))
+	assert.NotEqual(t, headers.Get("X-Conversation-Message-ID"), headers.Get("X-Conversation-Request-ID"))
+	assert.Regexp(t, `^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`, headers.Get("X-User-Id"))
 
 	traceID := headers.Get("X-Trace-ID")
+	spanID := headers.Get("X-B3-SpanID")
 	assert.Regexp(t, `^[0-9a-f]{32}$`, traceID)
-	assert.Equal(t, "00-"+traceID+"-"+headers.Get("X-B3-SpanID")+"-01", headers.Get("Traceparent"))
-	assert.Equal(t, strings.Join([]string{traceID, headers.Get("X-B3-SpanID"), "1", headers.Get("X-B3-ParentSpanID")}, "-"), headers.Get("B3"))
+	assert.Regexp(t, `^[0-9a-f]{16}$`, spanID)
+	assert.Equal(t, traceID, headers.Get("X-B3-TraceID"))
+	assert.Equal(t, spanID, headers.Get("X-B3-ParentSpanID"))
+	assert.Equal(t, "1", headers.Get("X-B3-Sampled"))
+	assert.Equal(t, "00-"+traceID+"-"+spanID+"-01", headers.Get("Traceparent"))
+	assert.Equal(t, traceID+"-"+spanID+"-1-"+spanID, headers.Get("B3"))
 }
 
 func TestApplyCodeBuddyRequestProfile(t *testing.T) {
@@ -148,15 +159,30 @@ func TestApplyCodeBuddyRequestProfile(t *testing.T) {
 
 	require.Len(t, request.Messages, 3)
 	assert.Equal(t, "system", request.Messages[0].Role)
-	assert.Equal(t, codeBuddyModelInstructions, request.Messages[0].StringContent())
+	assert.Equal(t, "This conversation is powered by gpt-5.6-sol\r\n\r\nYour main goal is to follow the USER's instructions at each message, denoted by the <user_query> tag.", request.Messages[0].StringContent())
 	assert.Equal(t, "developer", request.Messages[1].Role)
+	// 调用方显式指定的 stream/temperature 应原样透传，不被覆盖
+	require.NotNil(t, request.Stream)
+	assert.False(t, *request.Stream)
+	require.NotNil(t, request.Temperature)
+	assert.Equal(t, 0.0, *request.Temperature)
+	assert.Equal(t, "low", request.ReasoningEffort)
+	require.NotNil(t, request.StreamOptions)
+	assert.True(t, request.StreamOptions.IncludeUsage)
+}
+
+func TestApplyCodeBuddyRequestProfileDefaults(t *testing.T) {
+	request := &dto.GeneralOpenAIRequest{
+		Messages: []dto.Message{{Role: "user", Content: "hello"}},
+	}
+
+	ApplyCodeBuddyRequestProfile(request)
+
 	require.NotNil(t, request.Stream)
 	assert.True(t, *request.Stream)
 	require.NotNil(t, request.Temperature)
 	assert.Equal(t, 1.0, *request.Temperature)
 	assert.Equal(t, "low", request.ReasoningEffort)
-	require.NotNil(t, request.StreamOptions)
-	assert.True(t, request.StreamOptions.IncludeUsage)
 }
 
 func TestCodeBuddyConversationIdentityIsStableAcrossTurns(t *testing.T) {

@@ -79,6 +79,10 @@ func TestCodeBuddyCompatibilityBuildsWorkBuddyRequest(t *testing.T) {
 	assert.Equal(t, "conversation", headers.Get("X-Agent-Purpose"))
 	assert.Equal(t, "1", headers.Get("X-CodeBuddy-Request"))
 	assert.Empty(t, headers.Get("X-API-Mock-WorkBuddy-Compatible"))
+	assert.Empty(t, headers.Get("X-Session-ID"))
+	assert.NotEmpty(t, headers.Get("X-User-Id"))
+	assert.NotEmpty(t, headers.Get("Acp-Connection-ID"))
+	assert.Equal(t, "6.25.0", headers.Get("X-Stainless-Package-Version"))
 
 	stream := false
 	temperature := 0.0
@@ -94,9 +98,9 @@ func TestCodeBuddyCompatibilityBuildsWorkBuddyRequest(t *testing.T) {
 	assert.Equal(t, "system", request.Messages[0].Role)
 	assert.NotEmpty(t, request.Messages[0].StringContent())
 	require.NotNil(t, request.Stream)
-	assert.True(t, *request.Stream)
+	assert.False(t, *request.Stream)
 	require.NotNil(t, request.Temperature)
-	assert.Equal(t, 1.0, *request.Temperature)
+	assert.Equal(t, 0.0, *request.Temperature)
 	assert.Equal(t, "low", request.ReasoningEffort)
 	require.NotNil(t, request.StreamOptions)
 	assert.True(t, request.StreamOptions.IncludeUsage)

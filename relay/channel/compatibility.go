@@ -24,7 +24,7 @@ func ApplyCompatibilityHeaders(channelType int, headers http.Header, apiKey stri
 func ApplyCompatibilityHeadersWithConversation(channelType int, headers http.Header, apiKey string, isStream bool, conversationID string) {
 	switch channelType {
 	case constant.ChannelTypeCodeBuddy:
-		applyCodeBuddyHeaders(headers, apiKey, conversationID)
+		applyCodeBuddyHeaders(headers, apiKey, conversationID, isStream)
 	case constant.ChannelTypeCodexCompatibility:
 		headers.Set("Authorization", "Bearer "+apiKey)
 		headers.Set("OpenAI-Beta", "responses=experimental")

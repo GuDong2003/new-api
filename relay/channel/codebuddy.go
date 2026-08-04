@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -15,93 +16,66 @@ const (
 	codeBuddyProductVersion = "5.3.8"
 	codeBuddyCLIUserAgent   = "2.115.0"
 
-	codeBuddyModelInstructions = `You are a coding agent operating in a local workspace. Inspect, implement,
-verify, and complete the user's request using only the tools available in the
-current request.
-
-## Priorities
-
-1. Follow the user's current goal and explicit constraints.
-2. Follow developer messages, applicable AGENTS.md, and declared skills.
-3. Preserve user work, repository boundaries, credentials, and local conventions.
-4. Prefer completed, verified execution over plans or advice alone.
-
-Follow higher-priority instructions when rules conflict. Do not silently replace
-the requested task with a different one.
-
-## Execution
-
-- Inspect relevant instructions, files, and repository state before editing.
-- For multi-step work, keep an explicit plan and continue through
-  implementation, verification, cleanup, and requested delivery.
-- Make focused root-cause changes. Preserve unrelated work and do not perform
-  destructive cleanup without an explicit request.
-- Prefer existing project patterns and structured APIs. Avoid unnecessary
-  abstractions, broad refactors, and unrelated fixes.
-- Run the narrowest meaningful validation first, then broaden it when shared
-  behavior, persistent state, or user-facing flows change.
-- Never invent files, command output, test results, external state, or success.
-- Never reveal, log, commit, or repeat credentials, tokens, private keys, or
-  complete sensitive configuration values.
-
-## Tools
-
-- Tool declarations are authoritative. Use a declared tool when it is needed;
-  do not claim it ran without receiving its result.
-- buddy_skill is a transport compatibility declaration, not an executable
-  capability. Do not call it, claim it ran, or infer a result from it.
-- Use the exact name and input schema. Do not substitute a similarly named tool.
-- After a tool call, wait for its corresponding output before continuing.
-- Treat a live command session as active until its terminal state is known.
-- Inspect available files, images, and attachments before describing them.
-  Never infer their contents from a name, extension, or successful transport.
-- When no appropriate tool is declared, state the limitation plainly instead of
-  fabricating an action or result.
-
-## Response
-
-- Keep progress and final responses concise, direct, and factual.
-- Distinguish verified facts from assumptions, and an implementation from a
-  successful live validation.
-- Report material changes, validation, and remaining limitations.
-- Do not claim completion while required work or verification remains pending.`
+	// codeBuddySystemTemplate is the WorkBuddy official system prompt preamble
+	// used as the client-side marker. Upstreams like FreeModel
+	// (https://work.freemodel.dev) reject requests whose first system message
+	// does not carry the "This conversation is powered by <model>" marker, so
+	// the relay must inject it verbatim (with %s = upstream model name).
+	codeBuddySystemTemplate = "This conversation is powered by %s\r\n\r\nYour main goal is to follow the USER's instructions at each message, denoted by the <user_query> tag."
 )
 
-// ApplyCodeBuddyRequestProfile applies the public WorkBuddy relay profile used
-// by the reference implementation. Private prompt templates and tool catalogs
-// are intentionally not embedded here.
+// ApplyCodeBuddyRequestProfile applies the WorkBuddy client request profile:
+// it injects the official system-prompt marker, forces streaming and usage
+// reporting, and normalizes temperature/reasoning the way the official client
+// does. The marker is required by non-official upstreams that fingerprint the
+// WorkBuddy client via the system message.
 func ApplyCodeBuddyRequestProfile(request *dto.GeneralOpenAIRequest) {
 	if request == nil {
 		return
 	}
+	model := "gpt-5.6-sol"
+	if request.Model != "" {
+		model = request.Model
+	}
+	systemContent := fmt.Sprintf(codeBuddySystemTemplate, model)
 	if len(request.Messages) == 0 ||
 		request.Messages[0].Role != "system" ||
-		request.Messages[0].StringContent() != codeBuddyModelInstructions {
+		request.Messages[0].StringContent() != systemContent {
 		request.Messages = append([]dto.Message{{
 			Role:    "system",
-			Content: codeBuddyModelInstructions,
+			Content: systemContent,
 		}}, request.Messages...)
 	}
-	stream := true
-	temperature := 1.0
-	request.Stream = &stream
-	request.Temperature = &temperature
+	// 以下参数仅在调用方未显式指定时给 WorkBuddy 默认值，其余情况原样透传，
+	// 避免渠道覆盖下游客户端的温度/流式设置。
+	if request.Stream == nil {
+		stream := true
+		request.Stream = &stream
+	}
+	if request.Temperature == nil {
+		temperature := 1.0
+		request.Temperature = &temperature
+	}
 	if request.ReasoningEffort == "" {
 		request.ReasoningEffort = "low"
 	}
-	request.StreamOptions = &dto.StreamOptions{IncludeUsage: true}
+	if request.StreamOptions == nil {
+		request.StreamOptions = &dto.StreamOptions{IncludeUsage: true}
+	}
 }
 
-func applyCodeBuddyHeaders(headers http.Header, apiKey, conversationID string) {
+func applyCodeBuddyHeaders(headers http.Header, apiKey, conversationID string, isStream bool) {
 	conversationID = strings.TrimSpace(conversationID)
 	if conversationID == "" {
 		conversationID = uuid.NewString()
 	}
-	acpConnectionID := uuid.NewSHA1(uuid.NameSpaceURL, []byte("workbuddy-acp:"+conversationID)).String()
-	requestID := strings.ReplaceAll(uuid.NewString(), "-", "")
 	traceID := codeBuddyRandomHex(16)
 	spanID := codeBuddyRandomHex(8)
-	parentSpanID := codeBuddyRandomHex(8)
+	// 与官方客户端抓包一致：X-Request-ID 与 X-Conversation-Message-ID 共用 32-hex
+	// messageId；X-Conversation-Request-ID 为独立的 32-hex。B3 链路中 span 与
+	// parent span 相同。
+	messageID := strings.ReplaceAll(uuid.NewString(), "-", "")
+	conversationRequestID := strings.ReplaceAll(uuid.NewString(), "-", "")
 
 	headers.Set("Authorization", "Bearer "+apiKey)
 	headers.Set("X-API-Key", apiKey)
@@ -110,13 +84,11 @@ func applyCodeBuddyHeaders(headers http.Header, apiKey, conversationID string) {
 	headers.Set("User-Agent", "WorkBuddy/"+codeBuddyProductVersion+" WorkBuddy/"+codeBuddyProductVersion+" CLI/"+codeBuddyCLIUserAgent)
 	headers.Set("X-Agent-Intent", "craft")
 	headers.Set("X-Agent-Purpose", "conversation")
-	headers.Set("X-CodeBuddy-Request", "1")
 	headers.Set("X-Domain", "www.codebuddy.cn")
 	headers.Set("X-IDE-Name", "WorkBuddy")
 	headers.Set("X-IDE-Type", "WorkBuddy")
 	headers.Set("X-IDE-Version", codeBuddyProductVersion)
 	headers.Set("X-Product", "SaaS")
-	headers.Set("X-Product-Version", codeBuddyProductVersion)
 	headers.Set("X-Requested-With", "XMLHttpRequest")
 	headers.Set("X-Stainless-Arch", "x64")
 	headers.Set("X-Stainless-Lang", "js")
@@ -125,18 +97,32 @@ func applyCodeBuddyHeaders(headers http.Header, apiKey, conversationID string) {
 	headers.Set("X-Stainless-Retry-Count", "0")
 	headers.Set("X-Stainless-Runtime", "node")
 	headers.Set("X-Stainless-Runtime-Version", "v22.21.1")
-	headers.Set("Acp-Connection-ID", acpConnectionID)
+	// ACP 连接 ID 在同一会话内保持稳定（真实客户端在同一 ACP 连接生命周期内不变）。
+	headers.Set("Acp-Connection-ID", uuid.NewSHA1(uuid.NameSpaceURL, []byte("workbuddy-acp:"+conversationID)).String())
+	headers.Set("X-CodeBuddy-Request", "1")
 	headers.Set("X-Conversation-ID", conversationID)
-	headers.Set("X-Conversation-Message-ID", requestID)
-	headers.Set("X-Conversation-Request-ID", requestID)
-	headers.Set("X-Request-ID", requestID)
-	headers.Set("B3", traceID+"-"+spanID+"-1-"+parentSpanID)
+	headers.Set("X-Conversation-Message-ID", messageID)
+	headers.Set("X-Conversation-Request-ID", conversationRequestID)
+	headers.Set("X-Request-ID", messageID)
+	// 用户维度标识：下游若已自带 X-User-Id 则透传，否则派生稳定 UUID（会话内不变）。
+	// 对方非官方，无法校验真实 SSO 值，仅需保证格式合法。
+	if headers.Get("X-User-Id") == "" {
+		headers.Set("X-User-Id", codeBuddyUserUUID(conversationID))
+	}
+	headers.Set("B3", traceID+"-"+spanID+"-1-"+spanID)
 	headers.Set("Traceparent", "00-"+traceID+"-"+spanID+"-01")
-	headers.Set("X-B3-ParentSpanID", parentSpanID)
+	headers.Set("X-B3-ParentSpanID", spanID)
 	headers.Set("X-B3-Sampled", "1")
 	headers.Set("X-B3-SpanID", spanID)
 	headers.Set("X-B3-TraceID", traceID)
 	headers.Set("X-Trace-ID", traceID)
+}
+
+// codeBuddyUserUUID derives a stable, UUID-shaped user identifier from the
+// conversation key. It is a simulation stand-in for the SSO user id that the
+// official client would send; non-official upstreams cannot validate it.
+func codeBuddyUserUUID(conversationID string) string {
+	return uuid.NewSHA1(uuid.NameSpaceURL, []byte("workbuddy-user:"+strings.TrimSpace(conversationID))).String()
 }
 
 // ResolveCodeBuddyConversationID maps a caller's stable conversation key to
