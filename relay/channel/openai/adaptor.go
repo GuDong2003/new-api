@@ -103,6 +103,9 @@ func (a *Adaptor) Init(info *relaycommon.RelayInfo) {
 }
 
 func (a *Adaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {
+	if info.ChannelType == constant.ChannelTypeCodeBuddy && info.RelayMode == relayconstant.RelayModeResponses {
+		return relaycommon.GetFullRequestURL(info.ChannelBaseUrl, "/v1/chat/completions", info.ChannelType), nil
+	}
 	if info.RelayMode == relayconstant.RelayModeRealtime {
 		if strings.HasPrefix(info.ChannelBaseUrl, "https://") {
 			baseUrl := strings.TrimPrefix(info.ChannelBaseUrl, "https://")
@@ -637,6 +640,23 @@ func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommo
 	if info != nil && request.Reasoning != nil && request.Reasoning.Effort != "" {
 		info.SetReasoningEffort(request.Reasoning.Effort)
 	}
+	if info != nil && info.ChannelType == constant.ChannelTypeCodeBuddy {
+		result, err := service.ConvertRequest(c, info, types.RelayFormatOpenAI, &request)
+		if err != nil {
+			return nil, err
+		}
+		chatRequest, ok := result.Value.(*dto.GeneralOpenAIRequest)
+		if !ok {
+			return nil, fmt.Errorf("expected OpenAI chat completions request, got %T", result.Value)
+		}
+		channel.ApplyCodeBuddyRequestProfile(chatRequest)
+		stream := info.IsStream
+		chatRequest.Stream = &stream
+		if !stream {
+			chatRequest.StreamOptions = nil
+		}
+		return chatRequest, nil
+	}
 	if info != nil && info.ChannelType == constant.ChannelTypeCodexCompatibility {
 		// Codex Responses requires store=false and expects an instructions field.
 		request.Store = json.RawMessage("false")
@@ -673,6 +693,12 @@ func (a *Adaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, request
 }
 
 func (a *Adaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (usage any, err *types.NewAPIError) {
+	if info.ChannelType == constant.ChannelTypeCodeBuddy && info.RelayMode == relayconstant.RelayModeResponses {
+		if info.IsStream {
+			return OaiChatToResponsesStreamHandler(c, info, resp)
+		}
+		return OaiChatToResponsesHandler(c, info, resp)
+	}
 	switch info.RelayMode {
 	case relayconstant.RelayModeRealtime:
 		err, usage = OpenaiRealtimeHandler(c, info)

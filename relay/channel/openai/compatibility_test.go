@@ -4,10 +4,12 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/constant"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -128,6 +130,99 @@ func TestCodeBuddyCompatibilityReusesConversationIdentityFromPromptCacheKey(t *t
 	assert.NotEmpty(t, first.Get("X-Conversation-ID"))
 	assert.Equal(t, first.Get("X-Conversation-ID"), second.Get("X-Conversation-ID"))
 	assert.NotEqual(t, first.Get("X-Request-ID"), second.Get("X-Request-ID"))
+}
+
+func TestCodeBuddyResponsesConvertToWorkBuddyChatCompletions(t *testing.T) {
+	oldMode := gin.Mode()
+	gin.SetMode(gin.TestMode)
+	t.Cleanup(func() { gin.SetMode(oldMode) })
+
+	for _, isStream := range []bool{false, true} {
+		t.Run(map[bool]string{false: "non-stream", true: "stream"}[isStream], func(t *testing.T) {
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+			info := &relaycommon.RelayInfo{
+				IsStream:       isStream,
+				RelayMode:      relayconstant.RelayModeResponses,
+				RequestURLPath: "/v1/responses",
+				ChannelMeta: &relaycommon.ChannelMeta{
+					ChannelType:       constant.ChannelTypeCodeBuddy,
+					ChannelBaseUrl:    "https://proxy.example",
+					UpstreamModelName: "gpt-test",
+				},
+			}
+			adaptor := &Adaptor{}
+			adaptor.Init(info)
+
+			converted, err := adaptor.ConvertOpenAIResponsesRequest(c, info, dto.OpenAIResponsesRequest{
+				Model: "gpt-test",
+				Input: json.RawMessage(`"hello"`),
+			})
+			require.NoError(t, err)
+			request, ok := converted.(*dto.GeneralOpenAIRequest)
+			require.True(t, ok)
+			require.Len(t, request.Messages, 2)
+			assert.Equal(t, "system", request.Messages[0].Role)
+			assert.Equal(t, "hello", request.Messages[1].StringContent())
+			require.NotNil(t, request.Stream)
+			assert.Equal(t, isStream, *request.Stream)
+			if isStream {
+				require.NotNil(t, request.StreamOptions)
+				assert.True(t, request.StreamOptions.IncludeUsage)
+			} else {
+				assert.Nil(t, request.StreamOptions)
+			}
+
+			requestURL, err := adaptor.GetRequestURL(info)
+			require.NoError(t, err)
+			assert.Equal(t, "https://proxy.example/v1/chat/completions", requestURL)
+		})
+	}
+}
+
+func TestCodeBuddyResponsesConvertChatResponsesBackToResponses(t *testing.T) {
+	oldMode := gin.Mode()
+	gin.SetMode(gin.TestMode)
+	t.Cleanup(func() { gin.SetMode(oldMode) })
+	oldTimeout := constant.StreamingTimeout
+	constant.StreamingTimeout = 30
+	t.Cleanup(func() { constant.StreamingTimeout = oldTimeout })
+
+	t.Run("non-stream", func(t *testing.T) {
+		body := `{"id":"chatcmpl_1","object":"chat.completion","created":1710000000,"model":"gpt-test","choices":[{"index":0,"message":{"role":"assistant","content":"hello"},"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":3,"total_tokens":5}}`
+		c, recorder, resp, info := newResponsesChatTestContext(t, body, false)
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+		info.RelayMode = relayconstant.RelayModeResponses
+		info.ChannelType = constant.ChannelTypeCodeBuddy
+
+		usage, err := (&Adaptor{}).DoResponse(c, resp, info)
+		require.Nil(t, err)
+		require.NotNil(t, usage)
+		assert.Contains(t, recorder.Body.String(), `"object":"response"`)
+		assert.Contains(t, recorder.Body.String(), `"text":"hello"`)
+	})
+
+	t.Run("stream", func(t *testing.T) {
+		body := strings.Join([]string{
+			`data: {"id":"chatcmpl_1","object":"chat.completion.chunk","created":1710000000,"model":"gpt-test","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}`,
+			`data: {"id":"chatcmpl_1","object":"chat.completion.chunk","created":1710000000,"model":"gpt-test","choices":[{"index":0,"delta":{"content":"hello"},"finish_reason":null}]}`,
+			`data: {"id":"chatcmpl_1","object":"chat.completion.chunk","created":1710000000,"model":"gpt-test","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+			`data: {"id":"chatcmpl_1","object":"chat.completion.chunk","created":1710000000,"model":"gpt-test","choices":[],"usage":{"prompt_tokens":2,"completion_tokens":3,"total_tokens":5}}`,
+			`data: [DONE]`,
+			``,
+		}, "\n")
+		c, recorder, resp, info := newResponsesChatTestContext(t, body, true)
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+		info.RelayMode = relayconstant.RelayModeResponses
+		info.ChannelType = constant.ChannelTypeCodeBuddy
+
+		usage, err := (&Adaptor{}).DoResponse(c, resp, info)
+		require.Nil(t, err)
+		require.NotNil(t, usage)
+		assert.Contains(t, recorder.Body.String(), `event: response.created`)
+		assert.Contains(t, recorder.Body.String(), `event: response.output_text.delta`)
+		assert.Contains(t, recorder.Body.String(), `event: response.completed`)
+	})
 }
 
 func TestCodexCompatibilityResolvesPiResponsesPath(t *testing.T) {
