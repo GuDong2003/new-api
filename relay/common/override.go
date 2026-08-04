@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/samber/lo"
 	"github.com/tidwall/gjson"
@@ -185,6 +186,9 @@ func ApplyParamOverrideWithRelayInfo(jsonData []byte, info *RelayInfo) ([]byte, 
 	if len(paramOverride) == 0 {
 		return jsonData, nil
 	}
+	if err := validateActiveClaudeCodeParamOverride(info, paramOverride); err != nil {
+		return nil, err
+	}
 
 	overrideCtx := BuildParamOverrideContext(info)
 	var recorder *paramOverrideAuditRecorder
@@ -251,6 +255,113 @@ func extractReasoningEffortFromJSON(format types.RelayFormat, data []byte) (stri
 		return strings.TrimSpace(value.String()), true
 	}
 	return "", false
+}
+
+func validateActiveClaudeCodeParamOverride(info *RelayInfo, paramOverride map[string]interface{}) error {
+	if info == nil || info.ChannelMeta == nil ||
+		info.ChannelType != constant.ChannelTypeClaudeCode ||
+		!info.ShouldUseChannelTestStyle() {
+		return nil
+	}
+
+	operations, ok := tryParseOperations(paramOverride)
+	if !ok {
+		return nil
+	}
+	for _, operation := range operations {
+		switch strings.ToLower(strings.TrimSpace(operation.Mode)) {
+		case "delete_header", "copy_header", "move_header", "pass_headers":
+			return newClaudeCodeParamOverrideHeaderError()
+		case "sync_fields":
+			fromTarget, err := parseSyncTarget(operation.From)
+			if err != nil {
+				return newClaudeCodeParamOverrideHeaderError()
+			}
+			toTarget, err := parseSyncTarget(operation.To)
+			if err != nil || fromTarget.kind == "header" || toTarget.kind == "header" {
+				return newClaudeCodeParamOverrideHeaderError()
+			}
+		case "set_header":
+			if err := validateClaudeCodeSetHeaderOperation(operation); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func validateClaudeCodeSetHeaderOperation(operation ParamOperation) error {
+	if operation.KeepOrigin || operation.From != "" || operation.To != "" || len(operation.Conditions) != 0 {
+		return newClaudeCodeParamOverrideHeaderError()
+	}
+	if !isValidHTTPHeaderFieldName(operation.Path) || isClaudeCodeProfileManagedHeader(operation.Path) {
+		return newClaudeCodeParamOverrideHeaderError()
+	}
+
+	value, ok := operation.Value.(string)
+	if !ok || strings.TrimSpace(value) == "" || !isValidHTTPHeaderFieldValue(value) {
+		return newClaudeCodeParamOverrideHeaderError()
+	}
+	lowerValue := strings.ToLower(value)
+	if strings.Contains(lowerValue, "{client_header:") || strings.Contains(lowerValue, "{api_key}") {
+		return newClaudeCodeParamOverrideHeaderError()
+	}
+	return nil
+}
+
+func newClaudeCodeParamOverrideHeaderError() error {
+	return types.NewError(errors.New("Claude Code param override header operation is not allowed"), types.ErrorCodeChannelHeaderOverrideInvalid)
+}
+
+func isClaudeCodeProfileManagedHeader(headerName string) bool {
+	switch strings.ToLower(headerName) {
+	case "authorization",
+		"proxy-authorization",
+		"cookie",
+		"x-api-key",
+		"x-goog-api-key",
+		"user-agent",
+		"anthropic-version",
+		"accept",
+		"content-type",
+		"x-app",
+		"x-claude-code-session-id",
+		"anthropic-dangerous-direct-browser-access",
+		"accept-language":
+		return true
+	default:
+		return strings.HasPrefix(strings.ToLower(headerName), "x-stainless-") ||
+			strings.HasPrefix(strings.ToLower(headerName), "sec-fetch-")
+	}
+}
+
+func isValidHTTPHeaderFieldName(value string) bool {
+	if value == "" {
+		return false
+	}
+	for i := 0; i < len(value); i++ {
+		c := value[i]
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') {
+			continue
+		}
+		switch c {
+		case '!', '#', '$', '%', '&', '\'', '*', '+', '-', '.', '^', '_', '`', '|', '~':
+			continue
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func isValidHTTPHeaderFieldValue(value string) bool {
+	for i := 0; i < len(value); i++ {
+		c := value[i]
+		if c == '\r' || c == '\n' || c == 0 || c == 0x7f || (c < 0x20 && c != '\t') {
+			return false
+		}
+	}
+	return true
 }
 
 func shouldEnableParamOverrideAudit(paramOverride map[string]interface{}) bool {

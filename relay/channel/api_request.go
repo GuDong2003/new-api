@@ -138,6 +138,58 @@ func isHeaderPassthroughRuleKey(key string) bool {
 	return strings.HasPrefix(lower, headerPassthroughRegexPrefix) || strings.HasPrefix(lower, headerPassthroughRegexPrefixV2)
 }
 
+func shouldApplyClaudeCodeHeaderOverridePolicy(info *common.RelayInfo) bool {
+	return info != nil &&
+		info.ChannelMeta != nil &&
+		info.ChannelType == rootconstant.ChannelTypeClaudeCode &&
+		info.ShouldUseChannelTestStyle()
+}
+
+func validateClaudeCodeHeaderOverrides(headerOverrideSource map[string]interface{}) error {
+	for key, rawValue := range headerOverrideSource {
+		if isHeaderPassthroughRuleKey(key) {
+			return types.NewError(fmt.Errorf("Claude Code header overrides cannot use passthrough rules"), types.ErrorCodeChannelHeaderOverrideInvalid)
+		}
+
+		lowerKey := strings.ToLower(strings.TrimSpace(key))
+		if isClaudeCodeReservedOverrideHeader(lowerKey) {
+			return types.NewError(fmt.Errorf("Claude Code header override uses a reserved header"), types.ErrorCodeChannelHeaderOverrideInvalid)
+		}
+
+		value, ok := rawValue.(string)
+		if !ok {
+			return types.NewError(nil, types.ErrorCodeChannelHeaderOverrideInvalid)
+		}
+		lowerValue := strings.ToLower(value)
+		if strings.Contains(lowerValue, clientHeaderPlaceholderPrefix) || strings.Contains(lowerValue, "{api_key}") {
+			return types.NewError(fmt.Errorf("Claude Code header overrides cannot use dynamic placeholders"), types.ErrorCodeChannelHeaderOverrideInvalid)
+		}
+	}
+	return nil
+}
+
+func isClaudeCodeReservedOverrideHeader(lowerName string) bool {
+	switch lowerName {
+	case "authorization",
+		"proxy-authorization",
+		"cookie",
+		"x-api-key",
+		"x-goog-api-key",
+		"user-agent",
+		"anthropic-version",
+		"accept",
+		"content-type",
+		"x-app",
+		"x-claude-code-session-id",
+		"anthropic-dangerous-direct-browser-access",
+		"accept-language":
+		return true
+	default:
+		return strings.HasPrefix(lowerName, "x-stainless-") ||
+			strings.HasPrefix(lowerName, "sec-fetch-")
+	}
+}
+
 func shouldSkipPassthroughHeader(name string) bool {
 	name = strings.TrimSpace(name)
 	if name == "" {
@@ -200,6 +252,11 @@ func processHeaderOverride(info *common.RelayInfo, c *gin.Context) (map[string]s
 	}
 
 	headerOverrideSource := common.GetEffectiveHeaderOverride(info)
+	if shouldApplyClaudeCodeHeaderOverridePolicy(info) {
+		if err := validateClaudeCodeHeaderOverrides(headerOverrideSource); err != nil {
+			return nil, err
+		}
+	}
 
 	passAll := false
 	var passthroughRegex []*regexp.Regexp
@@ -326,13 +383,18 @@ func DoApiRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 	if err != nil {
 		return nil, fmt.Errorf("setup request header failed: %w", err)
 	}
-	// 在 SetupRequestHeader 之后应用 Header Override，确保用户设置优先级最高
-	// 这样可以覆盖默认的 Authorization header 设置
+	// 在 SetupRequestHeader 之后应用 Header Override，确保用户设置优先级最高。
+	// Claude Code has a fixed identity and is finalized after these overrides.
 	headerOverride, err := processHeaderOverride(info, c)
 	if err != nil {
 		return nil, err
 	}
 	applyHeaderOverrideToRequest(req, headerOverride)
+	if info != nil && info.ChannelMeta != nil &&
+		info.ChannelType == rootconstant.ChannelTypeClaudeCode &&
+		info.ShouldUseChannelTestStyle() {
+		ApplyClaudeCodeCompatibilityHeaders(req.Header, info.ApiKey, info.IsStream, info.EnsureClaudeCodeSessionID())
+	}
 	resp, err := doRequest(c, req, info)
 	if err != nil {
 		return nil, fmt.Errorf("do request failed: %w", err)

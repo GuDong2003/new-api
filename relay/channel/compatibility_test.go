@@ -32,20 +32,6 @@ func TestApplyCompatibilityHeaders(t *testing.T) {
 				assert.Equal(t, "text/event-stream", headers.Get("Accept"))
 			},
 		},
-		{
-			name:        "Claude Code",
-			channelType: constant.ChannelTypeClaudeCode,
-			assertions: func(t *testing.T, headers http.Header) {
-				assert.Equal(t, "Bearer test-key", headers.Get("Authorization"))
-				assert.Empty(t, headers.Get("x-api-key"))
-				assert.Empty(t, headers.Get("x-stainless-lang"))
-				assert.Empty(t, headers.Get("sec-fetch-mode"))
-				assert.Equal(t, "2.1.178 (Claude Code)", headers.Get("User-Agent"))
-				assert.Equal(t, "2023-06-01", headers.Get("Anthropic-Version"))
-				assert.Equal(t, "application/json", headers.Get("Accept"))
-				assert.Equal(t, "application/json", headers.Get("Content-Type"))
-			},
-		},
 	}
 
 	for _, test := range tests {
@@ -61,6 +47,64 @@ func TestApplyCompatibilityHeaders(t *testing.T) {
 			test.assertions(t, headers)
 		})
 	}
+}
+
+func TestApplyClaudeCodeCompatibilityHeaders(t *testing.T) {
+	const sessionID = "123e4567-e89b-12d3-a456-426614174000"
+
+	tests := []struct {
+		name       string
+		isStream   bool
+		wantAccept string
+	}{
+		{name: "stream", isStream: true, wantAccept: "text/event-stream"},
+		{name: "non-stream", isStream: false, wantAccept: "application/json"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			headers := http.Header{
+				"authorization":            []string{"discard"},
+				"proxy-authorization":      []string{"discard"},
+				"cookie":                   []string{"discard"},
+				"user-agent":               []string{"discard"},
+				"anthropic-version":        []string{"discard"},
+				"content-type":             []string{"discard"},
+				"accept":                   []string{"discard"},
+				"x-api-key":                []string{"discard"},
+				"x-goog-api-key":           []string{"discard"},
+				"x-app":                    []string{"discard"},
+				"x-claude-code-session-id": []string{"client-supplied"},
+				"x-stainless-lang":         []string{"node"},
+				"anthropic-dangerous-direct-browser-access": []string{"true"},
+				"accept-language": []string{"en-US"},
+				"sec-fetch-mode":  []string{"cors"},
+				"Anthropic-Beta":  []string{"interleaved-thinking-2025-05-14"},
+				"X-Safe-Static":   []string{"survives"},
+			}
+
+			ApplyClaudeCodeCompatibilityHeaders(headers, "test-key", test.isStream, sessionID)
+			ApplyClaudeCodeCompatibilityHeaders(headers, "test-key", test.isStream, sessionID)
+
+			require.Equal(t, http.Header{
+				"Authorization":            []string{"Bearer test-key"},
+				"User-Agent":               []string{"claude-cli/2.1.214"},
+				"X-App":                    []string{"cli"},
+				"Anthropic-Version":        []string{"2023-06-01"},
+				"Content-Type":             []string{"application/json"},
+				"Accept":                   []string{test.wantAccept},
+				"X-Claude-Code-Session-Id": []string{sessionID},
+				"Anthropic-Beta":           []string{"interleaved-thinking-2025-05-14"},
+				"X-Safe-Static":            []string{"survives"},
+			}, headers)
+		})
+	}
+
+	headers := http.Header{
+		"X-Claude-Code-Session-Id": []string{"client-supplied"},
+	}
+	ApplyClaudeCodeCompatibilityHeaders(headers, "test-key", false, "")
+	assert.Empty(t, headers.Get("X-Claude-Code-Session-Id"))
 }
 
 func TestCodeBuddyCompatibilityBuildsWorkBuddyProfile(t *testing.T) {

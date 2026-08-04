@@ -19,6 +19,7 @@ import (
 	hosttypes "github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"github.com/tidwall/gjson"
 )
@@ -177,6 +178,10 @@ type RelayInfo struct {
 	// convOptions caches the converter settings snapshot (see ConvOptions).
 	convOptions *convmeta.Options
 
+	// claudeCodeSessionID is generated only for Claude Code upstream requests.
+	// It is request-scoped and intentionally never sourced from inbound headers.
+	claudeCodeSessionID string
+
 	ThinkingContentInfo
 	TokenCountMeta
 	*ClaudeConvertInfo
@@ -231,6 +236,12 @@ func (info *RelayInfo) InitChannelMeta(c *gin.Context) {
 	}
 
 	info.ChannelMeta = channelMeta
+	if info.ChannelType == constant.ChannelTypeClaudeCode && info.ShouldUseChannelTestStyle() {
+		// Retry attempts reuse RelayInfo. Do not let a prior channel's runtime
+		// headers become trusted Claude Code overrides on this attempt.
+		info.RuntimeHeadersOverride = nil
+		info.UseRuntimeHeadersOverride = false
+	}
 
 	// Channel identity feeds the converter options snapshot (e.g.
 	// OpenRouterDialect); drop the cache so a cross-channel retry rebuilds it.
@@ -727,6 +738,18 @@ func (info *RelayInfo) SetEstimatePromptTokens(promptTokens int) {
 // behavior; the flag only affects tests that explicitly opt out.
 func (info *RelayInfo) ShouldUseChannelTestStyle() bool {
 	return info == nil || !info.IsChannelTest || !info.DisableChannelTestClientProfile
+}
+
+// EnsureClaudeCodeSessionID lazily creates the upstream-only session identity
+// used by Claude Code. Retries sharing this RelayInfo reuse the same value.
+func (info *RelayInfo) EnsureClaudeCodeSessionID() string {
+	if info == nil || info.ChannelMeta == nil || info.ChannelType != constant.ChannelTypeClaudeCode {
+		return ""
+	}
+	if info.claudeCodeSessionID == "" {
+		info.claudeCodeSessionID = uuid.NewString()
+	}
+	return info.claudeCodeSessionID
 }
 
 func (info *RelayInfo) GetEstimatePromptTokens() int {

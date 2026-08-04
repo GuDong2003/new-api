@@ -12,6 +12,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relaykit/dto"
+	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -430,8 +431,10 @@ func TestBuildFetchModelsHeadersUsesCompatibilityIdentities(t *testing.T) {
 			assertions: func(t *testing.T, headers http.Header) {
 				assert.Equal(t, "Bearer test-key", headers.Get("Authorization"))
 				assert.Empty(t, headers.Get("x-api-key"))
-				assert.Equal(t, "2.1.178 (Claude Code)", headers.Get("User-Agent"))
+				assert.Equal(t, "claude-cli/2.1.214", headers.Get("User-Agent"))
+				assert.Equal(t, "cli", headers.Get("X-App"))
 				assert.Equal(t, "2023-06-01", headers.Get("Anthropic-Version"))
+				assert.Empty(t, headers.Get("X-Claude-Code-Session-Id"))
 			},
 		},
 		{
@@ -455,6 +458,34 @@ func TestBuildFetchModelsHeadersUsesCompatibilityIdentities(t *testing.T) {
 			test.assertions(t, headers)
 		})
 	}
+}
+
+func TestBuildFetchModelsHeadersClaudeCodeFinalizesProfileAfterOverrides(t *testing.T) {
+	safeOverrides := `{"X-Safe-Static":"survives","Anthropic-Beta":"interleaved-thinking-2025-05-14"}`
+	headers, err := buildFetchModelsHeaders(&model.Channel{
+		Type:           constant.ChannelTypeClaudeCode,
+		HeaderOverride: &safeOverrides,
+	}, "test-key")
+	require.NoError(t, err)
+	assert.Equal(t, "Bearer test-key", headers.Get("Authorization"))
+	assert.Equal(t, "claude-cli/2.1.214", headers.Get("User-Agent"))
+	assert.Equal(t, "cli", headers.Get("X-App"))
+	assert.Equal(t, "application/json", headers.Get("Accept"))
+	assert.Equal(t, "application/json", headers.Get("Content-Type"))
+	assert.Equal(t, "survives", headers.Get("X-Safe-Static"))
+	assert.Equal(t, "interleaved-thinking-2025-05-14", headers.Get("Anthropic-Beta"))
+	assert.Empty(t, headers.Get("X-Api-Key"))
+	assert.Empty(t, headers.Get("X-Claude-Code-Session-Id"))
+
+	reservedOverride := `{"X-Api-Key":"override"}`
+	_, err = buildFetchModelsHeaders(&model.Channel{
+		Type:           constant.ChannelTypeClaudeCode,
+		HeaderOverride: &reservedOverride,
+	}, "test-key")
+	require.Error(t, err)
+	var apiErr *types.NewAPIError
+	require.ErrorAs(t, err, &apiErr)
+	require.Equal(t, types.ErrorCodeChannelHeaderOverrideInvalid, apiErr.GetErrorCode())
 }
 
 func TestNormalizeModelNames(t *testing.T) {
