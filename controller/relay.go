@@ -92,6 +92,12 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	defer func() {
 		if newAPIError != nil {
 			logger.LogError(c, fmt.Sprintf("relay error: %s", common.LocalLogPreview(newAPIError.Error())))
+			if service.UpstreamInterceptionErrorAlreadyWritten(c) {
+				return
+			}
+			if relayFormat != types.RelayFormatOpenAIRealtime && c.Writer.Written() {
+				return
+			}
 			newAPIError.SetMessage(common.MessageWithRequestId(newAPIError.Error(), requestId))
 			switch relayFormat {
 			case types.RelayFormatOpenAIRealtime:
@@ -329,6 +335,9 @@ func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service
 }
 
 func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) bool {
+	if c.Writer.Written() {
+		return false
+	}
 	if openaiErr == nil {
 		return false
 	}
