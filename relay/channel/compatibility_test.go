@@ -149,6 +149,7 @@ func TestApplyCodeBuddyRequestProfile(t *testing.T) {
 	stream := false
 	temperature := 0.0
 	request := &dto.GeneralOpenAIRequest{
+		Model:       "gpt-5.6-sol",
 		Messages:    []dto.Message{{Role: "developer", Content: "caller instructions"}, {Role: "user", Content: "hello"}},
 		Stream:      &stream,
 		Temperature: &temperature,
@@ -159,7 +160,7 @@ func TestApplyCodeBuddyRequestProfile(t *testing.T) {
 
 	require.Len(t, request.Messages, 3)
 	assert.Equal(t, "system", request.Messages[0].Role)
-	assert.Equal(t, "This conversation is powered by gpt-5.6-sol\r\n\r\nYour main goal is to follow the USER's instructions at each message, denoted by the <user_query> tag.", request.Messages[0].StringContent())
+	assert.Equal(t, "This conversation is powered by "+request.Model+"\r\n\r\nYour main goal is to follow the USER's instructions at each message, denoted by the <user_query> tag.", request.Messages[0].StringContent())
 	assert.Equal(t, "developer", request.Messages[1].Role)
 	// 调用方显式指定的 stream/temperature 应原样透传，不被覆盖
 	require.NotNil(t, request.Stream)
