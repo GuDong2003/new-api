@@ -223,6 +223,47 @@ func TestOaiChatToResponsesStreamHandlerConvertsSSEOrderAndUsage(t *testing.T) {
 	)
 }
 
+func TestOaiChatToResponsesStreamHandlerHandlesCodeBuddyDoneTerminal(t *testing.T) {
+	oldMode := gin.Mode()
+	gin.SetMode(gin.TestMode)
+	t.Cleanup(func() { gin.SetMode(oldMode) })
+
+	oldTimeout := constant.StreamingTimeout
+	constant.StreamingTimeout = 30
+	t.Cleanup(func() { constant.StreamingTimeout = oldTimeout })
+
+	body := strings.Join([]string{
+		`data: {"id":"chatcmpl_1","object":"chat.completion.chunk","created":1710000000,"model":"gpt-test","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}`,
+		`data: {"id":"chatcmpl_1","object":"chat.completion.chunk","created":1710000000,"model":"gpt-test","choices":[{"index":0,"delta":{"content":"hello"},"finish_reason":null}]}`,
+		`data: {"id":"chatcmpl_1","object":"chat.completion.chunk","created":1710000000,"model":"gpt-test","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+		`data: {"id":"chatcmpl_1","object":"chat.completion.chunk","created":1710000000,"model":"gpt-test","choices":[],"usage":{"prompt_tokens":2,"completion_tokens":3,"total_tokens":5}}`,
+		`data: done`,
+		``,
+	}, "\n")
+
+	c, recorder, resp, info := newResponsesChatTestContext(t, body, true)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	info.ChannelType = constant.ChannelTypeCodeBuddy
+
+	usage, err := OaiChatToResponsesStreamHandler(c, info, resp)
+	require.Nil(t, err)
+	require.NotNil(t, usage)
+	require.Equal(t, 2, usage.PromptTokens)
+	require.Equal(t, 3, usage.CompletionTokens)
+	require.Equal(t, 5, usage.TotalTokens)
+	require.NotNil(t, info.StreamStatus)
+	require.False(t, info.StreamStatus.HasErrors())
+	require.True(t, info.StreamStatus.IsNormalEnd())
+
+	got := recorder.Body.String()
+	require.Contains(t, got, `event: response.output_text.delta`)
+	require.Contains(t, got, `"delta":"hello"`)
+	require.Contains(t, got, `event: response.completed`)
+	require.Contains(t, got, `"status":"completed"`)
+	require.Contains(t, got, `"input_tokens":2`)
+	require.Contains(t, got, `"output_tokens":3`)
+}
+
 func requireOrderedSubstrings(t *testing.T, s string, parts ...string) {
 	t.Helper()
 
