@@ -204,6 +204,29 @@ func TestApplyCodeBuddyRequestProfileDefaults(t *testing.T) {
 	assert.Equal(t, "low", request.ReasoningEffort)
 }
 
+func TestApplyCodeBuddyRequestProfilePrependsPureStringMarkerForArrayContent(t *testing.T) {
+	systemContent := "This conversation is powered by gpt-5.6-sol\r\n\r\nYour main goal is to follow the USER's instructions at each message, denoted by the <user_query> tag."
+	request := &dto.GeneralOpenAIRequest{
+		Model: "gpt-5.6-sol",
+		Messages: []dto.Message{{
+			Role: "system",
+			Content: []any{map[string]any{
+				"type": "text",
+				"text": systemContent,
+			}},
+		}},
+	}
+
+	ApplyCodeBuddyRequestProfile(request)
+
+	require.Len(t, request.Messages, 2)
+	assert.Equal(t, "system", request.Messages[0].Role)
+	assert.True(t, request.Messages[0].IsStringContent())
+	assert.Equal(t, systemContent, request.Messages[0].StringContent())
+	_, ok := request.Messages[1].Content.([]any)
+	assert.True(t, ok)
+}
+
 func TestCodeBuddyConversationIdentityIsStableAcrossTurns(t *testing.T) {
 	conversationID := ResolveCodeBuddyConversationID(nil, &dto.OpenAIResponsesRequest{
 		PromptCacheKey: json.RawMessage(`"session-123"`),

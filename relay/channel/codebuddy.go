@@ -40,6 +40,7 @@ func ApplyCodeBuddyRequestProfile(request *dto.GeneralOpenAIRequest) {
 	systemContent := fmt.Sprintf(codeBuddySystemTemplate, model)
 	if len(request.Messages) == 0 ||
 		request.Messages[0].Role != "system" ||
+		!request.Messages[0].IsStringContent() ||
 		request.Messages[0].StringContent() != systemContent {
 		request.Messages = append([]dto.Message{{
 			Role:    "system",
@@ -62,6 +63,9 @@ func ApplyCodeBuddyRequestProfile(request *dto.GeneralOpenAIRequest) {
 	if request.StreamOptions == nil {
 		request.StreamOptions = &dto.StreamOptions{IncludeUsage: true}
 	}
+	// 部分上游（FreeModel 等 CodeBuddy 后端）禁止消息内容出现 "you are codex"
+	// （词边界、大小写不敏感），命中即 403。转发前统一清洗。
+	CleanupCodexForbiddenPhraseInMessages(request.Messages)
 }
 
 func applyCodeBuddyHeaders(headers http.Header, apiKey, conversationID string, isStream bool) {

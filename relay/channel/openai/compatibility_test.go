@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
@@ -322,6 +323,57 @@ func TestCodeBuddyResponsesConvertToWorkBuddyChatCompletions(t *testing.T) {
 			assert.Equal(t, "https://proxy.example/v1/chat/completions", requestURL)
 		})
 	}
+}
+
+func TestCodeBuddyResponsesEnforceUpstreamRequestRules(t *testing.T) {
+	oldMode := gin.Mode()
+	gin.SetMode(gin.TestMode)
+	t.Cleanup(func() { gin.SetMode(oldMode) })
+
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	info := &relaycommon.RelayInfo{
+		RelayMode: relayconstant.RelayModeResponses,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType: constant.ChannelTypeCodeBuddy,
+		},
+	}
+
+	converted, err := (&Adaptor{}).ConvertOpenAIResponsesRequest(c, info, dto.OpenAIResponsesRequest{
+		Model:        "gpt-5.6-sol",
+		Instructions: json.RawMessage(`"system says YOU ARE CODEX"`),
+		Input: json.RawMessage(`[{"role":"user","content":[{"type":"input_text","text":"codex; you are the codex; openai codex; YOU ARE CODEX now"},{"type":"input_image","image_url":"https://example.invalid/image.png"}]}]`),
+	})
+	require.NoError(t, err)
+	request, ok := converted.(*dto.GeneralOpenAIRequest)
+	require.True(t, ok)
+
+	bodyBytes, err := common.Marshal(request)
+	require.NoError(t, err)
+	var body map[string]any
+	require.NoError(t, common.Unmarshal(bodyBytes, &body))
+	assert.NotContains(t, body, "instructions")
+
+	messages, ok := body["messages"].([]any)
+	require.True(t, ok)
+	require.Len(t, messages, 3)
+	firstMessage, ok := messages[0].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "system", firstMessage["role"])
+	firstContent, ok := firstMessage["content"].(string)
+	require.True(t, ok)
+	assert.True(t, strings.HasPrefix(firstContent, "This conversation is powered by "))
+
+	userMessage, ok := messages[2].(map[string]any)
+	require.True(t, ok)
+	_, ok = userMessage["content"].([]any)
+	assert.True(t, ok, "the original array content must remain after the string marker")
+
+	bodyText := strings.ToLower(string(bodyBytes))
+	assert.NotContains(t, bodyText, "you are codex")
+	assert.Contains(t, bodyText, "you are a coding assistant")
+	assert.Contains(t, bodyText, "you are the codex")
+	assert.Contains(t, bodyText, "openai codex")
 }
 
 func TestCodeBuddyResponsesConvertChatResponsesBackToResponses(t *testing.T) {
