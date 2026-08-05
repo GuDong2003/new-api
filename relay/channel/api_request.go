@@ -393,7 +393,7 @@ func DoApiRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 	if info != nil && info.ChannelMeta != nil &&
 		info.ChannelType == rootconstant.ChannelTypeClaudeCode &&
 		info.ShouldUseChannelTestStyle() {
-		ApplyClaudeCodeCompatibilityHeaders(req.Header, info.ApiKey, info.IsStream, info.EnsureClaudeCodeSessionID())
+		ApplyClaudeCodeCompatibilityHeaders(req.Header, info.ApiKey, info.IsStream, info.EnsureClaudeCodeSessionID(), true)
 	}
 	resp, err := doRequest(c, req, info)
 	if err != nil {

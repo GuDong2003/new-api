@@ -227,7 +227,11 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		case types.RelayFormatOpenAIRealtime:
 			newAPIError = relay.WssHelper(c, relayInfo)
 		case types.RelayFormatClaude:
-			newAPIError = relay.ClaudeHelper(c, relayInfo)
+			if strings.HasSuffix(c.Request.URL.Path, "/messages/count_tokens") {
+				newAPIError = relay.ClaudeCountTokensHelper(c, relayInfo)
+			} else {
+				newAPIError = relay.ClaudeHelper(c, relayInfo)
+			}
 		case types.RelayFormatGemini:
 			newAPIError = geminiRelayHandler(c, relayInfo)
 		default:

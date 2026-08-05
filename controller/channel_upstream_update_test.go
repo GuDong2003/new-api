@@ -431,7 +431,7 @@ func TestBuildFetchModelsHeadersUsesCompatibilityIdentities(t *testing.T) {
 			assertions: func(t *testing.T, headers http.Header) {
 				assert.Equal(t, "Bearer test-key", headers.Get("Authorization"))
 				assert.Empty(t, headers.Get("x-api-key"))
-				assert.Equal(t, "claude-cli/2.1.214", headers.Get("User-Agent"))
+				assert.Equal(t, "claude-cli/2.1.214 (external, cli)", headers.Get("User-Agent"))
 				assert.Equal(t, "cli", headers.Get("X-App"))
 				assert.Equal(t, "2023-06-01", headers.Get("Anthropic-Version"))
 				assert.Empty(t, headers.Get("X-Claude-Code-Session-Id"))
@@ -468,7 +468,7 @@ func TestBuildFetchModelsHeadersClaudeCodeFinalizesProfileAfterOverrides(t *test
 	}, "test-key")
 	require.NoError(t, err)
 	assert.Equal(t, "Bearer test-key", headers.Get("Authorization"))
-	assert.Equal(t, "claude-cli/2.1.214", headers.Get("User-Agent"))
+	assert.Equal(t, "claude-cli/2.1.214 (external, cli)", headers.Get("User-Agent"))
 	assert.Equal(t, "cli", headers.Get("X-App"))
 	assert.Equal(t, "application/json", headers.Get("Accept"))
 	assert.Equal(t, "application/json", headers.Get("Content-Type"))

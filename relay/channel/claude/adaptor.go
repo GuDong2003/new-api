@@ -6,9 +6,12 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/relay/channel"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/relayconvert"
 	"github.com/QuantumNous/new-api/relaykit/types"
@@ -43,6 +46,10 @@ func (a *Adaptor) Init(info *relaycommon.RelayInfo) {
 }
 
 func (a *Adaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {
+	if info.RelayMode == relayconstant.RelayModeCountTokens {
+		// count_tokens 是标准端点，不带 beta query。
+		return fmt.Sprintf("%s/v1/messages/count_tokens", info.ChannelBaseUrl), nil
+	}
 	requestURL := fmt.Sprintf("%s/v1/messages", info.ChannelBaseUrl)
 	if !shouldAppendClaudeBetaQuery(info) {
 		return requestURL, nil
@@ -68,6 +75,10 @@ func shouldAppendClaudeBetaQuery(info *relaycommon.RelayInfo) bool {
 	if info.ChannelOtherSettings.ClaudeBetaQuery {
 		return true
 	}
+	// Claude Code 兼容渠道模拟真实客户端，推理请求默认走 /v1/messages?beta=true。
+	if info.ChannelType == constant.ChannelTypeClaudeCode {
+		return true
+	}
 	return false
 }
 
@@ -88,6 +99,17 @@ func (a *Adaptor) SetupRequestHeader(c *gin.Context, req *http.Header, info *rel
 		anthropicVersion = "2023-06-01"
 	}
 	req.Set("anthropic-version", anthropicVersion)
+	// Claude Code 兼容渠道：透传客户端携带的 x-stainless-* 标识头（与真实客户端一致）。
+	// 兼容身份头（ApplyClaudeCodeCompatibilityHeaders）不再删除它们。
+	if info != nil && info.ChannelType == constant.ChannelTypeClaudeCode {
+		for name, values := range c.Request.Header {
+			if strings.HasPrefix(strings.ToLower(name), "x-stainless-") {
+				for _, v := range values {
+					req.Add(name, v)
+				}
+			}
+		}
+	}
 	CommonClaudeHeadersOperation(c, req, info)
 	return nil
 }

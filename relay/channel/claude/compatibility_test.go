@@ -7,6 +7,7 @@ import (
 
 	"github.com/QuantumNous/new-api/constant"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -85,15 +86,16 @@ func TestClaudeCodeDoApiRequestFinalizesProfileAndReusesSession(t *testing.T) {
 	second := <-capturedHeaders
 	for _, headers := range []http.Header{first, second} {
 		assert.Equal(t, "Bearer test-key", headers.Get("Authorization"))
-		assert.Equal(t, "claude-cli/2.1.214", headers.Get("User-Agent"))
+		assert.Equal(t, "test-key", headers.Get("X-Api-Key"))
+		assert.Equal(t, "claude-cli/2.1.214 (external, cli)", headers.Get("User-Agent"))
 		assert.Equal(t, "cli", headers.Get("X-App"))
 		assert.Equal(t, "2023-06-01", headers.Get("Anthropic-Version"))
 		assert.Equal(t, "application/json", headers.Get("Content-Type"))
 		assert.Equal(t, "text/event-stream", headers.Get("Accept"))
 		assert.Equal(t, "survives", headers.Get("X-Safe-Static"))
 		assert.Equal(t, "interleaved-thinking-2025-05-14", headers.Get("Anthropic-Beta"))
-		assert.Empty(t, headers.Get("X-Api-Key"))
-		assert.Empty(t, headers.Get("X-Stainless-Lang"))
+		assert.Equal(t, "node", headers.Get("X-Stainless-Lang"))
+		assert.NotEmpty(t, headers.Get("X-Client-Request-Id"))
 	}
 
 	firstSessionID := first.Get("X-Claude-Code-Session-Id")
@@ -101,6 +103,55 @@ func TestClaudeCodeDoApiRequestFinalizesProfileAndReusesSession(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotEqual(t, "client-supplied", firstSessionID)
 	assert.Equal(t, firstSessionID, second.Get("X-Claude-Code-Session-Id"))
+}
+
+func TestClaudeCodeCountTokensURL(t *testing.T) {
+	adaptor := &Adaptor{}
+
+	// Claude Code 兼容渠道：count_tokens 模式拼 /v1/messages/count_tokens
+	requestURL, err := adaptor.GetRequestURL(&relaycommon.RelayInfo{
+		RelayMode: relayconstant.RelayModeCountTokens,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType:    constant.ChannelTypeClaudeCode,
+			ChannelBaseUrl: "https://proxy.example",
+		},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "https://proxy.example/v1/messages/count_tokens", requestURL)
+
+	// 普通推理请求仍走 /v1/messages（Claude Code 渠道默认带 ?beta=true）
+	requestURL, err = adaptor.GetRequestURL(&relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType:    constant.ChannelTypeClaudeCode,
+			ChannelBaseUrl: "https://proxy.example",
+		},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "https://proxy.example/v1/messages?beta=true", requestURL)
+}
+
+func TestClaudeCodeBetaQueryDefaultsTrue(t *testing.T) {
+	adaptor := &Adaptor{}
+
+	// Claude Code 兼容渠道默认追加 ?beta=true（对齐真实客户端）
+	requestURL, err := adaptor.GetRequestURL(&relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType:    constant.ChannelTypeClaudeCode,
+			ChannelBaseUrl: "https://proxy.example",
+		},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "https://proxy.example/v1/messages?beta=true", requestURL)
+
+	// 标准 Anthropic 渠道保持原行为（默认不加）
+	requestURL, err = adaptor.GetRequestURL(&relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType:    constant.ChannelTypeAnthropic,
+			ChannelBaseUrl: "https://proxy.example",
+		},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "https://proxy.example/v1/messages", requestURL)
 }
 
 func TestClaudeCodeChannelTestCanDisableClientProfile(t *testing.T) {

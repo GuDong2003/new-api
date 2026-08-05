@@ -74,7 +74,8 @@ func TestApplyClaudeCodeCompatibilityHeaders(t *testing.T) {
 				"x-goog-api-key":           []string{"discard"},
 				"x-app":                    []string{"discard"},
 				"x-claude-code-session-id": []string{"client-supplied"},
-				"x-stainless-lang":         []string{"node"},
+				"X-Stainless-Lang":         []string{"node"},
+				"X-Stainless-Os":           []string{"linux"},
 				"anthropic-dangerous-direct-browser-access": []string{"true"},
 				"accept-language": []string{"en-US"},
 				"sec-fetch-mode":  []string{"cors"},
@@ -82,28 +83,45 @@ func TestApplyClaudeCodeCompatibilityHeaders(t *testing.T) {
 				"X-Safe-Static":   []string{"survives"},
 			}
 
-			ApplyClaudeCodeCompatibilityHeaders(headers, "test-key", test.isStream, sessionID)
-			ApplyClaudeCodeCompatibilityHeaders(headers, "test-key", test.isStream, sessionID)
+			ApplyClaudeCodeCompatibilityHeaders(headers, "test-key", test.isStream, sessionID, true)
+			ApplyClaudeCodeCompatibilityHeaders(headers, "test-key", test.isStream, sessionID, true)
 
-			require.Equal(t, http.Header{
-				"Authorization":            []string{"Bearer test-key"},
-				"User-Agent":               []string{"claude-cli/2.1.214"},
-				"X-App":                    []string{"cli"},
-				"Anthropic-Version":        []string{"2023-06-01"},
-				"Content-Type":             []string{"application/json"},
-				"Accept":                   []string{test.wantAccept},
-				"X-Claude-Code-Session-Id": []string{sessionID},
-				"Anthropic-Beta":           []string{"interleaved-thinking-2025-05-14"},
-				"X-Safe-Static":            []string{"survives"},
-			}, headers)
+			require.Equal(t, "Bearer test-key", headers.Get("Authorization"))
+			require.Equal(t, "test-key", headers.Get("X-Api-Key"))
+			require.Equal(t, "claude-cli/2.1.214 (external, cli)", headers.Get("User-Agent"))
+			require.Equal(t, "cli", headers.Get("X-App"))
+			require.Equal(t, "2023-06-01", headers.Get("Anthropic-Version"))
+			require.Equal(t, "application/json", headers.Get("Content-Type"))
+			require.Equal(t, test.wantAccept, headers.Get("Accept"))
+			require.Equal(t, sessionID, headers.Get("X-Claude-Code-Session-Id"))
+			require.Equal(t, "interleaved-thinking-2025-05-14", headers.Get("Anthropic-Beta"))
+			require.Equal(t, "survives", headers.Get("X-Safe-Static"))
+			require.Equal(t, "node", headers.Get("X-Stainless-Lang"))
+			require.Equal(t, "linux", headers.Get("X-Stainless-Os"))
+			require.Regexp(t, `^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`, headers.Get("X-Client-Request-Id"))
+			// 客户端伪造的受管头被丢弃
+			require.Empty(t, headers.Get("Proxy-Authorization"))
+			require.Empty(t, headers.Get("Cookie"))
+			require.Empty(t, headers.Get("Anthropic-Dangerous-Direct-Browser-Access"))
+			require.Empty(t, headers.Get("Accept-Language"))
+			require.Empty(t, headers.Get("Sec-Fetch-Mode"))
 		})
 	}
 
 	headers := http.Header{
 		"X-Claude-Code-Session-Id": []string{"client-supplied"},
 	}
-	ApplyClaudeCodeCompatibilityHeaders(headers, "test-key", false, "")
+	ApplyClaudeCodeCompatibilityHeaders(headers, "test-key", false, "", true)
 	assert.Empty(t, headers.Get("X-Claude-Code-Session-Id"))
+}
+
+func TestApplyClaudeCodeCompatibilityHeadersFetchModelsSingleCredential(t *testing.T) {
+	headers := http.Header{}
+	// GET /v1/models：按协议只携带单个凭证头（Authorization），不设置 x-api-key。
+	ApplyClaudeCodeCompatibilityHeaders(headers, "test-key", false, "", false)
+	assert.Equal(t, "Bearer test-key", headers.Get("Authorization"))
+	assert.Empty(t, headers.Get("X-Api-Key"))
+	assert.Equal(t, "claude-cli/2.1.214 (external, cli)", headers.Get("User-Agent"))
 }
 
 func TestCodeBuddyCompatibilityBuildsWorkBuddyProfile(t *testing.T) {
