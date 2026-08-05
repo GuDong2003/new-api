@@ -169,13 +169,43 @@ func (a *Adaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {
 		return relaycommon.GetFullRequestURL(info.ChannelBaseUrl, requestURL, info.ChannelType), nil
 	case constant.ChannelTypeCodexCompatibility:
 		baseURL := strings.TrimRight(info.ChannelBaseUrl, "/")
-		if strings.HasSuffix(baseURL, "/codex/responses") {
+		// Codex 兼容渠道的 base URL 存在多种形态，按端点语义逐级解析：
+		//   - base 已含完整 compact 端点路径（如 /codex/responses/compact）→ 透传
+		//   - base 已含完整 responses 端点路径（/v1/responses、/codex/responses、
+		//     /backend-api/codex/responses）→ 透传，compact 时追加 /compact
+		//   - base 以 /codex 结尾（旧形态）→ 补 /responses
+		//   - base 以 /backend-api 结尾（chatgpt.com 订阅形态）→ 补 /codex/responses
+		//   - 其他（纯 host 或 /v1）→ 拼标准 OpenAI Responses 端点 /v1/responses
+		switch {
+		case strings.HasSuffix(baseURL, "/responses/compact"):
 			return baseURL, nil
-		}
-		if strings.HasSuffix(baseURL, "/codex") {
+		case strings.HasSuffix(baseURL, "/codex/responses"),
+			strings.HasSuffix(baseURL, "/backend-api/codex/responses"),
+			strings.HasSuffix(baseURL, "/v1/responses"):
+			if info.RelayMode == relayconstant.RelayModeResponsesCompact {
+				return baseURL + "/compact", nil
+			}
+			return baseURL, nil
+		case strings.HasSuffix(baseURL, "/codex"):
+			if info.RelayMode == relayconstant.RelayModeResponsesCompact {
+				return baseURL + "/responses/compact", nil
+			}
 			return baseURL + "/responses", nil
+		case strings.HasSuffix(baseURL, "/backend-api"):
+			if info.RelayMode == relayconstant.RelayModeResponsesCompact {
+				return baseURL + "/codex/responses/compact", nil
+			}
+			return baseURL + "/codex/responses", nil
+		default:
+			path := "/v1/responses"
+			if strings.HasSuffix(baseURL, "/v1") {
+				path = "/responses"
+			}
+			if info.RelayMode == relayconstant.RelayModeResponsesCompact {
+				path += "/compact"
+			}
+			return baseURL + path, nil
 		}
-		return baseURL + "/codex/responses", nil
 	//case constant.ChannelTypeMiniMax:
 	//	return minimax.GetRequestURL(info)
 	case constant.ChannelTypeCustom:
@@ -247,6 +277,25 @@ func (a *Adaptor) SetupRequestHeader(c *gin.Context, header *http.Header, info *
 		channel.ApplyCompatibilityHeadersWithConversation(info.ChannelType, *header, info.ApiKey, info.IsStream, conversationID)
 	} else {
 		channel.ApplyCompatibilityHeaders(info.ChannelType, *header, info.ApiKey, info.IsStream)
+	}
+	// Codex 兼容渠道：透传客户端携带的 Codex 会话类 header（多轮续接 / 粘性路由 / 安装标识等），
+	// 与真实 Codex CLI 行为对齐。仅复制客户端显式携带的值，不覆盖已由兼容身份设置的固定头。
+	if info.ChannelType == constant.ChannelTypeCodexCompatibility {
+		for _, name := range []string{
+			"session-id",
+			"thread-id",
+			"x-codex-turn-state",
+			"x-codex-beta-features",
+			"x-codex-installation-id",
+			"x-codex-turn-metadata",
+			"x-codex-parent-thread-id",
+			"x-codex-window-id",
+			"x-openai-subagent",
+		} {
+			if v := c.Request.Header.Get(name); v != "" && header.Get(name) == "" {
+				header.Set(name, v)
+			}
+		}
 	}
 	if info.ChannelType == constant.ChannelTypeOpenRouter {
 		if header.Get("HTTP-Referer") == "" {
@@ -661,6 +710,42 @@ func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommo
 		// Codex Responses requires store=false and expects an instructions field.
 		request.Store = json.RawMessage("false")
 		request.MaxOutputTokens = nil
+		// 渠道级系统提示词注入，语义与 codex 订阅渠道（codex/adaptor.go）对齐：
+		// instructions 为空时注入 SystemPrompt；非空且开启 SystemPromptOverride 时拼接。
+		if info.ChannelSetting.SystemPrompt != "" {
+			systemPrompt := info.ChannelSetting.SystemPrompt
+			if len(request.Instructions) == 0 {
+				if b, err := common.Marshal(systemPrompt); err == nil {
+					request.Instructions = b
+				} else {
+					return nil, err
+				}
+			} else if info.ChannelSetting.SystemPromptOverride {
+				var existing string
+				if err := common.Unmarshal(request.Instructions, &existing); err == nil {
+					existing = strings.TrimSpace(existing)
+					if existing == "" {
+						if b, err := common.Marshal(systemPrompt); err == nil {
+							request.Instructions = b
+						} else {
+							return nil, err
+						}
+					} else {
+						if b, err := common.Marshal(systemPrompt + "\n" + existing); err == nil {
+							request.Instructions = b
+						} else {
+							return nil, err
+						}
+					}
+				} else {
+					if b, err := common.Marshal(systemPrompt); err == nil {
+						request.Instructions = b
+					} else {
+						return nil, err
+					}
+				}
+			}
+		}
 		if len(request.Instructions) == 0 {
 			request.Instructions = json.RawMessage(`"You are a helpful assistant."`)
 		}
