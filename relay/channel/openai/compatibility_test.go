@@ -356,15 +356,17 @@ func TestCodeBuddyResponsesEnforceUpstreamRequestRules(t *testing.T) {
 
 	messages, ok := body["messages"].([]any)
 	require.True(t, ok)
-	require.Len(t, messages, 3)
+	// instructions 内容被合并进前缀 system（2 条：system + user），不再独立成条
+	require.Len(t, messages, 2)
 	firstMessage, ok := messages[0].(map[string]any)
 	require.True(t, ok)
 	assert.Equal(t, "system", firstMessage["role"])
 	firstContent, ok := firstMessage["content"].(string)
 	require.True(t, ok)
 	assert.True(t, strings.HasPrefix(firstContent, "This conversation is powered by "))
+	assert.Contains(t, firstContent, "system says")
 
-	userMessage, ok := messages[2].(map[string]any)
+	userMessage, ok := messages[1].(map[string]any)
 	require.True(t, ok)
 	_, ok = userMessage["content"].([]any)
 	assert.True(t, ok, "the original array content must remain after the string marker")
