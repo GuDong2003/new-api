@@ -273,6 +273,115 @@ func TestCodeBuddyConversationIdentityIsStableAcrossTurns(t *testing.T) {
 	assert.NotEqual(t, first.Get("X-Request-ID"), second.Get("X-Request-ID"))
 }
 
+func TestConfiguredClientIdentityAppliesVersionAndPlatformWithoutReplacingCredentials(t *testing.T) {
+	tests := []struct {
+		name        string
+		channelType int
+		config      *dto.ClientIdentityConfig
+		apply       func(http.Header, *dto.ClientIdentityConfig)
+		assertions  func(*testing.T, http.Header)
+	}{
+		{
+			name:        "codex compatibility profile",
+			channelType: constant.ChannelTypeCodexCompatibility,
+			config: &dto.ClientIdentityConfig{
+				Profile:  dto.ClientIdentityProfileCodexCompatibility,
+				Version:  "1.2.3",
+				Platform: dto.ClientIdentityPlatformLinuxX64,
+			},
+			apply: func(headers http.Header, config *dto.ClientIdentityConfig) {
+				ApplyCompatibilityHeadersWithClientIdentity(constant.ChannelTypeCodexCompatibility, headers, "codex-key", true, "", config)
+			},
+			assertions: func(t *testing.T, headers http.Header) {
+				assert.Equal(t, "Bearer codex-key", headers.Get("Authorization"))
+				assert.Equal(t, "responses=experimental", headers.Get("OpenAI-Beta"))
+				assert.Equal(t, "codex_cli_rs", headers.Get("Originator"))
+				assert.Equal(t, "codex_cli_rs/1.2.3 (linux-x64)", headers.Get("User-Agent"))
+				assert.Equal(t, "text/event-stream", headers.Get("Accept"))
+			},
+		},
+		{
+			name:        "claude code profile",
+			channelType: constant.ChannelTypeClaudeCode,
+			config: &dto.ClientIdentityConfig{
+				Profile:  dto.ClientIdentityProfileClaudeCode,
+				Version:  "2.1.214",
+				Platform: dto.ClientIdentityPlatformMacOSArm64,
+			},
+			apply: func(headers http.Header, config *dto.ClientIdentityConfig) {
+				ApplyClaudeCodeCompatibilityHeadersWithIdentity(headers, "claude-key", true, "session-id", true, config)
+			},
+			assertions: func(t *testing.T, headers http.Header) {
+				assert.Equal(t, "Bearer claude-key", headers.Get("Authorization"))
+				assert.Equal(t, "claude-key", headers.Get("X-Api-Key"))
+				assert.Equal(t, "claude-cli/2.1.214 (external, cli; macos-arm64)", headers.Get("User-Agent"))
+				assert.Equal(t, "cli", headers.Get("X-App"))
+				assert.Equal(t, "session-id", headers.Get("X-Claude-Code-Session-Id"))
+			},
+		},
+		{
+			name:        "codebuddy product profile",
+			channelType: constant.ChannelTypeCodeBuddy,
+			config: &dto.ClientIdentityConfig{
+				Profile:  dto.ClientIdentityProfileCodeBuddy,
+				Version:  "5.3.8.34705286",
+				Platform: dto.ClientIdentityPlatformMacOSX64,
+			},
+			apply: func(headers http.Header, config *dto.ClientIdentityConfig) {
+				ApplyCompatibilityHeadersWithClientIdentity(constant.ChannelTypeCodeBuddy, headers, "buddy-key", true, "conversation-id", config)
+			},
+			assertions: func(t *testing.T, headers http.Header) {
+				assert.Equal(t, "Bearer buddy-key", headers.Get("Authorization"))
+				assert.Equal(t, "buddy-key", headers.Get("X-API-Key"))
+				assert.Equal(t, "WorkBuddy/5.3.8.34705286 WorkBuddy/5.3.8.34705286 CLI/2.115.0", headers.Get("User-Agent"))
+				assert.Equal(t, "5.3.8.34705286", headers.Get("X-IDE-Version"))
+				assert.Equal(t, "macOS", headers.Get("X-Stainless-OS"))
+				assert.Equal(t, "x64", headers.Get("X-Stainless-Arch"))
+				assert.Equal(t, "1", headers.Get("X-CodeBuddy-Request"))
+				assert.Equal(t, "conversation-id", headers.Get("X-Conversation-ID"))
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			headers := http.Header{}
+			test.apply(headers, test.config)
+			test.assertions(t, headers)
+		})
+	}
+}
+
+func TestConfiguredClientIdentityIsReappliedAfterHeaderOverride(t *testing.T) {
+	config := &dto.ClientIdentityConfig{
+		Profile:  dto.ClientIdentityProfileCodexCompatibility,
+		Version:  "1.2.3",
+		Platform: dto.ClientIdentityPlatformLinuxX64,
+	}
+	headers := http.Header{}
+
+	ApplyCompatibilityHeadersWithClientIdentity(
+		constant.ChannelTypeCodexCompatibility,
+		headers,
+		"codex-key",
+		false,
+		"",
+		config,
+	)
+	headers.Set("User-Agent", "header-override")
+	ApplyCompatibilityHeadersWithClientIdentity(
+		constant.ChannelTypeCodexCompatibility,
+		headers,
+		"codex-key",
+		false,
+		"",
+		config,
+	)
+
+	assert.Equal(t, "codex_cli_rs/1.2.3 (linux-x64)", headers.Get("User-Agent"))
+	assert.Equal(t, "Bearer codex-key", headers.Get("Authorization"))
+}
+
 func TestResolveCodeBuddyConversationIDPrefersIncomingHeader(t *testing.T) {
 	incomingID := "a66fe5d5-ceb0-4f54-a69d-060e98bfb0c6"
 	headers := http.Header{"X-Conversation-Id": []string{incomingID}}

@@ -272,11 +272,13 @@ func (a *Adaptor) SetupRequestHeader(c *gin.Context, header *http.Header, info *
 			header.Set("Authorization", "Bearer "+info.ApiKey)
 		}
 	}
-	if info.ChannelType == constant.ChannelTypeCodeBuddy {
-		conversationID := channel.ResolveCodeBuddyConversationID(c.Request.Header, info.Request)
-		channel.ApplyCompatibilityHeadersWithConversation(info.ChannelType, *header, info.ApiKey, info.IsStream, conversationID)
-	} else {
-		channel.ApplyCompatibilityHeaders(info.ChannelType, *header, info.ApiKey, info.IsStream)
+	if info.ShouldUseChannelTestStyle() {
+		if info.ChannelType == constant.ChannelTypeCodeBuddy {
+			conversationID := channel.ResolveCodeBuddyConversationID(c.Request.Header, info.Request)
+			channel.ApplyCompatibilityHeadersWithClientIdentity(info.ChannelType, *header, info.ApiKey, info.IsStream, conversationID, info.ChannelOtherSettings.ClientIdentity)
+		} else {
+			channel.ApplyCompatibilityHeadersWithClientIdentity(info.ChannelType, *header, info.ApiKey, info.IsStream, "", info.ChannelOtherSettings.ClientIdentity)
+		}
 	}
 	// Codex 兼容渠道：透传客户端携带的 Codex 会话类 header（多轮续接 / 粘性路由 / 安装标识等），
 	// 与真实 Codex CLI 行为对齐。仅复制客户端显式携带的值，不覆盖已由兼容身份设置的固定头。

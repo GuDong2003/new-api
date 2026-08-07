@@ -390,10 +390,21 @@ func DoApiRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 		return nil, err
 	}
 	applyHeaderOverrideToRequest(req, headerOverride)
-	if info != nil && info.ChannelMeta != nil &&
-		info.ChannelType == rootconstant.ChannelTypeClaudeCode &&
-		info.ShouldUseChannelTestStyle() {
-		ApplyClaudeCodeCompatibilityHeaders(req.Header, info.ApiKey, info.IsStream, info.EnsureClaudeCodeSessionID(), true)
+	if info != nil && info.ChannelMeta != nil && info.ShouldUseChannelTestStyle() {
+		switch info.ChannelType {
+		case rootconstant.ChannelTypeCodex:
+			// Header overrides may contain arbitrary client headers, but they must
+			// not silently replace the explicitly configured client identity.
+			// OAuth credentials and account routing remain owned by the adapter.
+			ApplyCodexLegacyClientIdentity(req.Header, info.ChannelOtherSettings.ClientIdentity)
+		case rootconstant.ChannelTypeCodexCompatibility:
+			ApplyCompatibilityHeadersWithClientIdentity(info.ChannelType, req.Header, info.ApiKey, info.IsStream, "", info.ChannelOtherSettings.ClientIdentity)
+		case rootconstant.ChannelTypeClaudeCode:
+			ApplyClaudeCodeCompatibilityHeadersWithIdentity(req.Header, info.ApiKey, info.IsStream, info.EnsureClaudeCodeSessionID(), true, info.ChannelOtherSettings.ClientIdentity)
+		case rootconstant.ChannelTypeCodeBuddy:
+			conversationID := ResolveCodeBuddyConversationID(c.Request.Header, info.Request)
+			ApplyCompatibilityHeadersWithClientIdentity(info.ChannelType, req.Header, info.ApiKey, info.IsStream, conversationID, info.ChannelOtherSettings.ClientIdentity)
+		}
 	}
 	resp, err := doRequest(c, req, info)
 	if err != nil {

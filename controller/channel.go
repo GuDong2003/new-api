@@ -198,19 +198,28 @@ func GetAllChannels(c *gin.Context) {
 
 func buildFetchModelsHeaders(channel *model.Channel, key string) (http.Header, error) {
 	var headers http.Header
+	otherSettings := channel.GetOtherSettings()
 	switch channel.Type {
 	case constant.ChannelTypeAnthropic:
 		headers = GetClaudeAuthHeader(key)
 	default:
 		headers = GetAuthHeader(key)
 	}
-	relaychannel.ApplyCompatibilityHeaders(channel.Type, headers, key, false)
+	relaychannel.ApplyCompatibilityHeadersWithClientIdentity(channel.Type, headers, key, false, "", otherSettings.ClientIdentity)
 
 	if err := applyFetchModelsHeaderOverrides(channel, key, headers); err != nil {
 		return nil, err
 	}
-	if channel.Type == constant.ChannelTypeClaudeCode {
-		relaychannel.ApplyClaudeCodeCompatibilityHeaders(headers, key, false, "")
+	switch channel.Type {
+	case constant.ChannelTypeCodex:
+		relaychannel.ApplyCodexLegacyClientIdentity(headers, otherSettings.ClientIdentity)
+	case constant.ChannelTypeCodexCompatibility:
+		relaychannel.ApplyCompatibilityHeadersWithClientIdentity(channel.Type, headers, key, false, "", otherSettings.ClientIdentity)
+	case constant.ChannelTypeClaudeCode:
+		// GET /v1/models 按协议只携带单个凭证头（Authorization）。
+		relaychannel.ApplyClaudeCodeCompatibilityHeadersWithIdentity(headers, key, false, "", false, otherSettings.ClientIdentity)
+	case constant.ChannelTypeCodeBuddy:
+		relaychannel.ApplyCompatibilityHeadersWithClientIdentity(channel.Type, headers, key, false, "", otherSettings.ClientIdentity)
 	}
 	return headers, nil
 }

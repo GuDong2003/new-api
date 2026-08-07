@@ -22,6 +22,7 @@ For commercial licensing, please contact support@quantumnous.com
 // ============================================================================
 
 export const CHANNEL_TYPE_NEW_API = 60
+export const CHANNEL_TYPE_CODEX_LEGACY = 57
 export const CHANNEL_TYPE_CODEX = 61
 export const CHANNEL_TYPE_CLAUDE_CODE = 62
 export const CHANNEL_TYPE_CODE_BUDDY = 63

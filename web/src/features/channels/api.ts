@@ -24,6 +24,9 @@ import type {
   BatchDeleteParams,
   BatchSetTagParams,
   Channel,
+  ClientIdentityPlatform,
+  ClientIdentityProfile,
+  ChannelUpdatePayload,
   ChannelBalanceResponse,
   ChannelOpsResponse,
   ChannelTestResponse,
@@ -59,6 +62,51 @@ export type CodexUsageResponse = {
 export type CodexResetCreditsResponse = CodexUsageResponse
 
 export type CodexUsageResetResponse = CodexUsageResponse
+
+export type ClientIdentityVersionLookup = {
+  client_type: string
+  profile: ClientIdentityProfile
+  platform?: ClientIdentityPlatform
+  versions: string[]
+  latest: string
+  source: {
+    kind: 'npm' | 'workbuddy'
+    package?: string
+    platform?: ClientIdentityPlatform
+    checked_at?: number
+  }
+  cached: boolean
+  stale: boolean
+}
+
+export type ClientIdentityVersionResponse = {
+  success: boolean
+  message?: string
+  data?: ClientIdentityVersionLookup
+}
+
+export async function getClientIdentityVersions(
+  profile: ClientIdentityProfile,
+  platform?: ClientIdentityPlatform
+): Promise<ClientIdentityVersionResponse> {
+  const res = await api.get('/api/channel/client-identity/versions', {
+    params: { profile, ...(platform ? { platform } : {}) },
+    ...channelActionConfig(),
+  })
+  return res.data
+}
+
+export async function refreshClientIdentityVersions(
+  profile: ClientIdentityProfile,
+  platform?: ClientIdentityPlatform
+): Promise<ClientIdentityVersionResponse> {
+  const res = await api.post(
+    '/api/channel/client-identity/versions/refresh',
+    { profile, ...(platform ? { platform } : {}) },
+    channelActionConfig()
+  )
+  return res.data
+}
 
 export type CodexCredentialRefreshResponse = {
   success: boolean

@@ -578,3 +578,107 @@ func TestChannelSettingsValidateHTTPTransport(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "http2_connection_shards")
 }
+
+func TestClientIdentityDefaultsKeepCodexProfilesDistinct(t *testing.T) {
+	legacy := DefaultClientIdentityConfig(ClientIdentityChannelTypeCodexLegacy)
+	compatible := DefaultClientIdentityConfig(ClientIdentityChannelTypeCodexCompatible)
+
+	require.Equal(t, ClientIdentityClientTypeCodex, legacy.ClientType)
+	require.Equal(t, ClientIdentityProfileCodexLegacy, legacy.Profile)
+	require.Equal(t, ClientIdentityProfileCodexCompatibility, compatible.Profile)
+	require.NotEqual(t, legacy.Profile, compatible.Profile)
+	require.Empty(t, legacy.Version)
+	require.Empty(t, legacy.Platform)
+}
+
+func TestClientIdentityLegacySettingsRoundTripWithoutClientIdentity(t *testing.T) {
+	legacy := `{"aws_key_type":"ak_sk","disable_store":true}`
+	var settings ChannelOtherSettings
+	require.NoError(t, json.Unmarshal([]byte(legacy), &settings))
+	require.Nil(t, settings.ClientIdentity)
+	require.Equal(t, AwsKeyTypeAKSK, settings.AwsKeyType)
+	require.True(t, settings.DisableStore)
+
+	encoded, err := json.Marshal(settings)
+	require.NoError(t, err)
+	assert.NotContains(t, string(encoded), "client_identity")
+}
+
+func TestClientIdentityNormalizeAndValidate(t *testing.T) {
+	config := ClientIdentityConfig{
+		Version:  " 2.1.214 ",
+		Platform: "darwin-arm64-user",
+	}
+	require.NoError(t, config.Normalize(ClientIdentityChannelTypeClaudeCode))
+	assert.Equal(t, ClientIdentityClientTypeClaudeCode, config.ClientType)
+	assert.Equal(t, ClientIdentityProfileClaudeCode, config.Profile)
+	assert.Equal(t, "2.1.214", config.Version)
+	assert.Equal(t, ClientIdentityPlatformMacOSArm64, config.Platform)
+
+	workBuddy := ClientIdentityConfig{Version: "5.3.8.34705286", Platform: "win32-x64-user"}
+	require.NoError(t, workBuddy.Normalize(ClientIdentityChannelTypeCodeBuddy))
+	assert.Equal(t, ClientIdentityPlatformWindowsX64, workBuddy.Platform)
+	assert.Equal(t, ClientIdentityProfileCodeBuddy, workBuddy.Profile)
+}
+
+func TestClientIdentityRejectsInvalidValues(t *testing.T) {
+	tests := []struct {
+		name        string
+		channelType int
+		config      ClientIdentityConfig
+		want        string
+	}{
+		{
+			name:        "codex profiles cannot be merged",
+			channelType: ClientIdentityChannelTypeCodexLegacy,
+			config:      ClientIdentityConfig{Profile: ClientIdentityProfileCodexCompatibility},
+			want:        "not supported",
+		},
+		{
+			name:        "npm versions require semver",
+			channelType: ClientIdentityChannelTypeCodexCompatible,
+			config:      ClientIdentityConfig{Version: "0.146"},
+			want:        "invalid client identity version",
+		},
+		{
+			name:        "platform is allowlisted",
+			channelType: ClientIdentityChannelTypeClaudeCode,
+			config:      ClientIdentityConfig{Platform: "freebsd-x64"},
+			want:        "invalid client identity platform",
+		},
+		{
+			name:        "codebuddy product source is not npm",
+			channelType: ClientIdentityChannelTypeCodeBuddy,
+			config: ClientIdentityConfig{
+				Version: "5.3.8.34705286",
+				Source:  &ClientIdentitySourceMetadata{Kind: ClientIdentitySourceNPM},
+			},
+			want: "invalid client identity source kind",
+		},
+		{
+			name:        "source package is fixed",
+			channelType: ClientIdentityChannelTypeCodexCompatible,
+			config: ClientIdentityConfig{
+				Version: "0.146.0",
+				Source:  &ClientIdentitySourceMetadata{Kind: ClientIdentitySourceNPM, Package: "evil/package"},
+			},
+			want: "invalid client identity source package",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.config.Validate(tt.channelType)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.want)
+		})
+	}
+}
+
+func TestClientIdentityUnsupportedChannelRejectsNonEmptyConfig(t *testing.T) {
+	config := ClientIdentityConfig{Version: "1.2.3"}
+	err := config.Validate(1)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not supported")
+	assert.False(t, config.SupportsChannelType(1))
+}

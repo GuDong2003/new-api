@@ -94,7 +94,12 @@ func codeBuddySystemPromptWithModel(model string) string {
 	return codeBuddyMinimumSystemPrefix
 }
 
-func applyCodeBuddyHeaders(headers http.Header, apiKey, conversationID string, isStream bool) {
+func applyCodeBuddyHeaders(headers http.Header, apiKey, conversationID string, isStream bool, identity *dto.ClientIdentityConfig) {
+	config := resolveRuntimeClientIdentity(dto.ClientIdentityChannelTypeCodeBuddy, identity)
+	productVersion := strings.TrimSpace(config.Version)
+	if productVersion == "" {
+		productVersion = codeBuddyProductVersion
+	}
 	conversationID = strings.TrimSpace(conversationID)
 	if conversationID == "" {
 		conversationID = uuid.NewString()
@@ -111,18 +116,22 @@ func applyCodeBuddyHeaders(headers http.Header, apiKey, conversationID string, i
 	headers.Set("X-API-Key", apiKey)
 	headers.Set("Accept", "application/json")
 	headers.Set("Content-Type", "application/json")
-	headers.Set("User-Agent", "WorkBuddy/"+codeBuddyProductVersion+" WorkBuddy/"+codeBuddyProductVersion+" CLI/"+codeBuddyCLIUserAgent)
+	headers.Set("User-Agent", "WorkBuddy/"+productVersion+" WorkBuddy/"+productVersion+" CLI/"+codeBuddyCLIUserAgent)
 	headers.Set("X-Agent-Intent", "craft")
 	headers.Set("X-Agent-Purpose", "conversation")
 	headers.Set("X-Domain", "www.codebuddy.cn")
 	headers.Set("X-IDE-Name", "WorkBuddy")
 	headers.Set("X-IDE-Type", "WorkBuddy")
-	headers.Set("X-IDE-Version", codeBuddyProductVersion)
+	headers.Set("X-IDE-Version", productVersion)
 	headers.Set("X-Product", "SaaS")
 	headers.Set("X-Requested-With", "XMLHttpRequest")
 	headers.Set("X-Stainless-Arch", "x64")
 	headers.Set("X-Stainless-Lang", "js")
 	headers.Set("X-Stainless-OS", "Windows")
+	if osName, arch, ok := dto.ClientIdentityPlatformRuntime(config.Platform); ok {
+		headers.Set("X-Stainless-OS", osName)
+		headers.Set("X-Stainless-Arch", arch)
+	}
 	headers.Set("X-Stainless-Package-Version", "6.25.0")
 	headers.Set("X-Stainless-Retry-Count", "0")
 	headers.Set("X-Stainless-Runtime", "node")

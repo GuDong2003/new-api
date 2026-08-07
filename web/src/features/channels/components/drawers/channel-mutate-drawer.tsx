@@ -156,6 +156,7 @@ import {
 import { useChannelMutateForm } from '../../hooks/use-channel-mutate-form'
 import {
   CHANNEL_FORM_DEFAULT_VALUES,
+  CLIENT_IDENTITY_CHANNEL_TYPES,
   CHANNEL_TYPE_ADVANCED_CUSTOM,
   channelFormSchema,
   channelsQueryKeys,
@@ -194,6 +195,7 @@ import {
   ChannelApiAccessSection,
   ChannelAuthSection,
   ChannelBasicSection,
+  ChannelClientIdentitySection,
   ChannelEditorLoadingState,
   ChannelModelsSection,
 } from './sections'
@@ -260,6 +262,7 @@ const CHANNEL_EDITOR_MAIN_SECTION_IDS = [
   CHANNEL_EDITOR_SECTION_IDS.advanced,
 ]
 const ADVANCED_SETTINGS_SECTION_IDS = {
+  clientIdentity: 'channel-section-advanced-client-identity',
   routingStrategy: 'channel-section-advanced-routing-strategy',
   internalNotes: 'channel-section-advanced-internal-notes',
   overrideRules: 'channel-section-advanced-override-rules',
@@ -307,6 +310,10 @@ const SENSITIVE_FORM_FIELDS = [
   'upstream_model_update_check_enabled',
   'upstream_model_update_auto_sync_enabled',
   'upstream_model_update_ignored_models',
+  'client_identity_client_type',
+  'client_identity_profile',
+  'client_identity_version',
+  'client_identity_platform',
 ] satisfies (keyof ChannelFormValues)[]
 
 function readAdvancedSettingsPreference(): boolean {
@@ -354,7 +361,11 @@ function hasAdvancedSettingsValues(values: ChannelFormValues): boolean {
     values.claude_beta_query ||
     values.upstream_model_update_check_enabled ||
     values.upstream_model_update_auto_sync_enabled ||
-    values.upstream_model_update_ignored_models?.trim()
+    values.upstream_model_update_ignored_models?.trim() ||
+    values.client_identity_client_type ||
+    values.client_identity_profile ||
+    values.client_identity_version?.trim() ||
+    values.client_identity_platform
   )
 }
 
@@ -774,6 +785,12 @@ export function ChannelMutateDrawer({
   const currentUpstreamModelUpdateIgnoredModels = form.watch(
     'upstream_model_update_ignored_models'
   )
+  const currentClientIdentityClientType = form.watch(
+    'client_identity_client_type'
+  )
+  const currentClientIdentityProfile = form.watch('client_identity_profile')
+  const currentClientIdentityVersion = form.watch('client_identity_version')
+  const currentClientIdentityPlatform = form.watch('client_identity_platform')
   const shouldPreviewUnsavedModels =
     !isEditing ||
     (currentType === CHANNEL_TYPE_ADVANCED_CUSTOM && canEditSensitive)
@@ -1065,13 +1082,20 @@ export function ChannelMutateDrawer({
     currentUpstreamModelUpdateAutoSyncEnabled ||
     currentUpstreamModelUpdateIgnoredModels?.trim()
   )
+  const clientIdentityConfigured = Boolean(
+    currentClientIdentityClientType ||
+    currentClientIdentityProfile ||
+    currentClientIdentityVersion?.trim() ||
+    currentClientIdentityPlatform
+  )
   const advancedConfigured = Boolean(
     routingStrategyConfigured ||
     internalNotesConfigured ||
     overrideRulesConfigured ||
     extraSettingsConfigured ||
     fieldPassthroughConfigured ||
-    upstreamModelDetectionConfigured
+    upstreamModelDetectionConfigured ||
+    clientIdentityConfigured
   )
   const advancedNavChildren: ChannelEditorNavChildItem[] = [
     {
@@ -1095,6 +1119,13 @@ export function ChannelMutateDrawer({
       configured: extraSettingsConfigured,
     },
   ]
+  if (CLIENT_IDENTITY_CHANNEL_TYPES.has(currentType)) {
+    advancedNavChildren.unshift({
+      id: ADVANCED_SETTINGS_SECTION_IDS.clientIdentity,
+      title: t('Client Identity & Version'),
+      configured: clientIdentityConfigured,
+    })
+  }
   if (FIELD_PASSTHROUGH_TYPES.has(currentType)) {
     advancedNavChildren.push({
       id: ADVANCED_SETTINGS_SECTION_IDS.fieldPassthrough,
@@ -3642,6 +3673,25 @@ export function ChannelMutateDrawer({
                         onOpenChange={handleAdvancedSettingsOpenChange}
                         summary={advancedSummary}
                       >
+                        {CLIENT_IDENTITY_CHANNEL_TYPES.has(currentType) && (
+                          <div
+                            id={getEditorElementId(
+                              ADVANCED_SETTINGS_SECTION_IDS.clientIdentity
+                            )}
+                            className={configuredAdvancedSectionClassName(
+                              'scroll-mt-4',
+                              clientIdentityConfigured
+                            )}
+                          >
+                            <ChannelClientIdentitySection
+                              control={form.control}
+                              setValue={form.setValue}
+                              channelType={currentType}
+                              disabled={sensitiveLocked}
+                              isSubmitting={isSubmitting}
+                            />
+                          </div>
+                        )}
                         {/* ── Routing & Overrides ── */}
                         <div className={sideDrawerSectionClassName()}>
                           <CardHeading
