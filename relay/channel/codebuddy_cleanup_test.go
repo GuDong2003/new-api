@@ -54,7 +54,7 @@ func TestApplyCodeBuddyRequestProfileCleansForbiddenPhrase(t *testing.T) {
 	ApplyCodeBuddyRequestProfile(request)
 	requireMessageCount := len(request.Messages)
 	assert.Equal(t, 2, requireMessageCount)
-	assert.True(t, strings.HasPrefix(request.Messages[0].StringContent(), "This conversation is powered by gpt-5.6-sol\r\n\r\n"), "system should start with WorkBuddy marker")
-	assert.Equal(t, 3990, len(request.Messages[0].StringContent()))
+	assert.True(t, strings.HasPrefix(request.Messages[0].StringContent(), "This conversation is powered by "), "system should start with WorkBuddy marker")
+	assert.Equal(t, 122, len(request.Messages[0].StringContent()))
 	assert.Equal(t, "remember: you are a coding assistant", request.Messages[1].Content)
 }

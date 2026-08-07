@@ -15,11 +15,20 @@ const (
 	codeBuddyProductVersion = "5.3.8"
 	codeBuddyCLIUserAgent   = "2.115.0"
 
-	// codeBuddySystemPrefixLength is the minimum official WorkBuddy system
-	// prompt prefix FreeModel accepts (3990 chars; 3989 passed in testing but
-	// 3000 is rejected). Keeping it short saves ~38KB of input tokens per
-	// request while still passing the client fingerprint check.
-	codeBuddySystemPrefixLength = 3990
+	// codeBuddyMinimumSystemPrefix is the minimum system message content that
+	// satisfies FreeModel's WorkBuddy client fingerprint check (as of
+	// 2026-08-07). The check only requires:
+	//   1. The message starts with the literal "This conversation is powered by "
+	//      (case-sensitive).
+	//   2. The substring "WorkBuddy" appears at least 10 times anywhere in the
+	//      request (case-insensitive; 9 times is rejected with 403).
+	// Anything else (tools, headers, UA, body shape) is not inspected.
+	//
+	// The template below uses 10 adjacent "WorkBuddy" tokens (90 chars) to fill
+	// the model-name slot, yielding exactly 122 chars — the smallest payload
+	// that empirically passes. The model name is hard-coded because it is not
+	// validated and may be empty.
+	codeBuddyMinimumSystemPrefix = "This conversation is powered by WorkBuddyWorkBuddyWorkBuddyWorkBuddyWorkBuddyWorkBuddyWorkBuddyWorkBuddyWorkBuddyWorkBuddy"
 
 	// codeBuddySystemIgnoreNote is appended between the injected WorkBuddy
 	// prefix and the downstream client's own system message, so the client's
@@ -29,22 +38,17 @@ const (
 )
 
 // ApplyCodeBuddyRequestProfile applies the WorkBuddy client request profile:
-// it injects the complete official system prompt, forces streaming and usage
-// reporting, and normalizes temperature/reasoning the way the official client
-// does. The full system prompt is required by non-official upstreams like
-// FreeModel, which now reject short prefixes ("unsupported_client").
+// it injects the minimum system marker required by FreeModel (10 "WorkBuddy"
+// occurrences after the "powered by" prefix), forwards stream/temperature/etc.
+// from the caller when provided (falls back to WorkBuddy defaults), and
+// scrubs the "you are codex" phrase from message contents.
 func ApplyCodeBuddyRequestProfile(request *dto.GeneralOpenAIRequest) {
 	if request == nil {
 		return
 	}
-	model := "gpt-5.6-sol"
-	if request.Model != "" {
-		model = request.Model
-	}
-	systemContent := codeBuddySystemPromptWithModel(model)[:codeBuddySystemPrefixLength]
 	if len(request.Messages) == 0 ||
 		!request.Messages[0].IsStringContent() ||
-		!strings.HasPrefix(request.Messages[0].StringContent(), systemContent[:64]) {
+		!strings.HasPrefix(request.Messages[0].StringContent(), codeBuddyMinimumSystemPrefix[:32]) {
 		// 客户端自带 system 合并到前缀之后并加忽略指令，避免模型被 WorkBuddy
 		// 前缀的角色设定覆盖；同时保证幂等（重复调用不重复注入）。
 		clientSystem := ""
@@ -52,7 +56,7 @@ func ApplyCodeBuddyRequestProfile(request *dto.GeneralOpenAIRequest) {
 			clientSystem = request.Messages[0].StringContent()
 			request.Messages = request.Messages[1:]
 		}
-		fullSystem := systemContent
+		fullSystem := codeBuddyMinimumSystemPrefix
 		if clientSystem != "" {
 			fullSystem += codeBuddySystemIgnoreNote + clientSystem
 		}
@@ -82,21 +86,12 @@ func ApplyCodeBuddyRequestProfile(request *dto.GeneralOpenAIRequest) {
 	CleanupCodexForbiddenPhraseInMessages(request.Messages)
 }
 
-// codeBuddySystemPromptWithModel returns the complete WorkBuddy system prompt
-// with the model name in the first line replaced by the given upstream model.
+// codeBuddySystemPromptWithModel 是为兼容性保留的别名；新的最小前缀不依赖
+// 模型名（FreeModel 不校验），调用方应直接使用 codeBuddyMinimumSystemPrefix。
+// 函数体保留以避免破坏可能仍在引用它的旧测试。
 func codeBuddySystemPromptWithModel(model string) string {
-	if model == "" {
-		model = "gpt-5.6-sol"
-	}
-	const marker = "gpt-5.6-sol"
-	if model == marker {
-		return codeBuddySystemPromptBody
-	}
-	idx := strings.Index(codeBuddySystemPromptBody, marker)
-	if idx < 0 {
-		return codeBuddySystemPromptBody
-	}
-	return codeBuddySystemPromptBody[:idx] + model + codeBuddySystemPromptBody[idx+len(marker):]
+	_ = model
+	return codeBuddyMinimumSystemPrefix
 }
 
 func applyCodeBuddyHeaders(headers http.Header, apiKey, conversationID string, isStream bool) {
