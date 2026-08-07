@@ -189,7 +189,7 @@ export function ChannelClientIdentitySection(
   const selectedPlatform = platform || 'default'
 
   return (
-    <div className='flex scroll-mt-4 flex-col gap-4 border-t pt-4'>
+    <div className='flex scroll-mt-4 flex-col gap-4'>
       <div className='flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between'>
         <div className='flex items-start gap-3'>
           <span className='bg-muted text-muted-foreground flex size-8 shrink-0 items-center justify-center rounded-md'>

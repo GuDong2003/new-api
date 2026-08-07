@@ -20,7 +20,7 @@ const (
 	defaultWorkBuddyUpdateURL  = "https://www.codebuddy.cn/v2/update"
 	clientIdentityVersionTTL   = time.Hour
 	clientIdentityRequestLimit = 10 * time.Second
-	clientIdentityMaxBodyBytes = 2 << 20
+	clientIdentityMaxBodyBytes = 8 << 20
 	clientIdentityMaxVersions  = 64
 )
 
@@ -235,7 +235,10 @@ func clientTypeForClientIdentityProfile(profile string) string {
 func (s *ClientIdentityVersionService) fetchNPMVersions(ctx context.Context, packageName, profile string) ([]string, error) {
 	packagePath := strings.ReplaceAll(packageName, "/", "%2f")
 	endpoint := strings.TrimRight(s.npmRegistryURL, "/") + "/" + packagePath
-	body, err := s.fetchBody(ctx, endpoint, "application/json")
+	// The full npm packument for active CLI packages can exceed 10 MiB. The
+	// abbreviated packument keeps the official dist-tags and version keys while
+	// avoiding package metadata that this endpoint does not need.
+	body, err := s.fetchBody(ctx, endpoint, "application/vnd.npm.install-v1+json")
 	if err != nil {
 		return nil, err
 	}

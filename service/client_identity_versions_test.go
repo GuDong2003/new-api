@@ -1,8 +1,10 @@
 package service
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -15,6 +17,7 @@ func TestClientIdentityVersionServiceLoadsNPMVersionsAndFallsBackToCache(t *test
 	requestCount := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestCount++
+		assert.Equal(t, "application/vnd.npm.install-v1+json", r.Header.Get("Accept"))
 		if requestCount > 1 {
 			w.WriteHeader(http.StatusBadGateway)
 			return
@@ -43,6 +46,26 @@ func TestClientIdentityVersionServiceLoadsNPMVersionsAndFallsBackToCache(t *test
 	assert.True(t, stale.Cached)
 	assert.True(t, stale.Stale)
 	assert.Equal(t, "1.2.3", stale.Latest)
+}
+
+func TestClientIdentityVersionServiceAcceptsLargeOfficialNPMPackument(t *testing.T) {
+	body := fmt.Sprintf(
+		`{"name":"@openai/codex","dist-tags":{"latest":"1.2.3"},"versions":{"1.2.3":{}},"padding":%q}`,
+		strings.Repeat("x", 3<<20),
+	)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "application/vnd.npm.install-v1+json", r.Header.Get("Accept"))
+		_, _ = w.Write([]byte(body))
+	}))
+	defer server.Close()
+
+	service := NewClientIdentityVersionService(ClientIdentityVersionServiceOptions{
+		HTTPClient:     server.Client(),
+		NPMRegistryURL: server.URL,
+	})
+	lookup, err := service.ListVersions(t.Context(), dto.ClientIdentityProfileCodexLegacy, "")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"1.2.3"}, lookup.Versions)
 }
 
 func TestClientIdentityVersionServiceUsesOfficialWorkBuddyProductEndpoint(t *testing.T) {
