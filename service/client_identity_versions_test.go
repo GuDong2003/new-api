@@ -88,6 +88,11 @@ func TestClientIdentityVersionServiceFiltersNPMBuildsByPlatform(t *testing.T) {
 	assert.NotContains(t, lookup.Versions, "1.4.0-darwin-arm64")
 	assert.NotContains(t, lookup.Versions, "1.1.0-darwin-x64")
 	assert.NotContains(t, lookup.Versions, "1.0.0-win32-arm64")
+
+	defaultLookup, err := service.ListVersions(t.Context(), dto.ClientIdentityProfileCodexLegacy, "")
+	require.NoError(t, err)
+	assert.Equal(t, "1.4.0", defaultLookup.Latest)
+	assert.Equal(t, []string{"1.4.0", "1.2.0-beta"}, defaultLookup.Versions)
 }
 
 func TestNPMVersionPlatformFilterKeepsBaseAndMatchingArchitectureBuilds(t *testing.T) {
@@ -101,7 +106,13 @@ func TestNPMVersionPlatformFilterKeepsBaseAndMatchingArchitectureBuilds(t *testi
 		{name: "matching darwin architecture", platform: dto.ClientIdentityPlatformMacOSArm64, version: "2.0.0-darwin-arm64", want: true},
 		{name: "other darwin architecture", platform: dto.ClientIdentityPlatformMacOSArm64, version: "2.0.0-darwin-x64", want: false},
 		{name: "other operating system", platform: dto.ClientIdentityPlatformMacOSArm64, version: "2.0.0-linux-arm64", want: false},
-		{name: "unselected platform keeps all builds", platform: "", version: "2.0.0-win32-x64", want: true},
+		{name: "default platform keeps base version", platform: "", version: "2.0.0", want: true},
+		{name: "default platform excludes windows x64 build", platform: "", version: "2.0.0-win32-x64", want: false},
+		{name: "default platform excludes windows arm64 build", platform: "", version: "2.0.0-win32-arm64", want: false},
+		{name: "default platform excludes linux x64 build", platform: "", version: "2.0.0-linux-x64", want: false},
+		{name: "default platform excludes linux arm64 build", platform: "", version: "2.0.0-linux-arm64", want: false},
+		{name: "default platform excludes darwin x64 build", platform: "", version: "2.0.0-darwin-x64", want: false},
+		{name: "default platform excludes darwin arm64 build", platform: "", version: "2.0.0-darwin-arm64", want: false},
 	}
 
 	for _, tt := range tests {

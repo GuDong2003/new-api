@@ -426,7 +426,7 @@ func compareInt64(left, right int64) int {
 func isNPMVersionAllowedForPlatform(version, platform string) bool {
 	platform = strings.TrimSpace(platform)
 	if platform == "" {
-		return true
+		return npmPlatformBuildPattern.FindStringSubmatch(strings.ToLower(version)) == nil
 	}
 
 	match := npmPlatformBuildPattern.FindStringSubmatch(strings.ToLower(version))
