@@ -25,6 +25,7 @@ import type {
   BatchSetTagParams,
   Channel,
   ClientIdentityPlatform,
+  ClientIdentityConfig,
   ClientIdentityProfile,
   ChannelUpdatePayload,
   ChannelBalanceResponse,
@@ -70,7 +71,7 @@ export type ClientIdentityVersionLookup = {
   versions: string[]
   latest: string
   source: {
-    kind: 'npm' | 'workbuddy'
+    kind: 'npm' | 'workbuddy' | 'manual' | 'official' | 'community'
     package?: string
     platform?: ClientIdentityPlatform
     checked_at?: number
@@ -598,6 +599,8 @@ export async function fetchModels(data: {
   advanced_custom?: string
   header_override?: string
   proxy?: string
+  settings?: string
+  client_identity?: ClientIdentityConfig
 }): Promise<FetchModelsResponse> {
   const res = await api.post(
     '/api/channel/fetch_models',

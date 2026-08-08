@@ -3,14 +3,33 @@ package channel
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/constant"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
-	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/gin-gonic/gin"
+	"github.com/gorilla/websocket"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type headerOverrideTestAdaptor struct {
+	Adaptor
+	requestURL string
+	setup      func(*gin.Context, *http.Header, *relaycommon.RelayInfo) error
+}
+
+func (a headerOverrideTestAdaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {
+	return a.requestURL, nil
+}
+
+func (a headerOverrideTestAdaptor) SetupRequestHeader(c *gin.Context, headers *http.Header, info *relaycommon.RelayInfo) error {
+	if a.setup == nil {
+		return nil
+	}
+	return a.setup(c, headers, info)
+}
 
 func TestProcessHeaderOverride_ChannelTestSkipsPassthroughRules(t *testing.T) {
 	t.Parallel()
@@ -35,7 +54,7 @@ func TestProcessHeaderOverride_ChannelTestSkipsPassthroughRules(t *testing.T) {
 	require.Empty(t, headers)
 }
 
-func TestProcessHeaderOverride_ChannelTestSkipsClientHeaderPlaceholder(t *testing.T) {
+func TestProcessHeaderOverride_ChannelTestAppliesClientHeaderPlaceholder(t *testing.T) {
 	t.Parallel()
 
 	gin.SetMode(gin.TestMode)
@@ -55,8 +74,7 @@ func TestProcessHeaderOverride_ChannelTestSkipsClientHeaderPlaceholder(t *testin
 
 	headers, err := processHeaderOverride(info, ctx)
 	require.NoError(t, err)
-	_, ok := headers["x-upstream-trace"]
-	require.False(t, ok)
+	require.Equal(t, "trace-123", headers["x-upstream-trace"])
 }
 
 func TestProcessHeaderOverride_NonTestKeepsClientHeaderPlaceholder(t *testing.T) {
@@ -265,24 +283,35 @@ func TestProcessHeaderOverride_PassHeadersTemplateSetsRuntimeHeaders(t *testing.
 	require.Empty(t, upstreamReq.Header.Get("X-Codex-Beta-Features"))
 }
 
-func TestProcessHeaderOverride_ClaudeCodeProfileRejectsUnsafeOverrides(t *testing.T) {
-	reservedHeaders := []string{
-		"Authorization",
-		"Proxy-Authorization",
-		"Cookie",
-		"X-Api-Key",
-		"X-Goog-Api-Key",
-		"User-Agent",
-		"Anthropic-Version",
-		"Accept",
-		"Content-Type",
-		"X-App",
-		"X-Claude-Code-Session-Id",
-		"X-Stainless-Lang",
-		"Anthropic-Dangerous-Direct-Browser-Access",
-		"Accept-Language",
-		"Sec-Fetch-Mode",
+func TestProcessHeaderOverride_ClaudeCodeAllowsIdentityOverrides(t *testing.T) {
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	info := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType: constant.ChannelTypeClaudeCode,
+			ApiKey:      "channel-key",
+			HeadersOverride: map[string]any{
+				"aUtHoRiZaTiOn":     "Bearer override",
+				"X-API-KEY":         "{api_key}",
+				"aNtHrOpIc-Version": "override-version",
+				"CONTENT-TYPE":      "application/override",
+				"accept":            "override-accept",
+				"User-Agent":        "override-agent",
+			},
+		},
 	}
+
+	headers, err := processHeaderOverride(info, ctx)
+	require.NoError(t, err)
+	assert.Equal(t, "Bearer override", headers["authorization"])
+	assert.Equal(t, "channel-key", headers["x-api-key"])
+	assert.Equal(t, "override-version", headers["anthropic-version"])
+	assert.Equal(t, "application/override", headers["content-type"])
+	assert.Equal(t, "override-accept", headers["accept"])
+	assert.Equal(t, "override-agent", headers["user-agent"])
+}
+
+func TestProcessHeaderOverride_ClaudeCodeChannelTestAllowsAllExplicitHeaders(t *testing.T) {
 	tests := []struct {
 		name      string
 		overrides map[string]any
@@ -291,16 +320,7 @@ func TestProcessHeaderOverride_ClaudeCodeProfileRejectsUnsafeOverrides(t *testin
 		{name: "regex", overrides: map[string]any{"re:^X-": ""}},
 		{name: "regex v2", overrides: map[string]any{"regex:^X-": ""}},
 		{name: "client header placeholder", overrides: map[string]any{"X-Safe": "{client_header:X-Trace-Id}"}},
-		{name: "api key placeholder", overrides: map[string]any{"X-Safe": "Bearer {api_key}"}},
-	}
-	for _, header := range reservedHeaders {
-		tests = append(tests, struct {
-			name      string
-			overrides map[string]any
-		}{
-			name:      "reserved " + header,
-			overrides: map[string]any{header: "static-value"},
-		})
+		{name: "reserved header", overrides: map[string]any{"Authorization": "Bearer static"}},
 	}
 
 	for _, test := range tests {
@@ -309,6 +329,7 @@ func TestProcessHeaderOverride_ClaudeCodeProfileRejectsUnsafeOverrides(t *testin
 			ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
 			ctx.Request.Header.Set("X-Trace-Id", "trace-123")
 			info := &relaycommon.RelayInfo{
+				IsChannelTest: true,
 				ChannelMeta: &relaycommon.ChannelMeta{
 					ChannelType:     constant.ChannelTypeClaudeCode,
 					ApiKey:          "channel-key",
@@ -316,13 +337,176 @@ func TestProcessHeaderOverride_ClaudeCodeProfileRejectsUnsafeOverrides(t *testin
 				},
 			}
 
-			_, err := processHeaderOverride(info, ctx)
-			require.Error(t, err)
-			var apiErr *types.NewAPIError
-			require.ErrorAs(t, err, &apiErr)
-			require.Equal(t, types.ErrorCodeChannelHeaderOverrideInvalid, apiErr.GetErrorCode())
+			headers, err := processHeaderOverride(info, ctx)
+			require.NoError(t, err)
+			if test.name == "client header placeholder" {
+				assert.Equal(t, "trace-123", headers["x-safe"])
+				return
+			}
+			if test.name == "reserved header" {
+				assert.Equal(t, "Bearer static", headers["authorization"])
+			}
 		})
 	}
+}
+
+func TestDoApiRequestHeaderOverrideWinsOverCompatibilityDefaults(t *testing.T) {
+	tests := []struct {
+		name        string
+		channelType int
+	}{
+		{name: "ordinary", channelType: constant.ChannelTypeOpenAI},
+		{name: "codex", channelType: constant.ChannelTypeCodex},
+		{name: "codex compatibility", channelType: constant.ChannelTypeCodexCompatibility},
+		{name: "claude code", channelType: constant.ChannelTypeClaudeCode},
+		{name: "codebuddy", channelType: constant.ChannelTypeCodeBuddy},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			capturedHeaders := make(chan http.Header, 1)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				capturedHeaders <- r.Header.Clone()
+				w.WriteHeader(http.StatusOK)
+			}))
+			t.Cleanup(server.Close)
+
+			ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+			ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+			info := &relaycommon.RelayInfo{
+				IsStream: true,
+				ChannelMeta: &relaycommon.ChannelMeta{
+					ChannelType:    test.channelType,
+					ChannelBaseUrl: server.URL,
+					ApiKey:         "channel-key",
+					HeadersOverride: map[string]any{
+						"aUtHoRiZaTiOn":     "Bearer override",
+						"X-API-KEY":         "{api_key}",
+						"aNtHrOpIc-Version": "override-version",
+						"CONTENT-TYPE":      "application/override",
+						"accept":            "override-accept",
+						"User-Agent":        "override-agent",
+					},
+				},
+			}
+			adaptor := headerOverrideTestAdaptor{
+				requestURL: server.URL,
+				setup: func(_ *gin.Context, headers *http.Header, _ *relaycommon.RelayInfo) error {
+					headers.Set("Authorization", "Bearer adaptor")
+					headers.Set("X-Api-Key", "adaptor-key")
+					headers.Set("Anthropic-Version", "adaptor-version")
+					headers.Set("Content-Type", "application/adaptor")
+					headers.Set("Accept", "application/adaptor")
+					headers.Set("User-Agent", "adaptor-agent")
+					return nil
+				},
+			}
+
+			response, err := DoApiRequest(adaptor, ctx, info, http.NoBody)
+			require.NoError(t, err)
+			require.NotNil(t, response)
+			require.NoError(t, response.Body.Close())
+
+			headers := <-capturedHeaders
+			assert.Equal(t, "Bearer override", headers.Get("Authorization"))
+			assert.Equal(t, "channel-key", headers.Get("X-Api-Key"))
+			assert.Equal(t, "override-version", headers.Get("Anthropic-Version"))
+			assert.Equal(t, "application/override", headers.Get("Content-Type"))
+			assert.Equal(t, "override-accept", headers.Get("Accept"))
+			assert.Equal(t, "override-agent", headers.Get("User-Agent"))
+		})
+	}
+}
+
+func TestDoFormRequestAppliesHeaderOverrideAfterContentType(t *testing.T) {
+	capturedHeaders := make(chan http.Header, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedHeaders <- r.Header.Clone()
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(server.Close)
+
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/audio", nil)
+	ctx.Request.Header.Set("Content-Type", "multipart/form-data; boundary=client")
+	info := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType:    constant.ChannelTypeOpenAI,
+			ChannelBaseUrl: server.URL,
+			ApiKey:         "channel-key",
+			HeadersOverride: map[string]any{
+				"cOnTeNt-TyPe":     "application/override",
+				"aUtHoRiZaTiOn":    "override-authorization",
+				"X-Request-Source": "header-override",
+			},
+		},
+	}
+	adaptor := headerOverrideTestAdaptor{
+		requestURL: server.URL,
+		setup: func(_ *gin.Context, headers *http.Header, _ *relaycommon.RelayInfo) error {
+			headers.Set("Content-Type", "application/adaptor")
+			headers.Set("Authorization", "Bearer adaptor")
+			return nil
+		},
+	}
+
+	response, err := DoFormRequest(adaptor, ctx, info, http.NoBody)
+	require.NoError(t, err)
+	require.NotNil(t, response)
+	require.NoError(t, response.Body.Close())
+
+	headers := <-capturedHeaders
+	assert.Equal(t, "application/override", headers.Get("Content-Type"))
+	assert.Equal(t, "override-authorization", headers.Get("Authorization"))
+	assert.Equal(t, "header-override", headers.Get("X-Request-Source"))
+}
+
+func TestDoWssRequestAppliesHeaderOverrideAfterProtocolDefaults(t *testing.T) {
+	capturedHeaders := make(chan http.Header, 1)
+	upgrader := websocket.Upgrader{CheckOrigin: func(_ *http.Request) bool { return true }}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedHeaders <- r.Header.Clone()
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err == nil {
+			_ = conn.Close()
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/v1/realtime", nil)
+	ctx.Request.Header.Set("Content-Type", "client/content-type")
+	info := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType:    constant.ChannelTypeOpenAI,
+			ChannelBaseUrl: "ws" + strings.TrimPrefix(server.URL, "http"),
+			ApiKey:         "channel-key",
+			HeadersOverride: map[string]any{
+				"cOnTeNt-TyPe":           "override/content-type",
+				"sEc-WebSocket-Protocol": "override-protocol",
+				"aUtHoRiZaTiOn":          "override-authorization",
+			},
+		},
+	}
+	adaptor := headerOverrideTestAdaptor{
+		requestURL: info.ChannelBaseUrl,
+		setup: func(_ *gin.Context, headers *http.Header, _ *relaycommon.RelayInfo) error {
+			headers.Set("Content-Type", "application/adaptor")
+			headers.Set("Sec-WebSocket-Protocol", "adaptor-protocol")
+			headers.Set("Authorization", "Bearer adaptor")
+			return nil
+		},
+	}
+
+	conn, err := DoWssRequest(adaptor, ctx, info, http.NoBody)
+	require.NoError(t, err)
+	require.NotNil(t, conn)
+	require.NoError(t, conn.Close())
+
+	headers := <-capturedHeaders
+	assert.Equal(t, "override/content-type", headers.Get("Content-Type"))
+	assert.Equal(t, "override-protocol", headers.Get("Sec-WebSocket-Protocol"))
+	assert.Equal(t, "override-authorization", headers.Get("Authorization"))
 }
 
 func TestProcessHeaderOverride_ClaudeCodeProfileAllowsSafeStaticHeaders(t *testing.T) {

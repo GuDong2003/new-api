@@ -49,6 +49,58 @@ func TestApplyCompatibilityHeaders(t *testing.T) {
 	}
 }
 
+func TestApplyLightweightClientIdentityUsesOnlyVerifiedFields(t *testing.T) {
+	tests := []struct {
+		name       string
+		profile    string
+		version    string
+		platform   string
+		wantUA     string
+		wantMarker string
+	}{
+		{
+			name:     "Codex CLI",
+			profile:  dto.ClientIdentityProfileCodexCLI,
+			version:  "0.147.0",
+			platform: dto.ClientIdentityPlatformLinuxX64,
+			wantUA:   "codex_cli_rs/0.147.0 (linux-x64)",
+		},
+		{
+			name:     "Claude CLI",
+			profile:  dto.ClientIdentityProfileClaudeCLI,
+			version:  "2.1.224",
+			platform: dto.ClientIdentityPlatformMacOSArm64,
+			wantUA:   "claude-cli/2.1.224 (external, cli; macos-arm64)",
+		},
+		{
+			name:       "CodeBuddy CLI",
+			profile:    dto.ClientIdentityProfileCodeBuddyCLI,
+			version:    "5.3.8.34705286",
+			wantMarker: "1",
+		},
+		{
+			name:    "WorkBuddy Desktop leaves unknown identity empty",
+			profile: dto.ClientIdentityProfileWorkBuddyDesktop,
+			version: "5.3.8.34705286",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			headers := http.Header{}
+			ApplyLightweightClientIdentity(headers, &dto.ClientIdentityConfig{
+				Profile:  test.profile,
+				Version:  test.version,
+				Platform: test.platform,
+			})
+			assert.Equal(t, test.wantUA, headers.Get("User-Agent"))
+			assert.Equal(t, test.wantMarker, headers.Get("X-CodeBuddy-Request"))
+			assert.Empty(t, headers.Get("Authorization"))
+			assert.Empty(t, headers.Get("Anthropic-Version"))
+		})
+	}
+}
+
 func TestApplyClaudeCodeCompatibilityHeaders(t *testing.T) {
 	const sessionID = "123e4567-e89b-12d3-a456-426614174000"
 
@@ -352,7 +404,7 @@ func TestConfiguredClientIdentityAppliesVersionAndPlatformWithoutReplacingCreden
 	}
 }
 
-func TestConfiguredClientIdentityIsReappliedAfterHeaderOverride(t *testing.T) {
+func TestConfiguredClientIdentityDefaultsDoNotReplaceHeaderOverride(t *testing.T) {
 	config := &dto.ClientIdentityConfig{
 		Profile:  dto.ClientIdentityProfileCodexCompatibility,
 		Version:  "1.2.3",
@@ -369,17 +421,10 @@ func TestConfiguredClientIdentityIsReappliedAfterHeaderOverride(t *testing.T) {
 		config,
 	)
 	headers.Set("User-Agent", "header-override")
-	ApplyCompatibilityHeadersWithClientIdentity(
-		constant.ChannelTypeCodexCompatibility,
-		headers,
-		"codex-key",
-		false,
-		"",
-		config,
-	)
+	headers.Set("Authorization", "override-authorization")
 
-	assert.Equal(t, "codex_cli_rs/1.2.3 (linux-x64)", headers.Get("User-Agent"))
-	assert.Equal(t, "Bearer codex-key", headers.Get("Authorization"))
+	assert.Equal(t, "header-override", headers.Get("User-Agent"))
+	assert.Equal(t, "override-authorization", headers.Get("Authorization"))
 }
 
 func TestResolveCodeBuddyConversationIDPrefersIncomingHeader(t *testing.T) {

@@ -93,4 +93,67 @@ describe('channel client identity settings', () => {
     assert.equal(settings.client_identity, undefined)
     assert.equal(settings.disable_store, true)
   })
+
+  test('serializes a lightweight client identity for a standard channel', () => {
+    const settings = JSON.parse(
+      buildSettingsJSON({
+        ...CHANNEL_FORM_DEFAULT_VALUES,
+        type: 1,
+        client_identity_client_type: 'codex',
+        client_identity_profile: 'codex_cli',
+        client_identity_version: '0.147.0',
+        client_identity_platform: 'linux-x64',
+        client_identity_source: 'official',
+      })
+    )
+
+    assert.deepEqual(settings.client_identity, {
+      client_type: 'codex',
+      profile: 'codex_cli',
+      version: '0.147.0',
+      platform: 'linux-x64',
+      source: { kind: 'official' },
+    })
+  })
+
+  test('keeps standard channels on no-client defaults without identity settings', () => {
+    const settings = JSON.parse(
+      buildSettingsJSON({
+        ...CHANNEL_FORM_DEFAULT_VALUES,
+        type: 14,
+      })
+    )
+
+    assert.equal(settings.client_identity, undefined)
+  })
+
+  test('does not serialize a deep profile onto a standard channel', () => {
+    const settings = JSON.parse(
+      buildSettingsJSON({
+        ...CHANNEL_FORM_DEFAULT_VALUES,
+        type: 1,
+        client_identity_client_type: 'codex',
+        client_identity_profile: 'codex_legacy',
+        client_identity_version: '0.147.0',
+      })
+    )
+
+    assert.equal(settings.client_identity, undefined)
+  })
+
+  test('falls back to the deep channel template after a type switch', () => {
+    const settings = JSON.parse(
+      buildSettingsJSON({
+        ...CHANNEL_FORM_DEFAULT_VALUES,
+        type: 61,
+        client_identity_client_type: 'codex',
+        client_identity_profile: 'codex_cli',
+        client_identity_version: '0.147.0',
+      })
+    )
+
+    assert.equal(settings.client_identity.client_type, 'codex')
+    assert.equal(settings.client_identity.profile, 'codex_compatibility')
+    assert.equal(settings.client_identity.version, undefined)
+  })
 })

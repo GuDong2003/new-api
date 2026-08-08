@@ -15,8 +15,9 @@ const (
 	claudeCodeCompatibilityUA    = "claude-cli/2.1.214 (external, cli)"
 )
 
-// ApplyCompatibilityHeaders applies the fixed upstream identity for API-key
-// compatibility channels. Channel header overrides are applied afterward.
+// ApplyCompatibilityHeaders applies the default upstream identity for API-key
+// compatibility channels. Request construction must apply Header Override
+// afterward so an explicit override remains final.
 func ApplyCompatibilityHeaders(channelType int, headers http.Header, apiKey string, isStream bool) {
 	ApplyCompatibilityHeadersWithClientIdentity(channelType, headers, apiKey, isStream, "", nil)
 }
@@ -65,9 +66,46 @@ func ApplyCodexLegacyClientIdentity(headers http.Header, identity *dto.ClientIde
 	headers.Set("User-Agent", clientIdentityUserAgent("codex_cli_rs", version, config.Platform))
 }
 
-// ApplyClaudeCodeCompatibilityHeaders finalizes the fixed Claude Code
+// ApplyLightweightClientIdentity applies only the verified, low-risk identity
+// fields for standard OpenAI/Anthropic channels. It deliberately does not add
+// authentication, endpoint, protocol, session, or request-body fields.
+func ApplyLightweightClientIdentity(headers http.Header, identity *dto.ClientIdentityConfig) {
+	if headers == nil || identity == nil || identity.IsZero() {
+		return
+	}
+
+	switch identity.Profile {
+	case dto.ClientIdentityProfileCodexCLI:
+		version := strings.TrimSpace(identity.Version)
+		if version == "" {
+			version = strings.TrimPrefix(codexCompatibilityUserAgent, "codex_cli_rs/")
+		}
+		headers.Set("User-Agent", clientIdentityUserAgent("codex_cli_rs", version, identity.Platform))
+	case dto.ClientIdentityProfileClaudeCLI:
+		config := *identity
+		version := strings.TrimSpace(config.Version)
+		if version == "" {
+			version = strings.TrimPrefix(claudeCodeCompatibilityUA, "claude-cli/")
+			if index := strings.Index(version, " "); index >= 0 {
+				version = version[:index]
+			}
+		}
+		config.Version = version
+		headers.Set("User-Agent", claudeCodeUserAgentFor(config))
+	case dto.ClientIdentityProfileCodeBuddyCLI:
+		// This header is documented for CodeBuddy's local HTTP API. The
+		// lightweight profile opts into that single marker and nothing else.
+		headers.Set("X-CodeBuddy-Request", "1")
+	case dto.ClientIdentityProfileWorkBuddyDesktop:
+		// No stable public WorkBuddy Desktop request identity is verified.
+		// Keep the profile available for metadata/manual versioning without
+		// inventing a User-Agent or internal headers.
+	}
+}
+
+// ApplyClaudeCodeCompatibilityHeaders applies the default Claude Code
 // upstream identity. It is deliberately separate from generic compatibility
-// profiles because it must run after adapter setup and header overrides.
+// profiles because it runs after adapter setup and before Header Override.
 // includeAPIKey controls the x-api-key credential header: the Gateway protocol
 // requires both Authorization and x-api-key on inference requests, but only one
 // credential header on GET /v1/models.
@@ -75,9 +113,8 @@ func ApplyClaudeCodeCompatibilityHeaders(headers http.Header, apiKey string, isS
 	ApplyClaudeCodeCompatibilityHeadersWithIdentity(headers, apiKey, isStream, sessionID, includeAPIKey, nil)
 }
 
-// ApplyClaudeCodeCompatibilityHeadersWithIdentity finalizes the fixed Claude
-// Code protocol identity while allowing only a validated version/platform to
-// vary.
+// ApplyClaudeCodeCompatibilityHeadersWithIdentity applies the Claude Code
+// protocol defaults while allowing only a validated version/platform to vary.
 func ApplyClaudeCodeCompatibilityHeadersWithIdentity(headers http.Header, apiKey string, isStream bool, sessionID string, includeAPIKey bool, identity *dto.ClientIdentityConfig) {
 	config := resolveRuntimeClientIdentity(constant.ChannelTypeClaudeCode, identity)
 	for name := range headers {

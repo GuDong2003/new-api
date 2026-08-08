@@ -6,7 +6,9 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -111,6 +113,8 @@ func NewClientIdentityVersionService(options ClientIdentityVersionServiceOptions
 
 var defaultClientIdentityVersionService = NewClientIdentityVersionService(ClientIdentityVersionServiceOptions{})
 
+var npmPlatformBuildPattern = regexp.MustCompile(`(?i)-(win32|linux|darwin)-([a-z0-9]+)(?:[-.]|$)`)
+
 func GetClientIdentityVersions(ctx context.Context, profile, platform string) (ClientIdentityVersionLookup, error) {
 	return defaultClientIdentityVersionService.ListVersions(ctx, profile, platform)
 }
@@ -189,27 +193,41 @@ func (s *ClientIdentityVersionService) fetch(ctx context.Context, profile, platf
 
 	var versions []string
 	sourcePlatform := platform
-	if kind == dto.ClientIdentitySourceNPM {
-		versions, err = s.fetchNPMVersions(requestCtx, sourceName, profile)
-	} else {
+	switch kind {
+	case dto.ClientIdentitySourceNPM:
+		versions, err = s.fetchNPMVersions(requestCtx, sourceName, profile, platform)
+	case dto.ClientIdentitySourceWorkBuddy:
 		var version string
 		version, sourcePlatform, err = s.fetchWorkBuddyVersion(requestCtx, platform, profile)
 		if err == nil {
 			versions = []string{version}
 		}
+	case dto.ClientIdentitySourceManual,
+		dto.ClientIdentitySourceOfficial,
+		dto.ClientIdentitySourceCommunity:
+		// These profiles intentionally expose manual version/source metadata
+		// until a verified built-in upstream source is registered.
+		versions = nil
+	default:
+		err = fmt.Errorf("unsupported client identity source: %s", kind)
 	}
 	if err != nil {
 		return ClientIdentityVersionLookup{}, err
 	}
-	if len(versions) == 0 {
+	if len(versions) == 0 && kind != dto.ClientIdentitySourceManual &&
+		kind != dto.ClientIdentitySourceOfficial && kind != dto.ClientIdentitySourceCommunity {
 		return ClientIdentityVersionLookup{}, fmt.Errorf("official client identity source returned no versions")
+	}
+	latest := ""
+	if len(versions) > 0 {
+		latest = versions[0]
 	}
 	return ClientIdentityVersionLookup{
 		ClientType: clientTypeForClientIdentityProfile(profile),
 		Profile:    profile,
 		Platform:   sourcePlatform,
 		Versions:   versions,
-		Latest:     versions[0],
+		Latest:     latest,
 		Source: dto.ClientIdentitySourceMetadata{
 			Kind:      kind,
 			Package:   sourceName,
@@ -223,16 +241,24 @@ func clientTypeForClientIdentityProfile(profile string) string {
 	switch profile {
 	case dto.ClientIdentityProfileCodexLegacy, dto.ClientIdentityProfileCodexCompatibility:
 		return dto.ClientIdentityClientTypeCodex
+	case dto.ClientIdentityProfileCodexCLI:
+		return dto.ClientIdentityClientTypeCodex
+	case dto.ClientIdentityProfileClaudeCLI:
+		return dto.ClientIdentityClientTypeClaude
 	case dto.ClientIdentityProfileClaudeCode:
 		return dto.ClientIdentityClientTypeClaudeCode
-	case dto.ClientIdentityProfileCodeBuddy:
+	case dto.ClientIdentityProfileCodeBuddy, dto.ClientIdentityProfileCodeBuddyCLI:
 		return dto.ClientIdentityClientTypeCodeBuddy
+	case dto.ClientIdentityProfileWorkBuddyDesktop:
+		return dto.ClientIdentityClientTypeWorkBuddy
+	case dto.ClientIdentityProfileNone:
+		return dto.ClientIdentityClientTypeNone
 	default:
 		return ""
 	}
 }
 
-func (s *ClientIdentityVersionService) fetchNPMVersions(ctx context.Context, packageName, profile string) ([]string, error) {
+func (s *ClientIdentityVersionService) fetchNPMVersions(ctx context.Context, packageName, profile, platform string) ([]string, error) {
 	packagePath := strings.ReplaceAll(packageName, "/", "%2f")
 	endpoint := strings.TrimRight(s.npmRegistryURL, "/") + "/" + packagePath
 	// The full npm packument for active CLI packages can exceed 10 MiB. The
@@ -265,6 +291,9 @@ func (s *ClientIdentityVersionService) fetchNPMVersions(ctx context.Context, pac
 		if err := dto.ValidateClientIdentityVersion(profile, version); err != nil {
 			return err
 		}
+		if !isNPMVersionAllowedForPlatform(version, platform) {
+			return nil
+		}
 		if _, ok := seen[version]; ok {
 			return nil
 		}
@@ -292,7 +321,13 @@ func (s *ClientIdentityVersionService) fetchNPMVersions(ctx context.Context, pac
 		}
 		allVersions = append(allVersions, version)
 	}
-	sort.Sort(sort.Reverse(sort.StringSlice(allVersions)))
+	sort.SliceStable(allVersions, func(i, j int) bool {
+		comparison := compareClientIdentityVersions(allVersions[i], allVersions[j])
+		if comparison != 0 {
+			return comparison > 0
+		}
+		return allVersions[i] > allVersions[j]
+	})
 	for _, version := range allVersions {
 		if len(versions) >= clientIdentityMaxVersions {
 			break
@@ -302,6 +337,127 @@ func (s *ClientIdentityVersionService) fetchNPMVersions(ctx context.Context, pac
 		}
 	}
 	return versions, nil
+}
+
+type clientIdentitySemver struct {
+	major      int64
+	minor      int64
+	patch      int64
+	prerelease []string
+}
+
+func parseClientIdentitySemver(version string) clientIdentitySemver {
+	version = strings.TrimSpace(version)
+	if plus := strings.IndexByte(version, '+'); plus >= 0 {
+		version = version[:plus]
+	}
+	parsed := clientIdentitySemver{}
+	if dash := strings.IndexByte(version, '-'); dash >= 0 {
+		parsed.prerelease = strings.Split(version[dash+1:], ".")
+		version = version[:dash]
+	}
+	parts := strings.Split(version, ".")
+	if len(parts) == 3 {
+		parsed.major, _ = strconv.ParseInt(parts[0], 10, 64)
+		parsed.minor, _ = strconv.ParseInt(parts[1], 10, 64)
+		parsed.patch, _ = strconv.ParseInt(parts[2], 10, 64)
+	}
+	return parsed
+}
+
+func compareClientIdentityVersions(left, right string) int {
+	a := parseClientIdentitySemver(left)
+	b := parseClientIdentitySemver(right)
+	if a.major != b.major {
+		return compareInt64(a.major, b.major)
+	}
+	if a.minor != b.minor {
+		return compareInt64(a.minor, b.minor)
+	}
+	if a.patch != b.patch {
+		return compareInt64(a.patch, b.patch)
+	}
+	if len(a.prerelease) == 0 || len(b.prerelease) == 0 {
+		if len(a.prerelease) == len(b.prerelease) {
+			return 0
+		}
+		if len(a.prerelease) == 0 {
+			return 1
+		}
+		return -1
+	}
+	for index := 0; index < len(a.prerelease) && index < len(b.prerelease); index++ {
+		leftPart := a.prerelease[index]
+		rightPart := b.prerelease[index]
+		leftNumber, leftErr := strconv.ParseInt(leftPart, 10, 64)
+		rightNumber, rightErr := strconv.ParseInt(rightPart, 10, 64)
+		if leftErr == nil && rightErr == nil {
+			if leftNumber != rightNumber {
+				return compareInt64(leftNumber, rightNumber)
+			}
+			continue
+		}
+		if leftErr == nil {
+			return -1
+		}
+		if rightErr == nil {
+			return 1
+		}
+		if leftPart != rightPart {
+			if leftPart < rightPart {
+				return -1
+			}
+			return 1
+		}
+	}
+	return compareInt64(int64(len(a.prerelease)), int64(len(b.prerelease)))
+}
+
+func compareInt64(left, right int64) int {
+	if left < right {
+		return -1
+	}
+	if left > right {
+		return 1
+	}
+	return 0
+}
+
+func isNPMVersionAllowedForPlatform(version, platform string) bool {
+	platform = strings.TrimSpace(platform)
+	if platform == "" {
+		return true
+	}
+
+	match := npmPlatformBuildPattern.FindStringSubmatch(strings.ToLower(version))
+	if len(match) == 0 {
+		// A version without a platform build suffix is the base product version
+		// and is valid for every selected platform.
+		return true
+	}
+
+	expectedOS, expectedArchitecture := npmPlatformBuildTarget(platform)
+	if expectedOS == "" || expectedArchitecture == "" {
+		return false
+	}
+	return match[1] == expectedOS && match[2] == expectedArchitecture
+}
+
+func npmPlatformBuildTarget(platform string) (string, string) {
+	switch platform {
+	case dto.ClientIdentityPlatformWindowsX64:
+		return "win32", "x64"
+	case dto.ClientIdentityPlatformMacOSX64:
+		return "darwin", "x64"
+	case dto.ClientIdentityPlatformMacOSArm64:
+		return "darwin", "arm64"
+	case dto.ClientIdentityPlatformLinuxX64:
+		return "linux", "x64"
+	case dto.ClientIdentityPlatformLinuxArm64:
+		return "linux", "arm64"
+	default:
+		return "", ""
+	}
 }
 
 func (s *ClientIdentityVersionService) fetchWorkBuddyVersion(ctx context.Context, platform, profile string) (string, string, error) {

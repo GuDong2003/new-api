@@ -48,6 +48,88 @@ func TestClientIdentityVersionServiceLoadsNPMVersionsAndFallsBackToCache(t *test
 	assert.Equal(t, "1.2.3", stale.Latest)
 }
 
+func TestClientIdentityVersionServiceFiltersNPMBuildsByPlatform(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "application/vnd.npm.install-v1+json", r.Header.Get("Accept"))
+		_, err := w.Write([]byte(`{
+			"name":"@openai/codex",
+			"dist-tags":{"latest":"1.4.0-win32-x64"},
+			"versions":{
+				"1.4.0":{},
+				"1.4.0-win32-x64":{},
+				"1.4.0-linux-x64":{},
+				"1.4.0-darwin-arm64":{},
+				"1.3.0-linux-x64":{},
+				"1.2.0-beta":{},
+				"1.1.0-darwin-x64":{},
+				"1.0.0-win32-arm64":{}
+			}
+		}`))
+		require.NoError(t, err)
+	}))
+	defer server.Close()
+
+	service := NewClientIdentityVersionService(ClientIdentityVersionServiceOptions{
+		HTTPClient:     server.Client(),
+		NPMRegistryURL: server.URL,
+	})
+
+	lookup, err := service.ListVersions(t.Context(), dto.ClientIdentityProfileCodexLegacy, dto.ClientIdentityPlatformLinuxX64)
+	require.NoError(t, err)
+	assert.Equal(t, dto.ClientIdentityPlatformLinuxX64, lookup.Platform)
+	assert.Equal(t, "1.4.0", lookup.Latest)
+	assert.Equal(t, []string{
+		"1.4.0",
+		"1.4.0-linux-x64",
+		"1.3.0-linux-x64",
+		"1.2.0-beta",
+	}, lookup.Versions)
+	assert.NotContains(t, lookup.Versions, "1.4.0-win32-x64")
+	assert.NotContains(t, lookup.Versions, "1.4.0-darwin-arm64")
+	assert.NotContains(t, lookup.Versions, "1.1.0-darwin-x64")
+	assert.NotContains(t, lookup.Versions, "1.0.0-win32-arm64")
+}
+
+func TestNPMVersionPlatformFilterKeepsBaseAndMatchingArchitectureBuilds(t *testing.T) {
+	tests := []struct {
+		name     string
+		platform string
+		version  string
+		want     bool
+	}{
+		{name: "base version", platform: dto.ClientIdentityPlatformMacOSArm64, version: "2.0.0", want: true},
+		{name: "matching darwin architecture", platform: dto.ClientIdentityPlatformMacOSArm64, version: "2.0.0-darwin-arm64", want: true},
+		{name: "other darwin architecture", platform: dto.ClientIdentityPlatformMacOSArm64, version: "2.0.0-darwin-x64", want: false},
+		{name: "other operating system", platform: dto.ClientIdentityPlatformMacOSArm64, version: "2.0.0-linux-arm64", want: false},
+		{name: "unselected platform keeps all builds", platform: "", version: "2.0.0-win32-x64", want: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, isNPMVersionAllowedForPlatform(tt.version, tt.platform))
+		})
+	}
+}
+
+func TestClientIdentityVersionsUseSemverOrdering(t *testing.T) {
+	assert.Greater(t, compareClientIdentityVersions("2.10.0", "2.9.99"), 0)
+	assert.Greater(t, compareClientIdentityVersions("2.10.0", "2.10.0-beta.1"), 0)
+	assert.Greater(t, compareClientIdentityVersions("2.10.0-beta.2", "2.10.0-beta.1"), 0)
+}
+
+func TestClientIdentityVersionServiceAllowsManualProfilesWithoutLatest(t *testing.T) {
+	service := NewClientIdentityVersionService(ClientIdentityVersionServiceOptions{})
+	lookup, err := service.ListVersions(
+		t.Context(),
+		dto.ClientIdentityProfileCodeBuddyCLI,
+		dto.ClientIdentityPlatformLinuxX64,
+	)
+	require.NoError(t, err)
+	assert.Empty(t, lookup.Versions)
+	assert.Empty(t, lookup.Latest)
+	assert.Equal(t, dto.ClientIdentitySourceManual, lookup.Source.Kind)
+}
+
 func TestClientIdentityVersionServiceAcceptsLargeOfficialNPMPackument(t *testing.T) {
 	body := fmt.Sprintf(
 		`{"name":"@openai/codex","dist-tags":{"latest":"1.2.3"},"versions":{"1.2.3":{}},"padding":%q}`,

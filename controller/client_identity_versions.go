@@ -138,6 +138,7 @@ func GetChannelClientIdentity(c *gin.Context) {
 	persisted := false
 	settings := channel.GetOtherSettings()
 	if settings.ClientIdentity != nil {
+		persisted = !settings.ClientIdentity.IsZero()
 		config = *settings.ClientIdentity
 		if settings.ClientIdentity.Source != nil {
 			sourceCopy := *settings.ClientIdentity.Source
@@ -147,7 +148,6 @@ func GetChannelClientIdentity(c *gin.Context) {
 			common.ApiError(c, fmt.Errorf("invalid client identity settings: %w", err))
 			return
 		}
-		persisted = !config.IsZero()
 	}
 	common.ApiSuccess(c, gin.H{
 		"channel_id":   channel.Id,

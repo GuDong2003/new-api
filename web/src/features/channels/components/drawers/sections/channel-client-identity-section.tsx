@@ -17,9 +17,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import type { TFunction } from 'i18next'
 import { Loader2, RefreshCw, ShieldCheck } from 'lucide-react'
-import { useMemo } from 'react'
+import { useEffect, useMemo } from 'react'
 import { useWatch, type Control, type UseFormSetValue } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -34,6 +33,7 @@ import {
   FormLabel,
   FormMessage,
 } from '@/components/ui/form'
+import { Input } from '@/components/ui/input'
 import {
   Select,
   SelectContent,
@@ -79,10 +79,76 @@ const PLATFORM_OPTIONS: Array<{
 ]
 
 const PROFILE_LABELS: Record<ClientIdentityProfile, string> = {
+  none: 'No client',
   codex_legacy: 'Codex (legacy)',
   codex_compatibility: 'Codex',
   claude_code: 'Claude Code',
   codebuddy: 'WorkBuddy',
+  codex_cli: 'Codex CLI',
+  claude_cli: 'Claude CLI',
+  codebuddy_cli: 'CodeBuddy CLI',
+  workbuddy_desktop: 'WorkBuddy Desktop',
+}
+
+const LIGHTWEIGHT_PROFILE_OPTIONS: Array<{
+  clientType: NonNullable<ChannelFormValues['client_identity_client_type']>
+  profile: ClientIdentityProfile
+}> = [
+  { clientType: 'none', profile: 'none' },
+  { clientType: 'codex', profile: 'codex_cli' },
+  { clientType: 'claude', profile: 'claude_cli' },
+  { clientType: 'codebuddy', profile: 'codebuddy_cli' },
+  { clientType: 'workbuddy', profile: 'workbuddy_desktop' },
+]
+
+const SOURCE_OPTIONS = [
+  { value: 'manual', label: 'Manual' },
+  { value: 'official', label: 'Official source' },
+  { value: 'community', label: 'Community source' },
+  { value: 'npm', label: 'npm official catalog' },
+  { value: 'workbuddy', label: 'WorkBuddy official catalog' },
+] as const
+
+function getSourceOptions(profile: ClientIdentityProfile) {
+  if (profile === 'none') return []
+  if (profile === 'codex_cli' || profile === 'claude_cli') {
+    return SOURCE_OPTIONS.filter((option) => option.value !== 'workbuddy')
+  }
+  if (profile === 'codebuddy') {
+    return SOURCE_OPTIONS.filter((option) => option.value !== 'npm')
+  }
+  if (
+    profile === 'codex_legacy' ||
+    profile === 'codex_compatibility' ||
+    profile === 'claude_code'
+  ) {
+    return SOURCE_OPTIONS.filter((option) => option.value !== 'workbuddy')
+  }
+  return SOURCE_OPTIONS.filter(
+    (option) => option.value !== 'npm' && option.value !== 'workbuddy'
+  )
+}
+
+function getSourceLabel(source: string): string {
+  return (
+    SOURCE_OPTIONS.find((option) => option.value === source)?.label || source
+  )
+}
+
+function isLightweightChannel(channelType: number): boolean {
+  return channelType === 1 || channelType === 14
+}
+
+function getProfileOptions(channelType: number) {
+  if (isLightweightChannel(channelType)) return LIGHTWEIGHT_PROFILE_OPTIONS
+  const defaults = CLIENT_IDENTITY_DEFAULTS[channelType]
+  if (!defaults) return []
+  return [
+    {
+      clientType: defaults.client_type,
+      profile: defaults.profile as ClientIdentityProfile,
+    },
+  ]
 }
 
 function getDefaultProfile(channelType: number): ClientIdentityProfile {
@@ -91,17 +157,6 @@ function getDefaultProfile(channelType: number): ClientIdentityProfile {
 
 function getDefaultClientType(channelType: number): string {
   return CLIENT_IDENTITY_DEFAULTS[channelType]?.client_type || ''
-}
-
-function getClientTypeLabel(clientType: string, t: TFunction): string {
-  switch (clientType) {
-    case 'codex':
-      return t('Codex')
-    case 'claude_code':
-      return t('Claude Code')
-    default:
-      return t('WorkBuddy')
-  }
 }
 
 function getVersionQueryKey(
@@ -135,6 +190,8 @@ export function ChannelClientIdentitySection(
   const supported = CLIENT_IDENTITY_CHANNEL_TYPES.has(props.channelType)
   const defaultProfile = getDefaultProfile(props.channelType)
   const defaultClientType = getDefaultClientType(props.channelType)
+  const profileOptions = getProfileOptions(props.channelType)
+  const lightweight = isLightweightChannel(props.channelType)
   const profile = useWatch({
     control: props.control,
     name: 'client_identity_profile',
@@ -147,9 +204,13 @@ export function ChannelClientIdentitySection(
     control: props.control,
     name: 'client_identity_platform',
   })
-  const effectiveProfile = (
-    profile === defaultProfile ? profile : defaultProfile
-  ) as ClientIdentityProfile
+  const source = useWatch({
+    control: props.control,
+    name: 'client_identity_source',
+  })
+  const effectiveProfile = (profile ||
+    defaultProfile ||
+    'none') as ClientIdentityProfile
   const effectivePlatform = platform as ClientIdentityPlatform | undefined
   const queryKey = useMemo(
     () => getVersionQueryKey(effectiveProfile, effectivePlatform),
@@ -157,7 +218,7 @@ export function ChannelClientIdentitySection(
   )
   const versionsQuery = useQuery({
     queryKey,
-    enabled: supported && Boolean(effectiveProfile),
+    enabled: supported && effectiveProfile !== 'none',
     queryFn: async () =>
       unwrapLookup(
         await getClientIdentityVersions(effectiveProfile, effectivePlatform)
@@ -177,8 +238,6 @@ export function ChannelClientIdentitySection(
     },
   })
 
-  if (!supported) return null
-
   const lookup = versionsQuery.data
   const versionOptions = lookup?.versions || []
   const selectedVersion = version?.trim() || ''
@@ -187,6 +246,29 @@ export function ChannelClientIdentitySection(
   )
   const displayVersion = hasSelectedVersion ? selectedVersion : 'default'
   const selectedPlatform = platform || 'default'
+  const selectedSource = source || 'manual'
+  const isNoClient = effectiveProfile === 'none'
+  const sourceOptions = getSourceOptions(effectiveProfile)
+  const setClientIdentityValue = props.setValue
+
+  useEffect(() => {
+    if (isNoClient || !lookup?.latest || version?.trim()) return
+    setClientIdentityValue('client_identity_version', lookup.latest, {
+      shouldDirty: false,
+      shouldValidate: true,
+    })
+    if (
+      source === 'manual' &&
+      (lookup.source.kind === 'npm' || lookup.source.kind === 'workbuddy')
+    ) {
+      setClientIdentityValue('client_identity_source', 'official', {
+        shouldDirty: false,
+        shouldValidate: true,
+      })
+    }
+  }, [isNoClient, lookup, setClientIdentityValue, source, version])
+
+  if (!supported) return null
 
   return (
     <div className='flex scroll-mt-4 flex-col gap-4'>
@@ -201,7 +283,7 @@ export function ChannelClientIdentitySection(
             </h3>
             <p className='text-muted-foreground text-xs'>
               {t(
-                'Configure the client identity used by this compatibility channel.'
+                'Select an optional client identity without changing the channel endpoint or request format.'
               )}
             </p>
           </div>
@@ -213,6 +295,7 @@ export function ChannelClientIdentitySection(
           disabled={
             props.disabled ||
             props.isSubmitting ||
+            isNoClient ||
             versionsQuery.isPending ||
             refreshMutation.isPending
           }
@@ -228,124 +311,202 @@ export function ChannelClientIdentitySection(
       </div>
 
       <div className='grid gap-4 sm:grid-cols-2'>
-        <FormField
-          control={props.control}
-          name='client_identity_client_type'
-          render={({ field }) => (
-            <FormItem>
-              <FormLabel>{t('Client identity')}</FormLabel>
-              <Select
-                value={field.value || defaultClientType}
-                onValueChange={field.onChange}
-                disabled={props.disabled || props.isSubmitting}
-              >
-                <FormControl>
-                  <SelectTrigger>
-                    <SelectValue placeholder={t('Client identity')} />
-                  </SelectTrigger>
-                </FormControl>
-                <SelectContent>
-                  <SelectGroup>
-                    <SelectItem value={defaultClientType}>
-                      {getClientTypeLabel(defaultClientType, t)}
-                    </SelectItem>
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-              <FormDescription>
-                {t('Client identity is determined by channel type.')}
-              </FormDescription>
-              <FormMessage />
-            </FormItem>
-          )}
-        />
+        {lightweight && (
+          <FormField
+            control={props.control}
+            name='client_identity_profile'
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>{t('Client identity')}</FormLabel>
+                <Select
+                  value={field.value || defaultProfile}
+                  onValueChange={(value) => {
+                    const option = profileOptions.find(
+                      (item) => item.profile === value
+                    )
+                    field.onChange(value)
+                    const clientType = option?.clientType || defaultClientType
+                    props.setValue(
+                      'client_identity_client_type',
+                      clientType as ChannelFormValues['client_identity_client_type'],
+                      { shouldDirty: true, shouldValidate: true }
+                    )
+                    props.setValue('client_identity_version', '', {
+                      shouldDirty: true,
+                      shouldValidate: true,
+                    })
+                    props.setValue('client_identity_platform', undefined, {
+                      shouldDirty: true,
+                      shouldValidate: true,
+                    })
+                    props.setValue('client_identity_source', 'manual', {
+                      shouldDirty: true,
+                      shouldValidate: true,
+                    })
+                  }}
+                  disabled={props.disabled || props.isSubmitting}
+                >
+                  <FormControl>
+                    <SelectTrigger>
+                      <SelectValue placeholder={t('Client identity')} />
+                    </SelectTrigger>
+                  </FormControl>
+                  <SelectContent>
+                    <SelectGroup>
+                      {profileOptions.map((option) => (
+                        <SelectItem key={option.profile} value={option.profile}>
+                          {t(PROFILE_LABELS[option.profile])}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+                <FormDescription>
+                  {t('Client identity only changes verified client headers.')}
+                </FormDescription>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+        )}
 
-        <FormField
-          control={props.control}
-          name='client_identity_profile'
-          render={({ field }) => (
-            <FormItem>
-              <FormLabel>{t('Client profile')}</FormLabel>
-              <Select
-                value={field.value || defaultProfile}
-                onValueChange={field.onChange}
-                disabled={props.disabled || props.isSubmitting}
-              >
-                <FormControl>
-                  <SelectTrigger>
-                    <SelectValue placeholder={t('Client profile')} />
-                  </SelectTrigger>
-                </FormControl>
-                <SelectContent>
-                  <SelectGroup>
-                    <SelectItem value={defaultProfile}>
-                      {t(PROFILE_LABELS[defaultProfile])}
-                    </SelectItem>
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-              <FormDescription>
-                {t(
-                  'Codex legacy and Codex compatibility remain separate profiles.'
-                )}
-              </FormDescription>
-              <FormMessage />
-            </FormItem>
-          )}
-        />
+        {!lightweight && (
+          <FormField
+            control={props.control}
+            name='client_identity_profile'
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>{t('Client profile')}</FormLabel>
+                <Select
+                  value={field.value || defaultProfile}
+                  onValueChange={field.onChange}
+                  disabled={props.disabled || props.isSubmitting || isNoClient}
+                >
+                  <FormControl>
+                    <SelectTrigger>
+                      <SelectValue placeholder={t('Client profile')} />
+                    </SelectTrigger>
+                  </FormControl>
+                  <SelectContent>
+                    <SelectGroup>
+                      <SelectItem value={defaultProfile}>
+                        {t(PROFILE_LABELS[defaultProfile])}
+                      </SelectItem>
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+                <FormDescription>
+                  {t(
+                    'Codex legacy and Codex compatibility remain separate profiles.'
+                  )}
+                </FormDescription>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+        )}
 
         <FormField
           control={props.control}
           name='client_identity_version'
-          render={() => (
+          render={({ field }) => (
             <FormItem>
               <FormLabel>{t('Client version')}</FormLabel>
+              {versionOptions.length > 0 ? (
+                <Select
+                  value={displayVersion}
+                  onValueChange={(value) =>
+                    props.setValue(
+                      'client_identity_version',
+                      value === 'default' || value == null ? '' : value,
+                      { shouldDirty: true, shouldValidate: true }
+                    )
+                  }
+                  disabled={
+                    props.disabled ||
+                    props.isSubmitting ||
+                    versionsQuery.isPending
+                  }
+                >
+                  <FormControl>
+                    <SelectTrigger>
+                      <SelectValue
+                        placeholder={t('Use default client version')}
+                      />
+                    </SelectTrigger>
+                  </FormControl>
+                  <SelectContent>
+                    <SelectGroup>
+                      <SelectItem value='default'>
+                        {t('Use default client version')}
+                      </SelectItem>
+                      {selectedVersion && !hasSelectedVersion && (
+                        <SelectItem value={selectedVersion}>
+                          {selectedVersion} ({t('retained selection')})
+                        </SelectItem>
+                      )}
+                      {versionOptions.map((option) => (
+                        <SelectItem key={option} value={option}>
+                          {option}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+              ) : (
+                <FormControl>
+                  <Input
+                    {...field}
+                    value={field.value || ''}
+                    disabled={
+                      props.disabled || props.isSubmitting || isNoClient
+                    }
+                    placeholder={t('Enter a version manually')}
+                  />
+                </FormControl>
+              )}
+              <FormDescription>
+                {lookup?.latest
+                  ? t('Latest official version: {{version}}', {
+                      version: lookup.latest,
+                    })
+                  : t('Enter a version manually or choose a source.')}
+              </FormDescription>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+
+        <FormField
+          control={props.control}
+          name='client_identity_source'
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>{t('Version source')}</FormLabel>
               <Select
-                value={displayVersion}
-                onValueChange={(value) =>
-                  props.setValue(
-                    'client_identity_version',
-                    value === 'default' || value == null ? '' : value,
-                    { shouldDirty: true, shouldValidate: true }
-                  )
-                }
-                disabled={
-                  props.disabled ||
-                  props.isSubmitting ||
-                  versionsQuery.isPending
-                }
+                value={selectedSource}
+                onValueChange={field.onChange}
+                disabled={props.disabled || props.isSubmitting || isNoClient}
               >
                 <FormControl>
                   <SelectTrigger>
-                    <SelectValue
-                      placeholder={t('Use default client version')}
-                    />
+                    <SelectValue placeholder={t('Version source')} />
                   </SelectTrigger>
                 </FormControl>
                 <SelectContent>
                   <SelectGroup>
-                    <SelectItem value='default'>
-                      {t('Use default client version')}
-                    </SelectItem>
-                    {selectedVersion && !hasSelectedVersion && (
-                      <SelectItem value={selectedVersion}>
-                        {selectedVersion} ({t('retained selection')})
-                      </SelectItem>
-                    )}
-                    {versionOptions.map((option) => (
-                      <SelectItem key={option} value={option}>
-                        {option}
+                    {sourceOptions.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {t(option.label)}
                       </SelectItem>
                     ))}
                   </SelectGroup>
                 </SelectContent>
               </Select>
               <FormDescription>
-                {lookup?.latest
-                  ? t('Latest official version: {{version}}', {
-                      version: lookup.latest,
-                    })
-                  : t('Versions are loaded from the official client source.')}
+                {t(
+                  'Source is metadata unless a verified built-in catalog exists.'
+                )}
               </FormDescription>
               <FormMessage />
             </FormItem>
@@ -369,7 +530,7 @@ export function ChannelClientIdentitySection(
                     { shouldDirty: true, shouldValidate: true }
                   )
                 }
-                disabled={props.disabled || props.isSubmitting}
+                disabled={props.disabled || props.isSubmitting || isNoClient}
               >
                 <FormControl>
                   <SelectTrigger>
@@ -411,14 +572,24 @@ export function ChannelClientIdentitySection(
       {lookup && (
         <div className='text-muted-foreground flex flex-wrap gap-x-4 gap-y-1 text-xs'>
           <span>
-            {t('Source')}: {lookup.source.kind === 'npm' ? 'npm' : 'WorkBuddy'}
+            {t('Source')}: {t(getSourceLabel(lookup.source.kind))}
           </span>
           {lookup.cached && (
             <span>
               {lookup.stale ? t('Retained cached version') : t('Cached')}
             </span>
           )}
-          {!lookup.cached && <span>{t('Official source checked')}</span>}
+          {!lookup.cached &&
+            (lookup.source.kind === 'npm' ||
+            lookup.source.kind === 'workbuddy' ? (
+              <span>{t('Official source checked')}</span>
+            ) : (
+              <span>
+                {t(
+                  'Source is metadata unless a verified built-in catalog exists.'
+                )}
+              </span>
+            ))}
         </div>
       )}
     </div>

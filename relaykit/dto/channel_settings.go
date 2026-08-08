@@ -61,19 +61,32 @@ const (
 // channel constants. relaykit must stay independently buildable and therefore
 // cannot import github.com/QuantumNous/new-api/constant.
 const (
+	ClientIdentityChannelTypeOpenAI          = 1
+	ClientIdentityChannelTypeAnthropic       = 14
 	ClientIdentityChannelTypeCodexLegacy     = 57
 	ClientIdentityChannelTypeCodexCompatible = 61
 	ClientIdentityChannelTypeClaudeCode      = 62
 	ClientIdentityChannelTypeCodeBuddy       = 63
+	ClientIdentityClientTypeNone             = "none"
 	ClientIdentityClientTypeCodex            = "codex"
+	ClientIdentityClientTypeClaude           = "claude"
 	ClientIdentityClientTypeClaudeCode       = "claude_code"
 	ClientIdentityClientTypeCodeBuddy        = "codebuddy"
+	ClientIdentityClientTypeWorkBuddy        = "workbuddy"
+	ClientIdentityProfileNone                = "none"
 	ClientIdentityProfileCodexLegacy         = "codex_legacy"
 	ClientIdentityProfileCodexCompatibility  = "codex_compatibility"
 	ClientIdentityProfileClaudeCode          = "claude_code"
 	ClientIdentityProfileCodeBuddy           = "codebuddy"
+	ClientIdentityProfileCodexCLI            = "codex_cli"
+	ClientIdentityProfileClaudeCLI           = "claude_cli"
+	ClientIdentityProfileCodeBuddyCLI        = "codebuddy_cli"
+	ClientIdentityProfileWorkBuddyDesktop    = "workbuddy_desktop"
 	ClientIdentitySourceNPM                  = "npm"
 	ClientIdentitySourceWorkBuddy            = "workbuddy"
+	ClientIdentitySourceManual               = "manual"
+	ClientIdentitySourceOfficial             = "official"
+	ClientIdentitySourceCommunity            = "community"
 	ClientIdentityNPMCodexPackage            = "@openai/codex"
 	ClientIdentityNPMClaudeCodePackage       = "@anthropic-ai/claude-code"
 	ClientIdentityPlatformWindowsX64         = "windows-x64"
@@ -127,11 +140,20 @@ func (s *ClientIdentitySourceMetadata) isEmpty() bool {
 }
 
 // DefaultClientIdentityConfig returns the profile associated with a supported
-// channel. Version and platform remain empty so old settings retain the
-// current hard-coded runtime behavior until an operator explicitly selects a
-// value.
+// channel. Standard channels intentionally default to no client so their
+// normal protocol/adaptor behavior remains unchanged.
 func DefaultClientIdentityConfig(channelType int) ClientIdentityConfig {
 	switch channelType {
+	case ClientIdentityChannelTypeOpenAI:
+		return ClientIdentityConfig{
+			ClientType: ClientIdentityClientTypeNone,
+			Profile:    ClientIdentityProfileNone,
+		}
+	case ClientIdentityChannelTypeAnthropic:
+		return ClientIdentityConfig{
+			ClientType: ClientIdentityClientTypeNone,
+			Profile:    ClientIdentityProfileNone,
+		}
 	case ClientIdentityChannelTypeCodexLegacy:
 		return ClientIdentityConfig{
 			ClientType: ClientIdentityClientTypeCodex,
@@ -160,7 +182,9 @@ func DefaultClientIdentityConfig(channelType int) ClientIdentityConfig {
 // SupportsClientIdentityChannelType reports whether a channel has a built-in
 // client identity profile.
 func SupportsClientIdentityChannelType(channelType int) bool {
-	return channelType == ClientIdentityChannelTypeCodexLegacy ||
+	return channelType == ClientIdentityChannelTypeOpenAI ||
+		channelType == ClientIdentityChannelTypeAnthropic ||
+		channelType == ClientIdentityChannelTypeCodexLegacy ||
 		channelType == ClientIdentityChannelTypeCodexCompatible ||
 		channelType == ClientIdentityChannelTypeClaudeCode ||
 		channelType == ClientIdentityChannelTypeCodeBuddy
@@ -182,11 +206,17 @@ func ClientIdentityProfileForChannelType(channelType int) string {
 	return DefaultClientIdentityConfig(channelType).Profile
 }
 
-// ClientIdentityChannelTypeForProfile returns the only channel type that owns
-// a profile. It is useful to keep source validation identical in relaykit and
-// the host application.
+// ClientIdentityChannelTypeForProfile returns the canonical compatibility
+// channel used to validate a profile for the version-source API. Standard
+// OpenAI and Anthropic channels reuse those same profiles at runtime.
 func ClientIdentityChannelTypeForProfile(profile string) int {
 	switch profile {
+	case ClientIdentityProfileNone,
+		ClientIdentityProfileCodexCLI,
+		ClientIdentityProfileClaudeCLI,
+		ClientIdentityProfileCodeBuddyCLI,
+		ClientIdentityProfileWorkBuddyDesktop:
+		return ClientIdentityChannelTypeOpenAI
 	case ClientIdentityProfileCodexLegacy:
 		return ClientIdentityChannelTypeCodexLegacy
 	case ClientIdentityProfileCodexCompatibility:
@@ -202,12 +232,20 @@ func ClientIdentityChannelTypeForProfile(profile string) int {
 
 func clientIdentityClientTypeForProfile(profile string) string {
 	switch profile {
+	case ClientIdentityProfileNone:
+		return ClientIdentityClientTypeNone
 	case ClientIdentityProfileCodexLegacy, ClientIdentityProfileCodexCompatibility:
 		return ClientIdentityClientTypeCodex
+	case ClientIdentityProfileCodexCLI:
+		return ClientIdentityClientTypeCodex
+	case ClientIdentityProfileClaudeCLI:
+		return ClientIdentityClientTypeClaude
 	case ClientIdentityProfileClaudeCode:
 		return ClientIdentityClientTypeClaudeCode
-	case ClientIdentityProfileCodeBuddy:
+	case ClientIdentityProfileCodeBuddy, ClientIdentityProfileCodeBuddyCLI:
 		return ClientIdentityClientTypeCodeBuddy
+	case ClientIdentityProfileWorkBuddyDesktop:
+		return ClientIdentityClientTypeWorkBuddy
 	default:
 		return ""
 	}
@@ -218,10 +256,15 @@ func clientIdentityClientTypeForProfile(profile string) string {
 func NormalizeClientIdentityProfile(profile string) (string, error) {
 	profile = strings.ToLower(strings.TrimSpace(profile))
 	switch profile {
-	case ClientIdentityProfileCodexLegacy,
+	case ClientIdentityProfileNone,
+		ClientIdentityProfileCodexLegacy,
 		ClientIdentityProfileCodexCompatibility,
 		ClientIdentityProfileClaudeCode,
-		ClientIdentityProfileCodeBuddy:
+		ClientIdentityProfileCodeBuddy,
+		ClientIdentityProfileCodexCLI,
+		ClientIdentityProfileClaudeCLI,
+		ClientIdentityProfileCodeBuddyCLI,
+		ClientIdentityProfileWorkBuddyDesktop:
 		return profile, nil
 	default:
 		return "", fmt.Errorf("invalid client identity profile: %s", profile)
@@ -304,7 +347,9 @@ func validateClientIdentityVersion(profile, version string) error {
 	if len(version) > 64 {
 		return fmt.Errorf("client identity version is too long")
 	}
-	if profile == ClientIdentityProfileCodeBuddy {
+	if profile == ClientIdentityProfileCodeBuddy ||
+		profile == ClientIdentityProfileCodeBuddyCLI ||
+		profile == ClientIdentityProfileWorkBuddyDesktop {
 		if !clientIdentityWorkBuddyVersionRegex.MatchString(version) {
 			return fmt.Errorf("invalid WorkBuddy product version: %s", version)
 		}
@@ -349,9 +394,6 @@ func (c *ClientIdentityConfig) Normalize(channelType int) error {
 		c.Platform = normalized
 	}
 
-	if c.ClientType == "" {
-		c.ClientType = defaults.ClientType
-	}
 	if c.Profile == "" {
 		c.Profile = defaults.Profile
 	}
@@ -359,11 +401,23 @@ func (c *ClientIdentityConfig) Normalize(channelType int) error {
 	if expectedClientType == "" {
 		return fmt.Errorf("invalid client identity profile: %s", c.Profile)
 	}
+	if c.ClientType == "" {
+		if c.Profile == defaults.Profile {
+			c.ClientType = defaults.ClientType
+		} else {
+			c.ClientType = expectedClientType
+		}
+	}
 	if c.ClientType != expectedClientType {
 		return fmt.Errorf("client identity client_type %s does not match profile %s", c.ClientType, c.Profile)
 	}
-	if c.Profile != defaults.Profile {
+	if !clientIdentityProfileAllowedForChannel(c.Profile, channelType, defaults.Profile) {
 		return fmt.Errorf("client identity profile %s is not supported for channel type %d", c.Profile, channelType)
+	}
+	if c.Profile == ClientIdentityProfileNone {
+		if c.Version != "" || c.Platform != "" || c.Source != nil {
+			return fmt.Errorf("client identity version, platform, and source require a client profile")
+		}
 	}
 	if err := validateClientIdentityVersion(c.Profile, c.Version); err != nil {
 		return err
@@ -382,18 +436,23 @@ func (c *ClientIdentityConfig) Normalize(channelType int) error {
 			if c.Source.CheckedAt < 0 {
 				return fmt.Errorf("client identity source checked_at cannot be negative")
 			}
-			sourceKind, sourcePackage, err := ClientIdentitySourceForProfile(c.Profile)
-			if err != nil {
-				return err
-			}
-			if c.Source.Kind != sourceKind {
+			if !isClientIdentitySourceKind(c.Source.Kind) {
 				return fmt.Errorf("invalid client identity source kind: %s", c.Source.Kind)
 			}
-			if sourcePackage != "" && c.Source.Package != sourcePackage {
-				return fmt.Errorf("invalid client identity source package: %s", c.Source.Package)
-			}
-			if sourcePackage == "" && c.Source.Package != "" {
-				return fmt.Errorf("client identity source package is not allowed for %s", c.Profile)
+			if c.Source.Kind == ClientIdentitySourceNPM || c.Source.Kind == ClientIdentitySourceWorkBuddy {
+				sourceKind, sourcePackage, err := ClientIdentitySourceForProfile(c.Profile)
+				if err != nil {
+					return err
+				}
+				if c.Source.Kind != sourceKind {
+					return fmt.Errorf("invalid client identity source kind: %s", c.Source.Kind)
+				}
+				if sourcePackage != "" && c.Source.Package != sourcePackage {
+					return fmt.Errorf("invalid client identity source package: %s", c.Source.Package)
+				}
+				if sourcePackage == "" && c.Source.Package != "" {
+					return fmt.Errorf("client identity source package is not allowed for %s", c.Profile)
+				}
 			}
 			if c.Source.Platform != "" && c.Platform != "" && c.Source.Platform != c.Platform {
 				return fmt.Errorf("client identity source platform does not match platform")
@@ -401,6 +460,35 @@ func (c *ClientIdentityConfig) Normalize(channelType int) error {
 		}
 	}
 	return nil
+}
+
+func clientIdentityProfileAllowedForChannel(profile string, channelType int, defaultProfile string) bool {
+	if channelType == ClientIdentityChannelTypeOpenAI || channelType == ClientIdentityChannelTypeAnthropic {
+		switch profile {
+		case ClientIdentityProfileNone,
+			ClientIdentityProfileCodexCLI,
+			ClientIdentityProfileClaudeCLI,
+			ClientIdentityProfileCodeBuddyCLI,
+			ClientIdentityProfileWorkBuddyDesktop:
+			return true
+		default:
+			return false
+		}
+	}
+	return profile == defaultProfile
+}
+
+func isClientIdentitySourceKind(kind string) bool {
+	switch kind {
+	case ClientIdentitySourceNPM,
+		ClientIdentitySourceWorkBuddy,
+		ClientIdentitySourceManual,
+		ClientIdentitySourceOfficial,
+		ClientIdentitySourceCommunity:
+		return true
+	default:
+		return false
+	}
 }
 
 // Validate checks the complete persisted contract without modifying the
@@ -422,6 +510,14 @@ func ClientIdentitySourceForProfile(profile string) (kind string, name string, e
 		return "", "", err
 	}
 	switch profile {
+	case ClientIdentityProfileNone,
+		ClientIdentityProfileCodeBuddyCLI,
+		ClientIdentityProfileWorkBuddyDesktop:
+		return ClientIdentitySourceManual, "", nil
+	case ClientIdentityProfileCodexCLI:
+		return ClientIdentitySourceNPM, ClientIdentityNPMCodexPackage, nil
+	case ClientIdentityProfileClaudeCLI:
+		return ClientIdentitySourceNPM, ClientIdentityNPMClaudeCodePackage, nil
 	case ClientIdentityProfileCodexLegacy, ClientIdentityProfileCodexCompatibility:
 		return ClientIdentitySourceNPM, ClientIdentityNPMCodexPackage, nil
 	case ClientIdentityProfileClaudeCode:

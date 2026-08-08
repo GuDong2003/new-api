@@ -138,58 +138,6 @@ func isHeaderPassthroughRuleKey(key string) bool {
 	return strings.HasPrefix(lower, headerPassthroughRegexPrefix) || strings.HasPrefix(lower, headerPassthroughRegexPrefixV2)
 }
 
-func shouldApplyClaudeCodeHeaderOverridePolicy(info *common.RelayInfo) bool {
-	return info != nil &&
-		info.ChannelMeta != nil &&
-		info.ChannelType == rootconstant.ChannelTypeClaudeCode &&
-		info.ShouldUseChannelTestStyle()
-}
-
-func validateClaudeCodeHeaderOverrides(headerOverrideSource map[string]interface{}) error {
-	for key, rawValue := range headerOverrideSource {
-		if isHeaderPassthroughRuleKey(key) {
-			return types.NewError(fmt.Errorf("Claude Code header overrides cannot use passthrough rules"), types.ErrorCodeChannelHeaderOverrideInvalid)
-		}
-
-		lowerKey := strings.ToLower(strings.TrimSpace(key))
-		if isClaudeCodeReservedOverrideHeader(lowerKey) {
-			return types.NewError(fmt.Errorf("Claude Code header override uses a reserved header"), types.ErrorCodeChannelHeaderOverrideInvalid)
-		}
-
-		value, ok := rawValue.(string)
-		if !ok {
-			return types.NewError(nil, types.ErrorCodeChannelHeaderOverrideInvalid)
-		}
-		lowerValue := strings.ToLower(value)
-		if strings.Contains(lowerValue, clientHeaderPlaceholderPrefix) || strings.Contains(lowerValue, "{api_key}") {
-			return types.NewError(fmt.Errorf("Claude Code header overrides cannot use dynamic placeholders"), types.ErrorCodeChannelHeaderOverrideInvalid)
-		}
-	}
-	return nil
-}
-
-func isClaudeCodeReservedOverrideHeader(lowerName string) bool {
-	switch lowerName {
-	case "authorization",
-		"proxy-authorization",
-		"cookie",
-		"x-api-key",
-		"x-goog-api-key",
-		"user-agent",
-		"anthropic-version",
-		"accept",
-		"content-type",
-		"x-app",
-		"x-claude-code-session-id",
-		"anthropic-dangerous-direct-browser-access",
-		"accept-language":
-		return true
-	default:
-		return strings.HasPrefix(lowerName, "x-stainless-") ||
-			strings.HasPrefix(lowerName, "sec-fetch-")
-	}
-}
-
 func shouldSkipPassthroughHeader(name string) bool {
 	name = strings.TrimSpace(name)
 	if name == "" {
@@ -216,7 +164,7 @@ func applyHeaderOverridePlaceholders(template string, c *gin.Context, apiKey str
 			return "", false, fmt.Errorf("client_header placeholder name is empty: %q", template)
 		}
 		if c == nil || c.Request == nil {
-			return "", false, fmt.Errorf("missing request context for client_header placeholder")
+			return "", false, nil
 		}
 		clientHeaderValue := c.Request.Header.Get(name)
 		if strings.TrimSpace(clientHeaderValue) == "" {
@@ -252,12 +200,6 @@ func processHeaderOverride(info *common.RelayInfo, c *gin.Context) (map[string]s
 	}
 
 	headerOverrideSource := common.GetEffectiveHeaderOverride(info)
-	if shouldApplyClaudeCodeHeaderOverridePolicy(info) {
-		if err := validateClaudeCodeHeaderOverrides(headerOverrideSource); err != nil {
-			return nil, err
-		}
-	}
-
 	passAll := false
 	var passthroughRegex []*regexp.Regexp
 	if !info.IsChannelTest {
@@ -333,10 +275,6 @@ func processHeaderOverride(info *common.RelayInfo, c *gin.Context) (map[string]s
 		if !ok {
 			return nil, types.NewError(nil, types.ErrorCodeChannelHeaderOverrideInvalid)
 		}
-		if info.IsChannelTest && strings.HasPrefix(strings.TrimSpace(str), clientHeaderPlaceholderPrefix) {
-			continue
-		}
-
 		value, include, err := applyHeaderOverridePlaceholders(str, c, info.ApiKey)
 		if err != nil {
 			return nil, types.NewError(err, types.ErrorCodeChannelHeaderOverrideInvalid)
@@ -354,12 +292,35 @@ func ResolveHeaderOverride(info *common.RelayInfo, c *gin.Context) (map[string]s
 	return processHeaderOverride(info, c)
 }
 
+func applyHeaderOverrideToHeaders(headers http.Header, headerOverride map[string]string) {
+	if headers == nil {
+		return
+	}
+	for key, value := range headerOverride {
+		// Header.Set canonicalizes the new key, but it does not remove an
+		// existing differently-cased map key. Delete all case variants first so
+		// the override is the only value that can reach the upstream request.
+		for existingKey := range headers {
+			if strings.EqualFold(existingKey, key) {
+				delete(headers, existingKey)
+			}
+		}
+		headers.Set(key, value)
+	}
+}
+
+// ApplyHeaderOverrideToHeaders applies explicit overrides while removing
+// differently-cased existing keys so a request cannot carry duplicate values.
+func ApplyHeaderOverrideToHeaders(headers http.Header, headerOverride map[string]string) {
+	applyHeaderOverrideToHeaders(headers, headerOverride)
+}
+
 func applyHeaderOverrideToRequest(req *http.Request, headerOverride map[string]string) {
 	if req == nil {
 		return
 	}
+	applyHeaderOverrideToHeaders(req.Header, headerOverride)
 	for key, value := range headerOverride {
-		req.Header.Set(key, value)
 		// set Host in req
 		if strings.EqualFold(key, "Host") {
 			req.Host = value
@@ -383,19 +344,13 @@ func DoApiRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 	if err != nil {
 		return nil, fmt.Errorf("setup request header failed: %w", err)
 	}
-	// 在 SetupRequestHeader 之后应用 Header Override，确保用户设置优先级最高。
-	// Claude Code has a fixed identity and is finalized after these overrides.
-	headerOverride, err := processHeaderOverride(info, c)
-	if err != nil {
-		return nil, err
-	}
-	applyHeaderOverrideToRequest(req, headerOverride)
 	if info != nil && info.ChannelMeta != nil && info.ShouldUseChannelTestStyle() {
 		switch info.ChannelType {
+		case rootconstant.ChannelTypeOpenAI, rootconstant.ChannelTypeAnthropic:
+			ApplyLightweightClientIdentity(req.Header, info.ChannelOtherSettings.ClientIdentity)
 		case rootconstant.ChannelTypeCodex:
-			// Header overrides may contain arbitrary client headers, but they must
-			// not silently replace the explicitly configured client identity.
-			// OAuth credentials and account routing remain owned by the adapter.
+			// OAuth credentials and account routing remain owned by the adapter;
+			// the client identity is generated before Header Override is applied.
 			ApplyCodexLegacyClientIdentity(req.Header, info.ChannelOtherSettings.ClientIdentity)
 		case rootconstant.ChannelTypeCodexCompatibility:
 			ApplyCompatibilityHeadersWithClientIdentity(info.ChannelType, req.Header, info.ApiKey, info.IsStream, "", info.ChannelOtherSettings.ClientIdentity)
@@ -406,6 +361,13 @@ func DoApiRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 			ApplyCompatibilityHeadersWithClientIdentity(info.ChannelType, req.Header, info.ApiKey, info.IsStream, conversationID, info.ChannelOtherSettings.ClientIdentity)
 		}
 	}
+	// Apply Header Override last so it wins over every ordinary header emitted
+	// by the adaptor or the compatibility profile.
+	headerOverride, err := processHeaderOverride(info, c)
+	if err != nil {
+		return nil, err
+	}
+	applyHeaderOverrideToRequest(req, headerOverride)
 	resp, err := doRequest(c, req, info)
 	if err != nil {
 		return nil, fmt.Errorf("do request failed: %w", err)
@@ -431,6 +393,12 @@ func DoFormRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBod
 	if err != nil {
 		return nil, fmt.Errorf("setup request header failed: %w", err)
 	}
+	if info != nil && info.ChannelMeta != nil && info.ShouldUseChannelTestStyle() {
+		switch info.ChannelType {
+		case rootconstant.ChannelTypeOpenAI, rootconstant.ChannelTypeAnthropic:
+			ApplyLightweightClientIdentity(req.Header, info.ChannelOtherSettings.ClientIdentity)
+		}
+	}
 	// 在 SetupRequestHeader 之后应用 Header Override，确保用户设置优先级最高
 	// 这样可以覆盖默认的 Authorization header 设置
 	headerOverride, err := processHeaderOverride(info, c)
@@ -455,16 +423,20 @@ func DoWssRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 	if err != nil {
 		return nil, fmt.Errorf("setup request header failed: %w", err)
 	}
-	// 在 SetupRequestHeader 之后应用 Header Override，确保用户设置优先级最高
-	// 这样可以覆盖默认的 Authorization header 设置
+	if info != nil && info.ChannelMeta != nil && info.ShouldUseChannelTestStyle() {
+		switch info.ChannelType {
+		case rootconstant.ChannelTypeOpenAI, rootconstant.ChannelTypeAnthropic:
+			ApplyLightweightClientIdentity(targetHeader, info.ChannelOtherSettings.ClientIdentity)
+		}
+	}
+	// Keep the client Content-Type as an adaptor default. Header Override is
+	// applied after this assignment so it remains the final value.
+	targetHeader.Set("Content-Type", c.Request.Header.Get("Content-Type"))
 	headerOverride, err := processHeaderOverride(info, c)
 	if err != nil {
 		return nil, err
 	}
-	for key, value := range headerOverride {
-		targetHeader.Set(key, value)
-	}
-	targetHeader.Set("Content-Type", c.Request.Header.Get("Content-Type"))
+	applyHeaderOverrideToHeaders(targetHeader, headerOverride)
 	targetConn, _, err := websocket.DefaultDialer.Dial(fullRequestURL, targetHeader)
 	if err != nil {
 		return nil, fmt.Errorf("dial failed to %s: %w", common.SanitizeURLForLog(fullRequestURL), err)

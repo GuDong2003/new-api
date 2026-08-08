@@ -582,13 +582,83 @@ func TestChannelSettingsValidateHTTPTransport(t *testing.T) {
 func TestClientIdentityDefaultsKeepCodexProfilesDistinct(t *testing.T) {
 	legacy := DefaultClientIdentityConfig(ClientIdentityChannelTypeCodexLegacy)
 	compatible := DefaultClientIdentityConfig(ClientIdentityChannelTypeCodexCompatible)
+	standardOpenAI := DefaultClientIdentityConfig(ClientIdentityChannelTypeOpenAI)
+	standardAnthropic := DefaultClientIdentityConfig(ClientIdentityChannelTypeAnthropic)
 
 	require.Equal(t, ClientIdentityClientTypeCodex, legacy.ClientType)
 	require.Equal(t, ClientIdentityProfileCodexLegacy, legacy.Profile)
 	require.Equal(t, ClientIdentityProfileCodexCompatibility, compatible.Profile)
+	require.Equal(t, ClientIdentityClientTypeNone, standardOpenAI.ClientType)
+	require.Equal(t, ClientIdentityProfileNone, standardOpenAI.Profile)
+	require.Equal(t, ClientIdentityClientTypeNone, standardAnthropic.ClientType)
+	require.Equal(t, ClientIdentityProfileNone, standardAnthropic.Profile)
 	require.NotEqual(t, legacy.Profile, compatible.Profile)
 	require.Empty(t, legacy.Version)
 	require.Empty(t, legacy.Platform)
+	require.Empty(t, standardOpenAI.Version)
+	require.Empty(t, standardOpenAI.Platform)
+	require.Empty(t, standardAnthropic.Version)
+	require.Empty(t, standardAnthropic.Platform)
+}
+
+func TestClientIdentityStandardChannelsAcceptOnlyTheirTemplateProfile(t *testing.T) {
+	tests := []struct {
+		name        string
+		channelType int
+		config      ClientIdentityConfig
+		wantErr     string
+	}{
+		{
+			name:        "openai Codex CLI profile",
+			channelType: ClientIdentityChannelTypeOpenAI,
+			config: ClientIdentityConfig{
+				ClientType: ClientIdentityClientTypeCodex,
+				Profile:    ClientIdentityProfileCodexCLI,
+				Version:    "0.147.0",
+				Platform:   ClientIdentityPlatformLinuxX64,
+			},
+		},
+		{
+			name:        "anthropic Claude CLI profile",
+			channelType: ClientIdentityChannelTypeAnthropic,
+			config: ClientIdentityConfig{
+				ClientType: ClientIdentityClientTypeClaude,
+				Profile:    ClientIdentityProfileClaudeCLI,
+				Version:    "2.1.224",
+				Platform:   ClientIdentityPlatformMacOSArm64,
+			},
+		},
+		{
+			name:        "openai rejects legacy Codex profile",
+			channelType: ClientIdentityChannelTypeOpenAI,
+			config: ClientIdentityConfig{
+				ClientType: ClientIdentityClientTypeCodex,
+				Profile:    ClientIdentityProfileCodexLegacy,
+			},
+			wantErr: "not supported",
+		},
+		{
+			name:        "anthropic rejects deep WorkBuddy profile",
+			channelType: ClientIdentityChannelTypeAnthropic,
+			config: ClientIdentityConfig{
+				ClientType: ClientIdentityClientTypeCodeBuddy,
+				Profile:    ClientIdentityProfileCodeBuddy,
+			},
+			wantErr: "not supported",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.config.Validate(tt.channelType)
+			if tt.wantErr == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.wantErr)
+		})
+	}
 }
 
 func TestClientIdentityLegacySettingsRoundTripWithoutClientIdentity(t *testing.T) {
@@ -677,8 +747,8 @@ func TestClientIdentityRejectsInvalidValues(t *testing.T) {
 
 func TestClientIdentityUnsupportedChannelRejectsNonEmptyConfig(t *testing.T) {
 	config := ClientIdentityConfig{Version: "1.2.3"}
-	err := config.Validate(1)
+	err := config.Validate(2)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not supported")
-	assert.False(t, config.SupportsChannelType(1))
+	assert.False(t, config.SupportsChannelType(2))
 }

@@ -137,10 +137,15 @@ export interface ChannelOtherSettings {
 }
 
 export type ClientIdentityProfile =
+  | 'none'
   | 'codex_legacy'
   | 'codex_compatibility'
   | 'claude_code'
   | 'codebuddy'
+  | 'codex_cli'
+  | 'claude_cli'
+  | 'codebuddy_cli'
+  | 'workbuddy_desktop'
 
 export type ClientIdentityPlatform =
   | 'windows-x64'
@@ -150,14 +155,20 @@ export type ClientIdentityPlatform =
   | 'linux-arm64'
 
 export interface ClientIdentitySourceMetadata {
-  kind?: 'npm' | 'workbuddy'
+  kind?: 'npm' | 'workbuddy' | 'manual' | 'official' | 'community'
   package?: string
   platform?: ClientIdentityPlatform
   checked_at?: number
 }
 
 export interface ClientIdentityConfig {
-  client_type?: 'codex' | 'claude_code' | 'codebuddy'
+  client_type?:
+    | 'none'
+    | 'codex'
+    | 'claude'
+    | 'claude_code'
+    | 'codebuddy'
+    | 'workbuddy'
   profile?: ClientIdentityProfile
   version?: string
   platform?: ClientIdentityPlatform
