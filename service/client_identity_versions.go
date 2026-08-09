@@ -6,7 +6,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -112,8 +111,6 @@ func NewClientIdentityVersionService(options ClientIdentityVersionServiceOptions
 }
 
 var defaultClientIdentityVersionService = NewClientIdentityVersionService(ClientIdentityVersionServiceOptions{})
-
-var npmPlatformBuildPattern = regexp.MustCompile(`(?i)-(win32|linux|darwin)-([a-z0-9]+)(?:[-.]|$)`)
 
 func GetClientIdentityVersions(ctx context.Context, profile, platform string) (ClientIdentityVersionLookup, error) {
 	return defaultClientIdentityVersionService.ListVersions(ctx, profile, platform)
@@ -291,6 +288,9 @@ func (s *ClientIdentityVersionService) fetchNPMVersions(ctx context.Context, pac
 		if err := dto.ValidateClientIdentityVersion(profile, version); err != nil {
 			return err
 		}
+		if !isNPMVersionStable(version) {
+			return nil
+		}
 		if !isNPMVersionAllowedForPlatform(version, platform) {
 			return nil
 		}
@@ -319,6 +319,9 @@ func (s *ClientIdentityVersionService) fetchNPMVersions(ctx context.Context, pac
 		if err := dto.ValidateClientIdentityVersion(profile, version); err != nil {
 			continue
 		}
+		if !isNPMVersionStable(version) || !isNPMVersionAllowedForPlatform(version, platform) {
+			continue
+		}
 		allVersions = append(allVersions, version)
 	}
 	sort.SliceStable(allVersions, func(i, j int) bool {
@@ -340,18 +343,20 @@ func (s *ClientIdentityVersionService) fetchNPMVersions(ctx context.Context, pac
 }
 
 type clientIdentitySemver struct {
-	major      int64
-	minor      int64
-	patch      int64
-	prerelease []string
+	major         int64
+	minor         int64
+	patch         int64
+	prerelease    []string
+	buildMetadata []string
 }
 
 func parseClientIdentitySemver(version string) clientIdentitySemver {
 	version = strings.TrimSpace(version)
+	parsed := clientIdentitySemver{}
 	if plus := strings.IndexByte(version, '+'); plus >= 0 {
+		parsed.buildMetadata = strings.Split(version[plus+1:], ".")
 		version = version[:plus]
 	}
-	parsed := clientIdentitySemver{}
 	if dash := strings.IndexByte(version, '-'); dash >= 0 {
 		parsed.prerelease = strings.Split(version[dash+1:], ".")
 		version = version[:dash]
@@ -423,40 +428,59 @@ func compareInt64(left, right int64) int {
 	return 0
 }
 
-func isNPMVersionAllowedForPlatform(version, platform string) bool {
-	platform = strings.TrimSpace(platform)
-	if platform == "" {
-		return npmPlatformBuildPattern.FindStringSubmatch(strings.ToLower(version)) == nil
-	}
-
-	match := npmPlatformBuildPattern.FindStringSubmatch(strings.ToLower(version))
-	if len(match) == 0 {
-		// A version without a platform build suffix is the base product version
-		// and is valid for every selected platform.
+func isNPMVersionStable(version string) bool {
+	parsed := parseClientIdentitySemver(version)
+	if len(parsed.prerelease) == 0 {
 		return true
 	}
 
-	expectedOS, expectedArchitecture := npmPlatformBuildTarget(platform)
-	if expectedOS == "" || expectedArchitecture == "" {
-		return false
-	}
-	return match[1] == expectedOS && match[2] == expectedArchitecture
+	// Platform builds use a dash too, but are stable product builds when the
+	// platform suffix is the complete prerelease portion. Keep those builds
+	// available for an explicitly selected matching platform.
+	_, ok := npmPlatformBuildPlatform(parsed)
+	return ok
 }
 
-func npmPlatformBuildTarget(platform string) (string, string) {
-	switch platform {
-	case dto.ClientIdentityPlatformWindowsX64:
-		return "win32", "x64"
-	case dto.ClientIdentityPlatformMacOSX64:
-		return "darwin", "x64"
-	case dto.ClientIdentityPlatformMacOSArm64:
-		return "darwin", "arm64"
-	case dto.ClientIdentityPlatformLinuxX64:
-		return "linux", "x64"
-	case dto.ClientIdentityPlatformLinuxArm64:
-		return "linux", "arm64"
+func isNPMVersionAllowedForPlatform(version, platform string) bool {
+	parsed := parseClientIdentitySemver(version)
+	buildPlatform, isPlatformBuild := npmPlatformBuildPlatform(parsed)
+	if !isPlatformBuild {
+		// A version with an ordinary prerelease is not available for any
+		// platform. Build metadata is intentionally ignored here: a suffix
+		// after '+' is not a platform build suffix.
+		return len(parsed.prerelease) == 0
+	}
+
+	platform = strings.TrimSpace(platform)
+	if platform == "" {
+		return false
+	}
+	return buildPlatform == platform
+}
+
+func npmPlatformBuildPlatform(version clientIdentitySemver) (string, bool) {
+	if len(version.prerelease) != 1 {
+		return "", false
+	}
+
+	parts := strings.Split(strings.ToLower(version.prerelease[0]), "-")
+	if len(parts) != 2 {
+		return "", false
+	}
+
+	switch parts[0] + "-" + parts[1] {
+	case "win32-x64":
+		return dto.ClientIdentityPlatformWindowsX64, true
+	case "darwin-x64":
+		return dto.ClientIdentityPlatformMacOSX64, true
+	case "darwin-arm64":
+		return dto.ClientIdentityPlatformMacOSArm64, true
+	case "linux-x64":
+		return dto.ClientIdentityPlatformLinuxX64, true
+	case "linux-arm64":
+		return dto.ClientIdentityPlatformLinuxArm64, true
 	default:
-		return "", ""
+		return "", false
 	}
 }
 

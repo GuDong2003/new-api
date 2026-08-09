@@ -60,6 +60,7 @@ func TestClientIdentityVersionServiceFiltersNPMBuildsByPlatform(t *testing.T) {
 				"1.4.0-linux-x64":{},
 				"1.4.0-darwin-arm64":{},
 				"1.3.0-linux-x64":{},
+				"1.3.0-linux-x64-beta":{},
 				"1.2.0-beta":{},
 				"1.1.0-darwin-x64":{},
 				"1.0.0-win32-arm64":{}
@@ -82,17 +83,46 @@ func TestClientIdentityVersionServiceFiltersNPMBuildsByPlatform(t *testing.T) {
 		"1.4.0",
 		"1.4.0-linux-x64",
 		"1.3.0-linux-x64",
-		"1.2.0-beta",
 	}, lookup.Versions)
 	assert.NotContains(t, lookup.Versions, "1.4.0-win32-x64")
 	assert.NotContains(t, lookup.Versions, "1.4.0-darwin-arm64")
 	assert.NotContains(t, lookup.Versions, "1.1.0-darwin-x64")
 	assert.NotContains(t, lookup.Versions, "1.0.0-win32-arm64")
+	assert.NotContains(t, lookup.Versions, "1.3.0-linux-x64-beta")
 
 	defaultLookup, err := service.ListVersions(t.Context(), dto.ClientIdentityProfileCodexLegacy, "")
 	require.NoError(t, err)
 	assert.Equal(t, "1.4.0", defaultLookup.Latest)
-	assert.Equal(t, []string{"1.4.0", "1.2.0-beta"}, defaultLookup.Versions)
+	assert.Equal(t, []string{"1.4.0"}, defaultLookup.Versions)
+}
+
+func TestClientIdentityVersionServiceFiltersNPMPrereleasesAndFallsBackToStableLatest(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, err := w.Write([]byte(`{
+			"name":"@openai/codex",
+			"dist-tags":{"latest":"1.5.0-beta.1"},
+			"versions":{
+				"1.5.0-beta.1":{},
+				"1.4.0":{},
+				"1.3.0-alpha":{},
+				"1.2.0":{}
+			}
+		}`))
+		require.NoError(t, err)
+	}))
+	defer server.Close()
+
+	service := NewClientIdentityVersionService(ClientIdentityVersionServiceOptions{
+		HTTPClient:     server.Client(),
+		NPMRegistryURL: server.URL,
+	})
+
+	lookup, err := service.ListVersions(t.Context(), dto.ClientIdentityProfileCodexLegacy, "")
+	require.NoError(t, err)
+	assert.Equal(t, "1.4.0", lookup.Latest)
+	assert.Equal(t, []string{"1.4.0", "1.2.0"}, lookup.Versions)
+	assert.NotContains(t, lookup.Versions, "1.5.0-beta.1")
+	assert.NotContains(t, lookup.Versions, "1.3.0-alpha")
 }
 
 func TestNPMVersionPlatformFilterKeepsBaseAndMatchingArchitectureBuilds(t *testing.T) {
@@ -104,15 +134,21 @@ func TestNPMVersionPlatformFilterKeepsBaseAndMatchingArchitectureBuilds(t *testi
 	}{
 		{name: "base version", platform: dto.ClientIdentityPlatformMacOSArm64, version: "2.0.0", want: true},
 		{name: "matching darwin architecture", platform: dto.ClientIdentityPlatformMacOSArm64, version: "2.0.0-darwin-arm64", want: true},
+		{name: "matching platform build with metadata", platform: dto.ClientIdentityPlatformLinuxX64, version: "2.0.0-linux-x64+foo", want: true},
 		{name: "other darwin architecture", platform: dto.ClientIdentityPlatformMacOSArm64, version: "2.0.0-darwin-x64", want: false},
 		{name: "other operating system", platform: dto.ClientIdentityPlatformMacOSArm64, version: "2.0.0-linux-arm64", want: false},
+		{name: "platform build metadata is not prerelease", platform: dto.ClientIdentityPlatformLinuxX64, version: "2.0.0+foo-linux-x64", want: true},
+		{name: "platform build metadata is base version on another platform", platform: dto.ClientIdentityPlatformWindowsX64, version: "2.0.0+foo-linux-x64", want: true},
 		{name: "default platform keeps base version", platform: "", version: "2.0.0", want: true},
+		{name: "default platform keeps build metadata", platform: "", version: "2.0.0+foo-linux-x64", want: true},
+		{name: "default platform excludes matching platform build", platform: "", version: "2.0.0-linux-x64+foo", want: false},
 		{name: "default platform excludes windows x64 build", platform: "", version: "2.0.0-win32-x64", want: false},
 		{name: "default platform excludes windows arm64 build", platform: "", version: "2.0.0-win32-arm64", want: false},
 		{name: "default platform excludes linux x64 build", platform: "", version: "2.0.0-linux-x64", want: false},
 		{name: "default platform excludes linux arm64 build", platform: "", version: "2.0.0-linux-arm64", want: false},
 		{name: "default platform excludes darwin x64 build", platform: "", version: "2.0.0-darwin-x64", want: false},
 		{name: "default platform excludes darwin arm64 build", platform: "", version: "2.0.0-darwin-arm64", want: false},
+		{name: "alpha is not a platform build", platform: dto.ClientIdentityPlatformLinuxX64, version: "2.0.0-alpha-linux-x64", want: false},
 	}
 
 	for _, tt := range tests {

@@ -340,6 +340,84 @@ var (
 	clientIdentityWorkBuddyVersionRegex = regexp.MustCompile(`^(0|[1-9][0-9]*)(\.(0|[1-9][0-9]*)){2,3}$`)
 )
 
+func isClientIdentityNPMProfile(profile string) bool {
+	switch profile {
+	case ClientIdentityProfileCodexLegacy,
+		ClientIdentityProfileCodexCompatibility,
+		ClientIdentityProfileCodexCLI,
+		ClientIdentityProfileClaudeCode,
+		ClientIdentityProfileClaudeCLI:
+		return true
+	default:
+		return false
+	}
+}
+
+type clientIdentityNPMVersionParts struct {
+	prerelease    []string
+	buildMetadata []string
+}
+
+func parseClientIdentityNPMVersion(version string) clientIdentityNPMVersionParts {
+	version = strings.TrimSpace(version)
+	parsed := clientIdentityNPMVersionParts{}
+	if plus := strings.IndexByte(version, '+'); plus >= 0 {
+		parsed.buildMetadata = strings.Split(version[plus+1:], ".")
+		version = version[:plus]
+	}
+	if dash := strings.IndexByte(version, '-'); dash >= 0 {
+		parsed.prerelease = strings.Split(version[dash+1:], ".")
+	}
+	return parsed
+}
+
+func npmPlatformForPrerelease(prerelease []string) (string, bool) {
+	if len(prerelease) != 1 {
+		return "", false
+	}
+	switch strings.ToLower(prerelease[0]) {
+	case "win32-x64":
+		return ClientIdentityPlatformWindowsX64, true
+	case "darwin-x64":
+		return ClientIdentityPlatformMacOSX64, true
+	case "darwin-arm64":
+		return ClientIdentityPlatformMacOSArm64, true
+	case "linux-x64":
+		return ClientIdentityPlatformLinuxX64, true
+	case "linux-arm64":
+		return ClientIdentityPlatformLinuxArm64, true
+	default:
+		return "", false
+	}
+}
+
+func validateClientIdentityNPMVersionForPlatform(
+	profile string,
+	version string,
+	platform string,
+) error {
+	if !isClientIdentityNPMProfile(profile) || version == "" {
+		return nil
+	}
+
+	parsed := parseClientIdentityNPMVersion(version)
+	if len(parsed.prerelease) == 0 {
+		return nil
+	}
+
+	buildPlatform, isPlatformBuild := npmPlatformForPrerelease(parsed.prerelease)
+	if !isPlatformBuild {
+		return fmt.Errorf("prerelease client identity version is not allowed: %s", version)
+	}
+	if platform == "" {
+		return fmt.Errorf("platform build client identity version requires an explicit platform: %s", version)
+	}
+	if buildPlatform != platform {
+		return fmt.Errorf("client identity version platform %s does not match platform %s", buildPlatform, platform)
+	}
+	return nil
+}
+
 func validateClientIdentityVersion(profile, version string) error {
 	if version == "" {
 		return nil
@@ -420,6 +498,9 @@ func (c *ClientIdentityConfig) Normalize(channelType int) error {
 		}
 	}
 	if err := validateClientIdentityVersion(c.Profile, c.Version); err != nil {
+		return err
+	}
+	if err := validateClientIdentityNPMVersionForPlatform(c.Profile, c.Version, c.Platform); err != nil {
 		return err
 	}
 	if c.Source != nil {

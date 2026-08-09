@@ -691,6 +691,170 @@ func TestClientIdentityNormalizeAndValidate(t *testing.T) {
 	assert.Equal(t, ClientIdentityProfileCodeBuddy, workBuddy.Profile)
 }
 
+func TestClientIdentityNormalizeRejectsNPMPrereleases(t *testing.T) {
+	tests := []struct {
+		name        string
+		channelType int
+		profile     string
+		version     string
+	}{
+		{
+			name:        "codex legacy alpha",
+			channelType: ClientIdentityChannelTypeCodexLegacy,
+			profile:     ClientIdentityProfileCodexLegacy,
+			version:     "1.4.0-alpha.1",
+		},
+		{
+			name:        "codex compatibility beta",
+			channelType: ClientIdentityChannelTypeCodexCompatible,
+			profile:     ClientIdentityProfileCodexCompatibility,
+			version:     "1.4.0-beta.1",
+		},
+		{
+			name:        "codex cli release candidate",
+			channelType: ClientIdentityChannelTypeOpenAI,
+			profile:     ClientIdentityProfileCodexCLI,
+			version:     "1.4.0-rc.1",
+		},
+		{
+			name:        "claude code prerelease",
+			channelType: ClientIdentityChannelTypeClaudeCode,
+			profile:     ClientIdentityProfileClaudeCode,
+			version:     "2.1.214-beta",
+		},
+		{
+			name:        "claude cli prerelease",
+			channelType: ClientIdentityChannelTypeAnthropic,
+			profile:     ClientIdentityProfileClaudeCLI,
+			version:     "2.1.214-alpha",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := ClientIdentityConfig{
+				Profile:  tt.profile,
+				Version:  tt.version,
+				Platform: ClientIdentityPlatformLinuxX64,
+			}
+			err := config.Normalize(tt.channelType)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "prerelease")
+		})
+	}
+}
+
+func TestClientIdentityNormalizeAcceptsStableNPMVersions(t *testing.T) {
+	tests := []struct {
+		name        string
+		channelType int
+		profile     string
+		version     string
+	}{
+		{
+			name:        "codex legacy",
+			channelType: ClientIdentityChannelTypeCodexLegacy,
+			profile:     ClientIdentityProfileCodexLegacy,
+			version:     "1.4.0",
+		},
+		{
+			name:        "codex compatibility with metadata",
+			channelType: ClientIdentityChannelTypeCodexCompatible,
+			profile:     ClientIdentityProfileCodexCompatibility,
+			version:     "1.4.0+foo-linux-x64",
+		},
+		{
+			name:        "codex cli",
+			channelType: ClientIdentityChannelTypeOpenAI,
+			profile:     ClientIdentityProfileCodexCLI,
+			version:     "0.147.0",
+		},
+		{
+			name:        "claude code",
+			channelType: ClientIdentityChannelTypeClaudeCode,
+			profile:     ClientIdentityProfileClaudeCode,
+			version:     "2.1.214+build.7",
+		},
+		{
+			name:        "claude cli",
+			channelType: ClientIdentityChannelTypeAnthropic,
+			profile:     ClientIdentityProfileClaudeCLI,
+			version:     "2.1.214",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := ClientIdentityConfig{
+				Profile:  tt.profile,
+				Version:  tt.version,
+				Platform: ClientIdentityPlatformLinuxX64,
+			}
+			require.NoError(t, config.Normalize(tt.channelType))
+		})
+	}
+}
+
+func TestClientIdentityNormalizeRequiresMatchingPlatformForNPMBuilds(t *testing.T) {
+	tests := []struct {
+		name     string
+		platform string
+		version  string
+		wantErr  string
+	}{
+		{
+			name:     "matching platform build",
+			platform: ClientIdentityPlatformLinuxX64,
+			version:  "1.4.0-linux-x64+foo",
+		},
+		{
+			name:    "missing platform",
+			version: "1.4.0-linux-x64",
+			wantErr: "requires an explicit platform",
+		},
+		{
+			name:     "wrong platform",
+			platform: ClientIdentityPlatformWindowsX64,
+			version:  "1.4.0-linux-x64",
+			wantErr:  "does not match platform",
+		},
+		{
+			name:     "metadata suffix is not a platform build",
+			platform: ClientIdentityPlatformWindowsX64,
+			version:  "1.4.0+foo-linux-x64",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := ClientIdentityConfig{
+				Profile:  ClientIdentityProfileCodexCompatibility,
+				Version:  tt.version,
+				Platform: tt.platform,
+			}
+			err := config.Normalize(ClientIdentityChannelTypeCodexCompatible)
+			if tt.wantErr == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.wantErr)
+		})
+	}
+}
+
+func TestValidateClientIdentityVersionRemainsSyntaxOnlyForNPMVersions(t *testing.T) {
+	for _, version := range []string{
+		"1.4.0-alpha.1",
+		"1.4.0-linux-x64+foo",
+		"1.4.0+foo-linux-x64",
+	} {
+		t.Run(version, func(t *testing.T) {
+			require.NoError(t, ValidateClientIdentityVersion(ClientIdentityProfileCodexCompatibility, version))
+		})
+	}
+}
+
 func TestClientIdentityRejectsInvalidValues(t *testing.T) {
 	tests := []struct {
 		name        string

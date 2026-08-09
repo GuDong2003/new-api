@@ -137,6 +137,23 @@ function getClientTypeForProfile(
       return fallback
   }
 }
+export function getClientIdentitySourceForProfile(
+  profile: string | undefined,
+  platform?: string
+): 'manual' | 'official' {
+  switch (profile) {
+    case 'codex_legacy':
+    case 'codex_compatibility':
+    case 'codex_cli':
+    case 'claude_code':
+    case 'claude_cli':
+      return 'official'
+    case 'codebuddy':
+      return !platform || platform === 'windows-x64' ? 'official' : 'manual'
+    default:
+      return 'manual'
+  }
+}
 // ============================================================================
 // Form Validation Schema
 // ============================================================================
@@ -953,7 +970,6 @@ export function buildSettingsJSON(formData: ChannelFormValues): string {
     if (profile === 'none') {
       delete settingsObj.client_identity
     } else {
-      const profileMatchesChannel = requestedProfile === profile
       const clientIdentity: Record<string, unknown> = {
         client_type: getClientTypeForProfile(
           profile,
@@ -961,14 +977,22 @@ export function buildSettingsJSON(formData: ChannelFormValues): string {
         ),
         profile,
       }
-      if (profileMatchesChannel && formData.client_identity_version?.trim()) {
+      if (
+        requestedProfile === profile &&
+        formData.client_identity_version?.trim()
+      ) {
         clientIdentity.version = formData.client_identity_version.trim()
       }
-      if (profileMatchesChannel && formData.client_identity_platform) {
+      if (requestedProfile === profile && formData.client_identity_platform) {
         clientIdentity.platform = formData.client_identity_platform
       }
-      if (profileMatchesChannel && formData.client_identity_source) {
-        clientIdentity.source = { kind: formData.client_identity_source }
+      clientIdentity.source = {
+        kind: getClientIdentitySourceForProfile(
+          profile,
+          requestedProfile === profile
+            ? formData.client_identity_platform
+            : undefined
+        ),
       }
       settingsObj.client_identity = clientIdentity
     }

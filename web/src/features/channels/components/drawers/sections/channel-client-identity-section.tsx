@@ -52,6 +52,7 @@ import {
 import {
   CLIENT_IDENTITY_CHANNEL_TYPES,
   CLIENT_IDENTITY_DEFAULTS,
+  getClientIdentitySourceForProfile,
   type ChannelFormValues,
 } from '../../../lib/channel-form'
 import type {
@@ -100,40 +101,6 @@ const LIGHTWEIGHT_PROFILE_OPTIONS: Array<{
   { clientType: 'codebuddy', profile: 'codebuddy_cli' },
   { clientType: 'workbuddy', profile: 'workbuddy_desktop' },
 ]
-
-const SOURCE_OPTIONS = [
-  { value: 'manual', label: 'Manual' },
-  { value: 'official', label: 'Official source' },
-  { value: 'community', label: 'Community source' },
-  { value: 'npm', label: 'npm official catalog' },
-  { value: 'workbuddy', label: 'WorkBuddy official catalog' },
-] as const
-
-function getSourceOptions(profile: ClientIdentityProfile) {
-  if (profile === 'none') return []
-  if (profile === 'codex_cli' || profile === 'claude_cli') {
-    return SOURCE_OPTIONS.filter((option) => option.value !== 'workbuddy')
-  }
-  if (profile === 'codebuddy') {
-    return SOURCE_OPTIONS.filter((option) => option.value !== 'npm')
-  }
-  if (
-    profile === 'codex_legacy' ||
-    profile === 'codex_compatibility' ||
-    profile === 'claude_code'
-  ) {
-    return SOURCE_OPTIONS.filter((option) => option.value !== 'workbuddy')
-  }
-  return SOURCE_OPTIONS.filter(
-    (option) => option.value !== 'npm' && option.value !== 'workbuddy'
-  )
-}
-
-function getSourceLabel(source: string): string {
-  return (
-    SOURCE_OPTIONS.find((option) => option.value === source)?.label || source
-  )
-}
 
 function isLightweightChannel(channelType: number): boolean {
   return channelType === 1 || channelType === 14
@@ -212,6 +179,10 @@ export function ChannelClientIdentitySection(
     defaultProfile ||
     'none') as ClientIdentityProfile
   const effectivePlatform = platform as ClientIdentityPlatform | undefined
+  const automaticSource = getClientIdentitySourceForProfile(
+    effectiveProfile,
+    effectivePlatform
+  )
   const queryKey = useMemo(
     () => getVersionQueryKey(effectiveProfile, effectivePlatform),
     [effectivePlatform, effectiveProfile]
@@ -246,27 +217,37 @@ export function ChannelClientIdentitySection(
   )
   const displayVersion = hasSelectedVersion ? selectedVersion : 'default'
   const selectedPlatform = platform || 'default'
-  const selectedSource = source || 'manual'
   const isNoClient = effectiveProfile === 'none'
-  const sourceOptions = getSourceOptions(effectiveProfile)
   const setClientIdentityValue = props.setValue
 
   useEffect(() => {
-    if (isNoClient || !lookup?.latest || version?.trim()) return
-    setClientIdentityValue('client_identity_version', lookup.latest, {
-      shouldDirty: false,
-      shouldValidate: true,
-    })
-    if (
-      source === 'manual' &&
-      (lookup.source.kind === 'npm' || lookup.source.kind === 'workbuddy')
-    ) {
-      setClientIdentityValue('client_identity_source', 'official', {
+    if (isNoClient) return
+
+    if (source !== automaticSource) {
+      setClientIdentityValue('client_identity_source', automaticSource, {
         shouldDirty: false,
         shouldValidate: true,
       })
     }
-  }, [isNoClient, lookup, setClientIdentityValue, source, version])
+
+    if (!lookup) return
+    if (lookup.latest && !version?.trim()) {
+      setClientIdentityValue('client_identity_version', lookup.latest, {
+        shouldDirty: false,
+        shouldValidate: true,
+      })
+    }
+  }, [
+    automaticSource,
+    isNoClient,
+    lookup,
+    setClientIdentityValue,
+    source,
+    version,
+  ])
+
+  const sourceLabel =
+    automaticSource === 'official' ? 'Official source' : 'Manual'
 
   if (!supported) return null
 
@@ -336,10 +317,6 @@ export function ChannelClientIdentitySection(
                       shouldValidate: true,
                     })
                     props.setValue('client_identity_platform', undefined, {
-                      shouldDirty: true,
-                      shouldValidate: true,
-                    })
-                    props.setValue('client_identity_source', 'manual', {
                       shouldDirty: true,
                       shouldValidate: true,
                     })
@@ -470,43 +447,7 @@ export function ChannelClientIdentitySection(
                   ? t('Latest official version: {{version}}', {
                       version: lookup.latest,
                     })
-                  : t('Enter a version manually or choose a source.')}
-              </FormDescription>
-              <FormMessage />
-            </FormItem>
-          )}
-        />
-
-        <FormField
-          control={props.control}
-          name='client_identity_source'
-          render={({ field }) => (
-            <FormItem>
-              <FormLabel>{t('Version source')}</FormLabel>
-              <Select
-                value={selectedSource}
-                onValueChange={field.onChange}
-                disabled={props.disabled || props.isSubmitting || isNoClient}
-              >
-                <FormControl>
-                  <SelectTrigger>
-                    <SelectValue placeholder={t('Version source')} />
-                  </SelectTrigger>
-                </FormControl>
-                <SelectContent>
-                  <SelectGroup>
-                    {sourceOptions.map((option) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {t(option.label)}
-                      </SelectItem>
-                    ))}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-              <FormDescription>
-                {t(
-                  'Source is metadata unless a verified built-in catalog exists.'
-                )}
+                  : t('Enter a version manually')}
               </FormDescription>
               <FormMessage />
             </FormItem>
@@ -569,27 +510,27 @@ export function ChannelClientIdentitySection(
           </AlertDescription>
         </Alert>
       )}
-      {lookup && (
+      {!isNoClient && (
         <div className='text-muted-foreground flex flex-wrap gap-x-4 gap-y-1 text-xs'>
           <span>
-            {t('Source')}: {t(getSourceLabel(lookup.source.kind))}
+            {t('Source')}: {t(sourceLabel)}
           </span>
-          {lookup.cached && (
+          {lookup?.cached && (
             <span>
               {lookup.stale ? t('Retained cached version') : t('Cached')}
             </span>
           )}
-          {!lookup.cached &&
-            (lookup.source.kind === 'npm' ||
-            lookup.source.kind === 'workbuddy' ? (
-              <span>{t('Official source checked')}</span>
-            ) : (
-              <span>
-                {t(
-                  'Source is metadata unless a verified built-in catalog exists.'
-                )}
-              </span>
-            ))}
+          {lookup && !lookup.cached && (
+            <span>
+              {automaticSource === 'official' &&
+              (lookup.source.kind === 'npm' ||
+                lookup.source.kind === 'workbuddy')
+                ? t('Official source checked')
+                : t(
+                    'Source is metadata unless a verified built-in catalog exists.'
+                  )}
+            </span>
+          )}
         </div>
       )}
     </div>
