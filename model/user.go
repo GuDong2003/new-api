@@ -840,22 +840,33 @@ func (user *User) EditWithTx(tx *gorm.DB, updatePassword bool) error {
 	return tx.First(user, user.Id).Error
 }
 
+func resolveBindingColumn(bindingType string) (column string, provider string, ok bool) {
+	switch strings.ToLower(strings.TrimSpace(bindingType)) {
+	case "email":
+		return "email", "email", true
+	case "github", "github_id":
+		return "github_id", "github", true
+	case "discord", "discord_id":
+		return "discord_id", "discord", true
+	case "oidc", "oidc_id":
+		return "oidc_id", "oidc", true
+	case "wechat", "wechat_id":
+		return "wechat_id", "wechat", true
+	case "telegram", "telegram_id":
+		return "telegram_id", ExternalIdentityProviderTelegram, true
+	case "linuxdo", "linux_do_id":
+		return "linux_do_id", "linuxdo", true
+	default:
+		return "", "", false
+	}
+}
+
 func (user *User) ClearBinding(bindingType string) error {
 	if user.Id == 0 {
 		return errors.New("user id is empty")
 	}
 
-	bindingColumnMap := map[string]string{
-		"email":    "email",
-		"github":   "github_id",
-		"discord":  "discord_id",
-		"oidc":     "oidc_id",
-		"wechat":   "wechat_id",
-		"telegram": "telegram_id",
-		"linuxdo":  "linux_do_id",
-	}
-
-	column, ok := bindingColumnMap[bindingType]
+	column, provider, ok := resolveBindingColumn(bindingType)
 	if !ok {
 		return errors.New("invalid binding type")
 	}
@@ -864,7 +875,7 @@ func (user *User) ClearBinding(bindingType string) error {
 		if err := tx.Model(&User{}).Where("id = ?", user.Id).Update(column, "").Error; err != nil {
 			return err
 		}
-		if bindingType == ExternalIdentityProviderTelegram {
+		if provider == ExternalIdentityProviderTelegram {
 			return ReleaseExternalIdentityWithTx(tx, ExternalIdentityProviderTelegram, user.Id)
 		}
 		return nil
