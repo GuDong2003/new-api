@@ -432,6 +432,7 @@ export const channelFormSchema = z
         'linux-arm64',
       ])
       .optional(),
+    client_identity_context_1m_enabled: z.boolean().optional(),
     client_identity_source: z
       .enum(['manual', 'official', 'community', 'npm', 'workbuddy'])
       .optional(),
@@ -619,6 +620,7 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   client_identity_profile: undefined,
   client_identity_version: '',
   client_identity_platform: undefined,
+  client_identity_context_1m_enabled: false,
   client_identity_source: 'manual',
   advanced_custom: '',
 }
@@ -689,6 +691,7 @@ export function transformChannelToFormDefaults(
   let clientIdentityProfile: ChannelFormValues['client_identity_profile']
   let clientIdentityVersion = ''
   let clientIdentityPlatform: ChannelFormValues['client_identity_platform']
+  let clientIdentityContext1MEnabled = false
   let clientIdentitySource: ChannelFormValues['client_identity_source']
 
   if (channel.settings) {
@@ -755,6 +758,8 @@ export function transformChannelToFormDefaults(
         ) {
           clientIdentityPlatform = clientIdentity.platform
         }
+        clientIdentityContext1MEnabled =
+          clientIdentity.context_1m_enabled === true
         if (
           clientIdentity.source &&
           typeof clientIdentity.source === 'object' &&
@@ -825,6 +830,7 @@ export function transformChannelToFormDefaults(
     client_identity_profile: clientIdentityProfile,
     client_identity_version: clientIdentityVersion,
     client_identity_platform: clientIdentityPlatform,
+    client_identity_context_1m_enabled: clientIdentityContext1MEnabled,
     client_identity_source: clientIdentitySource || 'manual',
     advanced_custom: advancedCustom,
   }
@@ -985,6 +991,13 @@ export function buildSettingsJSON(formData: ChannelFormValues): string {
       }
       if (requestedProfile === profile && formData.client_identity_platform) {
         clientIdentity.platform = formData.client_identity_platform
+      }
+      if (
+        requestedProfile === profile &&
+        profile === 'claude_code' &&
+        formData.client_identity_context_1m_enabled === true
+      ) {
+        clientIdentity.context_1m_enabled = true
       }
       clientIdentity.source = {
         kind: getClientIdentitySourceForProfile(

@@ -43,6 +43,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Switch } from '@/components/ui/switch'
 
 import {
   getClientIdentityVersions,
@@ -500,6 +501,35 @@ export function ChannelClientIdentitySection(
             </FormItem>
           )}
         />
+
+        {effectiveProfile === 'claude_code' && (
+          <FormField
+            control={props.control}
+            name='client_identity_context_1m_enabled'
+            render={({ field }) => (
+              <FormItem className='flex items-center justify-between gap-4 sm:col-span-2'>
+                <div className='space-y-0.5'>
+                  <FormLabel>{t('Enable 1M context')}</FormLabel>
+                  <FormDescription>
+                    {t(
+                      'Add the Claude Code 1M context beta token to Anthropic-Beta.'
+                    )}
+                  </FormDescription>
+                </div>
+                <FormControl>
+                  <Switch
+                    checked={field.value === true}
+                    onCheckedChange={field.onChange}
+                    disabled={
+                      props.disabled || props.isSubmitting || isNoClient
+                    }
+                    aria-label={t('Enable 1M context')}
+                  />
+                </FormControl>
+              </FormItem>
+            )}
+          />
+        )}
       </div>
 
       {versionsQuery.isPending && <Skeleton className='h-4 w-72' />}

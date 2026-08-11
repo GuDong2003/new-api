@@ -691,6 +691,64 @@ func TestClientIdentityNormalizeAndValidate(t *testing.T) {
 	assert.Equal(t, ClientIdentityProfileCodeBuddy, workBuddy.Profile)
 }
 
+func TestClientIdentityContext1MJSONRoundTripAndZeroValue(t *testing.T) {
+	config := ClientIdentityConfig{
+		Profile:          ClientIdentityProfileClaudeCode,
+		Context1MEnabled: true,
+	}
+
+	assert.False(t, config.IsZero())
+	assert.True(t, (ClientIdentityConfig{}).IsZero())
+	assert.True(t, (ClientIdentityConfig{Context1MEnabled: false}).IsZero())
+
+	encoded, err := json.Marshal(config)
+	require.NoError(t, err)
+	assert.Contains(t, string(encoded), `"context_1m_enabled":true`)
+
+	var decoded ClientIdentityConfig
+	require.NoError(t, json.Unmarshal(encoded, &decoded))
+	assert.Equal(t, config, decoded)
+}
+
+func TestClientIdentityContext1MRequiresClaudeCodeProfile(t *testing.T) {
+	tests := []struct {
+		name        string
+		channelType int
+		config      ClientIdentityConfig
+	}{
+		{
+			name:        "none profile",
+			channelType: ClientIdentityChannelTypeOpenAI,
+			config: ClientIdentityConfig{
+				Profile:          ClientIdentityProfileNone,
+				Context1MEnabled: true,
+			},
+		},
+		{
+			name:        "codex profile",
+			channelType: ClientIdentityChannelTypeCodexCompatible,
+			config: ClientIdentityConfig{
+				Profile:          ClientIdentityProfileCodexCompatibility,
+				Context1MEnabled: true,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.config.Validate(tt.channelType)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "context_1m_enabled")
+		})
+	}
+
+	valid := ClientIdentityConfig{
+		Profile:          ClientIdentityProfileClaudeCode,
+		Context1MEnabled: true,
+	}
+	require.NoError(t, valid.Validate(ClientIdentityChannelTypeClaudeCode))
+}
+
 func TestClientIdentityNormalizeRejectsNPMPrereleases(t *testing.T) {
 	tests := []struct {
 		name        string

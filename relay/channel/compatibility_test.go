@@ -177,6 +177,55 @@ func TestApplyClaudeCodeCompatibilityHeadersFetchModelsSingleCredential(t *testi
 	assert.Equal(t, "claude-cli/2.1.214 (external, cli)", headers.Get("User-Agent"))
 }
 
+func TestApplyClaudeCodeCompatibilityHeadersContext1MBetaToken(t *testing.T) {
+	tests := []struct {
+		name          string
+		enabled       bool
+		initialHeader []string
+		wantHeader    string
+	}{
+		{
+			name:       "enabled adds token",
+			enabled:    true,
+			wantHeader: claudeCodeContext1MBetaToken,
+		},
+		{
+			name:          "enabled preserves existing tokens and removes duplicates",
+			enabled:       true,
+			initialHeader: []string{"interleaved-thinking-2025-05-14, context-1m-2025-08-07", "context-1m-2025-08-07, prompt-caching-2024-07-31"},
+			wantHeader:    "interleaved-thinking-2025-05-14, context-1m-2025-08-07, prompt-caching-2024-07-31",
+		},
+		{
+			name:          "disabled does not add token",
+			initialHeader: []string{"interleaved-thinking-2025-05-14"},
+			wantHeader:    "interleaved-thinking-2025-05-14",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			headers := http.Header{}
+			if tt.initialHeader != nil {
+				headers["Anthropic-Beta"] = tt.initialHeader
+			}
+			config := &dto.ClientIdentityConfig{
+				Profile:          dto.ClientIdentityProfileClaudeCode,
+				Context1MEnabled: tt.enabled,
+			}
+
+			ApplyClaudeCodeCompatibilityHeadersWithIdentity(headers, "test-key", false, "", true, config)
+			ApplyClaudeCodeCompatibilityHeadersWithIdentity(headers, "test-key", false, "", true, config)
+
+			assert.Equal(t, tt.wantHeader, headers.Get("Anthropic-Beta"))
+			wantContextTokenCount := 0
+			if tt.enabled {
+				wantContextTokenCount = 1
+			}
+			assert.Equal(t, wantContextTokenCount, strings.Count(headers.Get("Anthropic-Beta"), claudeCodeContext1MBetaToken))
+		})
+	}
+}
+
 func TestCodeBuddyCompatibilityBuildsWorkBuddyProfile(t *testing.T) {
 	headers := http.Header{
 		"Authorization": []string{"Bearer upstream-key"},

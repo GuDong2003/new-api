@@ -173,6 +173,57 @@ describe('channel client identity settings', () => {
     assert.deepEqual(settings.client_identity.source, { kind: 'official' })
   })
 
+  test('serializes the Claude Code 1M context flag when enabled', () => {
+    const settings = JSON.parse(
+      buildSettingsJSON({
+        ...CHANNEL_FORM_DEFAULT_VALUES,
+        type: 62,
+        client_identity_context_1m_enabled: true,
+      })
+    )
+
+    assert.equal(settings.client_identity.context_1m_enabled, true)
+  })
+
+  test('reads the persisted Claude Code 1M context flag', () => {
+    const values = transformChannelToFormDefaults({
+      type: 62,
+      settings: JSON.stringify({
+        client_identity: {
+          client_type: 'claude_code',
+          profile: 'claude_code',
+          context_1m_enabled: true,
+        },
+      }),
+      channel_info: {
+        is_multi_key: false,
+        multi_key_size: 0,
+        multi_key_polling_index: 0,
+        multi_key_mode: 'random',
+      },
+    } as Channel)
+
+    assert.equal(values.client_identity_context_1m_enabled, true)
+  })
+
+  test('does not serialize the Claude Code 1M context flag when disabled', () => {
+    const settings = JSON.parse(
+      buildSettingsJSON({
+        ...CHANNEL_FORM_DEFAULT_VALUES,
+        type: 62,
+        settings: JSON.stringify({
+          client_identity: {
+            profile: 'claude_code',
+            context_1m_enabled: true,
+          },
+        }),
+        client_identity_context_1m_enabled: false,
+      })
+    )
+
+    assert.equal(settings.client_identity.context_1m_enabled, undefined)
+  })
+
   test('serializes manual lightweight profiles without using a legacy source', () => {
     const settings = JSON.parse(
       buildSettingsJSON({

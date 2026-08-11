@@ -13,6 +13,7 @@ const (
 	codexCompatibilityOriginator = "codex_cli_rs"
 	codexCompatibilityUserAgent  = "codex_cli_rs/0.146.0"
 	claudeCodeCompatibilityUA    = "claude-cli/2.1.214 (external, cli)"
+	claudeCodeContext1MBetaToken = "context-1m-2025-08-07"
 )
 
 // ApplyCompatibilityHeaders applies the default upstream identity for API-key
@@ -124,6 +125,9 @@ func ApplyClaudeCodeCompatibilityHeadersWithIdentity(headers http.Header, apiKey
 			delete(headers, name)
 		}
 	}
+	if config.Context1MEnabled {
+		appendClaudeCodeContext1MBetaToken(headers)
+	}
 
 	headers.Set("Authorization", "Bearer "+apiKey)
 	if includeAPIKey {
@@ -144,6 +148,41 @@ func ApplyClaudeCodeCompatibilityHeadersWithIdentity(headers http.Header, apiKey
 	if headers.Get("X-Client-Request-Id") == "" {
 		headers.Set("X-Client-Request-Id", uuid.NewString())
 	}
+}
+
+func appendClaudeCodeContext1MBetaToken(headers http.Header) {
+	if headers == nil {
+		return
+	}
+
+	var betaValues []string
+	for name, values := range headers {
+		if !strings.EqualFold(name, "Anthropic-Beta") {
+			continue
+		}
+		betaValues = append(betaValues, values...)
+		delete(headers, name)
+	}
+
+	tokens := make([]string, 0)
+	seen := make(map[string]struct{})
+	for _, value := range betaValues {
+		for _, token := range strings.Split(value, ",") {
+			token = strings.TrimSpace(token)
+			if token == "" {
+				continue
+			}
+			if _, exists := seen[token]; exists {
+				continue
+			}
+			seen[token] = struct{}{}
+			tokens = append(tokens, token)
+		}
+	}
+	if _, exists := seen[claudeCodeContext1MBetaToken]; !exists {
+		tokens = append(tokens, claudeCodeContext1MBetaToken)
+	}
+	headers.Set("Anthropic-Beta", strings.Join(tokens, ", "))
 }
 
 func resolveRuntimeClientIdentity(channelType int, identity *dto.ClientIdentityConfig) dto.ClientIdentityConfig {

@@ -110,11 +110,12 @@ type ClientIdentitySourceMetadata struct {
 // contract. An absent client_identity object, or an object with only empty
 // values, keeps the legacy runtime defaults unchanged.
 type ClientIdentityConfig struct {
-	ClientType string                        `json:"client_type,omitempty"`
-	Profile    string                        `json:"profile,omitempty"`
-	Version    string                        `json:"version,omitempty"`
-	Platform   string                        `json:"platform,omitempty"`
-	Source     *ClientIdentitySourceMetadata `json:"source,omitempty"`
+	ClientType       string                        `json:"client_type,omitempty"`
+	Profile          string                        `json:"profile,omitempty"`
+	Version          string                        `json:"version,omitempty"`
+	Platform         string                        `json:"platform,omitempty"`
+	Context1MEnabled bool                          `json:"context_1m_enabled,omitempty"`
+	Source           *ClientIdentitySourceMetadata `json:"source,omitempty"`
 }
 
 func (c ClientIdentityConfig) isEmpty() bool {
@@ -122,6 +123,7 @@ func (c ClientIdentityConfig) isEmpty() bool {
 		strings.TrimSpace(c.Profile) == "" &&
 		strings.TrimSpace(c.Version) == "" &&
 		strings.TrimSpace(c.Platform) == "" &&
+		!c.Context1MEnabled &&
 		(c.Source == nil || c.Source.isEmpty())
 }
 
@@ -491,6 +493,9 @@ func (c *ClientIdentityConfig) Normalize(channelType int) error {
 	}
 	if !clientIdentityProfileAllowedForChannel(c.Profile, channelType, defaults.Profile) {
 		return fmt.Errorf("client identity profile %s is not supported for channel type %d", c.Profile, channelType)
+	}
+	if c.Context1MEnabled && c.Profile != ClientIdentityProfileClaudeCode {
+		return fmt.Errorf("client identity context_1m_enabled requires claude_code profile")
 	}
 	if c.Profile == ClientIdentityProfileNone {
 		if c.Version != "" || c.Platform != "" || c.Source != nil {
