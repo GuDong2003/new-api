@@ -24,20 +24,24 @@ import type {
   InviteCode,
   InviteCodeCreateInput,
   InviteCodeInput,
+  InviteCodeListParams,
   InviteCodePageResponse,
   InviteCodeUsagePageResponse,
 } from './types'
 
-export async function getInviteCodes(params: {
-  page: number
-  pageSize: number
-  keyword: string
-}): Promise<InviteCodePageResponse> {
+export async function getInviteCodes(
+  params: InviteCodeListParams
+): Promise<InviteCodePageResponse> {
   const response = await api.get('/api/invite_code/', {
     params: {
       p: params.page,
       page_size: params.pageSize,
       keyword: params.keyword || undefined,
+      status: params.status === 'all' ? undefined : params.status,
+      usage: params.usage === 'all' ? undefined : params.usage,
+      expiration:
+        params.expiration === 'all' ? undefined : params.expiration,
+      sort: params.sort === 'newest' ? undefined : params.sort,
     },
   })
   return response.data

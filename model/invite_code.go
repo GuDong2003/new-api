@@ -16,6 +16,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 const (
@@ -68,6 +69,15 @@ type InviteCodeUsageDetail struct {
 type GeneratedInviteCode struct {
 	Code       string      `json:"code"`
 	InviteCode *InviteCode `json:"invite_code"`
+}
+
+type InviteCodeQueryOptions struct {
+	Keyword    string
+	Status     string
+	Usage      string
+	Expiration string
+	Sort       string
+	Now        int64
 }
 
 func generateInviteCode() (string, error) {
@@ -229,8 +239,12 @@ func CreateInviteCodes(createdBy int, name string, count int, maxUses int, expir
 }
 
 func GetInviteCodes(keyword string, startIdx int, num int) ([]*InviteCode, int64, error) {
+	return GetInviteCodesWithOptions(InviteCodeQueryOptions{Keyword: keyword}, startIdx, num)
+}
+
+func GetInviteCodesWithOptions(options InviteCodeQueryOptions, startIdx int, num int) ([]*InviteCode, int64, error) {
 	query := DB.Model(&InviteCode{})
-	keyword = strings.TrimSpace(keyword)
+	keyword := strings.TrimSpace(options.Keyword)
 	if keyword != "" {
 		codeHash, codeHashErr := HashInviteCode(keyword)
 		if id, err := strconv.Atoi(keyword); err == nil {
@@ -241,12 +255,76 @@ func GetInviteCodes(keyword string, startIdx int, num int) ([]*InviteCode, int64
 			query = query.Where("name LIKE ? OR code_prefix LIKE ?", "%"+keyword+"%", strings.ToUpper(keyword)+"%")
 		}
 	}
+
+	now := options.Now
+	if now <= 0 {
+		now = common.GetTimestamp()
+	}
+	switch strings.ToLower(strings.TrimSpace(options.Status)) {
+	case "", "all":
+	case "enabled":
+		query = query.Where("status = ? AND (expired_time = 0 OR expired_time > ?) AND used_count < max_uses", common.InviteCodeStatusEnabled, now)
+	case "disabled":
+		query = query.Where("status <> ?", common.InviteCodeStatusEnabled)
+	case "expired":
+		query = query.Where("status = ? AND expired_time <> 0 AND expired_time <= ?", common.InviteCodeStatusEnabled, now)
+	case "exhausted":
+		query = query.Where("status = ? AND (expired_time = 0 OR expired_time > ?) AND used_count >= max_uses", common.InviteCodeStatusEnabled, now)
+	default:
+		return nil, 0, ErrInviteCodeInvalid
+	}
+
+	switch strings.ToLower(strings.TrimSpace(options.Usage)) {
+	case "", "all":
+	case "unused":
+		query = query.Where("used_count = 0")
+	case "used":
+		query = query.Where("used_count > 0")
+	default:
+		return nil, 0, ErrInviteCodeInvalid
+	}
+
+	switch strings.ToLower(strings.TrimSpace(options.Expiration)) {
+	case "", "all":
+	case "never":
+		query = query.Where("expired_time = 0")
+	case "scheduled":
+		query = query.Where("expired_time <> 0")
+	default:
+		return nil, 0, ErrInviteCodeInvalid
+	}
+
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
+
+	switch strings.ToLower(strings.TrimSpace(options.Sort)) {
+	case "", "newest":
+		query = query.Order("created_time DESC").Order("id DESC")
+	case "oldest":
+		query = query.Order("created_time ASC").Order("id ASC")
+	case "remaining":
+		query = query.Order("max_uses - used_count DESC").Order("id DESC")
+	case "expiring":
+		query = query.
+			Order(clause.Expr{
+				SQL:                "CASE WHEN expired_time > ? THEN 0 WHEN expired_time = 0 THEN 2 ELSE 1 END ASC",
+				Vars:               []interface{}{now},
+				WithoutParentheses: true,
+			}).
+			Order(clause.Expr{
+				SQL:                "CASE WHEN expired_time > ? THEN expired_time ELSE 0 END ASC",
+				Vars:               []interface{}{now},
+				WithoutParentheses: true,
+			}).
+			Order("id DESC")
+	default:
+		return nil, 0, ErrInviteCodeInvalid
+	}
+
 	var inviteCodes []*InviteCode
-	if err := query.Order("id desc").Limit(num).Offset(startIdx).Find(&inviteCodes).Error; err != nil {
+	if err := query.Limit(num).Offset(startIdx).Find(&inviteCodes).Error; err != nil {
 		return nil, 0, err
 	}
 	for _, inviteCode := range inviteCodes {

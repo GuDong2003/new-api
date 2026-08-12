@@ -47,6 +47,51 @@ export type InviteCodeCreateInput = InviteCodeInput & {
   count: number
 }
 
+export const INVITE_CODE_STATUS_FILTER_VALUES = [
+  'all',
+  'enabled',
+  'disabled',
+  'exhausted',
+  'expired',
+] as const
+
+export const INVITE_CODE_USAGE_FILTER_VALUES = [
+  'all',
+  'unused',
+  'used',
+] as const
+
+export const INVITE_CODE_EXPIRATION_FILTER_VALUES = [
+  'all',
+  'never',
+  'scheduled',
+] as const
+
+export const INVITE_CODE_SORT_VALUES = [
+  'newest',
+  'oldest',
+  'remaining',
+  'expiring',
+] as const
+
+export type InviteCodeStatusFilter =
+  (typeof INVITE_CODE_STATUS_FILTER_VALUES)[number]
+export type InviteCodeUsageFilter =
+  (typeof INVITE_CODE_USAGE_FILTER_VALUES)[number]
+export type InviteCodeExpirationFilter =
+  (typeof INVITE_CODE_EXPIRATION_FILTER_VALUES)[number]
+export type InviteCodeSort = (typeof INVITE_CODE_SORT_VALUES)[number]
+
+export type InviteCodeListParams = {
+  page: number
+  pageSize: number
+  keyword: string
+  status: InviteCodeStatusFilter
+  usage: InviteCodeUsageFilter
+  expiration: InviteCodeExpirationFilter
+  sort: InviteCodeSort
+}
+
 export type InviteCodeUsage = {
   id: number
   invite_code_id: number

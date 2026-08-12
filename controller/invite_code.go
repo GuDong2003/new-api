@@ -58,8 +58,18 @@ func ValidateInviteCode(c *gin.Context) {
 
 func GetInviteCodes(c *gin.Context) {
 	pageInfo := common.GetPageQuery(c)
-	inviteCodes, total, err := model.GetInviteCodes(c.Query("keyword"), pageInfo.GetStartIdx(), pageInfo.GetPageSize())
+	inviteCodes, total, err := model.GetInviteCodesWithOptions(model.InviteCodeQueryOptions{
+		Keyword:    c.Query("keyword"),
+		Status:     c.Query("status"),
+		Usage:      c.Query("usage"),
+		Expiration: c.Query("expiration"),
+		Sort:       c.Query("sort"),
+	}, pageInfo.GetStartIdx(), pageInfo.GetPageSize())
 	if err != nil {
+		if errors.Is(err, model.ErrInviteCodeInvalid) {
+			common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+			return
+		}
 		common.ApiError(c, err)
 		return
 	}

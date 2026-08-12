@@ -17,7 +17,16 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Copy, Link2, Loader2, Plus, Search, Users } from 'lucide-react'
+import { getRouteApi } from '@tanstack/react-router'
+import {
+  Copy,
+  Link2,
+  Loader2,
+  Plus,
+  RotateCcw,
+  Search,
+  Users,
+} from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -27,6 +36,14 @@ import { SectionPageLayout } from '@/components/layout'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import {
   Table,
   TableBody,
@@ -44,24 +61,130 @@ import { buildInviteRegistrationLink } from './invite-code-links'
 import { InviteCodeRowActions } from './invite-code-row-actions'
 import { getInviteCodeState } from './invite-code-state'
 import { InviteCodeUsagesDialog } from './invite-code-usages-dialog'
-import type { InviteCode } from './types'
+import type {
+  InviteCode,
+  InviteCodeExpirationFilter,
+  InviteCodeSort,
+  InviteCodeStatusFilter,
+  InviteCodeUsageFilter,
+} from './types'
 
 const pageSize = 20
+const route = getRouteApi('/_authenticated/invite-codes/')
+
+type InviteCodeSearchPatch = {
+  keyword?: string
+  status?: InviteCodeStatusFilter
+  usage?: InviteCodeUsageFilter
+  expiration?: InviteCodeExpirationFilter
+  sort?: InviteCodeSort
+}
 
 export function InviteCodesSection() {
   const { t } = useTranslation()
   const { copyToClipboard } = useCopyToClipboard()
   const queryClient = useQueryClient()
-  const [page, setPage] = useState(1)
-  const [keyword, setKeyword] = useState('')
+  const search = route.useSearch()
+  const navigate = route.useNavigate()
+  const page = search.page ?? 1
+  const keyword = search.keyword ?? ''
+  const status = search.status ?? 'all'
+  const usage = search.usage ?? 'all'
+  const expiration = search.expiration ?? 'all'
+  const sort = search.sort ?? 'newest'
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingInviteCode, setEditingInviteCode] = useState<InviteCode>()
   const [usageInviteCode, setUsageInviteCode] = useState<InviteCode>()
   const [deleteInviteCodeTarget, setDeleteInviteCodeTarget] =
     useState<InviteCode>()
+
+  const updateSearch = (patch: InviteCodeSearchPatch) => {
+    navigate({
+      search: (previous) => ({
+        ...previous,
+        page: undefined,
+        ...patch,
+      }),
+      replace: true,
+    })
+  }
+
+  const updatePage = (nextPage: number) => {
+    navigate({
+      search: (previous) => ({
+        ...previous,
+        page: nextPage <= 1 ? undefined : nextPage,
+      }),
+      replace: true,
+    })
+  }
+
+  const resetFilters = () => {
+    navigate({
+      search: (previous) => ({
+        ...previous,
+        page: undefined,
+        keyword: undefined,
+        status: undefined,
+        usage: undefined,
+        expiration: undefined,
+        sort: undefined,
+      }),
+      replace: true,
+    })
+  }
+
+  const hasActiveFilters =
+    keyword !== '' ||
+    status !== 'all' ||
+    usage !== 'all' ||
+    expiration !== 'all' ||
+    sort !== 'newest'
+
+  const statusItems = [
+    { value: 'all', label: t('All Status') },
+    { value: 'enabled', label: t('Available') },
+    { value: 'disabled', label: t('Disabled') },
+    { value: 'exhausted', label: t('Exhausted') },
+    { value: 'expired', label: t('Expired') },
+  ]
+  const usageItems = [
+    { value: 'all', label: t('All Usage') },
+    { value: 'unused', label: t('Unused') },
+    { value: 'used', label: t('Used') },
+  ]
+  const expirationItems = [
+    { value: 'all', label: t('All Expiration') },
+    { value: 'never', label: t('Never expires') },
+    { value: 'scheduled', label: t('Has Expiration') },
+  ]
+  const sortItems = [
+    { value: 'newest', label: t('Newest First') },
+    { value: 'oldest', label: t('Oldest First') },
+    { value: 'remaining', label: t('Most Remaining') },
+    { value: 'expiring', label: t('Expiring Soon') },
+  ]
+
   const query = useQuery({
-    queryKey: ['invite-codes', page, keyword],
-    queryFn: () => getInviteCodes({ page, pageSize, keyword }),
+    queryKey: [
+      'invite-codes',
+      page,
+      keyword,
+      status,
+      usage,
+      expiration,
+      sort,
+    ],
+    queryFn: () =>
+      getInviteCodes({
+        page,
+        pageSize,
+        keyword,
+        status,
+        usage,
+        expiration,
+        sort,
+      }),
     placeholderData: (previousData) => previousData,
   })
   const inviteCodes = query.data?.data?.items ?? []
@@ -82,7 +205,7 @@ export function InviteCodesSection() {
       toast.success(t('Invitation code deleted'))
       setDeleteInviteCodeTarget(undefined)
       if (inviteCodes.length === 1 && page > 1) {
-        setPage((current) => Math.max(1, current - 1))
+        updatePage(page - 1)
       }
       refresh()
     },
@@ -115,21 +238,154 @@ export function InviteCodesSection() {
         </SectionPageLayout.Actions>
         <SectionPageLayout.Content>
           <div className='space-y-4'>
-            <div className='relative w-full sm:max-w-sm'>
-              <Search
-                aria-hidden='true'
-                className='text-muted-foreground absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2'
-              />
-              <Input
-                aria-label={t('Search by code, name, or ID')}
-                value={keyword}
-                onChange={(event) => {
-                  setKeyword(event.target.value)
-                  setPage(1)
-                }}
-                className='pl-9'
-                placeholder={t('Search by code, name, or ID')}
-              />
+            <div className='flex flex-col gap-3 xl:flex-row xl:items-center'>
+              <div className='relative w-full xl:max-w-sm'>
+                <Search
+                  aria-hidden='true'
+                  className='text-muted-foreground absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2'
+                />
+                <Input
+                  aria-label={t('Search by code, name, or ID')}
+                  value={keyword}
+                  onChange={(event) =>
+                    updateSearch({
+                      keyword: event.target.value || undefined,
+                    })
+                  }
+                  className='pl-9'
+                  placeholder={t('Search by code, name, or ID')}
+                />
+              </div>
+
+              <div className='flex flex-wrap items-center gap-2'>
+                <Select
+                  items={statusItems}
+                  value={status}
+                  onValueChange={(value) =>
+                    value !== null &&
+                    updateSearch({
+                      status:
+                        value === 'all'
+                          ? undefined
+                          : (value as InviteCodeStatusFilter),
+                    })
+                  }
+                >
+                  <SelectTrigger
+                    className='min-w-32'
+                    aria-label={t('Status')}
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent alignItemWithTrigger={false}>
+                    <SelectGroup>
+                      {statusItems.map((item) => (
+                        <SelectItem key={item.value} value={item.value}>
+                          {item.label}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+
+                <Select
+                  items={usageItems}
+                  value={usage}
+                  onValueChange={(value) =>
+                    value !== null &&
+                    updateSearch({
+                      usage:
+                        value === 'all'
+                          ? undefined
+                          : (value as InviteCodeUsageFilter),
+                    })
+                  }
+                >
+                  <SelectTrigger
+                    className='min-w-28'
+                    aria-label={t('Usage')}
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent alignItemWithTrigger={false}>
+                    <SelectGroup>
+                      {usageItems.map((item) => (
+                        <SelectItem key={item.value} value={item.value}>
+                          {item.label}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+
+                <Select
+                  items={expirationItems}
+                  value={expiration}
+                  onValueChange={(value) =>
+                    value !== null &&
+                    updateSearch({
+                      expiration:
+                        value === 'all'
+                          ? undefined
+                          : (value as InviteCodeExpirationFilter),
+                    })
+                  }
+                >
+                  <SelectTrigger
+                    className='min-w-32'
+                    aria-label={t('Expiration Time')}
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent alignItemWithTrigger={false}>
+                    <SelectGroup>
+                      {expirationItems.map((item) => (
+                        <SelectItem key={item.value} value={item.value}>
+                          {item.label}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+
+                <Select
+                  items={sortItems}
+                  value={sort}
+                  onValueChange={(value) =>
+                    value !== null &&
+                    updateSearch({
+                      sort:
+                        value === 'newest'
+                          ? undefined
+                          : (value as InviteCodeSort),
+                    })
+                  }
+                >
+                  <SelectTrigger className='min-w-32' aria-label={t('Sort')}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent alignItemWithTrigger={false}>
+                    <SelectGroup>
+                      {sortItems.map((item) => (
+                        <SelectItem key={item.value} value={item.value}>
+                          {item.label}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+
+                <Button
+                  variant='ghost'
+                  size='sm'
+                  className='gap-2'
+                  disabled={!hasActiveFilters}
+                  onClick={resetFilters}
+                >
+                  <RotateCcw aria-hidden='true' className='h-4 w-4' />
+                  {t('Reset Filters')}
+                </Button>
+              </div>
             </div>
 
             <div className='rounded-md border'>
@@ -269,7 +525,7 @@ export function InviteCodesSection() {
                   variant='outline'
                   size='sm'
                   disabled={page <= 1 || query.isFetching}
-                  onClick={() => setPage((current) => Math.max(1, current - 1))}
+                  onClick={() => updatePage(page - 1)}
                 >
                   {t('Previous')}
                 </Button>
@@ -280,7 +536,7 @@ export function InviteCodesSection() {
                   variant='outline'
                   size='sm'
                   disabled={page >= totalPages || query.isFetching}
-                  onClick={() => setPage((current) => current + 1)}
+                  onClick={() => updatePage(page + 1)}
                 >
                   {t('Next')}
                 </Button>

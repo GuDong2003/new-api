@@ -17,10 +17,29 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { createFileRoute, redirect } from '@tanstack/react-router'
+import z from 'zod'
 
 import { InviteCodesSection } from '@/features/system-settings/auth/invite-codes/invite-codes-section'
+import {
+  INVITE_CODE_EXPIRATION_FILTER_VALUES,
+  INVITE_CODE_SORT_VALUES,
+  INVITE_CODE_STATUS_FILTER_VALUES,
+  INVITE_CODE_USAGE_FILTER_VALUES,
+} from '@/features/system-settings/auth/invite-codes/types'
 import { ROLE } from '@/lib/roles'
 import { useAuthStore } from '@/stores/auth-store'
+
+const inviteCodesSearchSchema = z.object({
+  page: z.number().int().positive().optional().catch(1),
+  keyword: z.string().optional().catch(''),
+  status: z.enum(INVITE_CODE_STATUS_FILTER_VALUES).optional().catch('all'),
+  usage: z.enum(INVITE_CODE_USAGE_FILTER_VALUES).optional().catch('all'),
+  expiration: z
+    .enum(INVITE_CODE_EXPIRATION_FILTER_VALUES)
+    .optional()
+    .catch('all'),
+  sort: z.enum(INVITE_CODE_SORT_VALUES).optional().catch('newest'),
+})
 
 export const Route = createFileRoute('/_authenticated/invite-codes/')({
   beforeLoad: () => {
@@ -29,5 +48,6 @@ export const Route = createFileRoute('/_authenticated/invite-codes/')({
       throw redirect({ to: '/403' })
     }
   },
+  validateSearch: inviteCodesSearchSchema,
   component: InviteCodesSection,
 })
