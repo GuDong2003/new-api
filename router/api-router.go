@@ -277,6 +277,7 @@ func SetApiRouter(router *gin.Engine) {
 			inviteCodeRoute.GET("/:id/usages", controller.GetInviteCodeUsages)
 			inviteCodeRoute.POST("/", controller.CreateInviteCodes)
 			inviteCodeRoute.PUT("/", controller.UpdateInviteCode)
+			inviteCodeRoute.DELETE("/:id", controller.DeleteInviteCode)
 		}
 		logRoute := apiRouter.Group("/log")
 		logRoute.GET("/", middleware.AdminAuth(), controller.GetAllLogs)

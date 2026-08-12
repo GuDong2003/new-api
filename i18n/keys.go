@@ -84,6 +84,8 @@ const (
 	MsgInviteCodeExpireTimeInvalid = "invite_code.expire_time_invalid"
 	MsgInviteCodeCreateFailed      = "invite_code.create_failed"
 	MsgInviteCodeUpdateInvalid     = "invite_code.update_invalid"
+	MsgInviteCodeDeleteUsed        = "invite_code.delete_used"
+	MsgInviteCodeDeleteFailed      = "invite_code.delete_failed"
 )
 
 // User related messages

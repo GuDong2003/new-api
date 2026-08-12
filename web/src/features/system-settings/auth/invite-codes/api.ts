@@ -71,3 +71,8 @@ export async function updateInviteCode(
   const response = await api.put('/api/invite_code/', { id, ...input })
   return response.data
 }
+
+export async function deleteInviteCode(id: number): Promise<ApiResponse<void>> {
+  const response = await api.delete(`/api/invite_code/${id}`)
+  return response.data
+}

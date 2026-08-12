@@ -31,6 +31,7 @@ var (
 	ErrInviteCodeRequired    = errors.New("invitation code is required")
 	ErrInviteCodeInvalid     = errors.New("invitation code is invalid")
 	ErrInviteCodeUnavailable = errors.New("invitation code is unavailable")
+	ErrInviteCodeUsed        = errors.New("invitation code has usage records")
 )
 
 type InviteCode struct {
@@ -324,6 +325,29 @@ func UpdateInviteCode(id int, name string, status int, maxUses int, expiredTime 
 		return hydrateInviteCode(inviteCode)
 	})
 	return inviteCode, err
+}
+
+func DeleteUnusedInviteCode(id int) error {
+	if id <= 0 {
+		return ErrInviteCodeInvalid
+	}
+	return DB.Transaction(func(tx *gorm.DB) error {
+		inviteCode := &InviteCode{}
+		if err := lockForUpdate(tx).First(inviteCode, id).Error; err != nil {
+			return err
+		}
+		if inviteCode.UsedCount > 0 {
+			return ErrInviteCodeUsed
+		}
+		var usageCount int64
+		if err := tx.Model(&InviteCodeUsage{}).Where("invite_code_id = ?", id).Count(&usageCount).Error; err != nil {
+			return err
+		}
+		if usageCount > 0 {
+			return ErrInviteCodeUsed
+		}
+		return tx.Delete(inviteCode).Error
+	})
 }
 
 func ConsumeInviteCodeHashWithTx(tx *gorm.DB, codeHash string, userId int, registrationMethod string) error {

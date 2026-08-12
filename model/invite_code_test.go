@@ -214,3 +214,34 @@ func TestInviteCodeValidationDoesNotConsumeTheCode(t *testing.T) {
 	require.NoError(t, db.Model(&InviteCode{}).Where("id = ?", inviteCode.Id).Update("status", common.InviteCodeStatusDisabled).Error)
 	assert.ErrorIs(t, ValidateInviteCodeHash(codeHash), ErrInviteCodeUnavailable)
 }
+
+func TestUnusedInviteCodeCanBeDeleted(t *testing.T) {
+	db := setupInviteCodeTestDB(t)
+	generated, err := CreateInviteCodes(1, "unused", 1, 1, 0)
+	require.NoError(t, err)
+	inviteCodeId := generated[0].InviteCode.Id
+	codeHash, err := HashInviteCode(generated[0].Code)
+	require.NoError(t, err)
+
+	require.NoError(t, DeleteUnusedInviteCode(inviteCodeId))
+	assert.ErrorIs(t, db.First(&InviteCode{}, inviteCodeId).Error, gorm.ErrRecordNotFound)
+	assert.ErrorIs(t, ValidateInviteCodeHash(codeHash), ErrInviteCodeUnavailable)
+}
+
+func TestUsedInviteCodeCannotBeDeleted(t *testing.T) {
+	db := setupInviteCodeTestDB(t)
+	generated, err := CreateInviteCodes(1, "used", 1, 2, 0)
+	require.NoError(t, err)
+	inviteCodeId := generated[0].InviteCode.Id
+	codeHash, err := HashInviteCode(generated[0].Code)
+	require.NoError(t, err)
+	require.NoError(t, db.Transaction(func(tx *gorm.DB) error {
+		return ConsumeInviteCodeHashWithTx(tx, codeHash, 501, "password")
+	}))
+
+	assert.ErrorIs(t, DeleteUnusedInviteCode(inviteCodeId), ErrInviteCodeUsed)
+	assert.NoError(t, db.First(&InviteCode{}, inviteCodeId).Error)
+	var usageCount int64
+	require.NoError(t, db.Model(&InviteCodeUsage{}).Where("invite_code_id = ?", inviteCodeId).Count(&usageCount).Error)
+	assert.EqualValues(t, 1, usageCount)
+}

@@ -159,6 +159,27 @@ func UpdateInviteCode(c *gin.Context) {
 	common.ApiSuccess(c, inviteCode)
 }
 
+func DeleteInviteCode(c *gin.Context) {
+	inviteCodeId, err := strconv.Atoi(c.Param("id"))
+	if err != nil || inviteCodeId <= 0 {
+		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+		return
+	}
+	if err := model.DeleteUnusedInviteCode(inviteCodeId); err != nil {
+		if errors.Is(err, model.ErrInviteCodeUsed) {
+			common.ApiErrorI18n(c, i18n.MsgInviteCodeDeleteUsed)
+			return
+		}
+		common.SysError("failed to delete invitation code: " + err.Error())
+		common.ApiErrorI18n(c, i18n.MsgInviteCodeDeleteFailed)
+		return
+	}
+	recordManageAudit(c, "invite_code.delete", map[string]interface{}{
+		"id": inviteCodeId,
+	})
+	common.ApiSuccess(c, nil)
+}
+
 func respondInviteCodeError(c *gin.Context, err error) bool {
 	switch {
 	case errors.Is(err, model.ErrInviteCodeRequired):

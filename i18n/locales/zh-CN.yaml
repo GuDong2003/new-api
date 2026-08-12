@@ -73,6 +73,8 @@ invite_code.max_uses_invalid: "邀请码可用次数必须在 1 到 100000 之�
 invite_code.expire_time_invalid: "过期时间必须晚于当前时间"
 invite_code.create_failed: "创建邀请码失败，请稍后重试"
 invite_code.update_invalid: "邀请码设置无效；总次数不能小于已使用次数"
+invite_code.delete_used: "已有使用记录的邀请码不能删除，请改为停用"
+invite_code.delete_failed: "删除邀请码失败，请稍后重试"
 
 # User messages
 user.password_login_disabled: "管理员关闭了密码登录"

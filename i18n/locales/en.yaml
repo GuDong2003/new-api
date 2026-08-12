@@ -72,6 +72,8 @@ invite_code.max_uses_invalid: "Maximum uses must be between 1 and 100000"
 invite_code.expire_time_invalid: "Expiration time must be in the future"
 invite_code.create_failed: "Failed to create invitation code, please try again later"
 invite_code.update_invalid: "Invalid invitation code settings; maximum uses cannot be lower than the used count"
+invite_code.delete_used: "Invitation codes with usage records cannot be deleted; disable them instead"
+invite_code.delete_failed: "Failed to delete invitation code, please try again later"
 
 # User messages
 user.password_login_disabled: "Password login has been disabled by administrator"

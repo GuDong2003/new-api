@@ -16,11 +16,13 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Copy, Link2, Loader2, Plus, Search, Users } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
 
+import { ConfirmDialog } from '@/components/confirm-dialog'
 import { SectionPageLayout } from '@/components/layout'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -36,9 +38,10 @@ import {
 import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
 import dayjs from '@/lib/dayjs'
 
-import { getInviteCodes } from './api'
+import { deleteInviteCode, getInviteCodes } from './api'
 import { InviteCodeDialog } from './invite-code-dialog'
 import { buildInviteRegistrationLink } from './invite-code-links'
+import { InviteCodeRowActions } from './invite-code-row-actions'
 import { getInviteCodeState } from './invite-code-state'
 import { InviteCodeUsagesDialog } from './invite-code-usages-dialog'
 import type { InviteCode } from './types'
@@ -54,6 +57,8 @@ export function InviteCodesSection() {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingInviteCode, setEditingInviteCode] = useState<InviteCode>()
   const [usageInviteCode, setUsageInviteCode] = useState<InviteCode>()
+  const [deleteInviteCodeTarget, setDeleteInviteCodeTarget] =
+    useState<InviteCode>()
   const query = useQuery({
     queryKey: ['invite-codes', page, keyword],
     queryFn: () => getInviteCodes({ page, pageSize, keyword }),
@@ -66,6 +71,25 @@ export function InviteCodesSection() {
   const refresh = () => {
     void queryClient.invalidateQueries({ queryKey: ['invite-codes'] })
   }
+
+  const deleteMutation = useMutation({
+    mutationFn: deleteInviteCode,
+    onSuccess: (response) => {
+      if (!response.success) {
+        toast.error(response.message || t('Failed to delete invitation code'))
+        return
+      }
+      toast.success(t('Invitation code deleted'))
+      setDeleteInviteCodeTarget(undefined)
+      if (inviteCodes.length === 1 && page > 1) {
+        setPage((current) => Math.max(1, current - 1))
+      }
+      refresh()
+    },
+    onError: (error: Error) => {
+      toast.error(error.message || t('Failed to delete invitation code'))
+    },
+  })
 
   const openCreateDialog = () => {
     setEditingInviteCode(undefined)
@@ -223,13 +247,11 @@ export function InviteCodesSection() {
                             : t('Never')}
                         </TableCell>
                         <TableCell className='text-right'>
-                          <Button
-                            variant='outline'
-                            size='sm'
-                            onClick={() => openEditDialog(inviteCode)}
-                          >
-                            {t('Edit')}
-                          </Button>
+                          <InviteCodeRowActions
+                            inviteCode={inviteCode}
+                            onEdit={openEditDialog}
+                            onDelete={setDeleteInviteCodeTarget}
+                          />
                         </TableCell>
                       </TableRow>
                     )
@@ -280,6 +302,30 @@ export function InviteCodesSection() {
           if (!open) setUsageInviteCode(undefined)
         }}
         inviteCode={usageInviteCode}
+      />
+      <ConfirmDialog
+        open={Boolean(deleteInviteCodeTarget)}
+        onOpenChange={(open) => {
+          if (!open) setDeleteInviteCodeTarget(undefined)
+        }}
+        title={t('Delete Invitation Code')}
+        desc={t(
+          'Delete invitation code "{{code}}"? This action cannot be undone.',
+          {
+            code:
+              deleteInviteCodeTarget?.code ||
+              deleteInviteCodeTarget?.code_prefix ||
+              '',
+          }
+        )}
+        confirmText={t('Delete')}
+        destructive
+        handleConfirm={() => {
+          if (deleteInviteCodeTarget) {
+            deleteMutation.mutate(deleteInviteCodeTarget.id)
+          }
+        }}
+        isLoading={deleteMutation.isPending}
       />
     </>
   )
