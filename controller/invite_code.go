@@ -1,0 +1,132 @@
+package controller
+
+import (
+	"errors"
+	"strings"
+	"unicode/utf8"
+
+	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/i18n"
+	"github.com/QuantumNous/new-api/model"
+	"github.com/gin-gonic/gin"
+)
+
+const (
+	maxInviteCodeBatchSize = 100
+	maxInviteCodeUses      = 100000
+	maxInviteCodeNameRunes = 64
+)
+
+type createInviteCodesRequest struct {
+	Name        string `json:"name"`
+	Count       int    `json:"count"`
+	MaxUses     int    `json:"max_uses"`
+	ExpiredTime int64  `json:"expired_time"`
+}
+
+type updateInviteCodeRequest struct {
+	Id          int    `json:"id"`
+	Name        string `json:"name"`
+	Status      int    `json:"status"`
+	MaxUses     int    `json:"max_uses"`
+	ExpiredTime int64  `json:"expired_time"`
+}
+
+func GetInviteCodes(c *gin.Context) {
+	pageInfo := common.GetPageQuery(c)
+	inviteCodes, total, err := model.GetInviteCodes(c.Query("keyword"), pageInfo.GetStartIdx(), pageInfo.GetPageSize())
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	pageInfo.SetTotal(int(total))
+	pageInfo.SetItems(inviteCodes)
+	common.ApiSuccess(c, pageInfo)
+}
+
+func CreateInviteCodes(c *gin.Context) {
+	var request createInviteCodesRequest
+	if err := common.DecodeJson(c.Request.Body, &request); err != nil {
+		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+		return
+	}
+	request.Name = strings.TrimSpace(request.Name)
+	if request.Count == 0 {
+		request.Count = 1
+	}
+	if request.MaxUses == 0 {
+		request.MaxUses = 1
+	}
+	if utf8.RuneCountInString(request.Name) > maxInviteCodeNameRunes {
+		common.ApiErrorI18n(c, i18n.MsgInviteCodeNameTooLong)
+		return
+	}
+	if request.Count < 1 || request.Count > maxInviteCodeBatchSize {
+		common.ApiErrorI18n(c, i18n.MsgInviteCodeCountInvalid)
+		return
+	}
+	if request.MaxUses < 1 || request.MaxUses > maxInviteCodeUses {
+		common.ApiErrorI18n(c, i18n.MsgInviteCodeMaxUsesInvalid)
+		return
+	}
+	if request.ExpiredTime != 0 && request.ExpiredTime <= common.GetTimestamp() {
+		common.ApiErrorI18n(c, i18n.MsgInviteCodeExpireTimeInvalid)
+		return
+	}
+	generated, err := model.CreateInviteCodes(c.GetInt("id"), request.Name, request.Count, request.MaxUses, request.ExpiredTime)
+	if err != nil {
+		common.SysError("failed to create invitation codes: " + err.Error())
+		common.ApiErrorI18n(c, i18n.MsgInviteCodeCreateFailed)
+		return
+	}
+	recordManageAudit(c, "invite_code.create", map[string]interface{}{
+		"count":    request.Count,
+		"max_uses": request.MaxUses,
+	})
+	common.ApiSuccess(c, generated)
+}
+
+func UpdateInviteCode(c *gin.Context) {
+	var request updateInviteCodeRequest
+	if err := common.DecodeJson(c.Request.Body, &request); err != nil {
+		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+		return
+	}
+	request.Name = strings.TrimSpace(request.Name)
+	if utf8.RuneCountInString(request.Name) > maxInviteCodeNameRunes {
+		common.ApiErrorI18n(c, i18n.MsgInviteCodeNameTooLong)
+		return
+	}
+	if request.MaxUses < 1 || request.MaxUses > maxInviteCodeUses {
+		common.ApiErrorI18n(c, i18n.MsgInviteCodeMaxUsesInvalid)
+		return
+	}
+	inviteCode, err := model.UpdateInviteCode(request.Id, request.Name, request.Status, request.MaxUses, request.ExpiredTime)
+	if err != nil {
+		if errors.Is(err, model.ErrInviteCodeInvalid) {
+			common.ApiErrorI18n(c, i18n.MsgInviteCodeUpdateInvalid)
+			return
+		}
+		common.ApiError(c, err)
+		return
+	}
+	recordManageAudit(c, "invite_code.update", map[string]interface{}{
+		"id":       inviteCode.Id,
+		"status":   inviteCode.Status,
+		"max_uses": inviteCode.MaxUses,
+	})
+	common.ApiSuccess(c, inviteCode)
+}
+
+func respondInviteCodeError(c *gin.Context, err error) bool {
+	switch {
+	case errors.Is(err, model.ErrInviteCodeRequired):
+		common.ApiErrorI18n(c, i18n.MsgInviteCodeRequired)
+		return true
+	case errors.Is(err, model.ErrInviteCodeInvalid), errors.Is(err, model.ErrInviteCodeUnavailable):
+		common.ApiErrorI18n(c, i18n.MsgInviteCodeUnavailable)
+		return true
+	default:
+		return false
+	}
+}

@@ -20,13 +20,15 @@ import (
 const oauthAuthFlowTTL = 10 * time.Minute
 
 type oauthStateRequest struct {
-	Provider string `json:"provider"`
-	Intent   string `json:"intent"`
-	Aff      string `json:"aff,omitempty"`
+	Provider   string `json:"provider"`
+	Intent     string `json:"intent"`
+	Aff        string `json:"aff,omitempty"`
+	InviteCode string `json:"invite_code,omitempty"`
 }
 
 type oauthFlowPayload struct {
-	AffiliateCode string `json:"affiliate_code,omitempty"`
+	AffiliateCode  string `json:"affiliate_code,omitempty"`
+	InviteCodeHash string `json:"invite_code_hash,omitempty"`
 }
 
 // providerParams returns map with Provider key for i18n templates
@@ -44,12 +46,25 @@ func GenerateOAuthCode(c *gin.Context) {
 	request.Provider = strings.TrimSpace(request.Provider)
 	request.Intent = strings.TrimSpace(request.Intent)
 	request.Aff = strings.TrimSpace(request.Aff)
+	request.InviteCode = strings.TrimSpace(request.InviteCode)
 	if oauth.GetProvider(request.Provider) == nil ||
 		(request.Intent != model.AuthFlowIntentLogin && request.Intent != model.AuthFlowIntentBind) ||
 		len(request.Aff) > 32 ||
-		(request.Intent == model.AuthFlowIntentBind && request.Aff != "") {
+		len(request.InviteCode) > 64 ||
+		(request.Intent == model.AuthFlowIntentBind && (request.Aff != "" || request.InviteCode != "")) {
 		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
 		return
+	}
+	inviteCodeHash := ""
+	if request.InviteCode != "" {
+		var err error
+		inviteCodeHash, err = model.HashInviteCode(request.InviteCode)
+		if err != nil {
+			if !respondInviteCodeError(c, err) {
+				common.ApiError(c, err)
+			}
+			return
+		}
 	}
 	userID := 0
 	sessionID := ""
@@ -62,7 +77,7 @@ func GenerateOAuthCode(c *gin.Context) {
 		userID = identity.UserID
 		sessionID = identity.SessionID
 	}
-	payload, err := common.Marshal(oauthFlowPayload{AffiliateCode: request.Aff})
+	payload, err := common.Marshal(oauthFlowPayload{AffiliateCode: request.Aff, InviteCodeHash: inviteCodeHash})
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -193,10 +208,13 @@ func HandleOAuth(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	user, err := findOrCreateOAuthUser(c, provider, oauthUser, payload.AffiliateCode)
+	user, err := findOrCreateOAuthUser(c, provider, oauthUser, payload.AffiliateCode, payload.InviteCodeHash)
 	if err != nil {
 		if errors.Is(err, model.ErrEmailAlreadyTaken) {
 			common.ApiErrorI18n(c, i18n.MsgUserEmailAlreadyTaken)
+			return
+		}
+		if respondInviteCodeError(c, err) {
 			return
 		}
 		switch err.(type) {
@@ -294,7 +312,7 @@ func handleOAuthBind(c *gin.Context, provider oauth.Provider, pendingFlow *model
 }
 
 // findOrCreateOAuthUser finds existing user or creates new user
-func findOrCreateOAuthUser(c *gin.Context, provider oauth.Provider, oauthUser *oauth.OAuthUser, affiliateCode string) (*model.User, error) {
+func findOrCreateOAuthUser(c *gin.Context, provider oauth.Provider, oauthUser *oauth.OAuthUser, affiliateCode string, inviteCodeHash string) (*model.User, error) {
 	user := &model.User{}
 
 	// Check if user already exists with new ID
@@ -333,6 +351,10 @@ func findOrCreateOAuthUser(c *gin.Context, provider oauth.Provider, oauthUser *o
 	// User doesn't exist, create new user if registration is enabled
 	if !common.RegisterEnabled {
 		return nil, &OAuthRegistrationDisabledError{}
+	}
+	inviteRequired := common.InviteRegistrationEnabled
+	if inviteRequired && inviteCodeHash == "" {
+		return nil, model.ErrInviteCodeRequired
 	}
 
 	// Set up new user
@@ -390,6 +412,9 @@ func findOrCreateOAuthUser(c *gin.Context, provider oauth.Provider, oauthUser *o
 			if err := model.CreateUserOAuthBindingWithTx(tx, binding); err != nil {
 				return err
 			}
+			if inviteRequired {
+				return model.ConsumeInviteCodeHashWithTx(tx, inviteCodeHash, user.Id, "oauth:"+provider.GetProviderPrefix())
+			}
 
 			return nil
 		})
@@ -418,6 +443,9 @@ func findOrCreateOAuthUser(c *gin.Context, provider oauth.Provider, oauthUser *o
 				"telegram_id": user.TelegramId,
 			}).Error; err != nil {
 				return err
+			}
+			if inviteRequired {
+				return model.ConsumeInviteCodeHashWithTx(tx, inviteCodeHash, user.Id, "oauth:"+provider.GetProviderPrefix())
 			}
 
 			return nil

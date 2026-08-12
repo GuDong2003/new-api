@@ -64,6 +64,16 @@ redemption.failed: "兑换失败，请稍后重试"
 redemption.not_provided: "未提供兑换码"
 redemption.expire_time_invalid: "过期时间不能早于当前时间"
 
+# Invitation code messages
+invite_code.required: "创建新账号需要填写邀请码"
+invite_code.unavailable: "邀请码无效、已过期、已停用或可用次数已耗尽"
+invite_code.name_too_long: "邀请码名称不能超过 64 个字符"
+invite_code.count_invalid: "邀请码生成数量必须在 1 到 100 之间"
+invite_code.max_uses_invalid: "邀请码可用次数必须在 1 到 100000 之间"
+invite_code.expire_time_invalid: "过期时间必须晚于当前时间"
+invite_code.create_failed: "创建邀请码失败，请稍后重试"
+invite_code.update_invalid: "邀请码设置无效；总次数不能小于已使用次数"
+
 # User messages
 user.password_login_disabled: "管理员关闭了密码登录"
 user.register_disabled: "管理员关闭了新用户注册"

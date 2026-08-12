@@ -46,8 +46,11 @@ import { useAuthRedirect } from '@/features/auth/hooks/use-auth-redirect'
 import { useEmailVerification } from '@/features/auth/hooks/use-email-verification'
 import { useTurnstile } from '@/features/auth/hooks/use-turnstile'
 import {
+  clearInvitationCode,
   getAffiliateCode,
+  getInvitationCode,
   saveAffiliateCode,
+  saveInvitationCode,
 } from '@/features/auth/lib/storage'
 import { useStatus } from '@/hooks/use-status'
 import { isAuthBundle } from '@/lib/api'
@@ -94,10 +97,12 @@ export function SignUpForm({
       email: '',
       password: '',
       confirmPassword: '',
+      inviteCode: getInvitationCode(),
     },
   })
 
   const emailValue = form.watch('email')
+  const inviteCodeValue = form.watch('inviteCode')
   const emailVerificationRequired = !!status?.email_verification
   const hasUserAgreement = Boolean(status?.user_agreement_enabled)
   const hasPrivacyPolicy = Boolean(status?.privacy_policy_enabled)
@@ -106,6 +111,10 @@ export function SignUpForm({
     status?.oauth_register_enabled ??
     status?.data?.oauth_register_enabled ??
     true
+  const inviteRegistrationEnabled = Boolean(
+    status?.invite_registration_enabled ??
+    status?.data?.invite_registration_enabled
+  )
   const hasWeChatLogin = Boolean(status?.wechat_login)
   const turnstileReady = !isTurnstileEnabled || Boolean(turnstileToken)
 
@@ -132,11 +141,17 @@ export function SignUpForm({
   }, [requiresLegalConsent])
 
   useEffect(() => {
-    const aff = new URLSearchParams(window.location.search).get('aff')?.trim()
+    const searchParams = new URLSearchParams(window.location.search)
+    const aff = searchParams.get('aff')?.trim()
     if (aff) {
       saveAffiliateCode(aff)
     }
-  }, [])
+    const inviteCode = searchParams.get('invite')?.trim()
+    if (inviteCode) {
+      saveInvitationCode(inviteCode)
+      form.setValue('inviteCode', inviteCode)
+    }
+  }, [form])
 
   async function onSubmit(data: z.infer<typeof registerFormSchema>) {
     if (requiresLegalConsent && !agreedToLegal) {
@@ -158,6 +173,13 @@ export function SignUpForm({
 
     if (!validateTurnstile()) return
 
+    if (inviteRegistrationEnabled && !data.inviteCode?.trim()) {
+      form.setError('inviteCode', {
+        message: t('Please enter an invitation code'),
+      })
+      return
+    }
+
     setIsLoading(true)
     try {
       const res = await register({
@@ -166,10 +188,12 @@ export function SignUpForm({
         email: data.email || undefined,
         verification_code: verificationCode || undefined,
         aff_code: getAffiliateCode(),
+        invite_code: data.inviteCode?.trim() || undefined,
         turnstile: turnstileToken,
       })
 
       if (res?.success) {
+        clearInvitationCode()
         toast.success(t('Account created! Please sign in'))
         redirectToLogin()
       } else {
@@ -214,7 +238,7 @@ export function SignUpForm({
 
     setIsWeChatSubmitting(true)
     try {
-      const res = await wechatLoginByCode(wechatCode)
+      const res = await wechatLoginByCode(wechatCode, inviteCodeValue?.trim())
       if (res?.success && isAuthBundle(res.data)) {
         await handleLoginSuccess(res.data)
         toast.success(t('Signed in via WeChat'))
@@ -295,6 +319,33 @@ export function SignUpForm({
           )}
         />
 
+        {inviteRegistrationEnabled && (
+          <FormField
+            control={form.control}
+            name='inviteCode'
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>{t('Invitation Code')}</FormLabel>
+                <FormControl>
+                  <Input
+                    {...field}
+                    value={field.value ?? ''}
+                    placeholder={t('Enter your invitation code')}
+                    autoComplete='one-time-code'
+                    autoCapitalize='characters'
+                    spellCheck={false}
+                    onChange={(event) => {
+                      field.onChange(event)
+                      saveInvitationCode(event.target.value)
+                    }}
+                  />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+        )}
+
         {/* Email Verification Section */}
         {emailVerificationRequired && (
           <>
@@ -371,6 +422,7 @@ export function SignUpForm({
           disabled={
             isLoading ||
             (requiresLegalConsent && !agreedToLegal) ||
+            (inviteRegistrationEnabled && !inviteCodeValue?.trim()) ||
             !turnstileReady
           }
         >
@@ -381,7 +433,11 @@ export function SignUpForm({
         {oauthRegisterEnabled && (
           <OAuthProviders
             status={status}
-            disabled={isLoading || (requiresLegalConsent && !agreedToLegal)}
+            disabled={
+              isLoading ||
+              (requiresLegalConsent && !agreedToLegal) ||
+              (inviteRegistrationEnabled && !inviteCodeValue?.trim())
+            }
             onWeChatLogin={hasWeChatLogin ? handleOpenWeChatDialog : undefined}
             isWeChatLoading={isWeChatSubmitting}
             className='pt-2'
