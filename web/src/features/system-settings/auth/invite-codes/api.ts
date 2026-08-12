@@ -22,8 +22,10 @@ import type {
   ApiResponse,
   GeneratedInviteCode,
   InviteCode,
+  InviteCodeCreateInput,
   InviteCodeInput,
   InviteCodePageResponse,
+  InviteCodeUsagePageResponse,
 } from './types'
 
 export async function getInviteCodes(params: {
@@ -41,13 +43,24 @@ export async function getInviteCodes(params: {
   return response.data
 }
 
-export async function createInviteCode(
-  input: InviteCodeInput
+export async function createInviteCodes(
+  input: InviteCodeCreateInput
 ): Promise<ApiResponse<GeneratedInviteCode[]>> {
-  const response = await api.post('/api/invite_code/', {
-    ...input,
-    count: 1,
-  })
+  const response = await api.post('/api/invite_code/', input)
+  return response.data
+}
+
+export async function getInviteCodeUsages(params: {
+  inviteCodeId: number
+  page: number
+  pageSize: number
+}): Promise<InviteCodeUsagePageResponse> {
+  const response = await api.get(
+    `/api/invite_code/${params.inviteCodeId}/usages`,
+    {
+      params: { p: params.page, page_size: params.pageSize },
+    }
+  )
   return response.data
 }
 

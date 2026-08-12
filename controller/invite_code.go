@@ -2,6 +2,7 @@ package controller
 
 import (
 	"errors"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -32,6 +33,29 @@ type updateInviteCodeRequest struct {
 	ExpiredTime int64  `json:"expired_time"`
 }
 
+type validateInviteCodeRequest struct {
+	InviteCode string `json:"invite_code"`
+}
+
+func ValidateInviteCode(c *gin.Context) {
+	var request validateInviteCodeRequest
+	if err := common.DecodeJson(c.Request.Body, &request); err != nil {
+		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+		return
+	}
+	codeHash, err := model.HashInviteCode(request.InviteCode)
+	if err == nil {
+		err = model.ValidateInviteCodeHash(codeHash)
+	}
+	if err != nil {
+		if !respondInviteCodeError(c, err) {
+			common.ApiError(c, err)
+		}
+		return
+	}
+	common.ApiSuccess(c, nil)
+}
+
 func GetInviteCodes(c *gin.Context) {
 	pageInfo := common.GetPageQuery(c)
 	inviteCodes, total, err := model.GetInviteCodes(c.Query("keyword"), pageInfo.GetStartIdx(), pageInfo.GetPageSize())
@@ -41,6 +65,23 @@ func GetInviteCodes(c *gin.Context) {
 	}
 	pageInfo.SetTotal(int(total))
 	pageInfo.SetItems(inviteCodes)
+	common.ApiSuccess(c, pageInfo)
+}
+
+func GetInviteCodeUsages(c *gin.Context) {
+	inviteCodeId, err := strconv.Atoi(c.Param("id"))
+	if err != nil || inviteCodeId <= 0 {
+		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+		return
+	}
+	pageInfo := common.GetPageQuery(c)
+	usages, total, err := model.GetInviteCodeUsages(inviteCodeId, pageInfo.GetStartIdx(), pageInfo.GetPageSize())
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	pageInfo.SetTotal(int(total))
+	pageInfo.SetItems(usages)
 	common.ApiSuccess(c, pageInfo)
 }
 

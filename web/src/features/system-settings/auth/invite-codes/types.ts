@@ -20,6 +20,8 @@ For commercial licensing, please contact support@quantumnous.com
 export type InviteCode = {
   id: number
   code_prefix: string
+  code: string
+  code_available: boolean
   name: string
   status: number
   max_uses: number
@@ -41,6 +43,20 @@ export type InviteCodeInput = {
   expired_time: number
 }
 
+export type InviteCodeCreateInput = InviteCodeInput & {
+  count: number
+}
+
+export type InviteCodeUsage = {
+  id: number
+  invite_code_id: number
+  user_id: number
+  username: string
+  display_name: string
+  used_time: number
+  registration_method: string
+}
+
 export type ApiResponse<T> = {
   success: boolean
   message?: string
@@ -49,6 +65,13 @@ export type ApiResponse<T> = {
 
 export type InviteCodePageResponse = ApiResponse<{
   items: InviteCode[]
+  total: number
+  page: number
+  page_size: number
+}>
+
+export type InviteCodeUsagePageResponse = ApiResponse<{
+  items: InviteCodeUsage[]
   total: number
   page: number
   page_size: number

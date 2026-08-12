@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { zodResolver } from '@hookform/resolvers/zod'
 import { Loader2 } from 'lucide-react'
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -38,7 +38,11 @@ import {
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { register, wechatLoginByCode } from '@/features/auth/api'
+import {
+  register,
+  validateInvitationCode,
+  wechatLoginByCode,
+} from '@/features/auth/api'
 import { LegalConsent } from '@/features/auth/components/legal-consent'
 import { OAuthProviders } from '@/features/auth/components/oauth-providers'
 import { registerFormSchema } from '@/features/auth/constants'
@@ -57,6 +61,8 @@ import { isAuthBundle } from '@/lib/api'
 import { getServerErrorMessageKey } from '@/lib/server-error-message'
 import { cn } from '@/lib/utils'
 
+type InviteAction = (inviteCode: string) => void | Promise<void>
+
 export function SignUpForm({
   className,
   ...props
@@ -68,6 +74,10 @@ export function SignUpForm({
   const [wechatCode, setWeChatCode] = useState('')
   const [isWeChatDialogOpen, setIsWeChatDialogOpen] = useState(false)
   const [isWeChatSubmitting, setIsWeChatSubmitting] = useState(false)
+  const [isInviteDialogOpen, setIsInviteDialogOpen] = useState(false)
+  const [inviteDialogCode, setInviteDialogCode] = useState('')
+  const [isInviteValidating, setIsInviteValidating] = useState(false)
+  const pendingInviteActionRef = useRef<InviteAction | null>(null)
   const [turnstileWidgetKey, setTurnstileWidgetKey] = useState(0)
   const legalConsentErrorMessage = t('Please agree to the legal terms first')
 
@@ -153,6 +163,86 @@ export function SignUpForm({
     }
   }, [form])
 
+  const requestInvitationCode = (action: InviteAction) => {
+    const existingCode = form.getValues('inviteCode')?.trim() || ''
+    if (!inviteRegistrationEnabled || existingCode) {
+      void action(existingCode)
+      return
+    }
+    pendingInviteActionRef.current = action
+    setInviteDialogCode('')
+    setIsInviteDialogOpen(true)
+  }
+
+  const handleInviteDialogChange = (open: boolean) => {
+    setIsInviteDialogOpen(open)
+    if (!open) {
+      pendingInviteActionRef.current = null
+      setInviteDialogCode('')
+      setIsInviteValidating(false)
+    }
+  }
+
+  async function handleInviteDialogContinue() {
+    const inviteCode = inviteDialogCode.trim()
+    if (!inviteCode) {
+      toast.error(t('Please enter an invitation code'))
+      return
+    }
+
+    setIsInviteValidating(true)
+    try {
+      const result = await validateInvitationCode(inviteCode)
+      if (!result?.success) {
+        toast.error(result?.message || t('Invitation code is unavailable'))
+        return
+      }
+      form.setValue('inviteCode', inviteCode)
+      saveInvitationCode(inviteCode)
+      const pendingAction = pendingInviteActionRef.current
+      pendingInviteActionRef.current = null
+      setIsInviteDialogOpen(false)
+      setInviteDialogCode('')
+      if (pendingAction) {
+        await pendingAction(inviteCode)
+      }
+    } catch {
+      toast.error(t('Failed to validate invitation code'))
+    } finally {
+      setIsInviteValidating(false)
+    }
+  }
+
+  async function submitRegistration(
+    data: z.infer<typeof registerFormSchema>,
+    inviteCode: string
+  ) {
+    setIsLoading(true)
+    try {
+      const res = await register({
+        username: data.username,
+        password: data.password,
+        email: data.email || undefined,
+        verification_code: verificationCode || undefined,
+        aff_code: getAffiliateCode(),
+        invite_code: inviteCode || undefined,
+        turnstile: turnstileToken,
+      })
+
+      if (res?.success) {
+        clearInvitationCode()
+        toast.success(t('Account created! Please sign in'))
+        redirectToLogin()
+      } else {
+        toast.error(res?.message || t('Failed to create account'))
+      }
+    } catch {
+      // Errors are handled by global interceptor
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
   async function onSubmit(data: z.infer<typeof registerFormSchema>) {
     if (requiresLegalConsent && !agreedToLegal) {
       toast.error(legalConsentErrorMessage)
@@ -174,36 +264,24 @@ export function SignUpForm({
     if (!validateTurnstile()) return
 
     if (inviteRegistrationEnabled && !data.inviteCode?.trim()) {
-      form.setError('inviteCode', {
-        message: t('Please enter an invitation code'),
-      })
+      requestInvitationCode((inviteCode) =>
+        submitRegistration(data, inviteCode)
+      )
       return
     }
 
-    setIsLoading(true)
-    try {
-      const res = await register({
-        username: data.username,
-        password: data.password,
-        email: data.email || undefined,
-        verification_code: verificationCode || undefined,
-        aff_code: getAffiliateCode(),
-        invite_code: data.inviteCode?.trim() || undefined,
-        turnstile: turnstileToken,
-      })
+    await submitRegistration(data, data.inviteCode?.trim() || '')
+  }
 
-      if (res?.success) {
-        clearInvitationCode()
-        toast.success(t('Account created! Please sign in'))
-        redirectToLogin()
-      } else {
-        toast.error(res?.message || t('Failed to create account'))
-      }
-    } catch {
-      // Errors are handled by global interceptor
-    } finally {
-      setIsLoading(false)
+  const handleBeforeProviderLogin = (
+    provider: string,
+    continueLogin: () => void
+  ) => {
+    if (provider === 'telegram') {
+      continueLogin()
+      return
     }
+    requestInvitationCode(() => continueLogin())
   }
 
   async function handleSendVerificationCode() {
@@ -319,33 +397,6 @@ export function SignUpForm({
           )}
         />
 
-        {inviteRegistrationEnabled && (
-          <FormField
-            control={form.control}
-            name='inviteCode'
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>{t('Invitation Code')}</FormLabel>
-                <FormControl>
-                  <Input
-                    {...field}
-                    value={field.value ?? ''}
-                    placeholder={t('Enter your invitation code')}
-                    autoComplete='one-time-code'
-                    autoCapitalize='characters'
-                    spellCheck={false}
-                    onChange={(event) => {
-                      field.onChange(event)
-                      saveInvitationCode(event.target.value)
-                    }}
-                  />
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-        )}
-
         {/* Email Verification Section */}
         {emailVerificationRequired && (
           <>
@@ -422,7 +473,6 @@ export function SignUpForm({
           disabled={
             isLoading ||
             (requiresLegalConsent && !agreedToLegal) ||
-            (inviteRegistrationEnabled && !inviteCodeValue?.trim()) ||
             !turnstileReady
           }
         >
@@ -433,17 +483,70 @@ export function SignUpForm({
         {oauthRegisterEnabled && (
           <OAuthProviders
             status={status}
-            disabled={
-              isLoading ||
-              (requiresLegalConsent && !agreedToLegal) ||
-              (inviteRegistrationEnabled && !inviteCodeValue?.trim())
-            }
+            disabled={isLoading || (requiresLegalConsent && !agreedToLegal)}
+            beforeProviderLogin={handleBeforeProviderLogin}
             onWeChatLogin={hasWeChatLogin ? handleOpenWeChatDialog : undefined}
             isWeChatLoading={isWeChatSubmitting}
             className='pt-2'
           />
         )}
       </form>
+
+      <Dialog
+        open={isInviteDialogOpen}
+        onOpenChange={handleInviteDialogChange}
+        title={t('Invitation Code Required')}
+        description={t(
+          'Enter a valid invitation code before continuing registration.'
+        )}
+        contentClassName='max-w-sm'
+        contentHeight='auto'
+        footer={
+          <>
+            <Button
+              type='button'
+              variant='outline'
+              disabled={isInviteValidating}
+              onClick={() => handleInviteDialogChange(false)}
+            >
+              {t('Cancel')}
+            </Button>
+            <Button
+              type='button'
+              className='gap-2'
+              disabled={isInviteValidating || !inviteDialogCode.trim()}
+              onClick={() => void handleInviteDialogContinue()}
+            >
+              {isInviteValidating ? (
+                <Loader2 className='h-4 w-4 animate-spin' />
+              ) : null}
+              {t('Continue')}
+            </Button>
+          </>
+        }
+      >
+        <div className='grid gap-2'>
+          <Label htmlFor='registration-invite-code'>
+            {t('Invitation Code')}
+          </Label>
+          <Input
+            id='registration-invite-code'
+            value={inviteDialogCode}
+            onChange={(event) => setInviteDialogCode(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' && inviteDialogCode.trim()) {
+                event.preventDefault()
+                void handleInviteDialogContinue()
+              }
+            }}
+            placeholder={t('Enter your invitation code')}
+            autoComplete='one-time-code'
+            autoCapitalize='characters'
+            spellCheck={false}
+            autoFocus
+          />
+        </div>
+      </Dialog>
 
       {hasWeChatLogin && (
         <Dialog

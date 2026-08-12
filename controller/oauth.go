@@ -65,6 +65,14 @@ func GenerateOAuthCode(c *gin.Context) {
 			}
 			return
 		}
+		if common.InviteRegistrationEnabled {
+			if err := model.ValidateInviteCodeHash(inviteCodeHash); err != nil {
+				if !respondInviteCodeError(c, err) {
+					common.ApiError(c, err)
+				}
+				return
+			}
+		}
 	}
 	userID := 0
 	sessionID := ""

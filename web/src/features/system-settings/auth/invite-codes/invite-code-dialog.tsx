@@ -29,7 +29,8 @@ import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
 
-import { createInviteCode, updateInviteCode } from './api'
+import { createInviteCodes, updateInviteCode } from './api'
+import { buildInviteRegistrationLinks } from './invite-code-links'
 import type { GeneratedInviteCode, InviteCode } from './types'
 
 type InviteCodeDialogProps = {
@@ -43,6 +44,7 @@ export function InviteCodeDialog(props: InviteCodeDialogProps) {
   const { t } = useTranslation()
   const { copyToClipboard } = useCopyToClipboard()
   const [name, setName] = useState('')
+  const [count, setCount] = useState(1)
   const [maxUses, setMaxUses] = useState(1)
   const [expiredAt, setExpiredAt] = useState<Date | undefined>()
   const [enabled, setEnabled] = useState(true)
@@ -53,6 +55,7 @@ export function InviteCodeDialog(props: InviteCodeDialogProps) {
   useEffect(() => {
     if (!props.open) return
     setName(props.inviteCode?.name ?? '')
+    setCount(1)
     setMaxUses(props.inviteCode?.max_uses ?? 1)
     setExpiredAt(
       props.inviteCode?.expired_time
@@ -76,6 +79,10 @@ export function InviteCodeDialog(props: InviteCodeDialogProps) {
     event.preventDefault()
     if (!Number.isInteger(maxUses) || maxUses < 1 || maxUses > 100000) {
       toast.error(t('Maximum uses must be between 1 and 100000'))
+      return
+    }
+    if (!isEditing && (!Number.isInteger(count) || count < 1 || count > 100)) {
+      toast.error(t('Generation count must be between 1 and 100'))
       return
     }
     const originalExpiredTime = props.inviteCode?.expired_time ?? 0
@@ -109,7 +116,7 @@ export function InviteCodeDialog(props: InviteCodeDialogProps) {
         }
         return
       }
-      const result = await createInviteCode(input)
+      const result = await createInviteCodes({ ...input, count })
       if (result.success && result.data?.length) {
         setGenerated(result.data)
         props.onSaved()
@@ -121,13 +128,17 @@ export function InviteCodeDialog(props: InviteCodeDialogProps) {
 
   if (generated.length > 0) {
     const codes = generated.map((item) => item.code).join('\n')
+    const registrationLinks = buildInviteRegistrationLinks(
+      window.location.origin,
+      generated.map((item) => item.code)
+    ).join('\n')
     return (
       <Dialog
         open={props.open}
         onOpenChange={handleOpenChange}
         title={t('Invitation Code Created')}
         description={t(
-          'Copy it now. For security, the full invitation code will not be shown again after this dialog is closed.'
+          'These invitation codes will remain visible in the invitation code list.'
         )}
         contentClassName='sm:max-w-lg'
         footer={
@@ -137,6 +148,9 @@ export function InviteCodeDialog(props: InviteCodeDialogProps) {
             </Button>
             <Button onClick={() => void copyToClipboard(codes)}>
               {t('Copy Invitation Code')}
+            </Button>
+            <Button onClick={() => void copyToClipboard(registrationLinks)}>
+              {t('Copy Registration Links')}
             </Button>
           </>
         }
@@ -194,6 +208,22 @@ export function InviteCodeDialog(props: InviteCodeDialogProps) {
             placeholder={t('For example: August early access')}
           />
         </div>
+        {!isEditing ? (
+          <div className='grid gap-2'>
+            <Label htmlFor='invite-code-count'>{t('Generation Count')}</Label>
+            <Input
+              id='invite-code-count'
+              type='number'
+              min={1}
+              max={100}
+              value={count}
+              onChange={(event) => setCount(Number(event.target.value))}
+            />
+            <p className='text-muted-foreground text-xs'>
+              {t('Generate between 1 and 100 invitation codes at a time')}
+            </p>
+          </div>
+        ) : null}
         <div className='grid gap-2'>
           <Label htmlFor='invite-code-max-uses'>{t('Maximum Uses')}</Label>
           <Input

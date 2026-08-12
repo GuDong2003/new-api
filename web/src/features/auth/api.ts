@@ -200,6 +200,21 @@ export async function register(payload: RegisterPayload): Promise<ApiResponse> {
   return res.data
 }
 
+export async function validateInvitationCode(
+  inviteCode: string
+): Promise<ApiResponse> {
+  const res = await api.post(
+    '/api/invite_code/validate',
+    { invite_code: inviteCode },
+    {
+      skipAuthRefresh: true,
+      skipBusinessError: true,
+      skipErrorHandler: true,
+    }
+  )
+  return res.data
+}
+
 // Send email verification code
 export async function sendEmailVerification(
   email: string,

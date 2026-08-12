@@ -18,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import {
   Activity,
+  BadgePlus,
   Box,
   CreditCard,
   FileText,
@@ -36,7 +37,7 @@ import {
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
-import { type SidebarData } from '@/components/layout/types'
+import type { SidebarData } from '@/components/layout/types'
 import { ROLE } from '@/lib/roles'
 
 /**
@@ -138,6 +139,11 @@ export function useSidebarData(): SidebarData {
             title: t('Redemption Codes'),
             url: '/redemption-codes',
             icon: Ticket,
+          },
+          {
+            title: t('Invitation Codes'),
+            url: '/invite-codes',
+            icon: BadgePlus,
           },
           {
             title: t('Subscriptions'),

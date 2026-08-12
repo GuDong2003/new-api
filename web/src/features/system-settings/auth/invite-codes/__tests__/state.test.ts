@@ -25,6 +25,8 @@ import type { InviteCode } from '../types.ts'
 const baseInviteCode: InviteCode = {
   id: 1,
   code_prefix: 'NAPI-ABCD',
+  code: 'NAPI-ABCD-EFGH-JKLM-NPQR',
+  code_available: true,
   name: '',
   status: 1,
   max_uses: 2,

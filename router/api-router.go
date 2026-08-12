@@ -269,10 +269,12 @@ func SetApiRouter(router *gin.Engine) {
 			redemptionRoute.DELETE("/invalid", controller.DeleteInvalidRedemption)
 			redemptionRoute.DELETE("/:id", controller.DeleteRedemption)
 		}
+		apiRouter.POST("/invite_code/validate", middleware.CriticalRateLimit(), controller.ValidateInviteCode)
 		inviteCodeRoute := apiRouter.Group("/invite_code")
 		inviteCodeRoute.Use(middleware.AdminAuth())
 		{
 			inviteCodeRoute.GET("/", controller.GetInviteCodes)
+			inviteCodeRoute.GET("/:id/usages", controller.GetInviteCodeUsages)
 			inviteCodeRoute.POST("/", controller.CreateInviteCodes)
 			inviteCodeRoute.PUT("/", controller.UpdateInviteCode)
 		}

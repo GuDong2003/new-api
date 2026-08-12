@@ -1,12 +1,16 @@
 package model
 
 import (
+	"crypto/aes"
+	"crypto/cipher"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"math/big"
+	"os"
 	"strconv"
 	"strings"
 
@@ -18,7 +22,10 @@ const (
 	inviteCodeAlphabet  = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 	inviteCodePartCount = 4
 	inviteCodePartSize  = 4
+	inviteCodeCipherV1  = "v1."
 )
+
+var inviteCodeCipherAAD = []byte("new-api-invite-code-v1")
 
 var (
 	ErrInviteCodeRequired    = errors.New("invitation code is required")
@@ -27,17 +34,20 @@ var (
 )
 
 type InviteCode struct {
-	Id          int    `json:"id"`
-	CodeHash    string `json:"-" gorm:"type:char(64);uniqueIndex"`
-	CodePrefix  string `json:"code_prefix" gorm:"type:varchar(16);index"`
-	Name        string `json:"name" gorm:"type:varchar(191);index"`
-	Status      int    `json:"status" gorm:"index"`
-	MaxUses     int    `json:"max_uses"`
-	UsedCount   int    `json:"used_count"`
-	CreatedBy   int    `json:"created_by" gorm:"index"`
-	CreatedTime int64  `json:"created_time" gorm:"bigint"`
-	UpdatedTime int64  `json:"updated_time" gorm:"bigint"`
-	ExpiredTime int64  `json:"expired_time" gorm:"bigint;index"`
+	Id             int    `json:"id"`
+	CodeHash       string `json:"-" gorm:"type:char(64);uniqueIndex"`
+	CodeCiphertext string `json:"-" gorm:"type:text"`
+	CodePrefix     string `json:"code_prefix" gorm:"type:varchar(16);index"`
+	Code           string `json:"code" gorm:"-:all"`
+	CodeAvailable  bool   `json:"code_available" gorm:"-:all"`
+	Name           string `json:"name" gorm:"type:varchar(191);index"`
+	Status         int    `json:"status" gorm:"index"`
+	MaxUses        int    `json:"max_uses"`
+	UsedCount      int    `json:"used_count"`
+	CreatedBy      int    `json:"created_by" gorm:"index"`
+	CreatedTime    int64  `json:"created_time" gorm:"bigint"`
+	UpdatedTime    int64  `json:"updated_time" gorm:"bigint"`
+	ExpiredTime    int64  `json:"expired_time" gorm:"bigint;index"`
 }
 
 type InviteCodeUsage struct {
@@ -46,6 +56,12 @@ type InviteCodeUsage struct {
 	UserId             int    `json:"user_id" gorm:"uniqueIndex"`
 	UsedTime           int64  `json:"used_time" gorm:"bigint"`
 	RegistrationMethod string `json:"registration_method" gorm:"type:varchar(32)"`
+}
+
+type InviteCodeUsageDetail struct {
+	InviteCodeUsage
+	Username    string `json:"username"`
+	DisplayName string `json:"display_name"`
 }
 
 type GeneratedInviteCode struct {
@@ -100,6 +116,73 @@ func HashInviteCode(rawCode string) (string, error) {
 	return hex.EncodeToString(hash[:]), nil
 }
 
+func inviteCodeCipherKey() [32]byte {
+	secret := strings.TrimSpace(os.Getenv("INVITE_CODE_ENCRYPTION_KEY"))
+	if secret == "" {
+		secret = common.CryptoSecret
+	}
+	return sha256.Sum256([]byte("invite-code-encryption-v1:" + secret))
+}
+
+func encryptInviteCode(rawCode string) (string, error) {
+	key := inviteCodeCipherKey()
+	block, err := aes.NewCipher(key[:])
+	if err != nil {
+		return "", err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", err
+	}
+	nonce := make([]byte, gcm.NonceSize())
+	if _, err := rand.Read(nonce); err != nil {
+		return "", err
+	}
+	sealed := gcm.Seal(nonce, nonce, []byte(rawCode), inviteCodeCipherAAD)
+	return inviteCodeCipherV1 + base64.RawURLEncoding.EncodeToString(sealed), nil
+}
+
+func decryptInviteCode(ciphertext string) (string, error) {
+	if ciphertext == "" {
+		return "", nil
+	}
+	if !strings.HasPrefix(ciphertext, inviteCodeCipherV1) {
+		return "", ErrInviteCodeInvalid
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(strings.TrimPrefix(ciphertext, inviteCodeCipherV1))
+	if err != nil {
+		return "", err
+	}
+	key := inviteCodeCipherKey()
+	block, err := aes.NewCipher(key[:])
+	if err != nil {
+		return "", err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", err
+	}
+	if len(payload) < gcm.NonceSize() {
+		return "", ErrInviteCodeInvalid
+	}
+	nonce, encryptedCode := payload[:gcm.NonceSize()], payload[gcm.NonceSize():]
+	plaintext, err := gcm.Open(nil, nonce, encryptedCode, inviteCodeCipherAAD)
+	if err != nil {
+		return "", err
+	}
+	return normalizeInviteCode(string(plaintext))
+}
+
+func hydrateInviteCode(inviteCode *InviteCode) error {
+	code, err := decryptInviteCode(inviteCode.CodeCiphertext)
+	if err != nil {
+		return err
+	}
+	inviteCode.Code = code
+	inviteCode.CodeAvailable = code != ""
+	return nil
+}
+
 func CreateInviteCodes(createdBy int, name string, count int, maxUses int, expiredTime int64) ([]GeneratedInviteCode, error) {
 	if createdBy <= 0 || count <= 0 || maxUses <= 0 {
 		return nil, ErrInviteCodeInvalid
@@ -115,17 +198,24 @@ func CreateInviteCodes(createdBy int, name string, count int, maxUses int, expir
 			if err != nil {
 				return err
 			}
+			codeCiphertext, err := encryptInviteCode(rawCode)
+			if err != nil {
+				return err
+			}
 			now := common.GetTimestamp()
 			inviteCode := &InviteCode{
-				CodeHash:    codeHash,
-				CodePrefix:  rawCode[:9],
-				Name:        strings.TrimSpace(name),
-				Status:      common.InviteCodeStatusEnabled,
-				MaxUses:     maxUses,
-				CreatedBy:   createdBy,
-				CreatedTime: now,
-				UpdatedTime: now,
-				ExpiredTime: expiredTime,
+				CodeHash:       codeHash,
+				CodeCiphertext: codeCiphertext,
+				CodePrefix:     rawCode[:9],
+				Code:           rawCode,
+				CodeAvailable:  true,
+				Name:           strings.TrimSpace(name),
+				Status:         common.InviteCodeStatusEnabled,
+				MaxUses:        maxUses,
+				CreatedBy:      createdBy,
+				CreatedTime:    now,
+				UpdatedTime:    now,
+				ExpiredTime:    expiredTime,
 			}
 			if err := tx.Create(inviteCode).Error; err != nil {
 				return err
@@ -141,8 +231,11 @@ func GetInviteCodes(keyword string, startIdx int, num int) ([]*InviteCode, int64
 	query := DB.Model(&InviteCode{})
 	keyword = strings.TrimSpace(keyword)
 	if keyword != "" {
+		codeHash, codeHashErr := HashInviteCode(keyword)
 		if id, err := strconv.Atoi(keyword); err == nil {
 			query = query.Where("id = ? OR name LIKE ? OR code_prefix LIKE ?", id, "%"+keyword+"%", strings.ToUpper(keyword)+"%")
+		} else if codeHashErr == nil {
+			query = query.Where("code_hash = ? OR name LIKE ? OR code_prefix LIKE ?", codeHash, "%"+keyword+"%", strings.ToUpper(keyword)+"%")
 		} else {
 			query = query.Where("name LIKE ? OR code_prefix LIKE ?", "%"+keyword+"%", strings.ToUpper(keyword)+"%")
 		}
@@ -155,7 +248,52 @@ func GetInviteCodes(keyword string, startIdx int, num int) ([]*InviteCode, int64
 	if err := query.Order("id desc").Limit(num).Offset(startIdx).Find(&inviteCodes).Error; err != nil {
 		return nil, 0, err
 	}
+	for _, inviteCode := range inviteCodes {
+		if err := hydrateInviteCode(inviteCode); err != nil {
+			return nil, 0, fmt.Errorf("decrypt invitation code %d: %w", inviteCode.Id, err)
+		}
+	}
 	return inviteCodes, total, nil
+}
+
+func GetInviteCodeUsages(inviteCodeId int, startIdx int, num int) ([]InviteCodeUsageDetail, int64, error) {
+	if inviteCodeId <= 0 {
+		return nil, 0, ErrInviteCodeInvalid
+	}
+	query := DB.Model(&InviteCodeUsage{}).Where("invite_code_id = ?", inviteCodeId)
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	var usages []InviteCodeUsageDetail
+	err := query.
+		Select("invite_code_usages.*, users.username, users.display_name").
+		Joins("LEFT JOIN users ON users.id = invite_code_usages.user_id").
+		Order("invite_code_usages.id desc").
+		Limit(num).
+		Offset(startIdx).
+		Scan(&usages).Error
+	return usages, total, err
+}
+
+func ValidateInviteCodeHash(codeHash string) error {
+	if strings.TrimSpace(codeHash) == "" {
+		return ErrInviteCodeRequired
+	}
+	inviteCode := &InviteCode{}
+	if err := DB.Where("code_hash = ?", codeHash).First(inviteCode).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrInviteCodeUnavailable
+		}
+		return err
+	}
+	now := common.GetTimestamp()
+	if inviteCode.Status != common.InviteCodeStatusEnabled ||
+		inviteCode.UsedCount >= inviteCode.MaxUses ||
+		(inviteCode.ExpiredTime != 0 && inviteCode.ExpiredTime <= now) {
+		return ErrInviteCodeUnavailable
+	}
+	return nil
 }
 
 func UpdateInviteCode(id int, name string, status int, maxUses int, expiredTime int64) (*InviteCode, error) {
@@ -180,7 +318,10 @@ func UpdateInviteCode(id int, name string, status int, maxUses int, expiredTime 
 		if err := tx.Model(inviteCode).Updates(updates).Error; err != nil {
 			return err
 		}
-		return tx.First(inviteCode, id).Error
+		if err := tx.First(inviteCode, id).Error; err != nil {
+			return err
+		}
+		return hydrateInviteCode(inviteCode)
 	})
 	return inviteCode, err
 }
