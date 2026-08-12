@@ -29,6 +29,7 @@ import {
   buildOIDCOAuthUrl,
   buildLinuxDOOAuthUrl,
 } from '../lib/oauth'
+import { saveOAuthInvitationForState } from '../lib/storage'
 import { pickTelegramAuthorization } from '../lib/telegram-login'
 import type { SystemStatus, CustomOAuthProviderInfo } from '../types'
 import { useAuthRedirect } from './use-auth-redirect'
@@ -38,7 +39,8 @@ import { useAuthRedirect } from './use-auth-redirect'
  */
 export function useOAuthLogin(
   status: SystemStatus | null,
-  redirectTo?: string
+  redirectTo?: string,
+  registrationInviteCode = ''
 ) {
   const { t } = useTranslation()
   const { handleLoginSuccess } = useAuthRedirect()
@@ -90,6 +92,7 @@ export function useOAuthLogin(
     try {
       await resetSession()
       const state = await createOAuthFlow('github', 'login')
+      saveOAuthInvitationForState(state, registrationInviteCode)
 
       const url = buildGitHubOAuthUrl(status.github_client_id, state)
       window.open(url, '_self')
@@ -111,6 +114,7 @@ export function useOAuthLogin(
     try {
       await resetSession()
       const state = await createOAuthFlow('discord', 'login')
+      saveOAuthInvitationForState(state, registrationInviteCode)
 
       const url = buildDiscordOAuthUrl(status.discord_client_id, state)
       window.open(url, '_self')
@@ -128,6 +132,7 @@ export function useOAuthLogin(
     try {
       await resetSession()
       const state = await createOAuthFlow('oidc', 'login')
+      saveOAuthInvitationForState(state, registrationInviteCode)
 
       const url = buildOIDCOAuthUrl(
         status.oidc_authorization_endpoint,
@@ -149,6 +154,7 @@ export function useOAuthLogin(
     try {
       await resetSession()
       const state = await createOAuthFlow('linuxdo', 'login')
+      saveOAuthInvitationForState(state, registrationInviteCode)
 
       const url = buildLinuxDOOAuthUrl(status.linuxdo_client_id, state)
       window.open(url, '_self')
@@ -210,6 +216,7 @@ export function useOAuthLogin(
     try {
       await resetSession()
       const state = await createOAuthFlow(provider.slug, 'login')
+      saveOAuthInvitationForState(state, registrationInviteCode)
 
       const redirectUri = `${window.location.origin}/oauth/${provider.slug}`
       const url = new URL(provider.authorization_endpoint)

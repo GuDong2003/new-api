@@ -27,6 +27,7 @@ For commercial licensing, please contact support@quantumnous.com
 const STORAGE_KEYS = {
   AFFILIATE: 'aff',
   INVITATION: 'invite',
+  OAUTH_INVITATION: 'oauth-registration-invite',
   STATUS: 'status',
 } as const
 
@@ -61,36 +62,53 @@ export function saveAffiliateCode(code: string): void {
   }
 }
 
-export function getInvitationCode(): string {
-  if (typeof window === 'undefined') return ''
-  try {
-    return window.sessionStorage.getItem(STORAGE_KEYS.INVITATION) ?? ''
-  } catch (error) {
-    // eslint-disable-next-line no-console
-    console.error('Failed to get invitation code:', error)
-    return ''
-  }
-}
-
-export function saveInvitationCode(code: string): void {
+export function saveOAuthInvitationForState(state: string, code: string): void {
   if (typeof window === 'undefined') return
   try {
+    const normalizedState = state.trim()
     const normalizedCode = code.trim()
-    if (normalizedCode) {
-      window.sessionStorage.setItem(STORAGE_KEYS.INVITATION, normalizedCode)
+    if (normalizedState && normalizedCode) {
+      window.sessionStorage.setItem(
+        STORAGE_KEYS.OAUTH_INVITATION,
+        JSON.stringify({ state: normalizedState, code: normalizedCode })
+      )
     } else {
-      window.sessionStorage.removeItem(STORAGE_KEYS.INVITATION)
+      window.sessionStorage.removeItem(STORAGE_KEYS.OAUTH_INVITATION)
     }
   } catch (error) {
     // eslint-disable-next-line no-console
-    console.error('Failed to save invitation code:', error)
+    console.error('Failed to save OAuth invitation code:', error)
   }
+}
+
+export function takeOAuthInvitationForState(state: string): string {
+  if (typeof window === 'undefined') return ''
+  try {
+    const rawValue = window.sessionStorage.getItem(
+      STORAGE_KEYS.OAUTH_INVITATION
+    )
+    window.sessionStorage.removeItem(STORAGE_KEYS.OAUTH_INVITATION)
+    if (!rawValue) return ''
+    const value = JSON.parse(rawValue) as { state?: unknown; code?: unknown }
+    if (
+      value.state === state &&
+      typeof value.code === 'string' &&
+      value.code.trim()
+    ) {
+      return value.code.trim()
+    }
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error('Failed to take OAuth invitation code:', error)
+  }
+  return ''
 }
 
 export function clearInvitationCode(): void {
   if (typeof window === 'undefined') return
   try {
     window.sessionStorage.removeItem(STORAGE_KEYS.INVITATION)
+    window.sessionStorage.removeItem(STORAGE_KEYS.OAUTH_INVITATION)
   } catch (error) {
     // eslint-disable-next-line no-console
     console.error('Failed to clear invitation code:', error)

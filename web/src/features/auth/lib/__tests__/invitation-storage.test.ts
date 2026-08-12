@@ -21,8 +21,8 @@ import { afterEach, describe, test } from 'node:test'
 
 import {
   clearInvitationCode,
-  getInvitationCode,
-  saveInvitationCode,
+  saveOAuthInvitationForState,
+  takeOAuthInvitationForState,
 } from '../storage.ts'
 
 function installWindowStorage() {
@@ -41,6 +41,7 @@ function installWindowStorage() {
     value: { sessionStorage: localStorage },
     configurable: true,
   })
+  return localStorage
 }
 
 afterEach(() => {
@@ -48,23 +49,36 @@ afterEach(() => {
 })
 
 describe('invitation code storage', () => {
-  test('trims and persists a code for password and OAuth registration', () => {
+  test('returns a trimmed code once for its matching OAuth state', () => {
     installWindowStorage()
 
-    saveInvitationCode('  NAPI-ABCD-EFGH-JKLM-NPQR  ')
+    saveOAuthInvitationForState('state-a', '  NAPI-ABCD-EFGH-JKLM-NPQR  ')
 
-    assert.equal(getInvitationCode(), 'NAPI-ABCD-EFGH-JKLM-NPQR')
+    assert.equal(
+      takeOAuthInvitationForState('state-a'),
+      'NAPI-ABCD-EFGH-JKLM-NPQR'
+    )
+    assert.equal(takeOAuthInvitationForState('state-a'), '')
   })
 
-  test('empty input and successful authentication clear stale codes', () => {
+  test('a different OAuth state cannot inherit a stale code', () => {
     installWindowStorage()
-    saveInvitationCode('NAPI-ABCD-EFGH-JKLM-NPQR')
+    saveOAuthInvitationForState('state-a', 'NAPI-ABCD-EFGH-JKLM-NPQR')
 
-    saveInvitationCode('  ')
-    assert.equal(getInvitationCode(), '')
+    assert.equal(takeOAuthInvitationForState('state-b'), '')
+    assert.equal(takeOAuthInvitationForState('state-a'), '')
+  })
 
-    saveInvitationCode('NAPI-ABCD-EFGH-JKLM-NPQR')
+  test('empty input and successful authentication clear all invite state', () => {
+    const storage = installWindowStorage()
+    storage.setItem('invite', 'legacy-code')
+    saveOAuthInvitationForState('state-a', 'NAPI-ABCD-EFGH-JKLM-NPQR')
+
     clearInvitationCode()
-    assert.equal(getInvitationCode(), '')
+    assert.equal(storage.getItem('invite'), null)
+    assert.equal(takeOAuthInvitationForState('state-a'), '')
+
+    saveOAuthInvitationForState('state-a', '  ')
+    assert.equal(takeOAuthInvitationForState('state-a'), '')
   })
 })

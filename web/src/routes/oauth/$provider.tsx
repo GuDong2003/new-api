@@ -24,9 +24,15 @@ import {
 } from '@tanstack/react-router'
 import type { AxiosRequestConfig } from 'axios'
 import i18next from 'i18next'
-import { useEffect } from 'react'
+import { Loader2 } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 
+import { Dialog } from '@/components/dialog'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { completeOAuthRegistration } from '@/features/auth/api'
 import { OAuthCallbackScreen } from '@/features/auth/components/oauth-callback-screen'
 import {
   OAUTH_BIND_CALLBACK_MESSAGE,
@@ -42,6 +48,8 @@ import {
   getOAuthSessionStorage,
   resolveOAuthCallbackMode,
 } from '@/features/auth/lib/oauth-callback-mode'
+import { takeOAuthInvitationForState } from '@/features/auth/lib/storage'
+import { isPendingOAuthRegistration } from '@/features/auth/types'
 import { api, applyAuthBundle, isAuthBundle } from '@/lib/api'
 import { getServerErrorMessageKey } from '@/lib/server-error-message'
 
@@ -59,6 +67,11 @@ interface OAuthBindingResult {
 
 function OAuthCallback() {
   const navigate = useNavigate()
+  const loginCallbackHandledRef = useRef(false)
+  const [registrationToken, setRegistrationToken] = useState('')
+  const [inviteCode, setInviteCode] = useState('')
+  const [isCompletingRegistration, setIsCompletingRegistration] =
+    useState(false)
   const { provider } = useParams({ from: '/oauth/$provider' }) as {
     provider: string
   }
@@ -84,6 +97,62 @@ function OAuthCallback() {
       opener: window.opener,
       storage: getOAuthSessionStorage(window),
     })
+  }
+
+  const safeNavigate = useCallback(
+    (target: unknown, fallback = '/dashboard') => {
+      const href =
+        sanitizeAuthRedirect(target, window.location.origin) ?? fallback
+      void navigate({ href, replace: true })
+    },
+    [navigate]
+  )
+
+  const handleInvitationDialogChange = (open: boolean) => {
+    if (open) return
+    setRegistrationToken('')
+    setInviteCode('')
+    safeNavigate('/sign-in', '/sign-in')
+  }
+
+  const handleCompleteRegistration = async () => {
+    const normalizedInviteCode = inviteCode.trim()
+    if (!registrationToken || !normalizedInviteCode) {
+      toast.error(i18next.t('Please enter an invitation code'))
+      return
+    }
+    setIsCompletingRegistration(true)
+    try {
+      const response = await completeOAuthRegistration(
+        registrationToken,
+        normalizedInviteCode
+      )
+      if (response?.success && isAuthBundle(response.data)) {
+        applyAuthBundle(response.data)
+        setRegistrationToken('')
+        safeNavigate(search.redirect)
+        toast.success(i18next.t('Signed in successfully!'))
+        return
+      }
+      const messageKey = getServerErrorMessageKey(response)
+      toast.error(
+        messageKey
+          ? i18next.t(messageKey)
+          : response?.message || i18next.t('OAuth failed')
+      )
+    } catch (error: unknown) {
+      const messageKey = getServerErrorMessageKey(error)
+      const responseMessage = (
+        error as { response?: { data?: { message?: string } } }
+      ).response?.data?.message
+      toast.error(
+        messageKey
+          ? i18next.t(messageKey)
+          : responseMessage || i18next.t('OAuth failed')
+      )
+    } finally {
+      setIsCompletingRegistration(false)
+    }
   }
 
   useEffect(() => {
@@ -174,11 +243,9 @@ function OAuthCallback() {
       }
     }
 
-    const safeNavigate = (target: unknown, fallback = '/dashboard') => {
-      const href =
-        sanitizeAuthRedirect(target, window.location.origin) ?? fallback
-      void navigate({ href, replace: true })
-    }
+    if (loginCallbackHandledRef.current) return
+    loginCallbackHandledRef.current = true
+    const callbackInvitationCode = takeOAuthInvitationForState(state)
 
     if (!code && !search.error) {
       toast.error(i18next.t('Missing code'))
@@ -202,6 +269,14 @@ function OAuthCallback() {
           applyAuthBundle(response.data.data)
           safeNavigate(search.redirect)
           toast.success(i18next.t('Signed in successfully!'))
+          return
+        }
+        if (
+          response.data?.success &&
+          isPendingOAuthRegistration(response.data?.data)
+        ) {
+          setInviteCode(callbackInvitationCode)
+          setRegistrationToken(response.data.data.registration_token)
           return
         }
         const messageKey = getServerErrorMessageKey(response.data)
@@ -229,8 +304,8 @@ function OAuthCallback() {
   }, [
     callbackState,
     mode,
-    navigate,
     provider,
+    safeNavigate,
     search.code,
     search.error,
     search.error_code,
@@ -240,7 +315,66 @@ function OAuthCallback() {
     search.telegram_bind,
   ])
 
-  return <OAuthCallbackScreen provider={provider} mode={mode} />
+  return (
+    <>
+      <OAuthCallbackScreen provider={provider} mode={mode} />
+      <Dialog
+        open={Boolean(registrationToken)}
+        onOpenChange={handleInvitationDialogChange}
+        title={i18next.t('Invitation Code Required')}
+        description={i18next.t(
+          'Enter a valid invitation code before continuing registration.'
+        )}
+        contentClassName='max-w-sm'
+        contentHeight='auto'
+        footer={
+          <>
+            <Button
+              type='button'
+              variant='outline'
+              disabled={isCompletingRegistration}
+              onClick={() => handleInvitationDialogChange(false)}
+            >
+              {i18next.t('Cancel')}
+            </Button>
+            <Button
+              type='button'
+              className='gap-2'
+              disabled={isCompletingRegistration || !inviteCode.trim()}
+              onClick={() => void handleCompleteRegistration()}
+            >
+              {isCompletingRegistration ? (
+                <Loader2 className='h-4 w-4 animate-spin' />
+              ) : null}
+              {i18next.t('Continue')}
+            </Button>
+          </>
+        }
+      >
+        <div className='grid gap-2'>
+          <Label htmlFor='oauth-registration-invite-code'>
+            {i18next.t('Invitation Code')}
+          </Label>
+          <Input
+            id='oauth-registration-invite-code'
+            value={inviteCode}
+            onChange={(event) => setInviteCode(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' && inviteCode.trim()) {
+                event.preventDefault()
+                void handleCompleteRegistration()
+              }
+            }}
+            placeholder={i18next.t('Enter your invitation code')}
+            autoComplete='one-time-code'
+            autoCapitalize='characters'
+            spellCheck={false}
+            autoFocus
+          />
+        </div>
+      </Dialog>
+    </>
+  )
 }
 
 export const Route = createFileRoute('/oauth/$provider')({

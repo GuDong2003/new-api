@@ -29,7 +29,7 @@ func setupInviteRegistrationTest(t *testing.T) {
 
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&model.User{}, &model.InviteCode{}, &model.InviteCodeUsage{}))
+	require.NoError(t, db.AutoMigrate(&model.User{}, &model.InviteCode{}, &model.InviteCodeUsage{}, &model.AuthFlow{}))
 	model.DB = db
 	common.SetMainDatabaseType(common.DatabaseTypeSQLite)
 	common.RegisterEnabled = true
@@ -124,4 +124,70 @@ func TestOAuthNewAccountRequiresAndConsumesInviteCode(t *testing.T) {
 	require.NoError(t, model.DB.First(&usage).Error)
 	assert.Equal(t, user.Id, usage.UserId)
 	assert.Equal(t, "oauth:flow_", usage.RegistrationMethod)
+}
+
+func TestPendingOAuthRegistrationConsumesFlowAndInviteAtomically(t *testing.T) {
+	setupInviteRegistrationTest(t)
+	provider := &authFlowTestOAuthProvider{}
+	oauth.Register("invite-flow-test", provider)
+	t.Cleanup(func() { oauth.Unregister("invite-flow-test") })
+	oauthUser := &oauth.OAuthUser{
+		ProviderUserID: "pending-oauth-user",
+		Username:       "pendingoauth",
+		DisplayName:    "Pending OAuth",
+		Extra:          map[string]any{},
+	}
+	registrationToken, _, err := createPendingOAuthRegistration("invite-flow-test", oauthUser, "")
+	require.NoError(t, err)
+
+	var userCount int64
+	require.NoError(t, model.DB.Model(&model.User{}).Count(&userCount).Error)
+	assert.Zero(t, userCount)
+
+	_, _, err = completePendingOAuthRegistration(registrationToken, "NAPI-AAAA-BBBB-CCCC-DDDD")
+	assert.ErrorIs(t, err, model.ErrInviteCodeUnavailable)
+	_, err = model.GetAuthFlow(registrationToken, model.AuthFlowMatch{
+		Purpose:  model.AuthFlowPurposeOAuthRegistration,
+		Provider: "invite-flow-test",
+		Intent:   model.AuthFlowIntentLogin,
+	})
+	require.NoError(t, err, "a rejected invite must not consume the registration flow")
+	require.NoError(t, model.DB.Model(&model.User{}).Count(&userCount).Error)
+	assert.Zero(t, userCount)
+
+	generated, err := model.CreateInviteCodes(1, "pending oauth registration", 1, 1, 0)
+	require.NoError(t, err)
+	user, providerName, err := completePendingOAuthRegistration(registrationToken, generated[0].Code)
+	require.NoError(t, err)
+	assert.Equal(t, "invite-flow-test", providerName)
+	assert.Equal(t, "pendingoauth", user.Username)
+
+	_, _, err = completePendingOAuthRegistration(registrationToken, generated[0].Code)
+	assert.ErrorIs(t, err, model.ErrAuthFlowConsumed)
+	var usage model.InviteCodeUsage
+	require.NoError(t, model.DB.First(&usage).Error)
+	assert.Equal(t, user.Id, usage.UserId)
+	assert.Equal(t, "oauth:flow_", usage.RegistrationMethod)
+}
+
+func TestPendingWeChatRegistrationDoesNotCreateUserBeforeInvite(t *testing.T) {
+	setupInviteRegistrationTest(t)
+	registrationToken, _, err := createPendingWeChatRegistration("wechat-pending-user")
+	require.NoError(t, err)
+
+	var userCount int64
+	require.NoError(t, model.DB.Model(&model.User{}).Count(&userCount).Error)
+	assert.Zero(t, userCount)
+
+	generated, err := model.CreateInviteCodes(1, "wechat registration", 1, 1, 0)
+	require.NoError(t, err)
+	user, providerName, err := completePendingOAuthRegistration(registrationToken, generated[0].Code)
+	require.NoError(t, err)
+	assert.Equal(t, "wechat", providerName)
+	assert.Equal(t, "wechat-pending-user", user.WeChatId)
+
+	var usage model.InviteCodeUsage
+	require.NoError(t, model.DB.First(&usage).Error)
+	assert.Equal(t, user.Id, usage.UserId)
+	assert.Equal(t, "wechat", usage.RegistrationMethod)
 }

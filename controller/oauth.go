@@ -20,15 +20,27 @@ import (
 const oauthAuthFlowTTL = 10 * time.Minute
 
 type oauthStateRequest struct {
-	Provider   string `json:"provider"`
-	Intent     string `json:"intent"`
-	Aff        string `json:"aff,omitempty"`
-	InviteCode string `json:"invite_code,omitempty"`
+	Provider string `json:"provider"`
+	Intent   string `json:"intent"`
+	Aff      string `json:"aff,omitempty"`
 }
 
 type oauthFlowPayload struct {
+	AffiliateCode string `json:"affiliate_code,omitempty"`
+}
+
+type oauthRegistrationPayload struct {
 	AffiliateCode  string `json:"affiliate_code,omitempty"`
-	InviteCodeHash string `json:"invite_code_hash,omitempty"`
+	ProviderUserID string `json:"provider_user_id"`
+	Username       string `json:"username,omitempty"`
+	DisplayName    string `json:"display_name,omitempty"`
+	Email          string `json:"email,omitempty"`
+	LegacyID       string `json:"legacy_id,omitempty"`
+}
+
+type completeOAuthRegistrationRequest struct {
+	RegistrationToken string `json:"registration_token"`
+	InviteCode        string `json:"invite_code"`
 }
 
 // providerParams returns map with Provider key for i18n templates
@@ -46,33 +58,12 @@ func GenerateOAuthCode(c *gin.Context) {
 	request.Provider = strings.TrimSpace(request.Provider)
 	request.Intent = strings.TrimSpace(request.Intent)
 	request.Aff = strings.TrimSpace(request.Aff)
-	request.InviteCode = strings.TrimSpace(request.InviteCode)
 	if oauth.GetProvider(request.Provider) == nil ||
 		(request.Intent != model.AuthFlowIntentLogin && request.Intent != model.AuthFlowIntentBind) ||
 		len(request.Aff) > 32 ||
-		len(request.InviteCode) > 64 ||
-		(request.Intent == model.AuthFlowIntentBind && (request.Aff != "" || request.InviteCode != "")) {
+		(request.Intent == model.AuthFlowIntentBind && request.Aff != "") {
 		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
 		return
-	}
-	inviteCodeHash := ""
-	if request.InviteCode != "" {
-		var err error
-		inviteCodeHash, err = model.HashInviteCode(request.InviteCode)
-		if err != nil {
-			if !respondInviteCodeError(c, err) {
-				common.ApiError(c, err)
-			}
-			return
-		}
-		if common.InviteRegistrationEnabled {
-			if err := model.ValidateInviteCodeHash(inviteCodeHash); err != nil {
-				if !respondInviteCodeError(c, err) {
-					common.ApiError(c, err)
-				}
-				return
-			}
-		}
 	}
 	userID := 0
 	sessionID := ""
@@ -85,7 +76,7 @@ func GenerateOAuthCode(c *gin.Context) {
 		userID = identity.UserID
 		sessionID = identity.SessionID
 	}
-	payload, err := common.Marshal(oauthFlowPayload{AffiliateCode: request.Aff, InviteCodeHash: inviteCodeHash})
+	payload, err := common.Marshal(oauthFlowPayload{AffiliateCode: request.Aff})
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -216,7 +207,20 @@ func HandleOAuth(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	user, err := findOrCreateOAuthUser(c, provider, oauthUser, payload.AffiliateCode, payload.InviteCodeHash)
+	user, err := findOrCreateOAuthUser(c, provider, oauthUser, payload.AffiliateCode, "")
+	if errors.Is(err, model.ErrInviteCodeRequired) {
+		registrationToken, expiresAt, flowErr := createPendingOAuthRegistration(providerName, oauthUser, payload.AffiliateCode)
+		if flowErr != nil {
+			common.ApiError(c, flowErr)
+			return
+		}
+		common.ApiSuccess(c, gin.H{
+			"require_invite_code": true,
+			"registration_token":  registrationToken,
+			"expires_at":          expiresAt.Unix(),
+		})
+		return
+	}
 	if err != nil {
 		if errors.Is(err, model.ErrEmailAlreadyTaken) {
 			common.ApiErrorI18n(c, i18n.MsgUserEmailAlreadyTaken)
@@ -246,6 +250,131 @@ func HandleOAuth(c *gin.Context) {
 
 	// 9. Setup login
 	setupLogin(user, c)
+}
+
+func createPendingOAuthRegistration(providerName string, oauthUser *oauth.OAuthUser, affiliateCode string) (string, time.Time, error) {
+	if oauthUser == nil || strings.TrimSpace(oauthUser.ProviderUserID) == "" {
+		return "", time.Time{}, model.ErrAuthFlowInvalid
+	}
+	legacyID, _ := oauthUser.Extra["legacy_id"].(string)
+	payload, err := common.Marshal(oauthRegistrationPayload{
+		AffiliateCode:  strings.TrimSpace(affiliateCode),
+		ProviderUserID: strings.TrimSpace(oauthUser.ProviderUserID),
+		Username:       strings.TrimSpace(oauthUser.Username),
+		DisplayName:    strings.TrimSpace(oauthUser.DisplayName),
+		Email:          model.NormalizeEmail(oauthUser.Email),
+		LegacyID:       strings.TrimSpace(legacyID),
+	})
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	expiresAt := time.Now().Add(oauthAuthFlowTTL)
+	registrationToken, _, err := model.CreateAuthFlow(model.AuthFlowCreate{
+		Purpose:   model.AuthFlowPurposeOAuthRegistration,
+		Provider:  providerName,
+		Intent:    model.AuthFlowIntentLogin,
+		Payload:   string(payload),
+		ExpiresAt: expiresAt,
+	})
+	return registrationToken, expiresAt, err
+}
+
+func CompleteOAuthRegistration(c *gin.Context) {
+	var request completeOAuthRegistrationRequest
+	if err := common.DecodeJson(c.Request.Body, &request); err != nil {
+		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+		return
+	}
+	request.RegistrationToken = strings.TrimSpace(request.RegistrationToken)
+	request.InviteCode = strings.TrimSpace(request.InviteCode)
+	if request.RegistrationToken == "" || len(request.RegistrationToken) > 128 || len(request.InviteCode) > 64 {
+		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+		return
+	}
+	user, providerName, err := completePendingOAuthRegistration(request.RegistrationToken, request.InviteCode)
+	if err != nil {
+		switch {
+		case errors.Is(err, model.ErrInviteCodeRequired), errors.Is(err, model.ErrInviteCodeInvalid), errors.Is(err, model.ErrInviteCodeUnavailable):
+			respondInviteCodeError(c, err)
+		case errors.Is(err, model.ErrAuthFlowInvalid), errors.Is(err, model.ErrAuthFlowExpired), errors.Is(err, model.ErrAuthFlowConsumed):
+			common.ApiErrorI18n(c, i18n.MsgOAuthStateInvalid)
+		case errors.As(err, new(*OAuthUserDeletedError)):
+			common.ApiErrorI18n(c, i18n.MsgOAuthUserDeleted)
+		case errors.As(err, new(*OAuthRegistrationDisabledError)):
+			common.ApiErrorI18n(c, i18n.MsgUserRegisterDisabled)
+		case errors.Is(err, model.ErrEmailAlreadyTaken), errors.As(err, new(*OAuthEmailAlreadyTakenError)):
+			common.ApiErrorI18n(c, i18n.MsgUserEmailAlreadyTaken)
+		default:
+			common.ApiError(c, err)
+		}
+		return
+	}
+	c.Set("oauth_registration_provider", providerName)
+	setupLogin(user, c)
+}
+
+func completePendingOAuthRegistration(registrationToken string, inviteCode string) (*model.User, string, error) {
+	pendingFlow, err := model.GetAuthFlow(registrationToken, model.AuthFlowMatch{
+		Purpose: model.AuthFlowPurposeOAuthRegistration,
+		Intent:  model.AuthFlowIntentLogin,
+	})
+	if err != nil {
+		return nil, "", err
+	}
+	if !common.RegisterEnabled {
+		return nil, "", &OAuthRegistrationDisabledError{}
+	}
+	inviteCodeHash, err := model.HashInviteCode(inviteCode)
+	if err != nil {
+		return nil, "", err
+	}
+
+	if pendingFlow.Provider == "wechat" {
+		return completePendingWeChatRegistration(registrationToken, pendingFlow, inviteCodeHash)
+	}
+	provider := oauth.GetProvider(pendingFlow.Provider)
+	if provider == nil || !provider.IsEnabled() {
+		return nil, "", model.ErrAuthFlowInvalid
+	}
+	var payload oauthRegistrationPayload
+	if err := common.UnmarshalJsonStr(pendingFlow.Payload, &payload); err != nil {
+		return nil, "", model.ErrAuthFlowInvalid
+	}
+	oauthUser := &oauth.OAuthUser{
+		ProviderUserID: payload.ProviderUserID,
+		Username:       payload.Username,
+		DisplayName:    payload.DisplayName,
+		Email:          payload.Email,
+		Extra:          map[string]any{},
+	}
+	if payload.LegacyID != "" {
+		oauthUser.Extra["legacy_id"] = payload.LegacyID
+	}
+	if existingUser, found, err := findOAuthUser(provider, oauthUser); err != nil {
+		return nil, "", err
+	} else if found {
+		if _, err := model.ConsumeAuthFlow(registrationToken, model.AuthFlowMatch{
+			Purpose: model.AuthFlowPurposeOAuthRegistration, Provider: pendingFlow.Provider, Intent: model.AuthFlowIntentLogin,
+		}); err != nil {
+			return nil, "", err
+		}
+		return existingUser, pendingFlow.Provider, nil
+	}
+
+	user, inviterId, err := prepareOAuthUser(provider, oauthUser, payload.AffiliateCode)
+	if err != nil {
+		return nil, "", err
+	}
+	_, err = model.ConsumeAuthFlowWithAction(registrationToken, model.AuthFlowMatch{
+		Purpose: model.AuthFlowPurposeOAuthRegistration, Provider: pendingFlow.Provider, Intent: model.AuthFlowIntentLogin,
+	}, func(tx *gorm.DB, _ *model.AuthFlow) error {
+		return createOAuthUserWithTx(tx, provider, oauthUser, user, inviterId, true, inviteCodeHash)
+	})
+	if err != nil {
+		return nil, "", err
+	}
+	user.FinalizeOAuthUserCreation(inviterId)
+	return user, pendingFlow.Provider, nil
 }
 
 // handleOAuthBind handles binding OAuth account to existing user
@@ -321,19 +450,44 @@ func handleOAuthBind(c *gin.Context, provider oauth.Provider, pendingFlow *model
 
 // findOrCreateOAuthUser finds existing user or creates new user
 func findOrCreateOAuthUser(c *gin.Context, provider oauth.Provider, oauthUser *oauth.OAuthUser, affiliateCode string, inviteCodeHash string) (*model.User, error) {
+	user, found, err := findOAuthUser(provider, oauthUser)
+	if err != nil || found {
+		return user, err
+	}
+	if !common.RegisterEnabled {
+		return nil, &OAuthRegistrationDisabledError{}
+	}
+	inviteRequired := common.InviteRegistrationEnabled
+	if inviteRequired && inviteCodeHash == "" {
+		return nil, model.ErrInviteCodeRequired
+	}
+	user, inviterId, err := prepareOAuthUser(provider, oauthUser, affiliateCode)
+	if err != nil {
+		return nil, err
+	}
+	if err := model.DB.Transaction(func(tx *gorm.DB) error {
+		return createOAuthUserWithTx(tx, provider, oauthUser, user, inviterId, inviteRequired, inviteCodeHash)
+	}); err != nil {
+		return nil, err
+	}
+	user.FinalizeOAuthUserCreation(inviterId)
+	return user, nil
+}
+
+func findOAuthUser(provider oauth.Provider, oauthUser *oauth.OAuthUser) (*model.User, bool, error) {
 	user := &model.User{}
 
 	// Check if user already exists with new ID
 	if provider.IsUserIDTaken(oauthUser.ProviderUserID) {
 		err := provider.FillUserByProviderID(user, oauthUser.ProviderUserID)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		// Check if user has been deleted
 		if user.Id == 0 {
-			return nil, &OAuthUserDeletedError{}
+			return nil, false, &OAuthUserDeletedError{}
 		}
-		return user, nil
+		return user, true, nil
 	}
 
 	// Try to find user with legacy ID (for GitHub migration from login to numeric ID)
@@ -341,7 +495,7 @@ func findOrCreateOAuthUser(c *gin.Context, provider oauth.Provider, oauthUser *o
 		if provider.IsUserIDTaken(legacyID) {
 			err := provider.FillUserByProviderID(user, legacyID)
 			if err != nil {
-				return nil, err
+				return nil, false, err
 			}
 			if user.Id != 0 {
 				// Found user with legacy ID, migrate to new ID
@@ -351,22 +505,15 @@ func findOrCreateOAuthUser(c *gin.Context, provider oauth.Provider, oauthUser *o
 					common.SysError(fmt.Sprintf("[OAuth] Failed to migrate user %d: %s", user.Id, err.Error()))
 					// Continue with login even if migration fails
 				}
-				return user, nil
+				return user, true, nil
 			}
 		}
 	}
+	return nil, false, nil
+}
 
-	// User doesn't exist, create new user if registration is enabled
-	if !common.RegisterEnabled {
-		return nil, &OAuthRegistrationDisabledError{}
-	}
-	inviteRequired := common.InviteRegistrationEnabled
-	if inviteRequired && inviteCodeHash == "" {
-		return nil, model.ErrInviteCodeRequired
-	}
-
-	// Set up new user
-	user.Username = provider.GetProviderPrefix() + strconv.Itoa(model.GetMaxUserId()+1)
+func prepareOAuthUser(provider oauth.Provider, oauthUser *oauth.OAuthUser, affiliateCode string) (*model.User, int, error) {
+	user := &model.User{Username: provider.GetProviderPrefix() + strconv.Itoa(model.GetMaxUserId()+1)}
 
 	if oauthUser.Username != "" {
 		if exists, err := model.CheckUserExistOrDeleted(oauthUser.Username, ""); err == nil && !exists {
@@ -388,9 +535,9 @@ func findOrCreateOAuthUser(c *gin.Context, provider oauth.Provider, oauthUser *o
 		user.Email = model.NormalizeEmail(oauthUser.Email)
 		if err := model.EnsureEmailAvailable(user.Email, 0); err != nil {
 			if errors.Is(err, model.ErrEmailAlreadyTaken) {
-				return nil, &OAuthEmailAlreadyTakenError{}
+				return nil, 0, &OAuthEmailAlreadyTakenError{}
 			}
-			return nil, err
+			return nil, 0, err
 		}
 	}
 	user.Role = common.RoleCommonUser
@@ -401,72 +548,42 @@ func findOrCreateOAuthUser(c *gin.Context, provider oauth.Provider, oauthUser *o
 	if affiliateCode != "" {
 		inviterId, _ = model.GetUserIdByAffCode(affiliateCode)
 	}
+	return user, inviterId, nil
+}
 
-	// Use transaction to ensure user creation and OAuth binding are atomic
+func createOAuthUserWithTx(tx *gorm.DB, provider oauth.Provider, oauthUser *oauth.OAuthUser, user *model.User, inviterId int, inviteRequired bool, inviteCodeHash string) error {
 	if genericProvider, ok := provider.(*oauth.GenericOAuthProvider); ok {
-		// Custom provider: create user and binding in a transaction
-		err := model.DB.Transaction(func(tx *gorm.DB) error {
-			// Create user
-			if err := user.InsertWithTx(tx, inviterId); err != nil {
-				return err
-			}
-
-			// Create OAuth binding
-			binding := &model.UserOAuthBinding{
-				UserId:         user.Id,
-				ProviderId:     genericProvider.GetProviderId(),
-				ProviderUserId: oauthUser.ProviderUserID,
-			}
-			if err := model.CreateUserOAuthBindingWithTx(tx, binding); err != nil {
-				return err
-			}
-			if inviteRequired {
-				return model.ConsumeInviteCodeHashWithTx(tx, inviteCodeHash, user.Id, "oauth:"+provider.GetProviderPrefix())
-			}
-
-			return nil
-		})
-		if err != nil {
-			return nil, err
+		if err := user.InsertWithTx(tx, inviterId); err != nil {
+			return err
 		}
-
-		// Perform post-transaction tasks (logs, sidebar config, inviter rewards)
-		user.FinalizeOAuthUserCreation(inviterId)
+		binding := &model.UserOAuthBinding{
+			UserId:         user.Id,
+			ProviderId:     genericProvider.GetProviderId(),
+			ProviderUserId: oauthUser.ProviderUserID,
+		}
+		if err := model.CreateUserOAuthBindingWithTx(tx, binding); err != nil {
+			return err
+		}
 	} else {
-		// Built-in provider: create user and update provider ID in a transaction
-		err := model.DB.Transaction(func(tx *gorm.DB) error {
-			// Create user
-			if err := user.InsertWithTx(tx, inviterId); err != nil {
-				return err
-			}
-
-			// Set the provider user ID on the user model and update
-			provider.SetProviderUserID(user, oauthUser.ProviderUserID)
-			if err := tx.Model(user).Updates(map[string]interface{}{
-				"github_id":   user.GitHubId,
-				"discord_id":  user.DiscordId,
-				"oidc_id":     user.OidcId,
-				"linux_do_id": user.LinuxDOId,
-				"wechat_id":   user.WeChatId,
-				"telegram_id": user.TelegramId,
-			}).Error; err != nil {
-				return err
-			}
-			if inviteRequired {
-				return model.ConsumeInviteCodeHashWithTx(tx, inviteCodeHash, user.Id, "oauth:"+provider.GetProviderPrefix())
-			}
-
-			return nil
-		})
-		if err != nil {
-			return nil, err
+		if err := user.InsertWithTx(tx, inviterId); err != nil {
+			return err
 		}
-
-		// Perform post-transaction tasks
-		user.FinalizeOAuthUserCreation(inviterId)
+		provider.SetProviderUserID(user, oauthUser.ProviderUserID)
+		if err := tx.Model(user).Updates(map[string]interface{}{
+			"github_id":   user.GitHubId,
+			"discord_id":  user.DiscordId,
+			"oidc_id":     user.OidcId,
+			"linux_do_id": user.LinuxDOId,
+			"wechat_id":   user.WeChatId,
+			"telegram_id": user.TelegramId,
+		}).Error; err != nil {
+			return err
+		}
 	}
-
-	return user, nil
+	if inviteRequired {
+		return model.ConsumeInviteCodeHashWithTx(tx, inviteCodeHash, user.Id, "oauth:"+provider.GetProviderPrefix())
+	}
+	return nil
 }
 
 // Error types for OAuth

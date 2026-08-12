@@ -128,6 +128,14 @@ func loginMethodFromContext(c *gin.Context) string {
 		return "passkey"
 	case "/api/oauth/wechat":
 		return "wechat"
+	case "/api/oauth/registration":
+		if provider := c.GetString("oauth_registration_provider"); provider != "" {
+			if provider == "wechat" {
+				return "wechat"
+			}
+			return "oauth:" + provider
+		}
+		return "oauth"
 	case "/api/oauth/telegram/login":
 		return "telegram"
 	case "/api/oauth/:provider":

@@ -40,7 +40,7 @@ type OAuthProvidersProps = {
   onWeChatLogin?: () => void
   isWeChatLoading?: boolean
   redirectTo?: string
-  beforeProviderLogin?: (provider: string, continueLogin: () => void) => void
+  registrationInviteCode?: string
 }
 
 type ProviderButton = {
@@ -58,7 +58,7 @@ export function OAuthProviders({
   onWeChatLogin,
   isWeChatLoading = false,
   redirectTo,
-  beforeProviderLogin,
+  registrationInviteCode,
 }: OAuthProvidersProps) {
   const { t } = useTranslation()
   const {
@@ -75,7 +75,7 @@ export function OAuthProviders({
     isTelegramPending,
     handleTelegramAuthorization,
     setIsTelegramDialogOpen,
-  } = useOAuthLogin(status, redirectTo)
+  } = useOAuthLogin(status, redirectTo, registrationInviteCode)
 
   const providerButtons: ProviderButton[] = []
 
@@ -173,13 +173,7 @@ export function OAuthProviders({
                 variant='outline'
                 type='button'
                 disabled={disabled || isLoading || extraDisabled}
-                onClick={() => {
-                  if (beforeProviderLogin) {
-                    beforeProviderLogin(key, onClick)
-                  } else {
-                    onClick()
-                  }
-                }}
+                onClick={onClick}
                 className='h-11 w-full justify-center gap-2 rounded-lg'
               >
                 {icon}

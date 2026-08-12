@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -90,46 +91,31 @@ func WeChatAuth(c *gin.Context) {
 			return
 		}
 	} else {
-		if common.RegisterEnabled {
-			inviteRequired := common.InviteRegistrationEnabled
-			inviteCodeHash := ""
-			if inviteRequired {
-				inviteCodeHash, err = model.HashInviteCode(c.GetHeader("X-Invite-Code"))
-				if err != nil {
-					if !respondInviteCodeError(c, err) {
-						common.ApiError(c, err)
-					}
-					return
-				}
-			}
-			user.Username = "wechat_" + strconv.Itoa(model.GetMaxUserId()+1)
-			user.DisplayName = "WeChat User"
-			user.Role = common.RoleCommonUser
-			user.Status = common.UserStatusEnabled
-
-			if err := model.DB.Transaction(func(tx *gorm.DB) error {
-				if err := user.InsertWithTx(tx, 0); err != nil {
-					return err
-				}
-				if inviteRequired {
-					return model.ConsumeInviteCodeHashWithTx(tx, inviteCodeHash, user.Id, "wechat")
-				}
-				return nil
-			}); err != nil {
-				if respondInviteCodeError(c, err) {
-					return
-				}
-				c.JSON(http.StatusOK, gin.H{
-					"success": false,
-					"message": err.Error(),
-				})
-				return
-			}
-			user.FinalizeOAuthUserCreation(0)
-		} else {
+		if !common.RegisterEnabled {
 			common.ApiErrorI18n(c, i18n.MsgUserRegisterDisabled)
 			return
 		}
+		if common.InviteRegistrationEnabled {
+			registrationToken, expiresAt, flowErr := createPendingWeChatRegistration(wechatId)
+			if flowErr != nil {
+				common.ApiError(c, flowErr)
+				return
+			}
+			common.ApiSuccess(c, gin.H{
+				"require_invite_code": true,
+				"registration_token":  registrationToken,
+				"expires_at":          expiresAt.Unix(),
+			})
+			return
+		}
+		user = newWeChatUser(wechatId)
+		if err := model.DB.Transaction(func(tx *gorm.DB) error {
+			return user.InsertWithTx(tx, 0)
+		}); err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		user.FinalizeOAuthUserCreation(0)
 	}
 
 	if user.Status != common.UserStatusEnabled {
@@ -140,6 +126,77 @@ func WeChatAuth(c *gin.Context) {
 		return
 	}
 	setupLogin(&user, c)
+}
+
+func newWeChatUser(wechatId string) model.User {
+	return model.User{
+		Username:    "wechat_" + strconv.Itoa(model.GetMaxUserId()+1),
+		DisplayName: "WeChat User",
+		Role:        common.RoleCommonUser,
+		Status:      common.UserStatusEnabled,
+		WeChatId:    wechatId,
+	}
+}
+
+func createPendingWeChatRegistration(wechatId string) (string, time.Time, error) {
+	wechatId = strings.TrimSpace(wechatId)
+	if wechatId == "" {
+		return "", time.Time{}, model.ErrAuthFlowInvalid
+	}
+	payload, err := common.Marshal(oauthRegistrationPayload{ProviderUserID: wechatId})
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	expiresAt := time.Now().Add(oauthAuthFlowTTL)
+	registrationToken, _, err := model.CreateAuthFlow(model.AuthFlowCreate{
+		Purpose:   model.AuthFlowPurposeOAuthRegistration,
+		Provider:  "wechat",
+		Intent:    model.AuthFlowIntentLogin,
+		Payload:   string(payload),
+		ExpiresAt: expiresAt,
+	})
+	return registrationToken, expiresAt, err
+}
+
+func completePendingWeChatRegistration(registrationToken string, pendingFlow *model.AuthFlow, inviteCodeHash string) (*model.User, string, error) {
+	var payload oauthRegistrationPayload
+	if err := common.UnmarshalJsonStr(pendingFlow.Payload, &payload); err != nil || strings.TrimSpace(payload.ProviderUserID) == "" {
+		return nil, "", model.ErrAuthFlowInvalid
+	}
+	wechatId := strings.TrimSpace(payload.ProviderUserID)
+	if model.IsWeChatIdAlreadyTaken(wechatId) {
+		user := &model.User{WeChatId: wechatId}
+		if err := user.FillUserByWeChatId(); err != nil {
+			return nil, "", err
+		}
+		if user.Id == 0 {
+			return nil, "", &OAuthUserDeletedError{}
+		}
+		if _, err := model.ConsumeAuthFlow(registrationToken, model.AuthFlowMatch{
+			Purpose:  model.AuthFlowPurposeOAuthRegistration,
+			Provider: "wechat",
+			Intent:   model.AuthFlowIntentLogin,
+		}); err != nil {
+			return nil, "", err
+		}
+		return user, "wechat", nil
+	}
+
+	user := newWeChatUser(wechatId)
+	if _, err := model.ConsumeAuthFlowWithAction(registrationToken, model.AuthFlowMatch{
+		Purpose:  model.AuthFlowPurposeOAuthRegistration,
+		Provider: "wechat",
+		Intent:   model.AuthFlowIntentLogin,
+	}, func(tx *gorm.DB, _ *model.AuthFlow) error {
+		if err := user.InsertWithTx(tx, 0); err != nil {
+			return err
+		}
+		return model.ConsumeInviteCodeHashWithTx(tx, inviteCodeHash, user.Id, "wechat")
+	}); err != nil {
+		return nil, "", err
+	}
+	user.FinalizeOAuthUserCreation(0)
+	return &user, "wechat", nil
 }
 
 type wechatBindRequest struct {

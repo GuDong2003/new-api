@@ -19,9 +19,9 @@ For commercial licensing, please contact support@quantumnous.com
 import axios from 'axios'
 
 import { api, refreshAuthentication, type RefreshOutcome } from '@/lib/api'
-import { useAuthStore } from '@/stores/auth-store'
+import { useAuthStore, type AuthBundle } from '@/stores/auth-store'
 
-import { getAffiliateCode, getInvitationCode } from './lib/storage'
+import { getAffiliateCode } from './lib/storage'
 import type { TelegramAuthorization } from './lib/telegram-login'
 import type {
   LoginPayload,
@@ -143,14 +143,12 @@ export async function createOAuthFlow(
   intent: 'login' | 'bind'
 ): Promise<string> {
   const aff = intent === 'login' ? getAffiliateCode() : ''
-  const inviteCode = intent === 'login' ? getInvitationCode() : ''
   const res = await api.post(
     '/api/oauth/state',
     {
       provider,
       intent,
       aff: aff || undefined,
-      invite_code: inviteCode || undefined,
     },
     { skipAuthRefresh: intent === 'login' }
   )
@@ -164,14 +162,29 @@ export async function createOAuthFlow(
 }
 
 // WeChat login by authorization code
-export async function wechatLoginByCode(
-  code: string,
-  inviteCode?: string
-): Promise<ApiResponse> {
+export async function wechatLoginByCode(code: string): Promise<ApiResponse> {
   const res = await api.get('/api/oauth/wechat', {
     params: { code },
-    headers: inviteCode ? { 'X-Invite-Code': inviteCode } : undefined,
   })
+  return res.data
+}
+
+export async function completeOAuthRegistration(
+  registrationToken: string,
+  inviteCode: string
+): Promise<ApiResponse<AuthBundle>> {
+  const res = await api.post(
+    '/api/oauth/registration',
+    {
+      registration_token: registrationToken,
+      invite_code: inviteCode,
+    },
+    {
+      skipAuthRefresh: true,
+      skipBusinessError: true,
+      skipErrorHandler: true,
+    }
+  )
   return res.data
 }
 

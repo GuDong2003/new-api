@@ -95,7 +95,7 @@ func TestGenerateOAuthCodeCarriesAffiliateInLoginFlow(t *testing.T) {
 	assert.Empty(t, flow.SessionId)
 }
 
-func TestGenerateOAuthCodeStoresInvitationCodeAsHash(t *testing.T) {
+func TestGenerateOAuthCodeDoesNotPersistPreAuthenticationInvitationCode(t *testing.T) {
 	setupAuthFlowControllerTest(t)
 	rawInviteCode := "NAPI-ABCD-EFGH-JKLM-NPQR"
 	recorder := httptest.NewRecorder()
@@ -121,9 +121,7 @@ func TestGenerateOAuthCodeStoresInvitationCodeAsHash(t *testing.T) {
 	assert.NotContains(t, flow.Payload, rawInviteCode)
 	var payload oauthFlowPayload
 	require.NoError(t, common.UnmarshalJsonStr(flow.Payload, &payload))
-	expectedHash, err := model.HashInviteCode(rawInviteCode)
-	require.NoError(t, err)
-	assert.Equal(t, expectedHash, payload.InviteCodeHash)
+	assert.Empty(t, payload.AffiliateCode)
 }
 
 func TestGenerateOAuthCodeBindsFlowToAuthenticatedSession(t *testing.T) {

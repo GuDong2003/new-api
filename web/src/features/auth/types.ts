@@ -86,6 +86,25 @@ export interface ApiResponse<T = unknown> {
   data?: T
 }
 
+export interface PendingOAuthRegistration {
+  require_invite_code: true
+  registration_token: string
+  expires_at: number
+}
+
+export function isPendingOAuthRegistration(
+  value: unknown
+): value is PendingOAuthRegistration {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as Partial<PendingOAuthRegistration>
+  return (
+    candidate.require_invite_code === true &&
+    typeof candidate.registration_token === 'string' &&
+    candidate.registration_token.length > 0 &&
+    typeof candidate.expires_at === 'number'
+  )
+}
+
 // ============================================================================
 // System Status
 // ============================================================================

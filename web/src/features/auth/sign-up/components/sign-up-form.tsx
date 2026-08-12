@@ -39,6 +39,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
+  completeOAuthRegistration,
   register,
   validateInvitationCode,
   wechatLoginByCode,
@@ -52,16 +53,17 @@ import { useTurnstile } from '@/features/auth/hooks/use-turnstile'
 import {
   clearInvitationCode,
   getAffiliateCode,
-  getInvitationCode,
   saveAffiliateCode,
-  saveInvitationCode,
 } from '@/features/auth/lib/storage'
+import { isPendingOAuthRegistration } from '@/features/auth/types'
 import { useStatus } from '@/hooks/use-status'
 import { isAuthBundle } from '@/lib/api'
 import { getServerErrorMessageKey } from '@/lib/server-error-message'
 import { cn } from '@/lib/utils'
 
-type InviteAction = (inviteCode: string) => void | Promise<void>
+type InviteAction = (
+  inviteCode: string
+) => boolean | void | Promise<boolean | void>
 
 export function SignUpForm({
   className,
@@ -107,12 +109,11 @@ export function SignUpForm({
       email: '',
       password: '',
       confirmPassword: '',
-      inviteCode: getInvitationCode(),
+      inviteCode: '',
     },
   })
 
   const emailValue = form.watch('email')
-  const inviteCodeValue = form.watch('inviteCode')
   const emailVerificationRequired = !!status?.email_verification
   const hasUserAgreement = Boolean(status?.user_agreement_enabled)
   const hasPrivacyPolicy = Boolean(status?.privacy_policy_enabled)
@@ -151,6 +152,7 @@ export function SignUpForm({
   }, [requiresLegalConsent])
 
   useEffect(() => {
+    clearInvitationCode()
     const searchParams = new URLSearchParams(window.location.search)
     const aff = searchParams.get('aff')?.trim()
     if (aff) {
@@ -158,19 +160,18 @@ export function SignUpForm({
     }
     const inviteCode = searchParams.get('invite')?.trim()
     if (inviteCode) {
-      saveInvitationCode(inviteCode)
       form.setValue('inviteCode', inviteCode)
     }
   }, [form])
 
   const requestInvitationCode = (action: InviteAction) => {
     const existingCode = form.getValues('inviteCode')?.trim() || ''
-    if (!inviteRegistrationEnabled || existingCode) {
+    if (!inviteRegistrationEnabled) {
       void action(existingCode)
       return
     }
     pendingInviteActionRef.current = action
-    setInviteDialogCode('')
+    setInviteDialogCode(existingCode)
     setIsInviteDialogOpen(true)
   }
 
@@ -198,14 +199,14 @@ export function SignUpForm({
         return
       }
       form.setValue('inviteCode', inviteCode)
-      saveInvitationCode(inviteCode)
       const pendingAction = pendingInviteActionRef.current
+      if (pendingAction) {
+        const shouldClose = await pendingAction(inviteCode)
+        if (shouldClose === false) return
+      }
       pendingInviteActionRef.current = null
       setIsInviteDialogOpen(false)
       setInviteDialogCode('')
-      if (pendingAction) {
-        await pendingAction(inviteCode)
-      }
     } catch {
       toast.error(t('Failed to validate invitation code'))
     } finally {
@@ -233,11 +234,14 @@ export function SignUpForm({
         clearInvitationCode()
         toast.success(t('Account created! Please sign in'))
         redirectToLogin()
+        return true
       } else {
         toast.error(res?.message || t('Failed to create account'))
+        return false
       }
     } catch {
       // Errors are handled by global interceptor
+      return false
     } finally {
       setIsLoading(false)
     }
@@ -263,7 +267,7 @@ export function SignUpForm({
 
     if (!validateTurnstile()) return
 
-    if (inviteRegistrationEnabled && !data.inviteCode?.trim()) {
+    if (inviteRegistrationEnabled) {
       requestInvitationCode((inviteCode) =>
         submitRegistration(data, inviteCode)
       )
@@ -271,17 +275,6 @@ export function SignUpForm({
     }
 
     await submitRegistration(data, data.inviteCode?.trim() || '')
-  }
-
-  const handleBeforeProviderLogin = (
-    provider: string,
-    continueLogin: () => void
-  ) => {
-    if (provider === 'telegram') {
-      continueLogin()
-      return
-    }
-    requestInvitationCode(() => continueLogin())
   }
 
   async function handleSendVerificationCode() {
@@ -316,11 +309,39 @@ export function SignUpForm({
 
     setIsWeChatSubmitting(true)
     try {
-      const res = await wechatLoginByCode(wechatCode, inviteCodeValue?.trim())
+      const res = await wechatLoginByCode(wechatCode)
       if (res?.success && isAuthBundle(res.data)) {
         await handleLoginSuccess(res.data)
         toast.success(t('Signed in via WeChat'))
         handleWeChatDialogChange(false)
+      } else if (res?.success && isPendingOAuthRegistration(res.data)) {
+        const registrationToken = res.data.registration_token
+        handleWeChatDialogChange(false)
+        const finishRegistration: InviteAction = async (inviteCode) => {
+          try {
+            const completion = await completeOAuthRegistration(
+              registrationToken,
+              inviteCode
+            )
+            if (completion?.success && isAuthBundle(completion.data)) {
+              await handleLoginSuccess(completion.data)
+              toast.success(t('Signed in via WeChat'))
+              return true
+            }
+            const messageKey = getServerErrorMessageKey(completion)
+            toast.error(
+              messageKey
+                ? t(messageKey)
+                : completion?.message || t('Failed to create account')
+            )
+            return false
+          } catch (error: unknown) {
+            const messageKey = getServerErrorMessageKey(error)
+            toast.error(messageKey ? t(messageKey) : t('Login failed'))
+            return false
+          }
+        }
+        requestInvitationCode(finishRegistration)
       } else {
         if (getServerErrorMessageKey(res)) return
         toast.error(res?.message || t('Login failed'))
@@ -484,7 +505,7 @@ export function SignUpForm({
           <OAuthProviders
             status={status}
             disabled={isLoading || (requiresLegalConsent && !agreedToLegal)}
-            beforeProviderLogin={handleBeforeProviderLogin}
+            registrationInviteCode={form.watch('inviteCode')?.trim() || ''}
             onWeChatLogin={hasWeChatLogin ? handleOpenWeChatDialog : undefined}
             isWeChatLoading={isWeChatSubmitting}
             className='pt-2'
