@@ -167,7 +167,14 @@ jobs:
             "$IMAGE_NAME:$RELEASE_TAG-amd64" \
             "$IMAGE_NAME:$RELEASE_TAG-arm64"
 
-          digest="$(docker buildx imagetools inspect "$IMAGE_NAME:$RELEASE_TAG" | awk '/Digest:/ {print $2; exit}')"
+          digest=""
+          for attempt in {1..12}; do
+            digest="$(docker buildx imagetools inspect "$IMAGE_NAME:$RELEASE_TAG" 2>/dev/null | awk '/^Digest:/ {print $2; exit}')" || true
+            if [[ -n "$digest" ]]; then
+              break
+            fi
+            sleep 5
+          done
           test -n "$digest"
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
           docker buildx imagetools inspect "$IMAGE_NAME:$RELEASE_TAG" >> "$GITHUB_STEP_SUMMARY"
