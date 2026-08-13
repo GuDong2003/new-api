@@ -46,6 +46,15 @@ type ScheduledSystemTaskHandler interface {
 	NewPayload() any
 }
 
+// DueSystemTaskHandler lets a scheduled task decide whether it is due using
+// its own durable cadence. This is useful for fan-out jobs whose individual
+// targets have different schedules while still keeping one system-task row as
+// the independent execution log.
+type DueSystemTaskHandler interface {
+	SystemTaskHandler
+	BuildDueTask(now int64) (*model.SystemTask, bool, error)
+}
+
 var (
 	systemTaskHandlersMu sync.RWMutex
 	systemTaskHandlers   = map[string]SystemTaskHandler{}
@@ -266,6 +275,12 @@ func runSystemTaskScheduler() {
 	scheduledHandlers := make([]ScheduledSystemTaskHandler, 0, len(handlers))
 	taskTypes := make([]string, 0, len(handlers))
 	for _, handler := range handlers {
+		if due, ok := handler.(DueSystemTaskHandler); ok {
+			if _, _, err := due.BuildDueTask(now); err != nil {
+				logger.LogWarn(context.Background(), fmt.Sprintf("system task due check failed: type=%s err=%v", due.Type(), err))
+			}
+			continue
+		}
 		scheduled, ok := handler.(ScheduledSystemTaskHandler)
 		if !ok || !scheduled.Enabled() {
 			continue

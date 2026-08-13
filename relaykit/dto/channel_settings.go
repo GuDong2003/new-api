@@ -23,6 +23,32 @@ type ChannelSettings struct {
 	// HTTP2ConnectionShards spreads HTTP/2 traffic across N independent transports
 	// (1-8). Zero/unset means 1. Ignored when HTTPProtocol is "http1".
 	HTTP2ConnectionShards int `json:"http2_connection_shards,omitempty"`
+	// Queue configures the optional background upstream queue warmer for this
+	// channel. The host module owns validation and execution; keeping this DTO
+	// here lets the channel setting travel through relaykit without a root-module
+	// dependency.
+	Queue *ChannelQueueSettings `json:"queue,omitempty"`
+}
+
+// ChannelQueueSettings configures a lightweight, per-channel upstream warm-up
+// request. It does not reserve a reusable slot and never replaces a user's
+// request; it only keeps the channel's upstream path exercised and records its
+// health independently from consumption logs.
+type ChannelQueueSettings struct {
+	Enabled       bool   `json:"enabled,omitempty"`
+	Model         string `json:"model,omitempty"`
+	Interval      int    `json:"interval,omitempty"`      // seconds between warm-ups
+	EndpointType  string `json:"endpoint_type,omitempty"` // empty/auto = detect
+	WarmupMessage string `json:"warmup_message,omitempty"`
+	MaxTokens     *uint  `json:"max_tokens,omitempty"` // cap warm-up output
+	Timeout       int    `json:"timeout,omitempty"`    // per-call timeout seconds
+
+	CircuitBreakerEnabled  bool  `json:"circuit_breaker_enabled,omitempty"`
+	MaxConsecutiveFailures int   `json:"max_consecutive_failures,omitempty"`
+	CooldownSeconds        int   `json:"cooldown_seconds,omitempty"`
+	MaxQueueAttempts       int   `json:"max_queue_attempts,omitempty"`
+	BackoffSeconds         int   `json:"backoff_seconds,omitempty"`
+	QueueBusyStatusCodes   []int `json:"queue_busy_status_codes,omitempty"`
 }
 
 const (

@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -22,6 +23,33 @@ func RegisterScheduledSystemTasks() {
 	service.RegisterSystemTaskHandler(modelUpdateHandler{})
 	service.RegisterSystemTaskHandler(midjourneyPollHandler{})
 	service.RegisterSystemTaskHandler(asyncTaskPollHandler{})
+	service.RegisterSystemTaskHandler(channelQueueWarmupHandler{})
+}
+
+type channelQueueWarmupHandler struct{}
+
+func (channelQueueWarmupHandler) Type() string { return model.SystemTaskTypeChannelQueueWarmup }
+
+func (channelQueueWarmupHandler) BuildDueTask(now int64) (*model.SystemTask, bool, error) {
+	return buildDueChannelQueueWarmupTask(now)
+}
+
+func (channelQueueWarmupHandler) Run(ctx context.Context, task *model.SystemTask, runnerID string) {
+	payload := channelQueueWarmupTaskPayload{}
+	if err := task.DecodePayload(&payload); err != nil {
+		finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusFailed, nil, err)
+		return
+	}
+	result, err := runChannelQueueWarmupRound(ctx, payload, service.NewSystemTaskProgressReporter(task, runnerID))
+	if err != nil && !errors.Is(err, context.Canceled) {
+		finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusFailed, result, err)
+		return
+	}
+	if ctx.Err() != nil {
+		finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusFailed, result, ctx.Err())
+		return
+	}
+	finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusSucceeded, result, nil)
 }
 
 // channelTestHandler runs the scheduled "test all channels" job. Enablement and

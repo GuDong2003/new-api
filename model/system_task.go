@@ -16,11 +16,12 @@ const (
 	SystemTaskStatusSucceeded SystemTaskStatus = "succeeded"
 	SystemTaskStatusFailed    SystemTaskStatus = "failed"
 
-	SystemTaskTypeLogCleanup     = "log_cleanup"
-	SystemTaskTypeChannelTest    = "channel_test"
-	SystemTaskTypeModelUpdate    = "model_update"
-	SystemTaskTypeMidjourneyPoll = "midjourney_poll"
-	SystemTaskTypeAsyncTaskPoll  = "async_task_poll"
+	SystemTaskTypeLogCleanup         = "log_cleanup"
+	SystemTaskTypeChannelTest        = "channel_test"
+	SystemTaskTypeModelUpdate        = "model_update"
+	SystemTaskTypeMidjourneyPoll     = "midjourney_poll"
+	SystemTaskTypeAsyncTaskPoll      = "async_task_poll"
+	SystemTaskTypeChannelQueueWarmup = "channel_queue_warmup"
 )
 
 var ErrSystemTaskLockLost = errors.New("system task lock lost")
@@ -184,6 +185,21 @@ func ListSystemTasks(limit int) ([]*SystemTask, error) {
 	}
 	var tasks []*SystemTask
 	err := DB.Order("id desc").Limit(limit).Find(&tasks).Error
+	return tasks, err
+}
+
+func ListSystemTasksByType(taskType string, limit int) ([]*SystemTask, error) {
+	if taskType == "" {
+		return nil, errors.New("task type is required")
+	}
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	var tasks []*SystemTask
+	err := DB.Where("type = ?", taskType).Order("id desc").Limit(limit).Find(&tasks).Error
 	return tasks, err
 }
 

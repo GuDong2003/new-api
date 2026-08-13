@@ -990,7 +990,79 @@ func (channel *Channel) ValidateSettings() error {
 			return fmt.Errorf("advanced custom channels require a %s route when upstream model update checks are enabled", dto.AdvancedCustomModelListPath)
 		}
 	}
+	if channelParams.Queue != nil {
+		if err := validateChannelQueueSettings(channelParams.Queue, channel); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+// MaxQueueDurationSeconds bounds queue settings before they are converted to
+// time.Duration values by the background warmer.
+const MaxQueueDurationSeconds = 86400
+
+func validateChannelQueueSettings(q *dto.ChannelQueueSettings, channel *Channel) error {
+	if q == nil || !q.Enabled {
+		return nil
+	}
+	if channel == nil {
+		return errors.New("channel is required when queue warmer is enabled")
+	}
+	queueModel := strings.TrimSpace(q.Model)
+	if queueModel == "" {
+		return errors.New("queue model is required when queue warmer is enabled")
+	}
+	if !channel.hasModel(queueModel) {
+		return fmt.Errorf("queue model %s is not in the channel model list", queueModel)
+	}
+	if q.Interval < 1 || q.Interval > MaxQueueDurationSeconds {
+		return fmt.Errorf("queue interval must be between 1 and %d seconds", MaxQueueDurationSeconds)
+	}
+	if q.Timeout < 0 || q.Timeout > MaxQueueDurationSeconds {
+		return fmt.Errorf("queue timeout must be between 0 and %d seconds", MaxQueueDurationSeconds)
+	}
+	if q.Timeout > 0 && q.Timeout >= q.Interval {
+		return errors.New("queue timeout must be less than interval")
+	}
+	if q.MaxTokens != nil && *q.MaxTokens > 128000 {
+		return errors.New("queue max_tokens must be at most 128000")
+	}
+	if q.MaxConsecutiveFailures < 0 || q.CooldownSeconds < 0 || q.MaxQueueAttempts < 0 || q.BackoffSeconds < 0 {
+		return errors.New("queue retry and circuit-breaker values must not be negative")
+	}
+	if q.CooldownSeconds > MaxQueueDurationSeconds || q.BackoffSeconds > MaxQueueDurationSeconds {
+		return fmt.Errorf("queue cooldown and backoff must be at most %d seconds", MaxQueueDurationSeconds)
+	}
+	for _, statusCode := range q.QueueBusyStatusCodes {
+		if statusCode < 100 || statusCode > 599 {
+			return fmt.Errorf("queue busy status code %d is invalid", statusCode)
+		}
+	}
+	if endpointType := strings.TrimSpace(strings.ToLower(q.EndpointType)); endpointType != "" && endpointType != "auto" {
+		switch types.EndpointType(endpointType) {
+		case types.EndpointTypeOpenAI, types.EndpointTypeOpenAIResponse, types.EndpointTypeOpenAIResponseCompact,
+			types.EndpointTypeOpenAIAlphaSearch, types.EndpointTypeAnthropic, types.EndpointTypeGemini,
+			types.EndpointTypeJinaRerank, types.EndpointTypeImageGeneration, types.EndpointTypeEmbeddings,
+			types.EndpointTypeOpenAIVideo:
+		default:
+			return fmt.Errorf("invalid queue endpoint_type: %s", q.EndpointType)
+		}
+	}
+	return nil
+}
+
+func (channel *Channel) hasModel(modelName string) bool {
+	modelName = strings.TrimSpace(modelName)
+	if channel == nil || modelName == "" {
+		return false
+	}
+	for _, configuredModel := range channel.GetModels() {
+		if strings.TrimSpace(configuredModel) == modelName {
+			return true
+		}
+	}
+	return false
 }
 
 func (channel *Channel) GetSetting() dto.ChannelSettings {

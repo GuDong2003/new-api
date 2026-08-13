@@ -23,6 +23,7 @@ import {
   CreditCard,
   FileText,
   FlaskConical,
+  Flame,
   Key,
   LayoutDashboard,
   ListTodo,
@@ -124,6 +125,11 @@ export function useSidebarData(): SidebarData {
             title: t('Channels'),
             url: '/channels',
             icon: Radio,
+          },
+          {
+            title: t('Queue'),
+            url: '/queue',
+            icon: Flame,
           },
           {
             title: t('Models'),
