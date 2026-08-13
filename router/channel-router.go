@@ -47,6 +47,7 @@ var channelPermissionRoutes = []permissionRoute{
 	{method: http.MethodGet, path: "/queue/logs", permission: authz.ChannelRead, handler: controller.ListChannelQueueWarmupLogsHandler},
 	{method: http.MethodPost, path: "/queue/run", permission: authz.ChannelOperate, handler: controller.RunChannelQueueWarmupHandler},
 	{method: http.MethodPut, path: "/queue/:id", permission: authz.ChannelWrite, handler: controller.UpdateChannelQueueConfigHandler},
+	{method: http.MethodDelete, path: "/queue/:id", permission: authz.ChannelWrite, handler: controller.DeleteChannelQueueConfigHandler},
 	{method: http.MethodGet, path: "/:id", permission: authz.ChannelRead, handler: controller.GetChannel},
 	{method: http.MethodGet, path: "/test", permission: authz.ChannelOperate, handler: controller.TestAllChannels},
 	{method: http.MethodGet, path: "/test/:id", permission: authz.ChannelOperate, handler: controller.TestChannel},

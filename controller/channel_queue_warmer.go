@@ -557,6 +557,32 @@ func UpdateChannelQueueConfigHandler(c *gin.Context) {
 	common.ApiSuccess(c, buildChannelQueueConfigView(channel))
 }
 
+func DeleteChannelQueueConfigHandler(c *gin.Context) {
+	channelID, err := strconv.Atoi(c.Param("id"))
+	if err != nil || channelID <= 0 {
+		common.ApiErrorMsg(c, "invalid channel id")
+		return
+	}
+	channel, err := model.GetChannelById(channelID, true)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	setting := channel.GetSetting()
+	setting.Queue = nil
+	channel.SetSetting(setting)
+	if err := model.DB.Model(&model.Channel{}).Where("id = ?", channelID).Update("setting", channel.Setting).Error; err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	updated, err := model.GetChannelById(channelID, true)
+	if err == nil {
+		model.CacheUpdateChannel(updated)
+		channel = updated
+	}
+	common.ApiSuccess(c, buildChannelQueueConfigView(channel))
+}
+
 func buildChannelQueueConfigView(channel *model.Channel) ChannelQueueConfigView {
 	q := readQueueSetting(channel)
 	models := channel.GetModels()

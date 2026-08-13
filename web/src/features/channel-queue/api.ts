@@ -48,6 +48,16 @@ export async function updateChannelQueueConfig(
   return res.data.data ?? null
 }
 
+export async function removeChannelQueueConfig(channelId: number) {
+  const res = await api.delete<QueueConfigItemResponse>(
+    `/api/channel/queue/${channelId}`
+  )
+  if (!res.data.success) {
+    throw new Error(res.data.message || 'Unable to remove queue channel')
+  }
+  return res.data.data ?? null
+}
+
 export async function runChannelQueueWarmup() {
   const res = await api.post<QueueRunResponse>('/api/channel/queue/run')
   if (!res.data.success) {

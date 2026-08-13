@@ -7,7 +7,15 @@ the Free Software Foundation, either version 3 of the License, or
 (at your option) any later version.
 */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Flame, Play, RefreshCw, Save, Settings2 } from 'lucide-react'
+import {
+  Flame,
+  Play,
+  Plus,
+  RefreshCw,
+  Save,
+  Settings2,
+  Trash2,
+} from 'lucide-react'
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -40,6 +48,7 @@ import {
   getChannelQueueConfig,
   getChannelQueueStatus,
   listChannelQueueWarmupLogs,
+  removeChannelQueueConfig,
   runChannelQueueWarmup,
   updateChannelQueueConfig,
 } from './api'
@@ -101,7 +110,9 @@ type QueueChannelCardProps = {
   item: ChannelQueueConfig
   status?: ChannelQueueStatus
   onSave: (channelId: number, queue: ChannelQueueSettings) => Promise<void>
+  onRemove: (channelId: number) => Promise<void>
   saving: boolean
+  removing: boolean
 }
 
 function QueueChannelCard(props: QueueChannelCardProps) {
@@ -151,15 +162,28 @@ function QueueChannelCard(props: QueueChannelCardProps) {
               </CardDescription>
             </div>
           </div>
-          <Badge
-            variant={status?.warming ? 'default' : 'outline'}
-            className={cn(
-              'shrink-0',
-              status?.warming && 'bg-orange-500 hover:bg-orange-500'
-            )}
-          >
-            {statusLabel(status, t)}
-          </Badge>
+          <div className='flex shrink-0 items-center gap-1'>
+            <Button
+              type='button'
+              variant='ghost'
+              size='icon-sm'
+              onClick={() => void props.onRemove(props.item.channel_id)}
+              disabled={props.removing}
+              title={t('Remove')}
+              aria-label={t('Remove')}
+            >
+              <Trash2 className='size-4' />
+            </Button>
+            <Badge
+              variant={status?.warming ? 'default' : 'outline'}
+              className={cn(
+                'shrink-0',
+                status?.warming && 'bg-orange-500 hover:bg-orange-500'
+              )}
+            >
+              {statusLabel(status, t)}
+            </Badge>
+          </div>
         </div>
       </CardHeader>
       <CardContent className='space-y-4'>
@@ -405,6 +429,7 @@ function QueueLogsTable({ logs }: { logs: QueueWarmupTask[] }) {
 export function ChannelQueuePage() {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
+  const [channelToAdd, setChannelToAdd] = useState('')
   const configQuery = useQuery({
     queryKey: ['channel-queue', 'config'],
     queryFn: getChannelQueueConfig,
@@ -423,6 +448,17 @@ export function ChannelQueuePage() {
     refetchInterval: 15000,
   })
 
+  const invalidateQueueData = () => {
+    void Promise.all([
+      queryClient.invalidateQueries({
+        queryKey: ['channel-queue', 'config'],
+      }),
+      queryClient.invalidateQueries({
+        queryKey: ['channel-queue', 'status'],
+      }),
+    ])
+  }
+
   const saveMutation = useMutation({
     mutationFn: ({
       channelId,
@@ -433,12 +469,38 @@ export function ChannelQueuePage() {
     }) => updateChannelQueueConfig(channelId, queue),
     onSuccess: () => {
       toast.success(t('Queue settings saved'))
-      void queryClient.invalidateQueries({
-        queryKey: ['channel-queue', 'config'],
-      })
+      invalidateQueueData()
     },
     onError: (error) =>
       toast.error(error instanceof Error ? error.message : t('Save failed')),
+  })
+  const addMutation = useMutation({
+    mutationFn: (item: ChannelQueueConfig) =>
+      updateChannelQueueConfig(item.channel_id, makeQueueDraft(item)),
+    onSuccess: () => {
+      setChannelToAdd('')
+      toast.success(t('Queue channel added'))
+      invalidateQueueData()
+    },
+    onError: (error) =>
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : t('Unable to add queue channel')
+      ),
+  })
+  const removeMutation = useMutation({
+    mutationFn: removeChannelQueueConfig,
+    onSuccess: () => {
+      toast.success(t('Queue channel removed'))
+      invalidateQueueData()
+    },
+    onError: (error) =>
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : t('Unable to remove queue channel')
+      ),
   })
   const runMutation = useMutation({
     mutationFn: runChannelQueueWarmup,
@@ -461,11 +523,17 @@ export function ChannelQueuePage() {
       ),
     [statusQuery.data]
   )
-  const configuredChannels = configQuery.data ?? []
-  const enabledCount = configuredChannels.filter(
+  const allChannels = configQuery.data ?? []
+  const selectedChannels = allChannels.filter((item) => item.queue != null)
+  const availableChannels = allChannels.filter((item) => item.queue == null)
+  const selectedChannel = availableChannels.find(
+    (item) => String(item.channel_id) === channelToAdd
+  )
+  const enabledCount = selectedChannels.filter(
     (item) => item.queue?.enabled
   ).length
   const savingChannelId = saveMutation.variables?.channelId
+  const removingChannelId = removeMutation.variables
 
   const refresh = () => {
     void Promise.all([
@@ -494,18 +562,18 @@ export function ChannelQueuePage() {
         </CardContent>
       </Card>
     )
-  } else if (configuredChannels.length === 0) {
+  } else if (selectedChannels.length === 0) {
     channelContent = (
       <Card>
         <CardContent className='text-muted-foreground py-10 text-center text-sm'>
-          {t('No channels found')}
+          {t('No queue channels added')}
         </CardContent>
       </Card>
     )
   } else {
     channelContent = (
       <div className='grid gap-4 xl:grid-cols-2'>
-        {configuredChannels.map((item) => (
+        {selectedChannels.map((item) => (
           <QueueChannelCard
             key={item.channel_id}
             item={item}
@@ -515,6 +583,12 @@ export function ChannelQueuePage() {
             }}
             saving={
               savingChannelId === item.channel_id && saveMutation.isPending
+            }
+            onRemove={async (channelId) => {
+              await removeMutation.mutateAsync(channelId)
+            }}
+            removing={
+              removingChannelId === item.channel_id && removeMutation.isPending
             }
           />
         ))}
@@ -581,20 +655,47 @@ export function ChannelQueuePage() {
       <SectionPageLayout.Content>
         <div className='space-y-4'>
           <Card>
-            <CardHeader>
-              <CardTitle>{t('Upstream queue warmer')}</CardTitle>
-              <CardDescription>
-                {t(
-                  'Keep selected upstream queue paths warm with small background requests. No reusable slot is reserved and no user request is replaced.'
-                )}
-              </CardDescription>
-            </CardHeader>
-            <CardContent className='text-muted-foreground flex flex-wrap gap-x-6 gap-y-2 text-xs'>
-              <span>
-                {t('Enabled channels')}: {enabledCount}
-              </span>
-              <span>{t('Status refresh')}: 8s</span>
-              <span>{t('Warm-up logs are separate from usage logs')}</span>
+            <CardContent className='flex flex-wrap items-center justify-between gap-3 py-3'>
+              <div className='min-w-0'>
+                <div className='text-sm font-medium'>{t('Queue channels')}</div>
+                <div className='text-muted-foreground text-xs'>
+                  {t('Enabled channels')}: {enabledCount} ·{' '}
+                  {t('Status refresh')}: 8s
+                </div>
+              </div>
+              <div className='flex min-w-0 items-center gap-2'>
+                <select
+                  className='border-input bg-background h-8 max-w-[min(60vw,20rem)] min-w-48 rounded-lg border px-2 text-sm outline-none'
+                  value={channelToAdd}
+                  onChange={(event) => setChannelToAdd(event.target.value)}
+                  disabled={
+                    availableChannels.length === 0 || addMutation.isPending
+                  }
+                  aria-label={t('Select a channel')}
+                >
+                  <option value=''>
+                    {availableChannels.length > 0
+                      ? t('Select a channel')
+                      : t('All channels added')}
+                  </option>
+                  {availableChannels.map((item) => (
+                    <option key={item.channel_id} value={item.channel_id}>
+                      #{item.channel_id} · {item.channel_name}
+                    </option>
+                  ))}
+                </select>
+                <Button
+                  type='button'
+                  size='sm'
+                  onClick={() => {
+                    if (selectedChannel) addMutation.mutate(selectedChannel)
+                  }}
+                  disabled={!selectedChannel || addMutation.isPending}
+                >
+                  <Plus data-icon='inline-start' />
+                  {t('Add')}
+                </Button>
+              </div>
             </CardContent>
           </Card>
 
@@ -606,11 +707,6 @@ export function ChannelQueuePage() {
                 <Settings2 className='size-4' aria-hidden='true' />
                 {t('Queue warm-up logs')}
               </CardTitle>
-              <CardDescription>
-                {t(
-                  'Each scheduled or manual warm-up is stored independently as a system task.'
-                )}
-              </CardDescription>
             </CardHeader>
             <CardContent>{logsContent}</CardContent>
           </Card>
