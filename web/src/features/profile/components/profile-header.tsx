@@ -20,11 +20,10 @@ import { Activity, BarChart3, WalletCards } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { StatusBadge } from '@/components/status-badge'
-import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Card, CardContent } from '@/components/ui/card'
 import { IconBadge, type IconBadgeTone } from '@/components/ui/icon-badge'
 import { Skeleton } from '@/components/ui/skeleton'
-import { getUserAvatarFallback, getUserAvatarStyle } from '@/lib/avatar'
+import { UserAvatarEditor } from '@/components/user-avatar-editor'
 import { formatCompactNumber, formatQuota } from '@/lib/format'
 import { getRoleLabel } from '@/lib/roles'
 
@@ -38,12 +37,13 @@ import type { UserProfile } from '../types'
 interface ProfileHeaderProps {
   profile: UserProfile | null
   loading: boolean
+  onAvatarChanged: () => void | Promise<void>
 }
 
-export function ProfileHeader({ profile, loading }: ProfileHeaderProps) {
+export function ProfileHeader(props: ProfileHeaderProps) {
   const { t } = useTranslation()
 
-  if (loading) {
+  if (props.loading) {
     return (
       <Card data-card-hover='false' className='gap-0 overflow-hidden py-0'>
         <CardContent className='p-4 sm:p-5'>
@@ -77,12 +77,11 @@ export function ProfileHeader({ profile, loading }: ProfileHeaderProps) {
     )
   }
 
-  if (!profile) return null
+  if (!props.profile) return null
 
+  const profile = props.profile
   const displayName = getDisplayName(profile)
   const avatarName = profile.username || displayName
-  const avatarFallback = getUserAvatarFallback(avatarName)
-  const avatarFallbackStyle = getUserAvatarStyle(avatarName)
   const roleLabel = getRoleLabel(profile.role)
   const stats: {
     label: string
@@ -118,14 +117,12 @@ export function ProfileHeader({ profile, loading }: ProfileHeaderProps) {
     <Card data-card-hover='false' className='gap-0 overflow-hidden py-0'>
       <CardContent className='p-3 sm:p-5'>
         <div className='flex items-center gap-3 text-left sm:gap-4'>
-          <Avatar className='ring-background h-12 w-12 rounded-xl text-sm ring-2 sm:h-16 sm:w-16 sm:rounded-2xl sm:text-lg sm:ring-4'>
-            <AvatarFallback
-              className='rounded-xl font-semibold text-white sm:rounded-2xl'
-              style={avatarFallbackStyle}
-            >
-              {avatarFallback}
-            </AvatarFallback>
-          </Avatar>
+          <UserAvatarEditor
+            compact
+            avatarUrl={profile.avatar_url}
+            name={avatarName}
+            onChanged={props.onAvatarChanged}
+          />
 
           <div className='min-w-0 flex-1 space-y-1.5 sm:space-y-3'>
             <div className='flex min-w-0 items-center gap-2'>

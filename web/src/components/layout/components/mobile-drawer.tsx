@@ -91,7 +91,9 @@ function MobileUserProfile({ user, onNavigate }: MobileUserProfileProps) {
         {/* User header - simplified */}
         <div className='border-border flex items-center gap-2.5 border-b p-2.5'>
           <Avatar className='size-9'>
-            <AvatarImage src='/avatars/01.png' alt={`@${displayName}`} />
+            {user.avatar_url && (
+              <AvatarImage src={user.avatar_url} alt={`@${displayName}`} />
+            )}
             <AvatarFallback className='text-xs'>{initials}</AvatarFallback>
           </Avatar>
           <div className='flex flex-1 flex-col gap-0.5 overflow-hidden'>
@@ -255,15 +257,15 @@ export function MobileDrawer({
               >
                 {loading ? (
                   <div className='flex flex-col gap-1 p-2'>
-                    {Array.from({ length: 4 }, (_, i) => (
-                      <Skeleton key={i} className='h-8 w-full' />
+                    {['first', 'second', 'third', 'fourth'].map((key) => (
+                      <Skeleton key={key} className='h-8 w-full' />
                     ))}
                   </div>
                 ) : (
                   <AnimatePresence>
-                    {mobileLinksList.map((link, index) => (
+                    {mobileLinksList.map((link) => (
                       <motion.div
-                        key={`${link.href}-${index}`}
+                        key={link.href}
                         className='border-border border-b p-2.5 last:border-b-0'
                         variants={MOBILE_DRAWER_ANIMATION.menuItem as Variants}
                       >

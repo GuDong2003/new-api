@@ -52,7 +52,11 @@ export function Profile() {
       <div className='min-h-0 flex-1 overflow-auto px-3 py-3 sm:px-4 sm:py-6'>
         <CardStaggerContainer className='mx-auto flex w-full max-w-7xl flex-col gap-4 sm:gap-6'>
           <CardStaggerItem>
-            <ProfileHeader profile={profile} loading={loading} />
+            <ProfileHeader
+              profile={profile}
+              loading={loading}
+              onAvatarChanged={refreshProfile}
+            />
           </CardStaggerItem>
 
           <CardStaggerItem>

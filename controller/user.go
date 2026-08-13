@@ -544,6 +544,7 @@ func buildSelfUserData(user *model.User) map[string]interface{} {
 		"id":                user.Id,
 		"username":          user.Username,
 		"display_name":      user.DisplayName,
+		"avatar_url":        user.AvatarURL,
 		"role":              user.Role,
 		"status":            user.Status,
 		"email":             user.Email,
@@ -999,6 +1000,9 @@ func DeleteUser(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	if err := service.DeleteManagedAvatar(originUser.AvatarURL); err != nil {
+		common.SysError(fmt.Sprintf("failed to remove avatar for deleted user %d: %v", id, err))
+	}
 	recordManageAuditFor(c, originUser.Id, "user.delete", map[string]interface{}{
 		"username": originUser.Username,
 		"id":       originUser.Id,
@@ -1023,6 +1027,9 @@ func DeleteSelf(c *gin.Context) {
 	if err != nil {
 		common.ApiError(c, err)
 		return
+	}
+	if err := service.DeleteManagedAvatar(user.AvatarURL); err != nil {
+		common.SysError(fmt.Sprintf("failed to remove avatar for deleted user %d: %v", id, err))
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
@@ -1155,6 +1162,9 @@ func ManageUser(c *gin.Context) {
 				"message": err.Error(),
 			})
 			return
+		}
+		if err := service.DeleteManagedAvatar(user.AvatarURL); err != nil {
+			common.SysError(fmt.Sprintf("failed to remove avatar for deleted user %d: %v", user.Id, err))
 		}
 		// 删除用户后，强制清理 Redis 中所有该用户令牌的缓存，
 		// 避免已缓存的令牌在 TTL 过期前仍能通过 TokenAuth 校验。

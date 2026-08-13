@@ -82,6 +82,7 @@ type User struct {
 	Password         string                     `json:"password" gorm:"not null;" validate:"min=8,max=20"`
 	OriginalPassword string                     `json:"original_password" gorm:"-:all"` // this field is only for Password change verification, don't save it to database!
 	DisplayName      string                     `json:"display_name" gorm:"index" validate:"max=20"`
+	AvatarURL        string                     `json:"avatar_url" gorm:"type:varchar(255);column:avatar_url"`
 	Role             int                        `json:"role" gorm:"type:int;default:1"`   // admin, common
 	Status           int                        `json:"status" gorm:"type:int;default:1"` // enabled, disabled
 	Email            string                     `json:"email" gorm:"index" validate:"max=50"`
@@ -133,6 +134,37 @@ func (user *User) GetAccessToken() string {
 		return ""
 	}
 	return *user.AccessToken
+}
+
+// ReplaceUserAvatar atomically swaps a user's managed avatar URL and returns
+// the previous value so the caller can remove the old file after commit.
+func ReplaceUserAvatar(userID int, avatarURL string) (string, error) {
+	if userID == 0 {
+		return "", errors.New("user id is empty")
+	}
+
+	var previousAvatarURL string
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		var current User
+		if err := lockForUpdate(tx).
+			Select("id", "avatar_url").
+			Where("id = ?", userID).
+			First(&current).Error; err != nil {
+			return err
+		}
+		previousAvatarURL = current.AvatarURL
+		result := tx.Model(&User{}).
+			Where("id = ?", userID).
+			Update("avatar_url", avatarURL)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return gorm.ErrRecordNotFound
+		}
+		return nil
+	})
+	return previousAvatarURL, err
 }
 
 func (user *User) SetAccessToken(token string) {
