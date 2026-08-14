@@ -292,6 +292,9 @@ func migrateDB() error {
 		&SystemInstance{},
 		&SystemTask{},
 		&SystemTaskLock{},
+		&UpstreamAccount{},
+		&UpstreamAccountChannel{},
+		&UpstreamAccountLog{},
 		&NamedLease{},
 		&CasbinRule{},
 		&AuthzRole{},
@@ -358,6 +361,9 @@ func migrateDBFast() error {
 		{&SystemInstance{}, "SystemInstance"},
 		{&SystemTask{}, "SystemTask"},
 		{&SystemTaskLock{}, "SystemTaskLock"},
+		{&UpstreamAccount{}, "UpstreamAccount"},
+		{&UpstreamAccountChannel{}, "UpstreamAccountChannel"},
+		{&UpstreamAccountLog{}, "UpstreamAccountLog"},
 		{&NamedLease{}, "NamedLease"},
 	}
 	// 动态计算migration数量，确保errChan缓冲区足够大

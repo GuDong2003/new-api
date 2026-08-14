@@ -22,6 +22,7 @@ const (
 	SystemTaskTypeMidjourneyPoll     = "midjourney_poll"
 	SystemTaskTypeAsyncTaskPoll      = "async_task_poll"
 	SystemTaskTypeChannelQueueWarmup = "channel_queue_warmup"
+	SystemTaskTypeUpstreamAccount    = "upstream_account_maintenance"
 )
 
 var ErrSystemTaskLockLost = errors.New("system task lock lost")

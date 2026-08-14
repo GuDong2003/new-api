@@ -331,7 +331,13 @@ function BalanceCell({ channel }: { channel: Channel }) {
   const layout = useContext(ChannelRowActionsLayoutContext)
   const { sensitiveVisible } = useChannels()
   const isTagRow = isTagAggregateRow(channel)
-  const balance = channel.balance || 0
+  const usesUpstream = channel.balance_source === 'upstream'
+  const balance = usesUpstream
+    ? (channel.upstream_balance ?? 0)
+    : channel.balance || 0
+  const balanceUnit = usesUpstream
+    ? channel.upstream_balance_unit || 'QUOTA'
+    : 'USD'
   const usedQuota = channel.used_quota || 0
   const [isUpdating, setIsUpdating] = useState(false)
   const [codexUsageOpen, setCodexUsageOpen] = useState(false)
@@ -358,9 +364,10 @@ function BalanceCell({ channel }: { channel: Channel }) {
       showSymbol: layout !== 'card',
     })
   )
-  const remainingFull = withSuffix(
-    formatCurrencyFromUSD(balance, balanceFormatOptions)
-  )
+  const remainingFull =
+    balanceUnit === 'USD'
+      ? withSuffix(formatCurrencyFromUSD(balance, balanceFormatOptions))
+      : `${balance.toLocaleString(locale)} ${balanceUnit}`
   const usedDisplay =
     usedFull.length > MAX_INLINE_BALANCE_CHARS
       ? withSuffix(
@@ -371,18 +378,25 @@ function BalanceCell({ channel }: { channel: Channel }) {
           })
         )
       : usedFull
-  const remainingDisplay =
-    remainingFull.length > MAX_INLINE_BALANCE_CHARS
-      ? withSuffix(
-          formatCurrencyFromUSD(balance, {
-            compact: true,
-            locale,
-            showSymbol: layout !== 'card',
-          })
-        )
-      : remainingFull
+  let remainingDisplay = remainingFull
+  if (remainingFull.length > MAX_INLINE_BALANCE_CHARS) {
+    remainingDisplay =
+      balanceUnit === 'USD'
+        ? withSuffix(
+            formatCurrencyFromUSD(balance, {
+              compact: true,
+              locale,
+              showSymbol: layout !== 'card',
+            })
+          )
+        : `${new Intl.NumberFormat(locale, { notation: 'compact' }).format(balance)} ${balanceUnit}`
+  }
   const usedLabel = `${t('Used:')} ${usedFull}`
-  const remainingLabel = `${t('Remaining:')} ${remainingFull}`
+  const remainingLabel = `${t('Remaining:')} ${remainingFull}${
+    usesUpstream && channel.upstream_account_name
+      ? ` · ${channel.upstream_account_name}`
+      : ''
+  }`
   const maskedUsedLabel = `${t('Used:')} ${SENSITIVE_MASK}`
   const maskedRemainingLabel = `${t('Remaining:')} ${SENSITIVE_MASK}`
 
@@ -416,10 +430,13 @@ function BalanceCell({ channel }: { channel: Channel }) {
   }
 
   // Regular channel row: show used and remaining with click to update
-  const variant = getBalanceVariant(balance)
+  const variant = balanceUnit === 'USD' ? getBalanceVariant(balance) : 'info'
 
   const handleClickUpdate = async () => {
     if (isUpdating) {
+      return
+    }
+    if (channel.balance_source === 'none') {
       return
     }
 
@@ -448,17 +465,23 @@ function BalanceCell({ channel }: { channel: Channel }) {
   let remainingBadgeLabel = sensitiveVisible ? remainingDisplay : SENSITIVE_MASK
   if (sensitiveVisible && isUpdating) {
     remainingBadgeLabel = t('Updating...')
+  } else if (sensitiveVisible && channel.balance_source === 'none') {
+    remainingBadgeLabel = t('Disabled')
   } else if (sensitiveVisible && channel.type === 57) {
     remainingBadgeLabel = t('Account Info')
   }
   let remainingTooltipLabel = remainingLabel
   if (!sensitiveVisible) {
     remainingTooltipLabel = maskedRemainingLabel
+  } else if (channel.balance_source === 'none') {
+    remainingTooltipLabel = '该渠道已设置为不查询余额'
   } else if (channel.type === 57) {
     remainingTooltipLabel = t('Click to view Codex usage')
   }
   let remainingBadgeVariant: StatusBadgeProps['variant'] = variant
-  if (channel.type === 57) {
+  if (channel.balance_source === 'none') {
+    remainingBadgeVariant = 'neutral'
+  } else if (channel.type === 57) {
     remainingBadgeVariant = 'info'
   } else if (isUpdating) {
     remainingBadgeVariant = 'neutral'

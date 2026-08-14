@@ -50,6 +50,15 @@ export const channelSchema = z.object({
   other: z.string().default(''),
   balance: z.number().default(0), // in USD
   balance_updated_time: z.number(),
+  balance_source: z.enum(['channel', 'upstream', 'none']).default('channel'),
+  upstream_account_id: z.number().optional(),
+  upstream_account_name: z.string().optional(),
+  upstream_balance: z.number().optional(),
+  upstream_balance_unit: z.string().optional(),
+  upstream_balance_updated_time: z.number().optional(),
+  upstream_balance_status: z
+    .enum(['unknown', 'healthy', 'failed', 'manual_required'])
+    .optional(),
   models: z.string().default(''),
   group: z.string().default('default'),
   used_quota: z.number().default(0),
@@ -207,6 +216,8 @@ export interface ChannelBalanceResponse {
   message?: string
   balance?: number
   currency?: string
+  balance_source?: 'channel' | 'upstream' | 'none'
+  balance_updated_time?: number
 }
 
 export interface FetchModelsResponse {

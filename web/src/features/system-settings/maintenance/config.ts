@@ -81,6 +81,7 @@ export const SIDEBAR_MODULES_DEFAULT: SidebarModulesAdminConfig = {
     order: [
       'channel',
       'queue',
+      'upstreamAccounts',
       'models',
       'user',
       'redemption',
@@ -91,6 +92,7 @@ export const SIDEBAR_MODULES_DEFAULT: SidebarModulesAdminConfig = {
     ],
     channel: true,
     queue: true,
+    upstreamAccounts: true,
     models: true,
     redemption: true,
     invitation: true,

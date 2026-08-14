@@ -309,6 +309,20 @@ func SetApiRouter(router *gin.Engine) {
 			systemInfoRoute.DELETE("/stale-instances", controller.DeleteStaleSystemInstances)
 			systemInfoRoute.DELETE("/instances/:node_name", controller.DeleteStaleSystemInstance)
 		}
+		upstreamAccountRoute := apiRouter.Group("/upstream-account")
+		upstreamAccountRoute.Use(middleware.AdminAuth())
+		{
+			upstreamAccountRoute.GET("/", controller.ListUpstreamAccounts)
+			upstreamAccountRoute.GET("/channels", controller.ListUpstreamAccountChannels)
+			upstreamAccountRoute.POST("/", controller.CreateUpstreamAccount)
+			upstreamAccountRoute.GET("/logs", controller.ListUpstreamAccountLogs)
+			upstreamAccountRoute.PUT("/:id", controller.UpdateUpstreamAccount)
+			upstreamAccountRoute.DELETE("/:id", controller.DeleteUpstreamAccount)
+			upstreamAccountRoute.PUT("/:id/channels", controller.ReplaceUpstreamAccountChannels)
+			upstreamAccountRoute.POST("/:id/checkin", controller.CheckinUpstreamAccount)
+			upstreamAccountRoute.POST("/:id/balance", controller.RefreshUpstreamAccountBalance)
+			upstreamAccountRoute.POST("/:id/health", controller.HealthCheckUpstreamAccount)
+		}
 
 		dataRoute := apiRouter.Group("/data")
 		dataRoute.GET("/", middleware.AdminAuth(), controller.GetAllQuotaDates)

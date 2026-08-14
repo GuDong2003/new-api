@@ -263,6 +263,10 @@ export function SidebarModulesSection({
         title: t('Queue'),
         description: t('Queue channels'),
       },
+      upstreamAccounts: {
+        title: t('Automatic Check-in'),
+        description: t('Manage upstream check-ins and real balances.'),
+      },
       redemption: {
         title: t('Redeem codes'),
         description: t('Create and review invite or credit codes.'),

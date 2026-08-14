@@ -53,6 +53,7 @@ export function BalanceQueryDialog({
   const [balanceUpdatedTime, setBalanceUpdatedTime] = useState<number | null>(
     null
   )
+  const [balanceCurrency, setBalanceCurrency] = useState<string | null>(null)
   const [codexUsageResponse, setCodexUsageResponse] =
     useState<CodexUsageDialogData | null>(null)
 
@@ -92,18 +93,29 @@ export function BalanceQueryDialog({
       const response = await updateChannelBalance(currentRow.id)
       if (response.success && response.balance !== undefined) {
         const newBalance = response.balance
-        const now = Math.floor(Date.now() / 1000)
+        const now =
+          response.balance_updated_time ?? Math.floor(Date.now() / 1000)
 
         setBalance(newBalance)
+        setBalanceCurrency(response.currency || 'USD')
         setBalanceUpdatedTime(now)
         toast.success(t('Balance updated successfully'))
 
         // Update currentRow immediately with new balance and timestamp
-        setCurrentRow({
-          ...currentRow,
-          balance: newBalance,
-          balance_updated_time: now,
-        })
+        setCurrentRow(
+          response.balance_source === 'upstream'
+            ? {
+                ...currentRow,
+                upstream_balance: newBalance,
+                upstream_balance_unit: response.currency || 'QUOTA',
+                upstream_balance_updated_time: now,
+              }
+            : {
+                ...currentRow,
+                balance: newBalance,
+                balance_updated_time: now,
+              }
+        )
 
         // Invalidate queries to refresh the table
         await queryClient.invalidateQueries({
@@ -124,20 +136,47 @@ export function BalanceQueryDialog({
   const handleClose = () => {
     setBalance(null)
     setBalanceUpdatedTime(null)
+    setBalanceCurrency(null)
     setCodexUsageResponse(null)
     onOpenChange(false)
   }
 
-  const formatBalance = (bal: number) =>
-    formatCurrencyFromUSD(bal, {
-      digitsLarge: 2,
-      digitsSmall: 4,
-      abbreviate: false,
-    })
+  const formatBalance = (bal: number, currency = 'USD') =>
+    currency === 'USD'
+      ? formatCurrencyFromUSD(bal, {
+          digitsLarge: 2,
+          digitsSmall: 4,
+          abbreviate: false,
+        })
+      : `${bal.toLocaleString()} ${currency}`
 
   const formatDate = (timestamp: number) => {
     if (!timestamp) return 'Never'
     return formatTimestampToDate(timestamp)
+  }
+
+  let displayedBalance = formatBalance(currentRow.balance)
+  if (balance !== null) {
+    displayedBalance = formatBalance(balance, balanceCurrency || 'USD')
+  } else if (currentRow.balance_source === 'upstream') {
+    displayedBalance = formatBalance(
+      currentRow.upstream_balance ?? 0,
+      currentRow.upstream_balance_unit || 'QUOTA'
+    )
+  } else if (currentRow.balance_source === 'none') {
+    displayedBalance = '不查询'
+  }
+  const displayedUpdatedTime =
+    balanceUpdatedTime ??
+    (currentRow.balance_source === 'upstream'
+      ? currentRow.upstream_balance_updated_time
+      : currentRow.balance_updated_time) ??
+    0
+  let queryButtonLabel = t('Update Balance')
+  if (currentRow.balance_source === 'none') {
+    queryButtonLabel = '余额查询已关闭'
+  } else if (isQuerying) {
+    queryButtonLabel = t('Querying...')
   }
 
   if (isCodex) {
@@ -184,14 +223,9 @@ export function BalanceQueryDialog({
             </IconBadge>
             <span>{t('Current Balance')}</span>
           </div>
-          <div className='text-2xl font-bold'>
-            {balance !== null
-              ? formatBalance(balance)
-              : formatBalance(currentRow.balance)}
-          </div>
+          <div className='text-2xl font-bold'>{displayedBalance}</div>
           <div className='text-muted-foreground mt-2 text-xs'>
-            {t('Last updated:')}{' '}
-            {formatDate(balanceUpdatedTime ?? currentRow.balance_updated_time)}
+            {t('Last updated:')} {formatDate(displayedUpdatedTime)}
           </div>
         </div>
 
@@ -199,11 +233,11 @@ export function BalanceQueryDialog({
         <Button
           className='w-full'
           onClick={handleQueryBalance}
-          disabled={isQuerying}
+          disabled={isQuerying || currentRow.balance_source === 'none'}
         >
           {isQuerying && <Loader2 className='mr-2 h-4 w-4 animate-spin' />}
           {!isQuerying && <RefreshCw className='mr-2 h-4 w-4' />}
-          {isQuerying ? t('Querying...') : t('Update Balance')}
+          {queryButtonLabel}
         </Button>
       </div>
     </Dialog>

@@ -478,11 +478,14 @@ export async function handleUpdateChannelBalance(
       const balance = response.balance
       toast.success(
         i18next.t('Balance updated: {{balance}}', {
-          balance: formatCurrencyFromUSD(balance, {
-            digitsLarge: 2,
-            digitsSmall: 4,
-            abbreviate: false,
-          }),
+          balance:
+            response.currency === 'USD' || !response.currency
+              ? formatCurrencyFromUSD(balance, {
+                  digitsLarge: 2,
+                  digitsSmall: 4,
+                  abbreviate: false,
+                })
+              : `${balance.toLocaleString()} ${response.currency}`,
         })
       )
       queryClient?.invalidateQueries({ queryKey: channelsQueryKeys.lists() })

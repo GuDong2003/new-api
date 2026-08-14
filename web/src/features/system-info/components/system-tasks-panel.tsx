@@ -85,6 +85,7 @@ const TYPE_LABEL: Record<string, string> = {
   midjourney_poll: 'Drawing task polling',
   async_task_poll: 'Async task polling',
   channel_queue_warmup: 'Upstream queue warmer',
+  upstream_account_maintenance: 'Automatic Check-in',
 }
 
 const TYPE_DISPLAY_ID: Record<string, string> = {

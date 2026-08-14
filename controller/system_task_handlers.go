@@ -24,6 +24,29 @@ func RegisterScheduledSystemTasks() {
 	service.RegisterSystemTaskHandler(midjourneyPollHandler{})
 	service.RegisterSystemTaskHandler(asyncTaskPollHandler{})
 	service.RegisterSystemTaskHandler(channelQueueWarmupHandler{})
+	service.RegisterSystemTaskHandler(upstreamAccountHandler{})
+}
+
+type upstreamAccountHandler struct{}
+
+func (upstreamAccountHandler) Type() string { return model.SystemTaskTypeUpstreamAccount }
+
+func (upstreamAccountHandler) BuildDueTask(now int64) (*model.SystemTask, bool, error) {
+	return buildDueUpstreamAccountTask(now)
+}
+
+func (upstreamAccountHandler) Run(ctx context.Context, task *model.SystemTask, runnerID string) {
+	payload := upstreamAccountTaskPayload{}
+	if err := task.DecodePayload(&payload); err != nil {
+		finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusFailed, nil, err)
+		return
+	}
+	result, err := runUpstreamAccountTask(ctx, payload, service.NewSystemTaskProgressReporter(task, runnerID))
+	if err != nil {
+		finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusFailed, result, err)
+		return
+	}
+	finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusSucceeded, result, nil)
 }
 
 type channelQueueWarmupHandler struct{}

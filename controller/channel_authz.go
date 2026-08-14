@@ -82,12 +82,19 @@ var channelOperationalFields = map[string]struct{}{
 // channelReadOnlyFields lists server-managed/accounting fields that the general
 // channel edit endpoint must ignore even if a client sends them.
 var channelReadOnlyFields = map[string]struct{}{
-	"created_time":         {},
-	"test_time":            {},
-	"response_time":        {},
-	"balance":              {},
-	"balance_updated_time": {},
-	"used_quota":           {},
+	"created_time":                  {},
+	"test_time":                     {},
+	"response_time":                 {},
+	"balance":                       {},
+	"balance_updated_time":          {},
+	"balance_source":                {},
+	"upstream_account_id":           {},
+	"upstream_account_name":         {},
+	"upstream_balance":              {},
+	"upstream_balance_unit":         {},
+	"upstream_balance_updated_time": {},
+	"upstream_balance_status":       {},
+	"used_quota":                    {},
 }
 
 func clearChannelReadOnlyFields(channel *PatchChannel, requestData map[string]any) {
@@ -106,6 +113,15 @@ func clearChannelReadOnlyFields(channel *PatchChannel, requestData map[string]an
 	if _, ok := requestData["balance_updated_time"]; ok {
 		channel.BalanceUpdatedTime = 0
 	}
+	if _, ok := requestData["balance_source"]; ok {
+		channel.BalanceSource = ""
+	}
+	channel.UpstreamAccountId = 0
+	channel.UpstreamAccountName = ""
+	channel.UpstreamBalance = nil
+	channel.UpstreamBalanceUnit = ""
+	channel.UpstreamBalanceUpdatedTime = 0
+	channel.UpstreamBalanceStatus = ""
 	if _, ok := requestData["used_quota"]; ok {
 		channel.UsedQuota = 0
 	}

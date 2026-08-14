@@ -168,6 +168,9 @@ func GetAllChannels(c *gin.Context) {
 	for _, datum := range channelData {
 		clearChannelInfo(datum)
 	}
+	if err := model.HydrateChannelUpstreamBalances(channelData); err != nil {
+		common.SysError("failed to hydrate upstream channel balances: " + err.Error())
+	}
 
 	countQuery := buildChannelListQuery(groupFilter, statusFilter, -1)
 	var results []struct {
@@ -381,6 +384,9 @@ func SearchChannels(c *gin.Context) {
 	for _, datum := range pagedData {
 		clearChannelInfo(datum)
 	}
+	if err := model.HydrateChannelUpstreamBalances(pagedData); err != nil {
+		common.SysError("failed to hydrate upstream channel balances: " + err.Error())
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
@@ -407,6 +413,7 @@ func GetChannel(c *gin.Context) {
 	}
 	if channel != nil {
 		clearChannelInfo(channel)
+		_ = model.HydrateChannelUpstreamBalances([]*model.Channel{channel})
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,

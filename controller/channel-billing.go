@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -357,6 +358,23 @@ func updateChannelMoonshotBalance(channel *model.Channel) (float64, error) {
 }
 
 func updateChannelBalance(channel *model.Channel) (float64, error) {
+	if channel.BalanceSource == "" {
+		channel.BalanceSource = model.ChannelBalanceSourceChannel
+	}
+	switch channel.BalanceSource {
+	case model.ChannelBalanceSourceNone:
+		return 0, errors.New("该渠道已设置为不查询余额")
+	case model.ChannelBalanceSourceUpstream:
+		account, err := model.GetUpstreamAccountForChannel(channel.Id)
+		if err != nil {
+			return 0, fmt.Errorf("获取绑定的上游站点账号失败: %w", err)
+		}
+		result, err := service.RefreshUpstreamAccountBalance(context.Background(), account, model.UpstreamTriggerManual)
+		if err != nil {
+			return 0, err
+		}
+		return result.Balance, nil
+	}
 	baseURL := constant.ChannelBaseURLs[channel.Type]
 	if channel.GetBaseURL() == "" {
 		channel.BaseURL = &baseURL
@@ -444,10 +462,22 @@ func UpdateChannelBalance(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	currency := "USD"
+	updatedTime := common.GetTimestamp()
+	if channel.BalanceSource == model.ChannelBalanceSourceUpstream {
+		account, accountErr := model.GetUpstreamAccountForChannel(channel.Id)
+		if accountErr == nil {
+			currency = account.BalanceUnit
+			updatedTime = account.BalanceUpdatedTime
+		}
+	}
 	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "",
-		"balance": balance,
+		"success":              true,
+		"message":              "",
+		"balance":              balance,
+		"currency":             currency,
+		"balance_source":       channel.BalanceSource,
+		"balance_updated_time": updatedTime,
 	})
 }
 
@@ -456,12 +486,29 @@ func updateAllChannelsBalance() error {
 	if err != nil {
 		return err
 	}
+	refreshedUpstreamAccounts := make(map[int]struct{})
 	for _, channel := range channels {
 		if channel.Status != common.ChannelStatusEnabled {
 			continue
 		}
 		if channel.ChannelInfo.IsMultiKey {
 			continue // skip multi-key channels
+		}
+		if channel.BalanceSource == model.ChannelBalanceSourceNone {
+			continue
+		}
+		if channel.BalanceSource == model.ChannelBalanceSourceUpstream {
+			account, accountErr := model.GetUpstreamAccountForChannel(channel.Id)
+			if accountErr != nil {
+				continue
+			}
+			if _, refreshed := refreshedUpstreamAccounts[account.Id]; refreshed {
+				continue
+			}
+			refreshedUpstreamAccounts[account.Id] = struct{}{}
+			_, _ = service.RefreshUpstreamAccountBalance(context.Background(), account, model.UpstreamTriggerScheduled)
+			time.Sleep(common.RequestInterval)
+			continue
 		}
 		// TODO: support Azure
 		//if channel.Type != common.ChannelTypeOpenAI && channel.Type != common.ChannelTypeCustom {
@@ -470,7 +517,7 @@ func updateAllChannelsBalance() error {
 		balance, err := updateChannelBalance(channel)
 		if err != nil {
 			continue
-		} else {
+		} else if channel.BalanceSource != model.ChannelBalanceSourceUpstream {
 			// err is nil & balance <= 0 means quota is used up
 			if balance <= 0 {
 				service.DisableChannel(*types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, "", channel.GetAutoBan()), "余额不足")

@@ -20,6 +20,7 @@ import {
   Activity,
   BadgePlus,
   Box,
+  CalendarCheck,
   CreditCard,
   FileText,
   FlaskConical,
@@ -130,6 +131,11 @@ export function useSidebarData(): SidebarData {
             title: t('Queue'),
             url: '/queue',
             icon: Flame,
+          },
+          {
+            title: t('Automatic Check-in'),
+            url: '/upstream-accounts',
+            icon: CalendarCheck,
           },
           {
             title: t('Models'),
