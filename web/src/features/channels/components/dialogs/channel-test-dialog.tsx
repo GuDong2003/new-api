@@ -79,6 +79,7 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet'
 import { Switch } from '@/components/ui/switch'
+import { Textarea } from '@/components/ui/textarea'
 import {
   Tooltip,
   TooltipContent,
@@ -334,6 +335,7 @@ function ChannelTestDialogContent({
   > | null>(null)
   const [endpointType, setEndpointType] = useState('auto')
   const [isStreamTest, setIsStreamTest] = useState(false)
+  const [messageOverride, setMessageOverride] = useState('')
   const [searchTerm, setSearchTerm] = useState('')
   const [testResults, setTestResults] = useState<Record<string, TestResult>>({})
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({})
@@ -401,6 +403,7 @@ function ChannelTestDialogContent({
     batchStopRequestedRef.current = true
     setEndpointType('auto')
     setIsStreamTest(false)
+    setMessageOverride('')
     setSearchTerm('')
     setTestResults({})
     setRowSelection({})
@@ -562,6 +565,7 @@ function ChannelTestDialogContent({
             testModel: model,
             endpointType: endpointType === 'auto' ? undefined : endpointType,
             stream: effectiveStreamTest || undefined,
+            message: messageOverride,
             silent,
           },
           (success, responseTime, error, errorCode) => {
@@ -601,6 +605,7 @@ function ChannelTestDialogContent({
       endpointType,
       effectiveStreamTest,
       markModelTesting,
+      messageOverride,
       refreshChannelLists,
       t,
       updateTestResult,
@@ -1049,6 +1054,25 @@ function ChannelTestDialogContent({
                 {t('Enable streaming mode for the test request.')}
               </p>
             </div>
+          </div>
+
+          <div className='grid gap-2'>
+            <Label htmlFor='channel-test-message'>
+              {t('Test message override')}
+            </Label>
+            <Textarea
+              id='channel-test-message'
+              value={messageOverride}
+              onChange={(event) => setMessageOverride(event.target.value)}
+              placeholder={t('Leave blank to use the global default.')}
+              maxLength={4096}
+              rows={3}
+            />
+            <p className='text-muted-foreground text-xs'>
+              {t(
+                'Leave blank to use the default channel-test message from system settings. This prompt is also used for image generation tests.'
+              )}
+            </p>
           </div>
 
           <div className='space-y-3 max-sm:has-[div[role="toolbar"]]:pb-16'>

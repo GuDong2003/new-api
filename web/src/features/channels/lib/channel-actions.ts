@@ -25,6 +25,7 @@ import { formatCurrencyFromUSD } from '@/lib/currency'
 import {
   copyChannel,
   deleteChannel,
+  testChannelDetailed,
   testChannel,
   updateChannel,
   updateChannelStatus,
@@ -275,6 +276,7 @@ export async function handleTestChannel(
     testModel?: string
     endpointType?: string
     stream?: boolean
+    message?: string
     silent?: boolean
   },
   onTestComplete?: (
@@ -285,18 +287,28 @@ export async function handleTestChannel(
   ) => void
 ): Promise<void> {
   const payload =
-    options && (options.testModel || options.endpointType || options.stream)
+    options &&
+    (options.testModel ||
+      options.endpointType ||
+      options.stream ||
+      options.message !== undefined)
       ? {
           ...(options.testModel ? { model: options.testModel } : {}),
           ...(options.endpointType
             ? { endpoint_type: options.endpointType }
             : {}),
           ...(options.stream ? { stream: true } : {}),
+          ...(options.message !== undefined
+            ? { message: options.message }
+            : {}),
         }
       : undefined
 
   try {
-    const response = await testChannel(id, payload)
+    const response =
+      payload && options?.message !== undefined
+        ? await testChannelDetailed(id, payload)
+        : await testChannel(id, payload)
     const responseTime = getChannelTestResponseTime(response)
     const duration = formatChannelTestDuration(responseTime)
     const target = getChannelTestLabel(options)

@@ -336,6 +336,7 @@ export function ModelMutateDrawer({
       'monitor_setting.auto_test_channel_enabled': false,
       'monitor_setting.auto_test_channel_minutes': 10,
       'monitor_setting.channel_test_mode': 'scheduled_all',
+      'monitor_setting.channel_test_message': '你好，请简单介绍一下你自己。',
       'channel_affinity_setting.enabled': false,
       'channel_affinity_setting.switch_on_success': true,
       'channel_affinity_setting.keep_on_channel_disabled': false,

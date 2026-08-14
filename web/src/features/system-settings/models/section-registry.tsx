@@ -20,6 +20,7 @@ import { ChannelAffinitySection } from '../general/channel-affinity'
 import { IoNetDeploymentSettingsSection } from '../integrations/ionet-deployment-settings-section'
 import type { ModelSettings } from '../types'
 import { createSectionRegistry } from '../utils/section-registry'
+import { ChannelTestSection } from './channel-test-section'
 import { ClaudeSettingsCard } from './claude-settings-card'
 import { GeminiSettingsCard } from './gemini-settings-card'
 import { GlobalSettingsCard } from './global-settings-card'
@@ -85,6 +86,18 @@ const MODELS_SECTIONS = [
             settings['monitor_setting.auto_test_channel_minutes'],
           'monitor_setting.channel_test_mode':
             settings['monitor_setting.channel_test_mode'],
+        }}
+      />
+    ),
+  },
+  {
+    id: 'channel-test',
+    titleKey: 'Channel Test',
+    build: (settings: ModelSettings) => (
+      <ChannelTestSection
+        defaultValues={{
+          'monitor_setting.channel_test_message':
+            settings['monitor_setting.channel_test_message'],
         }}
       />
     ),

@@ -1,6 +1,7 @@
 package operation_setting
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -54,4 +55,27 @@ func TestGetMonitorSettingPreservesAutoBanOnlyMode(t *testing.T) {
 
 	require.NotNil(t, setting)
 	assert.Equal(t, ChannelTestModeAutoBanOnly, setting.ChannelTestMode)
+}
+
+func TestResolveChannelTestMessageUsesOverrideAndGlobalFallback(t *testing.T) {
+	orig := monitorSetting
+	t.Cleanup(func() { monitorSetting = orig })
+
+	monitorSetting.ChannelTestMessage = "全局测试消息"
+
+	message, err := ResolveChannelTestMessage("临时测试消息")
+	require.NoError(t, err)
+	assert.Equal(t, "临时测试消息", message)
+
+	message, err = ResolveChannelTestMessage("")
+	require.NoError(t, err)
+	assert.Equal(t, "全局测试消息", message)
+}
+
+func TestValidateChannelTestMessageLimit(t *testing.T) {
+	valid := strings.Repeat("测", ChannelTestMessageMaxRunes)
+	require.NoError(t, ValidateChannelTestMessage(valid))
+
+	tooLong := strings.Repeat("测", ChannelTestMessageMaxRunes+1)
+	assert.Error(t, ValidateChannelTestMessage(tooLong))
 }

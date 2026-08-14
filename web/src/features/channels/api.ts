@@ -29,6 +29,7 @@ import type {
   ChannelTestResponse,
   CopyChannelParams,
   CopyChannelResponse,
+  DetailedChannelTestRequest,
   FetchModelsResponse,
   GetChannelResponse,
   GetChannelsParams,
@@ -217,6 +218,21 @@ export async function testChannel(
   const res = await api.get(
     `/api/channel/test/${id}`,
     channelActionConfig({ params })
+  )
+  return res.data
+}
+
+/**
+ * Test a channel with a JSON body, including a one-off prompt override.
+ */
+export async function testChannelDetailed(
+  id: number,
+  data: DetailedChannelTestRequest
+): Promise<ChannelTestResponse> {
+  const res = await api.post(
+    `/api/channel/test/${id}`,
+    data,
+    channelActionConfig()
   )
   return res.data
 }

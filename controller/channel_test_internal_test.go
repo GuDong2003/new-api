@@ -356,3 +356,18 @@ func TestTestAllChannelsRejectsExistingActiveTask(t *testing.T) {
 	require.Contains(t, recorder.Body.String(), existing.TaskID)
 	require.Contains(t, recorder.Body.String(), "已有通道测试任务正在运行或等待中")
 }
+
+func TestBuildTestRequestWithMessageUsesPromptForImageGeneration(t *testing.T) {
+	request := buildTestRequestWithMessage(
+		"gpt-image-2",
+		string(constant.EndpointTypeImageGeneration),
+		&model.Channel{Type: constant.ChannelTypeOpenAI},
+		false,
+		"a red apple on a white background",
+	)
+
+	imageRequest, ok := request.(*dto.ImageRequest)
+	require.True(t, ok)
+	assert.Equal(t, "a red apple on a white background", imageRequest.Prompt)
+	assert.Equal(t, "1024x1024", imageRequest.Size)
+}

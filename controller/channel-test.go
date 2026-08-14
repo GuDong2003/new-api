@@ -89,9 +89,11 @@ func testChannelWithOptions(ctx context.Context, channel *model.Channel, testUse
 	if channel == nil {
 		return testResult{localErr: errors.New("channel is nil")}
 	}
-	if strings.TrimSpace(options.message) == "" {
-		options.message = "hi"
+	resolvedMessage, messageErr := operation_setting.ResolveChannelTestMessage(options.message)
+	if messageErr != nil {
+		return testResult{localErr: messageErr}
 	}
+	options.message = resolvedMessage
 	tik := time.Now()
 	var unsupportedTestChannelTypes = []int{
 		constant.ChannelTypeMidjourney,
@@ -712,12 +714,14 @@ func detectErrorMessageFromJSONBytes(jsonBytes []byte) string {
 }
 
 func buildTestRequest(model string, endpointType string, channel *model.Channel, isStream bool) dto.Request {
-	return buildTestRequestWithMessage(model, endpointType, channel, isStream, "hi")
+	return buildTestRequestWithMessage(model, endpointType, channel, isStream, operation_setting.DefaultChannelTestMessage)
 }
 
 func buildTestRequestWithMessage(model string, endpointType string, channel *model.Channel, isStream bool, message string) dto.Request {
-	if strings.TrimSpace(message) == "" {
-		message = "hi"
+	if resolvedMessage, err := operation_setting.ResolveChannelTestMessage(message); err == nil {
+		message = resolvedMessage
+	} else {
+		message = operation_setting.DefaultChannelTestMessage
 	}
 	testResponsesInput := buildTestResponsesInput(message)
 
@@ -734,7 +738,7 @@ func buildTestRequestWithMessage(model string, endpointType string, channel *mod
 			// 返回 ImageRequest
 			return &dto.ImageRequest{
 				Model:  model,
-				Prompt: "a cute cat",
+				Prompt: message,
 				N:      lo.ToPtr(uint(1)),
 				Size:   "1024x1024",
 			}
@@ -902,7 +906,41 @@ func applyTestRequestMaxTokens(request dto.Request, maxTokens *uint) {
 	}
 }
 
+type detailedChannelTestRequest struct {
+	Model        string `json:"model"`
+	EndpointType string `json:"endpoint_type"`
+	Stream       bool   `json:"stream"`
+	Message      string `json:"message"`
+}
+
 func TestChannel(c *gin.Context) {
+	testChannelHTTP(c, c.Query("model"), c.Query("endpoint_type"), parseChannelTestStream(c), "")
+}
+
+// TestChannelDetailed accepts a JSON body so a temporary test prompt does not
+// leak into access logs or URL history. An empty message uses the global
+// channel-test message configured in system settings.
+func TestChannelDetailed(c *gin.Context) {
+	var request detailedChannelTestRequest
+	if c.Request != nil && c.Request.Body != nil {
+		if err := c.ShouldBindJSON(&request); err != nil && !errors.Is(err, io.EOF) {
+			common.ApiError(c, err)
+			return
+		}
+	}
+	if _, err := operation_setting.NormalizeChannelTestMessage(request.Message); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	testChannelHTTP(c, request.Model, request.EndpointType, request.Stream, request.Message)
+}
+
+func parseChannelTestStream(c *gin.Context) bool {
+	isStream, _ := strconv.ParseBool(c.Query("stream"))
+	return isStream
+}
+
+func testChannelHTTP(c *gin.Context, testModel string, endpointType string, isStream bool, message string) {
 	channelId, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
 		common.ApiError(c, err)
@@ -921,9 +959,6 @@ func TestChannel(c *gin.Context) {
 	//		go func() { _ = channel.SaveChannelInfo() }()
 	//	}
 	//}()
-	testModel := c.Query("model")
-	endpointType := c.Query("endpoint_type")
-	isStream, _ := strconv.ParseBool(c.Query("stream"))
 	testUserID, err := resolveChannelTestUserID(c)
 	if err != nil {
 		common.ApiError(c, err)
@@ -934,7 +969,9 @@ func TestChannel(c *gin.Context) {
 	if c.Request != nil {
 		requestCtx = c.Request.Context()
 	}
-	result := testChannel(requestCtx, channel, testUserID, testModel, endpointType, isStream)
+	result := testChannelWithOptions(requestCtx, channel, testUserID, testModel, endpointType, isStream, channelTestOptions{
+		message: message,
+	})
 	if result.localErr != nil {
 		resp := gin.H{
 			"success": false,
