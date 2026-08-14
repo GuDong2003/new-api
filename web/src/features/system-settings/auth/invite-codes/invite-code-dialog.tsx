@@ -44,6 +44,7 @@ export function InviteCodeDialog(props: InviteCodeDialogProps) {
   const { t } = useTranslation()
   const { copyToClipboard } = useCopyToClipboard()
   const [name, setName] = useState('')
+  const [customCode, setCustomCode] = useState('')
   const [count, setCount] = useState(1)
   const [maxUses, setMaxUses] = useState(1)
   const [expiredAt, setExpiredAt] = useState<Date | undefined>()
@@ -55,6 +56,7 @@ export function InviteCodeDialog(props: InviteCodeDialogProps) {
   useEffect(() => {
     if (!props.open) return
     setName(props.inviteCode?.name ?? '')
+    setCustomCode('')
     setCount(1)
     setMaxUses(props.inviteCode?.max_uses ?? 1)
     setExpiredAt(
@@ -83,6 +85,12 @@ export function InviteCodeDialog(props: InviteCodeDialogProps) {
     }
     if (!isEditing && (!Number.isInteger(count) || count < 1 || count > 100)) {
       toast.error(t('Generation count must be between 1 and 100'))
+      return
+    }
+    if (!isEditing && customCode.trim() && count !== 1) {
+      toast.error(
+        t('Custom invitation code can only create one code at a time')
+      )
       return
     }
     const originalExpiredTime = props.inviteCode?.expired_time ?? 0
@@ -116,7 +124,11 @@ export function InviteCodeDialog(props: InviteCodeDialogProps) {
         }
         return
       }
-      const result = await createInviteCodes({ ...input, count })
+      const result = await createInviteCodes({
+        ...input,
+        count,
+        code: customCode.trim() || undefined,
+      })
       if (result.success && result.data?.length) {
         setGenerated(result.data)
         props.onSaved()
@@ -210,6 +222,33 @@ export function InviteCodeDialog(props: InviteCodeDialogProps) {
         </div>
         {!isEditing ? (
           <div className='grid gap-2'>
+            <Label htmlFor='invite-code-custom'>
+              {t('Custom invitation code (optional)')}
+            </Label>
+            <Input
+              id='invite-code-custom'
+              value={customCode}
+              maxLength={64}
+              autoCapitalize='none'
+              autoCorrect='off'
+              onChange={(event) => {
+                const value = event.target.value.toLowerCase()
+                setCustomCode(value)
+                if (value.trim()) setCount(1)
+              }}
+              placeholder={t(
+                'Leave blank to generate a random 16-character code'
+              )}
+            />
+            <p className='text-muted-foreground text-xs'>
+              {t(
+                'Custom codes use 8-64 lowercase letters, numbers, hyphens, or underscores.'
+              )}
+            </p>
+          </div>
+        ) : null}
+        {!isEditing ? (
+          <div className='grid gap-2'>
             <Label htmlFor='invite-code-count'>{t('Generation Count')}</Label>
             <Input
               id='invite-code-count'
@@ -217,10 +256,13 @@ export function InviteCodeDialog(props: InviteCodeDialogProps) {
               min={1}
               max={100}
               value={count}
+              disabled={Boolean(customCode.trim())}
               onChange={(event) => setCount(Number(event.target.value))}
             />
             <p className='text-muted-foreground text-xs'>
-              {t('Generate between 1 and 100 invitation codes at a time')}
+              {customCode.trim()
+                ? t('Custom invitation code can only create one code at a time')
+                : t('Generate between 1 and 100 invitation codes at a time')}
             </p>
           </div>
         ) : null}

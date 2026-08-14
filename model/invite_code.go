@@ -20,10 +20,15 @@ import (
 )
 
 const (
-	inviteCodeAlphabet  = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
-	inviteCodePartCount = 4
-	inviteCodePartSize  = 4
-	inviteCodeCipherV1  = "v1."
+	inviteCodeLegacyAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+	inviteCodeLegacyPrefix   = "NAPI"
+	inviteCodeLegacyParts    = 4
+	inviteCodeLegacyPartSize = 4
+	inviteCodeRandomAlphabet = "abcdefghijklmnopqrstuvwxyz0123456789"
+	inviteCodeRandomLength   = 16
+	inviteCodeCustomMin      = 8
+	inviteCodeCustomMax      = 64
+	inviteCodeCipherV1       = "v1."
 )
 
 var inviteCodeCipherAAD = []byte("new-api-invite-code-v1")
@@ -33,6 +38,7 @@ var (
 	ErrInviteCodeInvalid     = errors.New("invitation code is invalid")
 	ErrInviteCodeUnavailable = errors.New("invitation code is unavailable")
 	ErrInviteCodeUsed        = errors.New("invitation code has usage records")
+	ErrInviteCodeExists      = errors.New("invitation code already exists")
 )
 
 type InviteCode struct {
@@ -80,39 +86,53 @@ type InviteCodeQueryOptions struct {
 	Now        int64
 }
 
-func generateInviteCode() (string, error) {
-	parts := make([]string, inviteCodePartCount)
-	alphabetSize := big.NewInt(int64(len(inviteCodeAlphabet)))
-	for partIndex := range parts {
-		part := make([]byte, inviteCodePartSize)
-		for charIndex := range part {
-			index, err := rand.Int(rand.Reader, alphabetSize)
-			if err != nil {
-				return "", err
-			}
-			part[charIndex] = inviteCodeAlphabet[index.Int64()]
+func generateRandomInviteCode() (string, error) {
+	alphabetSize := big.NewInt(int64(len(inviteCodeRandomAlphabet)))
+	code := make([]byte, inviteCodeRandomLength)
+	for index := range code {
+		charIndex, err := rand.Int(rand.Reader, alphabetSize)
+		if err != nil {
+			return "", err
 		}
-		parts[partIndex] = string(part)
+		code[index] = inviteCodeRandomAlphabet[charIndex.Int64()]
 	}
-	return "NAPI-" + strings.Join(parts, "-"), nil
+	return string(code), nil
 }
 
 func normalizeInviteCode(rawCode string) (string, error) {
-	compact := strings.NewReplacer("-", "", " ", "").Replace(strings.ToUpper(strings.TrimSpace(rawCode)))
-	if len(compact) != 4+inviteCodePartCount*inviteCodePartSize || !strings.HasPrefix(compact, "NAPI") {
+	trimmed := strings.TrimSpace(rawCode)
+	legacyCompact := strings.NewReplacer("-", "", " ", "").Replace(strings.ToUpper(trimmed))
+	legacyLength := len(inviteCodeLegacyPrefix) + inviteCodeLegacyParts*inviteCodeLegacyPartSize
+	if len(legacyCompact) == legacyLength && strings.HasPrefix(legacyCompact, inviteCodeLegacyPrefix) {
+		codeBody := legacyCompact[len(inviteCodeLegacyPrefix):]
+		for _, char := range codeBody {
+			if !strings.ContainsRune(inviteCodeLegacyAlphabet, char) {
+				return "", ErrInviteCodeInvalid
+			}
+		}
+		parts := []string{inviteCodeLegacyPrefix}
+		for start := 0; start < len(codeBody); start += inviteCodeLegacyPartSize {
+			parts = append(parts, codeBody[start:start+inviteCodeLegacyPartSize])
+		}
+		return strings.Join(parts, "-"), nil
+	}
+
+	customCode := strings.ToLower(trimmed)
+	if len(customCode) < inviteCodeCustomMin || len(customCode) > inviteCodeCustomMax {
 		return "", ErrInviteCodeInvalid
 	}
-	codeBody := compact[4:]
-	for _, char := range codeBody {
-		if !strings.ContainsRune(inviteCodeAlphabet, char) {
+	for index := 0; index < len(customCode); index++ {
+		char := customCode[index]
+		isAlphaNumeric := (char >= 'a' && char <= 'z') || (char >= '0' && char <= '9')
+		isSeparator := char == '-' || char == '_'
+		if !isAlphaNumeric && !isSeparator {
+			return "", ErrInviteCodeInvalid
+		}
+		if isSeparator && (index == 0 || index == len(customCode)-1) {
 			return "", ErrInviteCodeInvalid
 		}
 	}
-	parts := []string{"NAPI"}
-	for start := 0; start < len(codeBody); start += inviteCodePartSize {
-		parts = append(parts, codeBody[start:start+inviteCodePartSize])
-	}
-	return strings.Join(parts, "-"), nil
+	return customCode, nil
 }
 
 func HashInviteCode(rawCode string) (string, error) {
@@ -195,19 +215,59 @@ func hydrateInviteCode(inviteCode *InviteCode) error {
 }
 
 func CreateInviteCodes(createdBy int, name string, count int, maxUses int, expiredTime int64) ([]GeneratedInviteCode, error) {
+	return CreateInviteCodesWithCustomCode(createdBy, name, count, maxUses, expiredTime, "")
+}
+
+func inviteCodePrefix(code string) string {
+	if strings.HasPrefix(code, inviteCodeLegacyPrefix+"-") && len(code) >= 9 {
+		return code[:9]
+	}
+	if len(code) > 16 {
+		return code[:16]
+	}
+	return code
+}
+
+func CreateInviteCodesWithCustomCode(createdBy int, name string, count int, maxUses int, expiredTime int64, customCode string) ([]GeneratedInviteCode, error) {
 	if createdBy <= 0 || count <= 0 || maxUses <= 0 {
 		return nil, ErrInviteCodeInvalid
 	}
+	customCode = strings.TrimSpace(customCode)
+	if customCode != "" {
+		if count != 1 {
+			return nil, ErrInviteCodeInvalid
+		}
+		var err error
+		customCode, err = normalizeInviteCode(customCode)
+		if err != nil {
+			return nil, err
+		}
+	}
 	generated := make([]GeneratedInviteCode, 0, count)
 	err := DB.Transaction(func(tx *gorm.DB) error {
-		for range count {
-			rawCode, err := generateInviteCode()
-			if err != nil {
-				return err
+		for generatedCount := 0; generatedCount < count; {
+			rawCode := customCode
+			if rawCode == "" {
+				var err error
+				rawCode, err = generateRandomInviteCode()
+				if err != nil {
+					return err
+				}
 			}
 			codeHash, err := HashInviteCode(rawCode)
 			if err != nil {
 				return err
+			}
+			var existing InviteCode
+			lookupErr := tx.Select("id").Where("code_hash = ?", codeHash).First(&existing).Error
+			if lookupErr == nil {
+				if customCode != "" {
+					return ErrInviteCodeExists
+				}
+				continue
+			}
+			if !errors.Is(lookupErr, gorm.ErrRecordNotFound) {
+				return lookupErr
 			}
 			codeCiphertext, err := encryptInviteCode(rawCode)
 			if err != nil {
@@ -217,7 +277,7 @@ func CreateInviteCodes(createdBy int, name string, count int, maxUses int, expir
 			inviteCode := &InviteCode{
 				CodeHash:       codeHash,
 				CodeCiphertext: codeCiphertext,
-				CodePrefix:     rawCode[:9],
+				CodePrefix:     inviteCodePrefix(rawCode),
 				Code:           rawCode,
 				CodeAvailable:  true,
 				Name:           strings.TrimSpace(name),
@@ -232,6 +292,7 @@ func CreateInviteCodes(createdBy int, name string, count int, maxUses int, expir
 				return err
 			}
 			generated = append(generated, GeneratedInviteCode{Code: rawCode, InviteCode: inviteCode})
+			generatedCount++
 		}
 		return nil
 	})

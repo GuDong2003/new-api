@@ -20,6 +20,7 @@ const (
 
 type createInviteCodesRequest struct {
 	Name        string `json:"name"`
+	Code        string `json:"code"`
 	Count       int    `json:"count"`
 	MaxUses     int    `json:"max_uses"`
 	ExpiredTime int64  `json:"expired_time"`
@@ -102,6 +103,7 @@ func CreateInviteCodes(c *gin.Context) {
 		return
 	}
 	request.Name = strings.TrimSpace(request.Name)
+	request.Code = strings.TrimSpace(request.Code)
 	if request.Count == 0 {
 		request.Count = 1
 	}
@@ -116,6 +118,10 @@ func CreateInviteCodes(c *gin.Context) {
 		common.ApiErrorI18n(c, i18n.MsgInviteCodeCountInvalid)
 		return
 	}
+	if request.Code != "" && request.Count != 1 {
+		common.ApiErrorI18n(c, i18n.MsgInviteCodeCustomCountInvalid)
+		return
+	}
 	if request.MaxUses < 1 || request.MaxUses > maxInviteCodeUses {
 		common.ApiErrorI18n(c, i18n.MsgInviteCodeMaxUsesInvalid)
 		return
@@ -124,8 +130,16 @@ func CreateInviteCodes(c *gin.Context) {
 		common.ApiErrorI18n(c, i18n.MsgInviteCodeExpireTimeInvalid)
 		return
 	}
-	generated, err := model.CreateInviteCodes(c.GetInt("id"), request.Name, request.Count, request.MaxUses, request.ExpiredTime)
+	generated, err := model.CreateInviteCodesWithCustomCode(c.GetInt("id"), request.Name, request.Count, request.MaxUses, request.ExpiredTime, request.Code)
 	if err != nil {
+		if errors.Is(err, model.ErrInviteCodeInvalid) {
+			common.ApiErrorI18n(c, i18n.MsgInviteCodeFormatInvalid)
+			return
+		}
+		if errors.Is(err, model.ErrInviteCodeExists) {
+			common.ApiErrorI18n(c, i18n.MsgInviteCodeExists)
+			return
+		}
 		common.SysError("failed to create invitation codes: " + err.Error())
 		common.ApiErrorI18n(c, i18n.MsgInviteCodeCreateFailed)
 		return

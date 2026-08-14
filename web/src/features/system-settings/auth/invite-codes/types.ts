@@ -45,6 +45,7 @@ export type InviteCodeInput = {
 
 export type InviteCodeCreateInput = InviteCodeInput & {
   count: number
+  code?: string
 }
 
 export const INVITE_CODE_STATUS_FILTER_VALUES = [

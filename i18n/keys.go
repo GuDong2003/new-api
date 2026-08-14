@@ -76,16 +76,19 @@ const (
 
 // Invitation code related messages
 const (
-	MsgInviteCodeRequired          = "invite_code.required"
-	MsgInviteCodeUnavailable       = "invite_code.unavailable"
-	MsgInviteCodeNameTooLong       = "invite_code.name_too_long"
-	MsgInviteCodeCountInvalid      = "invite_code.count_invalid"
-	MsgInviteCodeMaxUsesInvalid    = "invite_code.max_uses_invalid"
-	MsgInviteCodeExpireTimeInvalid = "invite_code.expire_time_invalid"
-	MsgInviteCodeCreateFailed      = "invite_code.create_failed"
-	MsgInviteCodeUpdateInvalid     = "invite_code.update_invalid"
-	MsgInviteCodeDeleteUsed        = "invite_code.delete_used"
-	MsgInviteCodeDeleteFailed      = "invite_code.delete_failed"
+	MsgInviteCodeRequired           = "invite_code.required"
+	MsgInviteCodeUnavailable        = "invite_code.unavailable"
+	MsgInviteCodeNameTooLong        = "invite_code.name_too_long"
+	MsgInviteCodeCountInvalid       = "invite_code.count_invalid"
+	MsgInviteCodeCustomCountInvalid = "invite_code.custom_count_invalid"
+	MsgInviteCodeFormatInvalid      = "invite_code.format_invalid"
+	MsgInviteCodeMaxUsesInvalid     = "invite_code.max_uses_invalid"
+	MsgInviteCodeExpireTimeInvalid  = "invite_code.expire_time_invalid"
+	MsgInviteCodeExists             = "invite_code.exists"
+	MsgInviteCodeCreateFailed       = "invite_code.create_failed"
+	MsgInviteCodeUpdateInvalid      = "invite_code.update_invalid"
+	MsgInviteCodeDeleteUsed         = "invite_code.delete_used"
+	MsgInviteCodeDeleteFailed       = "invite_code.delete_failed"
 )
 
 // User related messages

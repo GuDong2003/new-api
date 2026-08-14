@@ -37,9 +37,10 @@ func TestInviteCodeGenerationEncryptsFullCodeAndSupportsNormalizedInput(t *testi
 	require.NoError(t, err)
 	require.Len(t, generated, 1)
 	rawCode := generated[0].Code
-	assert.True(t, strings.HasPrefix(rawCode, "NAPI-"))
+	assert.Len(t, rawCode, 16)
+	assert.Regexp(t, `^[a-z0-9]{16}$`, rawCode)
 	assert.NotEqual(t, rawCode, generated[0].InviteCode.CodeHash)
-	assert.Equal(t, rawCode[:9], generated[0].InviteCode.CodePrefix)
+	assert.Equal(t, rawCode, generated[0].InviteCode.CodePrefix)
 
 	var stored InviteCode
 	require.NoError(t, db.First(&stored, generated[0].InviteCode.Id).Error)
@@ -68,6 +69,47 @@ func TestInviteCodeGenerationEncryptsFullCodeAndSupportsNormalizedInput(t *testi
 	assert.NotContains(t, string(encoded), stored.CodeHash)
 	assert.NotContains(t, string(encoded), "code_ciphertext")
 	assert.NotContains(t, string(encoded), stored.CodeCiphertext)
+}
+
+func TestInviteCodeSupportsLegacyAndCustomFormats(t *testing.T) {
+	db := setupInviteCodeTestDB(t)
+
+	legacyCode := "NAPI-ABCD-EFGH-JKLM-NPQR"
+	legacyHash, err := HashInviteCode(strings.ToLower(strings.ReplaceAll(legacyCode, "-", "")))
+	require.NoError(t, err)
+	expectedLegacyHash, err := HashInviteCode(legacyCode)
+	require.NoError(t, err)
+	assert.Equal(t, expectedLegacyHash, legacyHash)
+
+	generated, err := CreateInviteCodesWithCustomCode(
+		7,
+		"custom",
+		1,
+		1,
+		0,
+		"VIP-2026-TEST",
+	)
+	require.NoError(t, err)
+	require.Len(t, generated, 1)
+	assert.Equal(t, "vip-2026-test", generated[0].Code)
+	assert.Equal(t, "vip-2026-test", generated[0].InviteCode.CodePrefix)
+
+	customHash, err := HashInviteCode("VIP-2026-TEST")
+	require.NoError(t, err)
+	assert.Equal(t, generated[0].InviteCode.CodeHash, customHash)
+
+	_, err = CreateInviteCodesWithCustomCode(7, "duplicate", 1, 1, 0, "VIP-2026-TEST")
+	assert.ErrorIs(t, err, ErrInviteCodeExists)
+
+	_, err = CreateInviteCodesWithCustomCode(7, "short", 1, 1, 0, "short")
+	assert.ErrorIs(t, err, ErrInviteCodeInvalid)
+
+	_, err = CreateInviteCodesWithCustomCode(7, "batch", 2, 1, 0, "VIP-2026-OTHER")
+	assert.ErrorIs(t, err, ErrInviteCodeInvalid)
+
+	var stored InviteCode
+	require.NoError(t, db.First(&stored, generated[0].InviteCode.Id).Error)
+	assert.Empty(t, stored.Code)
 }
 
 func TestInviteCodeUsageHonorsLimitAndRecordsEachRegistration(t *testing.T) {

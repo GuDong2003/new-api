@@ -326,7 +326,11 @@ export function ChannelTestSection({ defaultValues }: ChannelTestSectionProps) {
                     <Select value={field.value} onValueChange={field.onChange}>
                       <FormControl>
                         <SelectTrigger>
-                          <SelectValue />
+                          <SelectValue>
+                            {field.value === 'passive_recovery'
+                              ? t('Passive recovery only')
+                              : t('Scheduled full test')}
+                          </SelectValue>
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent alignItemWithTrigger={false}>
