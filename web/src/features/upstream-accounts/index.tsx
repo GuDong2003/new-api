@@ -567,7 +567,8 @@ export function UpstreamAccountsPage() {
                         <div className='text-muted-foreground space-y-1 text-xs'>
                           <p>
                             自动签到：{account.auto_checkin ? '开启' : '关闭'} ·
-                            自动余额：{account.auto_balance ? '开启' : '关闭'}
+                            自动余额：
+                            {account.auto_balance ? '开启' : '关闭'}
                           </p>
                           <p>
                             绑定渠道：
@@ -790,19 +791,18 @@ export function UpstreamAccountsPage() {
             </CardContent>
           </Card>
         </div>
+        <AccountDialog
+          open={dialogOpen}
+          account={editing}
+          channels={channelsQuery.data ?? []}
+          saving={saveMutation.isPending}
+          onOpenChange={(open) => {
+            setDialogOpen(open)
+            if (!open) setEditing(null)
+          }}
+          onSave={(input) => saveMutation.mutate(input)}
+        />
       </SectionPageLayout.Content>
-
-      <AccountDialog
-        open={dialogOpen}
-        account={editing}
-        channels={channelsQuery.data ?? []}
-        saving={saveMutation.isPending}
-        onOpenChange={(open) => {
-          setDialogOpen(open)
-          if (!open) setEditing(null)
-        }}
-        onSave={(input) => saveMutation.mutate(input)}
-      />
     </SectionPageLayout>
   )
 }
