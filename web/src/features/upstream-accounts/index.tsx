@@ -28,7 +28,7 @@ import {
   RefreshCw,
   Trash2,
 } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 
 import { Dialog } from '@/components/dialog'
@@ -126,23 +126,33 @@ type AccountDialogProps = {
   onSave: (input: UpstreamAccountInput) => void
 }
 
+function createAccountForm(
+  account: UpstreamAccount | null
+): UpstreamAccountInput {
+  if (!account) return { ...EMPTY_FORM, channel_ids: [] }
+
+  return {
+    name: account.name,
+    base_url: account.base_url,
+    site_type: 'new_api',
+    auth_type: account.auth_type,
+    user_id: account.user_id,
+    credential: '',
+    auto_checkin: account.auto_checkin,
+    auto_balance: account.auto_balance,
+    balance_interval: account.balance_interval,
+    channel_ids: account.channel_ids,
+  }
+}
+
 function AccountDialog(props: AccountDialogProps) {
   const [form, setForm] = useState<UpstreamAccountInput>(() =>
-    props.account
-      ? {
-          name: props.account.name,
-          base_url: props.account.base_url,
-          site_type: 'new_api',
-          auth_type: props.account.auth_type,
-          user_id: props.account.user_id,
-          credential: '',
-          auto_checkin: props.account.auto_checkin,
-          auto_balance: props.account.auto_balance,
-          balance_interval: props.account.balance_interval,
-          channel_ids: props.account.channel_ids,
-        }
-      : { ...EMPTY_FORM, channel_ids: [] }
+    createAccountForm(props.account)
   )
+
+  useEffect(() => {
+    if (props.open) setForm(createAccountForm(props.account))
+  }, [props.open, props.account])
 
   const selected = new Set(form.channel_ids ?? [])
   const toggleChannel = (channelId: number, checked: boolean) => {
@@ -782,20 +792,17 @@ export function UpstreamAccountsPage() {
         </div>
       </SectionPageLayout.Content>
 
-      {dialogOpen && (
-        <AccountDialog
-          key={editing?.id ?? 'new'}
-          open={dialogOpen}
-          account={editing}
-          channels={channelsQuery.data ?? []}
-          saving={saveMutation.isPending}
-          onOpenChange={(open) => {
-            setDialogOpen(open)
-            if (!open) setEditing(null)
-          }}
-          onSave={(input) => saveMutation.mutate(input)}
-        />
-      )}
+      <AccountDialog
+        open={dialogOpen}
+        account={editing}
+        channels={channelsQuery.data ?? []}
+        saving={saveMutation.isPending}
+        onOpenChange={(open) => {
+          setDialogOpen(open)
+          if (!open) setEditing(null)
+        }}
+        onSave={(input) => saveMutation.mutate(input)}
+      />
     </SectionPageLayout>
   )
 }
