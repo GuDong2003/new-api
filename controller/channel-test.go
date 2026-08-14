@@ -10,6 +10,7 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -36,27 +37,41 @@ import (
 )
 
 type testResult struct {
-	context     *gin.Context
-	localErr    error
-	newAPIError *types.NewAPIError
+	context          *gin.Context
+	localErr         error
+	newAPIError      *types.NewAPIError
+	responsePreview  string
+	previewTruncated bool
 }
 
 type channelTestOptions struct {
-	message        string
-	skipConsumeLog bool
-	maxTokens      *uint
+	message         string
+	useChannelStyle bool
+	capturePreview  bool
+	skipConsumeLog  bool
+	maxTokens       *uint
 }
 
-func normalizeChannelTestEndpoint(channel *model.Channel, endpointType string) string {
-	normalized := strings.ToLower(strings.TrimSpace(endpointType))
+const channelTestResponsePreviewMaxBytes = 8 << 10
+
+var (
+	channelTestPreviewSensitiveValuePattern = regexp.MustCompile(`(?i)\b(?:authorization|api[_-]?key|access[_-]?token|refresh[_-]?token|token|secret|password|credential|signature)\b\s*[:=]\s*(?:bearer\s+)?[^\s,;&}\"']+`)
+	channelTestPreviewBearerPattern         = regexp.MustCompile(`(?i)\bbearer\s+[A-Za-z0-9._~+/-]+={0,2}`)
+)
+
+func normalizeChannelTestEndpoint(channel *model.Channel, modelName, endpointType string) string {
+	normalized := strings.TrimSpace(endpointType)
 	if strings.EqualFold(normalized, "auto") {
-		return ""
+		normalized = ""
 	}
 	if normalized != "" {
 		return normalized
 	}
 	if channel != nil && channel.Type == constant.ChannelTypeCodex {
 		return string(constant.EndpointTypeOpenAIResponse)
+	}
+	if strings.HasSuffix(modelName, "-compact") {
+		return string(constant.EndpointTypeOpenAIResponseCompact)
 	}
 	return normalized
 }
@@ -79,7 +94,11 @@ func resolveChannelTestUserID(c *gin.Context) (int, error) {
 }
 
 func testChannel(ctx context.Context, channel *model.Channel, testUserID int, testModel string, endpointType string, isStream bool) testResult {
-	return testChannelWithOptions(ctx, channel, testUserID, testModel, endpointType, isStream, channelTestOptions{})
+	setting := operation_setting.GetMonitorSetting()
+	return testChannelWithOptions(ctx, channel, testUserID, testModel, endpointType, isStream, channelTestOptions{
+		message:         setting.ChannelTestMessage,
+		useChannelStyle: setting.ChannelTestUseChannelStyle,
+	})
 }
 
 func testChannelWithOptions(ctx context.Context, channel *model.Channel, testUserID int, testModel string, endpointType string, isStream bool, options channelTestOptions) testResult {
@@ -128,7 +147,7 @@ func testChannelWithOptions(ctx context.Context, channel *model.Channel, testUse
 		}
 	}
 
-	endpointType = normalizeChannelTestEndpoint(channel, endpointType)
+	endpointType = normalizeChannelTestEndpoint(channel, testModel, endpointType)
 
 	requestPath := "/v1/chat/completions"
 
@@ -162,7 +181,13 @@ func testChannelWithOptions(ctx context.Context, channel *model.Channel, testUse
 		if strings.Contains(strings.ToLower(testModel), "codex") {
 			requestPath = "/v1/responses"
 		}
+		if strings.HasSuffix(testModel, "-compact") {
+			requestPath = "/v1/responses/compact"
+		}
 
+	}
+	if strings.HasPrefix(requestPath, "/v1/responses/compact") {
+		testModel = strings.TrimSuffix(testModel, "-compact") + "-compact"
 	}
 	// Gemini 原生流式通过 URL action（:streamGenerateContent）表达而非请求体字段，
 	// GeminiChatRequest.IsStream 依据请求 URL 判定，合成请求路径需与生产入口保持一致
@@ -261,6 +286,7 @@ func testChannelWithOptions(ctx context.Context, channel *model.Channel, testUse
 	}
 
 	info.IsChannelTest = true
+	info.DisableChannelTestClientProfile = !options.useChannelStyle
 	info.InitChannelMeta(c)
 
 	err = attachTestBillingRequestInput(info, request)
@@ -494,7 +520,7 @@ func testChannelWithOptions(ctx context.Context, channel *model.Channel, testUse
 		}
 	}
 	result := w.Result()
-	respBody, err := readTestResponseBody(result.Body, isStream)
+	respBody, responseTruncated, err := readTestResponseBody(result.Body, isStream)
 	if err != nil {
 		return testResult{
 			context:     c,
@@ -531,12 +557,23 @@ func testChannelWithOptions(ctx context.Context, channel *model.Channel, testUse
 			Other:            other,
 		})
 	}
-	common.SysLog(fmt.Sprintf("testing channel #%d, response: \n%s", channel.Id, string(respBody)))
-	return testResult{
+	common.SysLog(fmt.Sprintf("testing channel #%d completed", channel.Id))
+	resultData := testResult{
 		context:     c,
 		localErr:    nil,
 		newAPIError: nil,
 	}
+	if options.capturePreview {
+		previewBody := respBody
+		previewTruncated := responseTruncated
+		if len(previewBody) > channelTestResponsePreviewMaxBytes {
+			previewBody = previewBody[:channelTestResponsePreviewMaxBytes]
+			previewTruncated = true
+		}
+		resultData.responsePreview = sanitizeChannelTestResponsePreview(previewBody)
+		resultData.previewTruncated = previewTruncated
+	}
+	return resultData
 }
 
 func attachTestBillingRequestInput(info *relaycommon.RelayInfo, request dto.Request) error {
@@ -610,13 +647,69 @@ func coerceTestUsage(usageAny any, isStream bool, estimatePromptTokens int) (*dt
 	}
 }
 
-func readTestResponseBody(body io.ReadCloser, isStream bool) ([]byte, error) {
+func readTestResponseBody(body io.ReadCloser, isStream bool) ([]byte, bool, error) {
 	defer func() { _ = body.Close() }()
-	const maxStreamLogBytes = 8 << 10
-	if isStream {
-		return io.ReadAll(io.LimitReader(body, maxStreamLogBytes))
+	if !isStream {
+		response, err := io.ReadAll(body)
+		return response, false, err
 	}
-	return io.ReadAll(body)
+	limit := int64(channelTestResponsePreviewMaxBytes)
+	response, err := io.ReadAll(io.LimitReader(body, limit+1))
+	if err != nil {
+		return nil, false, err
+	}
+	if int64(len(response)) > limit {
+		return response[:limit], true, nil
+	}
+	return response, false, nil
+}
+
+func sanitizeChannelTestResponsePreview(response []byte) string {
+	preview := strings.TrimSpace(string(response))
+	if preview == "" {
+		return ""
+	}
+	var value any
+	if err := json.Unmarshal([]byte(preview), &value); err == nil {
+		value = redactChannelTestPreviewValue(value)
+		if sanitized, err := json.Marshal(value); err == nil {
+			preview = string(sanitized)
+		}
+	}
+	preview = channelTestPreviewSensitiveValuePattern.ReplaceAllString(preview, "[REDACTED]")
+	preview = channelTestPreviewBearerPattern.ReplaceAllString(preview, "Bearer [REDACTED]")
+	return preview
+}
+
+func redactChannelTestPreviewValue(value any) any {
+	switch item := value.(type) {
+	case map[string]any:
+		for key, child := range item {
+			if isSensitiveChannelTestPreviewKey(key) {
+				item[key] = "[REDACTED]"
+			} else {
+				item[key] = redactChannelTestPreviewValue(child)
+			}
+		}
+		return item
+	case []any:
+		for index, child := range item {
+			item[index] = redactChannelTestPreviewValue(child)
+		}
+		return item
+	default:
+		return value
+	}
+}
+
+func isSensitiveChannelTestPreviewKey(key string) bool {
+	normalized := strings.ToLower(strings.NewReplacer("_", "", "-", "", " ", "").Replace(strings.TrimSpace(key)))
+	for _, sensitive := range []string{"authorization", "apikey", "accesskey", "refreshtoken", "token", "secret", "password", "credential", "signature", "cookie", "headers", "request", "prompt", "messages", "input"} {
+		if normalized == sensitive || strings.Contains(normalized, sensitive) {
+			return true
+		}
+	}
+	return false
 }
 
 func detectErrorFromTestResponseBody(respBody []byte) error {
@@ -910,16 +1003,15 @@ type detailedChannelTestRequest struct {
 	Model        string `json:"model"`
 	EndpointType string `json:"endpoint_type"`
 	Stream       bool   `json:"stream"`
-	Message      string `json:"message"`
 }
 
 func TestChannel(c *gin.Context) {
 	testChannelHTTP(c, c.Query("model"), c.Query("endpoint_type"), parseChannelTestStream(c), "")
 }
 
-// TestChannelDetailed accepts a JSON body so a temporary test prompt does not
-// leak into access logs or URL history. An empty message uses the global
-// channel-test message configured in system settings.
+// TestChannelDetailed accepts a JSON body for model, endpoint and stream
+// selection. The request always uses the global test message from settings;
+// there is intentionally no per-run prompt override.
 func TestChannelDetailed(c *gin.Context) {
 	var request detailedChannelTestRequest
 	if c.Request != nil && c.Request.Body != nil {
@@ -928,11 +1020,7 @@ func TestChannelDetailed(c *gin.Context) {
 			return
 		}
 	}
-	if _, err := operation_setting.NormalizeChannelTestMessage(request.Message); err != nil {
-		common.ApiError(c, err)
-		return
-	}
-	testChannelHTTP(c, request.Model, request.EndpointType, request.Stream, request.Message)
+	testChannelHTTP(c, request.Model, request.EndpointType, request.Stream, "")
 }
 
 func parseChannelTestStream(c *gin.Context) bool {
@@ -969,8 +1057,11 @@ func testChannelHTTP(c *gin.Context, testModel string, endpointType string, isSt
 	if c.Request != nil {
 		requestCtx = c.Request.Context()
 	}
+	monitorSetting := operation_setting.GetMonitorSetting()
 	result := testChannelWithOptions(requestCtx, channel, testUserID, testModel, endpointType, isStream, channelTestOptions{
-		message: message,
+		message:         message,
+		useChannelStyle: monitorSetting.ChannelTestUseChannelStyle,
+		capturePreview:  monitorSetting.ChannelTestShowResponsePreview,
 	})
 	if result.localErr != nil {
 		resp := gin.H{
@@ -997,11 +1088,16 @@ func testChannelHTTP(c *gin.Context, testModel string, endpointType string, isSt
 		})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{
+	response := gin.H{
 		"success": true,
 		"message": "",
 		"time":    consumedTime,
-	})
+	}
+	if monitorSetting.ChannelTestShowResponsePreview {
+		response["response_preview"] = result.responsePreview
+		response["response_preview_truncated"] = result.previewTruncated
+	}
+	c.JSON(http.StatusOK, response)
 }
 
 // channelTestSummary records the outcome of one channel test cycle so the

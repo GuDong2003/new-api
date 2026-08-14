@@ -223,7 +223,7 @@ export async function testChannel(
 }
 
 /**
- * Test a channel with a JSON body, including a one-off prompt override.
+ * Test a channel with a JSON body. The server supplies the global test message.
  */
 export async function testChannelDetailed(
   id: number,

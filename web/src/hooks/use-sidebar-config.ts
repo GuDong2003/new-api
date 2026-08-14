@@ -19,70 +19,41 @@ For commercial licensing, please contact support@quantumnous.com
 import { useMemo } from 'react'
 
 import type { NavGroup, NavItem } from '@/components/layout/types'
+import {
+  getSidebarModuleOrder,
+  SIDEBAR_MODULES_DEFAULT,
+  type SidebarModulesAdminConfig,
+} from '@/features/system-settings/maintenance/config'
 import { useStatus } from '@/hooks/use-status'
 import { useAuthStore } from '@/stores/auth-store'
-
-type SidebarSectionConfig = {
-  enabled: boolean
-  [key: string]: boolean
-}
-
-type SidebarModulesAdminConfig = Record<string, SidebarSectionConfig>
 
 // User-layer config is shape-identical to admin, but may be null
 // to signal "no narrowing" (empty/invalid/legacy users).
 type SidebarModulesUserConfig = SidebarModulesAdminConfig | null
-
-/**
- * Default sidebar modules configuration
- */
-const DEFAULT_SIDEBAR_MODULES: SidebarModulesAdminConfig = {
-  chat: {
-    enabled: true,
-    playground: true,
-    chat: true,
-  },
-  console: {
-    enabled: true,
-    detail: true,
-    token: true,
-    log: true,
-    midjourney: true,
-    task: true,
-  },
-  personal: {
-    enabled: true,
-    topup: true,
-    personal: true,
-  },
-  admin: {
-    enabled: true,
-    channel: true,
-    queue: true,
-    models: true,
-    redemption: true,
-    invitation: true,
-    user: true,
-    setting: true,
-    subscription: true,
-  },
-}
 
 const mergeWithDefaultSidebarModules = (
   config: SidebarModulesAdminConfig
 ): SidebarModulesAdminConfig => {
   const merged: SidebarModulesAdminConfig = { ...config }
 
-  Object.entries(DEFAULT_SIDEBAR_MODULES).forEach(
+  Object.entries(SIDEBAR_MODULES_DEFAULT).forEach(
     ([sectionKey, defaultSection]) => {
       const existingSection = merged[sectionKey]
       if (!existingSection) {
-        merged[sectionKey] = { ...defaultSection }
+        merged[sectionKey] = {
+          ...defaultSection,
+          order: [...defaultSection.order],
+        }
         return
       }
 
-      merged[sectionKey] = { ...defaultSection, ...existingSection }
+      merged[sectionKey] = {
+        ...defaultSection,
+        ...existingSection,
+        order: getSidebarModuleOrder(existingSection, defaultSection.order),
+      }
       Object.keys(defaultSection).forEach((moduleKey) => {
+        if (moduleKey === 'order') return
         if (merged[sectionKey][moduleKey] === undefined) {
           merged[sectionKey][moduleKey] = defaultSection[moduleKey]
         }
@@ -118,8 +89,16 @@ const URL_TO_CONFIG_MAP: Record<string, { section: string; module: string }> = {
   '/redemption-codes': { section: 'admin', module: 'redemption' },
   '/invite-codes': { section: 'admin', module: 'invitation' },
   '/subscriptions': { section: 'admin', module: 'subscription' },
+  '/system-info': { section: 'admin', module: 'systemInfo' },
   '/system-settings': { section: 'admin', module: 'setting' },
   '/system-settings/site': { section: 'admin', module: 'setting' },
+}
+
+const SIDEBAR_GROUP_TO_CONFIG_SECTION: Record<string, string> = {
+  chat: 'chat',
+  general: 'console',
+  personal: 'personal',
+  admin: 'admin',
 }
 
 /**
@@ -130,7 +109,7 @@ function parseSidebarConfig(
 ): SidebarModulesAdminConfig {
   // If empty string, null, or undefined, use default config
   if (!value || value.trim() === '') {
-    return DEFAULT_SIDEBAR_MODULES
+    return mergeWithDefaultSidebarModules({})
   }
 
   try {
@@ -139,7 +118,7 @@ function parseSidebarConfig(
   } catch {
     // eslint-disable-next-line no-console
     console.error('Failed to parse sidebar modules configuration')
-    return DEFAULT_SIDEBAR_MODULES
+    return mergeWithDefaultSidebarModules({})
   }
 }
 
@@ -260,6 +239,45 @@ function filterNavItems(
     .filter((item) => isNavItemVisible(item, adminConfig, userConfig))
 }
 
+function getNavItemConfigKey(item: NavItem): string | null {
+  if ('type' in item && item.type === 'chat-presets') return 'chat'
+
+  if ('url' in item && item.url) {
+    const mapping = URL_TO_CONFIG_MAP[item.url as string]
+    return mapping?.module ?? null
+  }
+
+  return null
+}
+
+function orderNavItems(
+  items: NavItem[],
+  sectionKey: string | undefined,
+  adminConfig: SidebarModulesAdminConfig
+): NavItem[] {
+  if (!sectionKey) return items
+
+  const sectionConfig = adminConfig[sectionKey]
+  if (!sectionConfig) return items
+
+  const configuredOrder = getSidebarModuleOrder(
+    sectionConfig,
+    SIDEBAR_MODULES_DEFAULT[sectionKey]?.order ?? []
+  )
+  const rank = new Map(
+    configuredOrder.map((moduleKey, index) => [moduleKey, index])
+  )
+
+  return items
+    .map((item, index) => ({
+      item,
+      index,
+      rank: rank.get(getNavItemConfigKey(item) ?? '') ?? configuredOrder.length,
+    }))
+    .sort((a, b) => a.rank - b.rank || a.index - b.index)
+    .map(({ item }) => item)
+}
+
 /**
  * Filter sidebar navigation groups by admin × user sidebar_modules config.
  *
@@ -303,10 +321,21 @@ export function useSidebarConfig(navGroups: NavGroup[]): NavGroup[] {
   const filteredNavGroups = useMemo(
     () =>
       navGroups
-        .map((group) => ({
-          ...group,
-          items: filterNavItems(group.items, adminConfig, userConfig),
-        }))
+        .map((group) => {
+          const filteredItems = filterNavItems(
+            group.items,
+            adminConfig,
+            userConfig
+          )
+          return {
+            ...group,
+            items: orderNavItems(
+              filteredItems,
+              group.id ? SIDEBAR_GROUP_TO_CONFIG_SECTION[group.id] : undefined,
+              adminConfig
+            ),
+          }
+        })
         .filter((group) => group.items.length > 0), // Only show navigation groups with visible items
     [navGroups, adminConfig, userConfig]
   )

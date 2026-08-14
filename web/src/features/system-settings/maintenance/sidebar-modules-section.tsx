@@ -16,7 +16,21 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useEffect, useMemo } from 'react'
+import {
+  ArrowDown01Icon,
+  ArrowUp01Icon,
+  Drag01Icon,
+} from '@hugeicons/core-free-icons'
+import { HugeiconsIcon } from '@hugeicons/react'
+import { Reorder, useDragControls } from 'motion/react'
+import {
+  useEffect,
+  useMemo,
+  useState,
+  type KeyboardEvent,
+  type PointerEvent,
+  type ReactNode,
+} from 'react'
 import { useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 
@@ -41,7 +55,9 @@ import { SettingsSection } from '../components/settings-section'
 import { useUpdateOption } from '../hooks/use-update-option'
 import {
   SIDEBAR_MODULES_DEFAULT,
+  getSidebarModuleOrder,
   type SidebarModulesAdminConfig,
+  type SidebarSectionConfig,
   serializeSidebarModulesAdmin,
 } from './config'
 
@@ -56,6 +72,111 @@ const toTitleCase = (value: string) =>
   value
     .replaceAll(/[_-]+/g, ' ')
     .replaceAll(/\b\w/g, (char) => char.toUpperCase())
+
+type SidebarModuleReorderItemProps = {
+  value: string
+  title: string
+  index: number
+  count: number
+  onMove: (index: number, direction: 'up' | 'down') => void
+  children: ReactNode
+}
+
+function SidebarModuleReorderItem({
+  value,
+  title,
+  index,
+  count,
+  onMove,
+  children,
+}: SidebarModuleReorderItemProps) {
+  const { t } = useTranslation()
+  const dragControls = useDragControls()
+
+  const handleDragStart = (event: PointerEvent<HTMLButtonElement>) => {
+    dragControls.start(event)
+  }
+
+  const handleDragKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
+    if (event.key === 'ArrowUp') {
+      event.preventDefault()
+      onMove(index, 'up')
+    }
+    if (event.key === 'ArrowDown') {
+      event.preventDefault()
+      onMove(index, 'down')
+    }
+  }
+
+  return (
+    <Reorder.Item
+      value={value}
+      dragListener={false}
+      dragControls={dragControls}
+      className='bg-background flex min-w-0 items-center gap-2 rounded-lg border px-2'
+    >
+      <button
+        type='button'
+        className='text-muted-foreground hover:text-foreground flex size-7 shrink-0 cursor-grab touch-none items-center justify-center rounded-md active:cursor-grabbing'
+        aria-label={t('Drag {{group}} to reorder', { group: title })}
+        onPointerDown={handleDragStart}
+        onKeyDown={handleDragKeyDown}
+      >
+        <HugeiconsIcon icon={Drag01Icon} strokeWidth={2} aria-hidden='true' />
+      </button>
+      <div className='min-w-0 flex-1'>{children}</div>
+      <div className='flex shrink-0 gap-1'>
+        <button
+          type='button'
+          className='text-muted-foreground hover:bg-muted hover:text-foreground flex size-7 items-center justify-center rounded-md disabled:pointer-events-none disabled:opacity-40'
+          disabled={index === 0}
+          aria-label={t('Move {{group}} up', { group: title })}
+          onClick={() => onMove(index, 'up')}
+        >
+          <HugeiconsIcon
+            icon={ArrowUp01Icon}
+            strokeWidth={2}
+            aria-hidden='true'
+          />
+        </button>
+        <button
+          type='button'
+          className='text-muted-foreground hover:bg-muted hover:text-foreground flex size-7 items-center justify-center rounded-md disabled:pointer-events-none disabled:opacity-40'
+          disabled={index === count - 1}
+          aria-label={t('Move {{group}} down', { group: title })}
+          onClick={() => onMove(index, 'down')}
+        >
+          <HugeiconsIcon
+            icon={ArrowDown01Icon}
+            strokeWidth={2}
+            aria-hidden='true'
+          />
+        </button>
+      </div>
+    </Reorder.Item>
+  )
+}
+
+function buildModuleOrders(config: SidebarModulesAdminConfig) {
+  return Object.entries(config).reduce<Record<string, string[]>>(
+    (orders, [sectionKey, sectionConfig]) => {
+      orders[sectionKey] = getSidebarModuleOrder(sectionConfig)
+      return orders
+    },
+    {}
+  )
+}
+
+function getSectionModuleOrder(
+  sectionKey: string,
+  sectionConfig: SidebarSectionConfig,
+  order: string[] | undefined
+) {
+  return getSidebarModuleOrder(
+    sectionConfig,
+    order ?? SIDEBAR_MODULES_DEFAULT[sectionKey]?.order ?? []
+  )
+}
 
 export function SidebarModulesSection({
   config,
@@ -138,9 +259,17 @@ export function SidebarModulesSection({
         title: t('Models'),
         description: t('Manage catalog visibility and pricing.'),
       },
+      queue: {
+        title: t('Queue'),
+        description: t('Queue channels'),
+      },
       redemption: {
         title: t('Redeem codes'),
         description: t('Create and review invite or credit codes.'),
+      },
+      invitation: {
+        title: t('Invitation Codes'),
+        description: t('Invitation Code'),
       },
       user: {
         title: t('Users'),
@@ -154,9 +283,16 @@ export function SidebarModulesSection({
         title: t('Subscription Management'),
         description: t('Manage subscription plans and pricing.'),
       },
+      systemInfo: {
+        title: t('System Info'),
+        description: t('System settings'),
+      },
     },
   }
   const formDefaults = useMemo(() => config, [config])
+  const [moduleOrders, setModuleOrders] = useState<Record<string, string[]>>(
+    () => buildModuleOrders(formDefaults)
+  )
 
   const form = useForm<SidebarFormValues>({
     defaultValues: formDefaults,
@@ -164,10 +300,38 @@ export function SidebarModulesSection({
 
   useEffect(() => {
     form.reset(formDefaults)
+    setModuleOrders(buildModuleOrders(formDefaults))
   }, [formDefaults, form])
 
+  const moveModule = (
+    sectionKey: string,
+    index: number,
+    direction: 'up' | 'down'
+  ) => {
+    setModuleOrders((current) => {
+      const order = [...(current[sectionKey] ?? [])]
+      const targetIndex = direction === 'up' ? index - 1 : index + 1
+      if (targetIndex < 0 || targetIndex >= order.length) return current
+
+      const [moved] = order.splice(index, 1)
+      order.splice(targetIndex, 0, moved)
+      return { ...current, [sectionKey]: order }
+    })
+  }
+
   const onSubmit = async (values: SidebarFormValues) => {
-    const serialized = serializeSidebarModulesAdmin(values)
+    const valuesWithOrder = Object.entries(values).reduce<SidebarFormValues>(
+      (nextValues, [sectionKey, sectionConfig]) => {
+        nextValues[sectionKey] = {
+          ...sectionConfig,
+          order:
+            moduleOrders[sectionKey] ?? getSidebarModuleOrder(sectionConfig),
+        }
+        return nextValues
+      },
+      {}
+    )
+    const serialized = serializeSidebarModulesAdmin(valuesWithOrder)
     if (serialized === initialSerialized) {
       return
     }
@@ -180,6 +344,7 @@ export function SidebarModulesSection({
 
   const resetToDefault = () => {
     form.reset(SIDEBAR_MODULES_DEFAULT)
+    setModuleOrders(buildModuleOrders(SIDEBAR_MODULES_DEFAULT))
   }
 
   const sections = Object.entries(config)
@@ -200,8 +365,10 @@ export function SidebarModulesSection({
               title: toTitleCase(sectionKey),
               description: t('Custom sidebar section'),
             }
-            const modules = Object.entries(sectionConfig).filter(
-              ([moduleKey]) => moduleKey !== 'enabled'
+            const modules = getSectionModuleOrder(
+              sectionKey,
+              sectionConfig,
+              moduleOrders[sectionKey]
             )
 
             return (
@@ -228,41 +395,67 @@ export function SidebarModulesSection({
                   )}
                 />
 
-                <SettingsControlChildren className='grid gap-3 md:grid-cols-2'>
-                  {modules.map(([moduleKey]) => {
-                    const moduleInfo = moduleMeta[sectionKey]?.[moduleKey] ?? {
-                      title: toTitleCase(moduleKey),
-                      description: t('Custom module'),
+                <SettingsControlChildren>
+                  <Reorder.Group
+                    axis='y'
+                    values={modules}
+                    onReorder={(nextOrder) =>
+                      setModuleOrders((current) => ({
+                        ...current,
+                        [sectionKey]: nextOrder,
+                      }))
                     }
-                    return (
-                      <FormField
-                        key={`${sectionKey}.${moduleKey}`}
-                        control={form.control}
-                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                        name={`${sectionKey}.${moduleKey}` as any}
-                        render={({ field }) => (
-                          <SettingsSwitchItem className='py-2'>
-                            <SettingsSwitchContent>
-                              <FormLabel>{moduleInfo.title}</FormLabel>
-                              <FormDescription>
-                                {moduleInfo.description}
-                              </FormDescription>
-                            </SettingsSwitchContent>
-                            <FormControl>
-                              <Switch
-                                checked={Boolean(field.value)}
-                                onCheckedChange={field.onChange}
-                                disabled={
-                                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                                  !form.watch(`${sectionKey}.enabled` as any)
-                                }
-                              />
-                            </FormControl>
-                          </SettingsSwitchItem>
-                        )}
-                      />
-                    )
-                  })}
+                    className='flex flex-col gap-2'
+                  >
+                    {modules.map((moduleKey, index) => {
+                      const moduleInfo = moduleMeta[sectionKey]?.[
+                        moduleKey
+                      ] ?? {
+                        title: toTitleCase(moduleKey),
+                        description: t('Custom module'),
+                      }
+                      return (
+                        <SidebarModuleReorderItem
+                          key={`${sectionKey}.${moduleKey}`}
+                          value={moduleKey}
+                          title={moduleInfo.title}
+                          index={index}
+                          count={modules.length}
+                          onMove={(itemIndex, direction) =>
+                            moveModule(sectionKey, itemIndex, direction)
+                          }
+                        >
+                          <FormField
+                            control={form.control}
+                            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                            name={`${sectionKey}.${moduleKey}` as any}
+                            render={({ field }) => (
+                              <SettingsSwitchItem className='py-2'>
+                                <SettingsSwitchContent>
+                                  <FormLabel>{moduleInfo.title}</FormLabel>
+                                  <FormDescription>
+                                    {moduleInfo.description}
+                                  </FormDescription>
+                                </SettingsSwitchContent>
+                                <FormControl>
+                                  <Switch
+                                    checked={Boolean(field.value)}
+                                    onCheckedChange={field.onChange}
+                                    disabled={
+                                      !form.watch(
+                                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                                        `${sectionKey}.enabled` as any
+                                      )
+                                    }
+                                  />
+                                </FormControl>
+                              </SettingsSwitchItem>
+                            )}
+                          />
+                        </SidebarModuleReorderItem>
+                      )
+                    })}
+                  </Reorder.Group>
                 </SettingsControlChildren>
               </SettingsControlGroup>
             )

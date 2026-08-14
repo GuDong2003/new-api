@@ -79,7 +79,6 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet'
 import { Switch } from '@/components/ui/switch'
-import { Textarea } from '@/components/ui/textarea'
 import {
   Tooltip,
   TooltipContent,
@@ -92,7 +91,7 @@ import { updateChannel } from '../../api'
 import {
   channelsQueryKeys,
   formatResponseTime,
-  handleTestChannel,
+  handleDetailedChannelTest,
 } from '../../lib'
 import type {
   Channel,
@@ -122,6 +121,8 @@ type TestResult = {
   completedAt?: number
   error?: string
   errorCode?: string
+  responsePreview?: string
+  responsePreviewTruncated?: boolean
 }
 
 type BatchProgress = {
@@ -215,6 +216,7 @@ const MODEL_PRICE_ERROR_CODE = 'model_price_error'
 const FAILURE_SUMMARY_MAX_LENGTH = 96
 const BATCH_TEST_CONCURRENCY = 5
 const BATCH_TEST_DELAY_MS = 100
+const RESPONSE_PREVIEW_MAX_LENGTH = 800
 
 type FailureStatusDisplay = {
   summary: string
@@ -248,6 +250,35 @@ function truncateFailureSummary(summary: string) {
   }
 
   return `${summary.slice(0, FAILURE_SUMMARY_MAX_LENGTH).trimEnd()}...`
+}
+
+function formatResponsePreview(value: unknown): {
+  text?: string
+  truncated: boolean
+} {
+  if (value === undefined || value === null) {
+    return { truncated: false }
+  }
+
+  let text: string
+  if (typeof value === 'string') {
+    text = value
+  } else {
+    try {
+      text = JSON.stringify(value, null, 2)
+    } catch {
+      text = String(value)
+    }
+  }
+
+  if (!text) return { truncated: false }
+  if (text.length <= RESPONSE_PREVIEW_MAX_LENGTH) {
+    return { text, truncated: false }
+  }
+  return {
+    text: text.slice(0, RESPONSE_PREVIEW_MAX_LENGTH).trimEnd(),
+    truncated: true,
+  }
 }
 
 function getFailureStatusDisplay({
@@ -335,7 +366,6 @@ function ChannelTestDialogContent({
   > | null>(null)
   const [endpointType, setEndpointType] = useState('auto')
   const [isStreamTest, setIsStreamTest] = useState(false)
-  const [messageOverride, setMessageOverride] = useState('')
   const [searchTerm, setSearchTerm] = useState('')
   const [testResults, setTestResults] = useState<Record<string, TestResult>>({})
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({})
@@ -403,7 +433,6 @@ function ChannelTestDialogContent({
     batchStopRequestedRef.current = true
     setEndpointType('auto')
     setIsStreamTest(false)
-    setMessageOverride('')
     setSearchTerm('')
     setTestResults({})
     setRowSelection({})
@@ -558,24 +587,34 @@ function ChannelTestDialogContent({
       let finalResult: TestResult | undefined
 
       try {
-        await handleTestChannel(
+        await handleDetailedChannelTest(
           currentRow.id,
           {
             channelName: currentRow.name,
             testModel: model,
-            endpointType: endpointType === 'auto' ? undefined : endpointType,
-            stream: effectiveStreamTest || undefined,
-            message: messageOverride,
+            endpointType: endpointType === 'auto' ? '' : endpointType,
+            stream: effectiveStreamTest,
             silent,
           },
-          (success, responseTime, error, errorCode) => {
+          (
+            success,
+            responseTime,
+            error,
+            errorCode,
+            responsePreview,
+            responsePreviewTruncated
+          ) => {
             const completedAt = Date.now()
+            const formattedPreview = formatResponsePreview(responsePreview)
             finalResult = {
               status: success ? 'success' : 'error',
               responseTime,
               completedAt,
               error,
               errorCode,
+              responsePreview: formattedPreview.text,
+              responsePreviewTruncated:
+                formattedPreview.truncated || responsePreviewTruncated,
             }
             updateTestResult(model, finalResult)
           }
@@ -605,7 +644,6 @@ function ChannelTestDialogContent({
       endpointType,
       effectiveStreamTest,
       markModelTesting,
-      messageOverride,
       refreshChannelLists,
       t,
       updateTestResult,
@@ -1056,25 +1094,6 @@ function ChannelTestDialogContent({
             </div>
           </div>
 
-          <div className='grid gap-2'>
-            <Label htmlFor='channel-test-message'>
-              {t('Test message override')}
-            </Label>
-            <Textarea
-              id='channel-test-message'
-              value={messageOverride}
-              onChange={(event) => setMessageOverride(event.target.value)}
-              placeholder={t('Leave blank to use the global default.')}
-              maxLength={4096}
-              rows={3}
-            />
-            <p className='text-muted-foreground text-xs'>
-              {t(
-                'Leave blank to use the default channel-test message from system settings. This prompt is also used for image generation tests.'
-              )}
-            </p>
-          </div>
-
           <div className='space-y-3 max-sm:has-[div[role="toolbar"]]:pb-16'>
             <div className='flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between'>
               <div className='min-w-0 space-y-2'>
@@ -1264,12 +1283,17 @@ function TestResultCell({
   }
 
   if (result.status === 'success') {
-    return typeof result.responseTime === 'number' ? (
-      <span className='text-muted-foreground text-sm'>
-        {formatResponseTime(result.responseTime, t)}
-      </span>
-    ) : (
-      <span className='text-muted-foreground text-sm'>-</span>
+    return (
+      <div className='min-w-0 space-y-1.5'>
+        {typeof result.responseTime === 'number' ? (
+          <span className='text-muted-foreground text-sm'>
+            {formatResponseTime(result.responseTime, t)}
+          </span>
+        ) : (
+          <span className='text-muted-foreground text-sm'>-</span>
+        )}
+        <ResponsePreview result={result} />
+      </div>
     )
   }
 
@@ -1279,6 +1303,27 @@ function TestResultCell({
       model={model}
       onOpenDetails={onOpenDetails}
     />
+  )
+}
+
+function ResponsePreview({ result }: { result: TestResult }) {
+  const { t } = useTranslation()
+  if (!result.responsePreview) return null
+
+  return (
+    <div className='bg-muted/20 min-w-0 rounded-md border border-dashed px-2 py-1.5'>
+      <p className='text-muted-foreground text-[11px] font-medium'>
+        {t('Response preview')}
+      </p>
+      <pre className='text-muted-foreground mt-1 max-h-20 overflow-auto text-[11px] leading-relaxed wrap-break-word whitespace-pre-wrap'>
+        {result.responsePreview}
+      </pre>
+      {result.responsePreviewTruncated && (
+        <p className='text-muted-foreground mt-1 text-[11px]'>
+          {t('Preview is truncated for safety.')}
+        </p>
+      )}
+    </div>
   )
 }
 
@@ -1305,37 +1350,40 @@ function FailureResultContent({
   })
 
   return (
-    <div className='flex min-w-0 items-center gap-2 text-xs whitespace-normal'>
-      <p className='text-muted-foreground line-clamp-2 min-w-0 flex-1 leading-snug wrap-break-word'>
-        {summary}
-      </p>
-      <div className='flex shrink-0 flex-wrap items-center justify-end gap-1.5'>
-        {isModelPriceError && (
-          <Button
-            variant='outline'
-            size='sm'
-            className='h-7 w-fit px-2 text-xs'
-            onClick={() =>
-              window.open('/system-settings/billing/model-pricing', '_blank')
-            }
-          >
-            <Settings className='mr-1 h-3 w-3 shrink-0' />
-            {t('Go to Settings')}
-          </Button>
-        )}
-        {details && (
-          <Button
-            variant='ghost'
-            size='sm'
-            className='h-7 w-fit px-2 text-xs'
-            aria-haspopup='dialog'
-            onClick={() => onOpenDetails({ model, summary, details })}
-          >
-            <Info className='mr-1 h-3 w-3 shrink-0' />
-            {t('Details')}
-          </Button>
-        )}
+    <div className='min-w-0 space-y-1.5'>
+      <div className='flex min-w-0 items-center gap-2 text-xs whitespace-normal'>
+        <p className='text-muted-foreground line-clamp-2 min-w-0 flex-1 leading-snug wrap-break-word'>
+          {summary}
+        </p>
+        <div className='flex shrink-0 flex-wrap items-center justify-end gap-1.5'>
+          {isModelPriceError && (
+            <Button
+              variant='outline'
+              size='sm'
+              className='h-7 w-fit px-2 text-xs'
+              onClick={() =>
+                window.open('/system-settings/billing/model-pricing', '_blank')
+              }
+            >
+              <Settings className='mr-1 h-3 w-3 shrink-0' />
+              {t('Go to Settings')}
+            </Button>
+          )}
+          {details && (
+            <Button
+              variant='ghost'
+              size='sm'
+              className='h-7 w-fit px-2 text-xs'
+              aria-haspopup='dialog'
+              onClick={() => onOpenDetails({ model, summary, details })}
+            >
+              <Info className='mr-1 h-3 w-3 shrink-0' />
+              {t('Details')}
+            </Button>
+          )}
+        </div>
       </div>
+      <ResponsePreview result={result} />
     </div>
   )
 }

@@ -11,28 +11,39 @@ import (
 )
 
 type MonitorSetting struct {
-	AutoTestChannelEnabled bool    `json:"auto_test_channel_enabled"`
-	AutoTestChannelMinutes float64 `json:"auto_test_channel_minutes"`
-	ChannelTestMode        string  `json:"channel_test_mode"`
-	ChannelTestMessage     string  `json:"channel_test_message"`
+	AutoTestChannelEnabled         bool    `json:"auto_test_channel_enabled"`
+	AutoTestChannelMinutes         float64 `json:"auto_test_channel_minutes"`
+	ChannelTestMode                string  `json:"channel_test_mode"`
+	ChannelTestMessage             string  `json:"channel_test_message"`
+	ChannelTestUseChannelStyle     bool    `json:"channel_test_use_channel_style"`
+	ChannelTestShowResponsePreview bool    `json:"channel_test_show_response_preview"`
 }
 
 const (
 	ChannelTestModeScheduledAll    = "scheduled_all"
 	ChannelTestModeAutoBanOnly     = "auto_ban_only"
 	ChannelTestModePassiveRecovery = "passive_recovery"
-	ChannelTestMessageOptionKey    = "monitor_setting.channel_test_message"
 	DefaultChannelTestMessage      = "你好，请简单介绍一下你自己。"
 	ChannelTestMessageMaxRunes     = 4096
+
+	ChannelTestMessageOptionKey             = "monitor_setting.channel_test_message"
+	ChannelTestUseChannelStyleOptionKey     = "monitor_setting.channel_test_use_channel_style"
+	ChannelTestShowResponsePreviewOptionKey = "monitor_setting.channel_test_show_response_preview"
 )
 
 // 默认配置
-var monitorSetting = MonitorSetting{
-	AutoTestChannelEnabled: false,
-	AutoTestChannelMinutes: 10,
-	ChannelTestMode:        ChannelTestModeScheduledAll,
-	ChannelTestMessage:     DefaultChannelTestMessage,
+func defaultMonitorSetting() MonitorSetting {
+	return MonitorSetting{
+		AutoTestChannelEnabled:         false,
+		AutoTestChannelMinutes:         10,
+		ChannelTestMode:                ChannelTestModeScheduledAll,
+		ChannelTestMessage:             DefaultChannelTestMessage,
+		ChannelTestUseChannelStyle:     true,
+		ChannelTestShowResponsePreview: false,
+	}
 }
+
+var monitorSetting = defaultMonitorSetting()
 
 func init() {
 	// 注册到全局配置管理器
@@ -59,12 +70,18 @@ func GetMonitorSetting() *MonitorSetting {
 	default:
 		monitorSetting.ChannelTestMode = ChannelTestModeScheduledAll
 	}
+	message, err := NormalizeChannelTestMessage(monitorSetting.ChannelTestMessage)
+	if err != nil || message == "" {
+		monitorSetting.ChannelTestMessage = DefaultChannelTestMessage
+	} else {
+		monitorSetting.ChannelTestMessage = message
+	}
 	return &monitorSetting
 }
 
-// NormalizeChannelTestMessage trims and validates a test prompt supplied by
-// an administrator or a one-off channel test request. Empty values are
-// allowed and resolve to the configured global default at request time.
+// NormalizeChannelTestMessage trims and validates the administrator-configured
+// global channel-test message. Empty values resolve to the built-in default at
+// request time.
 func NormalizeChannelTestMessage(value string) (string, error) {
 	value = strings.TrimSpace(value)
 	if !utf8.ValidString(value) {
@@ -76,8 +93,8 @@ func NormalizeChannelTestMessage(value string) (string, error) {
 	return value, nil
 }
 
-// ResolveChannelTestMessage returns the one-off prompt when provided, or the
-// persisted global prompt for scheduled/default tests.
+// ResolveChannelTestMessage returns an explicitly supplied internal test
+// message when provided, or the persisted global message for default tests.
 func ResolveChannelTestMessage(value string) (string, error) {
 	normalized, err := NormalizeChannelTestMessage(value)
 	if err != nil {

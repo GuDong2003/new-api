@@ -33,7 +33,8 @@ export type HeaderNavModulesConfig = {
 
 export type SidebarSectionConfig = {
   enabled: boolean
-  [key: string]: boolean
+  order: string[]
+  [key: string]: boolean | string[]
 }
 
 export type SidebarModulesAdminConfig = Record<string, SidebarSectionConfig>
@@ -56,11 +57,13 @@ export const HEADER_NAV_DEFAULT: HeaderNavModulesConfig = {
 export const SIDEBAR_MODULES_DEFAULT: SidebarModulesAdminConfig = {
   chat: {
     enabled: true,
+    order: ['playground', 'chat'],
     playground: true,
     chat: true,
   },
   console: {
     enabled: true,
+    order: ['detail', 'token', 'log', 'midjourney', 'task'],
     detail: true,
     token: true,
     log: true,
@@ -69,17 +72,32 @@ export const SIDEBAR_MODULES_DEFAULT: SidebarModulesAdminConfig = {
   },
   personal: {
     enabled: true,
+    order: ['topup', 'personal'],
     topup: true,
     personal: true,
   },
   admin: {
     enabled: true,
+    order: [
+      'channel',
+      'queue',
+      'models',
+      'user',
+      'redemption',
+      'invitation',
+      'subscription',
+      'systemInfo',
+      'setting',
+    ],
     channel: true,
+    queue: true,
     models: true,
     redemption: true,
+    invitation: true,
     user: true,
     setting: true,
     subscription: true,
+    systemInfo: true,
   },
 }
 
@@ -127,11 +145,49 @@ const parseAccessModule = (
 const cloneSidebarDefault = (): SidebarModulesAdminConfig =>
   Object.entries(SIDEBAR_MODULES_DEFAULT).reduce<SidebarModulesAdminConfig>(
     (acc, [section, config]) => {
-      acc[section] = { ...config }
+      acc[section] = { ...config, order: [...config.order] }
       return acc
     },
     {}
   )
+
+const getSidebarModuleKeys = (config: SidebarSectionConfig): string[] =>
+  Object.keys(config).filter(
+    (moduleKey) => moduleKey !== 'enabled' && moduleKey !== 'order'
+  )
+
+/**
+ * Return a stable module order while keeping unknown/custom modules visible.
+ * Older saved configurations do not have an order field, so their canonical
+ * order is filled from the defaults and any extra keys are appended.
+ */
+export function getSidebarModuleOrder(
+  config: SidebarSectionConfig,
+  fallbackOrder: string[] = []
+): string[] {
+  const available = getSidebarModuleKeys(config)
+  const configured = Array.isArray(config.order)
+    ? config.order.filter(
+        (moduleKey, index, values) =>
+          typeof moduleKey === 'string' &&
+          available.includes(moduleKey) &&
+          values.indexOf(moduleKey) === index
+      )
+    : []
+  const fallback = fallbackOrder.filter(
+    (moduleKey, index, values) =>
+      available.includes(moduleKey) && values.indexOf(moduleKey) === index
+  )
+
+  return [
+    ...configured,
+    ...fallback.filter((moduleKey) => !configured.includes(moduleKey)),
+    ...available.filter(
+      (moduleKey) =>
+        !configured.includes(moduleKey) && !fallback.includes(moduleKey)
+    ),
+  ]
+}
 
 export function parseHeaderNavModules(
   value: string | null | undefined
@@ -194,22 +250,36 @@ export function parseSidebarModulesAdmin(
     Object.entries(parsed).forEach(([sectionKey, raw]) => {
       if (!raw || typeof raw !== 'object') return
 
-      const defaultSection = defaults[sectionKey] ?? { enabled: true }
+      const defaultSection = defaults[sectionKey] ?? {
+        enabled: true,
+        order: [],
+      }
+      const rawRecord = raw as Record<string, unknown>
       const sectionConfig: SidebarSectionConfig = {
-        enabled: toBoolean(
-          (raw as Record<string, unknown>).enabled,
-          defaultSection.enabled ?? true
-        ),
+        enabled: toBoolean(rawRecord.enabled, defaultSection.enabled ?? true),
+        order: [],
       }
 
-      Object.entries(raw as Record<string, unknown>).forEach(
-        ([moduleKey, moduleValue]) => {
-          if (moduleKey === 'enabled') return
-          sectionConfig[moduleKey] = toBoolean(
-            moduleValue,
-            defaultSection[moduleKey] ?? true
-          )
-        }
+      Object.entries(rawRecord).forEach(([moduleKey, moduleValue]) => {
+        if (moduleKey === 'enabled' || moduleKey === 'order') return
+        sectionConfig[moduleKey] = toBoolean(
+          moduleValue,
+          typeof defaultSection[moduleKey] === 'boolean'
+            ? defaultSection[moduleKey]
+            : true
+        )
+      })
+      sectionConfig.order = getSidebarModuleOrder(
+        {
+          ...sectionConfig,
+          order: Array.isArray(rawRecord.order)
+            ? rawRecord.order.filter(
+                (moduleKey): moduleKey is string =>
+                  typeof moduleKey === 'string'
+              )
+            : [],
+        },
+        defaultSection.order
       )
 
       result[sectionKey] = sectionConfig
@@ -218,15 +288,20 @@ export function parseSidebarModulesAdmin(
     // Merge defaults to ensure expected sections exist
     Object.entries(defaults).forEach(([sectionKey, config]) => {
       if (!result[sectionKey]) {
-        result[sectionKey] = { ...config }
+        result[sectionKey] = { ...config, order: [...config.order] }
         return
       }
 
       Object.entries(config).forEach(([moduleKey, moduleValue]) => {
+        if (moduleKey === 'order') return
         if (!(moduleKey in result[sectionKey])) {
           result[sectionKey][moduleKey] = moduleValue
         }
       })
+      result[sectionKey].order = getSidebarModuleOrder(
+        result[sectionKey],
+        config.order
+      )
     })
 
     return result
@@ -238,5 +313,20 @@ export function parseSidebarModulesAdmin(
 export function serializeSidebarModulesAdmin(
   config: SidebarModulesAdminConfig
 ): string {
-  return JSON.stringify(config)
+  const normalized = Object.entries(config).reduce<SidebarModulesAdminConfig>(
+    (acc, [sectionKey, sectionConfig]) => {
+      const { enabled, order: _order, ...modules } = sectionConfig
+      acc[sectionKey] = {
+        enabled,
+        order: getSidebarModuleOrder(
+          sectionConfig,
+          SIDEBAR_MODULES_DEFAULT[sectionKey]?.order ?? []
+        ),
+        ...modules,
+      }
+      return acc
+    },
+    {}
+  )
+  return JSON.stringify(normalized)
 }

@@ -32,6 +32,11 @@ export const STATIC_I18N_KEYS = [
   'Back to Dashboard',
   'Auto-disable rules',
   'Channel health checks',
+  'Test request',
+  'Use channel style',
+  'Show response preview',
+  'Response preview',
+  'Preview is truncated for safety.',
   'Request retry',
 
   // System settings sidebar
