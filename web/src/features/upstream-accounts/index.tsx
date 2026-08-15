@@ -1083,6 +1083,36 @@ export function UpstreamAccountsPage() {
                             )}
                           </div>
                           <div className='flex items-center gap-1'>
+                            {account.external_checkin_url && (
+                              <Button
+                                variant='ghost'
+                                size='icon-sm'
+                                onClick={() => {
+                                  openExternal(account.external_checkin_url)
+                                  if (
+                                    account.open_redeem_with_checkin &&
+                                    account.redeem_url
+                                  ) {
+                                    openExternal(account.redeem_url)
+                                  }
+                                }}
+                                title={t('External check-in')}
+                                aria-label={t('External check-in')}
+                              >
+                                <CalendarCheck />
+                              </Button>
+                            )}
+                            {account.redeem_url && (
+                              <Button
+                                variant='ghost'
+                                size='icon-sm'
+                                onClick={() => openExternal(account.redeem_url)}
+                                title={t('Recharge / redeem')}
+                                aria-label={t('Recharge / redeem')}
+                              >
+                                <CircleDollarSign />
+                              </Button>
+                            )}
                             <Button
                               variant='outline'
                               size='sm'
@@ -1241,37 +1271,6 @@ export function UpstreamAccountsPage() {
                             检查
                           </Button>
                         </div>
-                        {(account.external_checkin_url ||
-                          account.redeem_url) && (
-                          <div className='grid grid-cols-2 gap-2'>
-                            {account.external_checkin_url && (
-                              <Button
-                                variant='ghost'
-                                size='sm'
-                                onClick={() => {
-                                  openExternal(account.external_checkin_url)
-                                  if (
-                                    account.open_redeem_with_checkin &&
-                                    account.redeem_url
-                                  ) {
-                                    openExternal(account.redeem_url)
-                                  }
-                                }}
-                              >
-                                <ExternalLink /> {t('External check-in')}
-                              </Button>
-                            )}
-                            {account.redeem_url && (
-                              <Button
-                                variant='ghost'
-                                size='sm'
-                                onClick={() => openExternal(account.redeem_url)}
-                              >
-                                <ExternalLink /> {t('Recharge / redeem')}
-                              </Button>
-                            )}
-                          </div>
-                        )}
                       </CardContent>
                     </Card>
                   ))}
