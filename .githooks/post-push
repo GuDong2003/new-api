@@ -17,5 +17,5 @@ while read -r _local_ref _local_sha remote_ref _remote_sha; do
   [[ "$tag" =~ ^[0-9]{6}-gd-[0-9]+$ ]] || continue
 
   echo "post-push: dispatching GD release workflow for $tag"
-  gh workflow run release.yml --repo "$repo" --ref main -f "tag=$tag"
+  gh workflow run .github/workflows/release.yml --repo "$repo" --ref main -f "tag=$tag"
 done
