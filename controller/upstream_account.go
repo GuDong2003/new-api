@@ -32,7 +32,7 @@ func ListUpstreamAccounts(c *gin.Context) {
 
 func ListUpstreamAccountChannels(c *gin.Context) {
 	channels := make([]*model.Channel, 0)
-	if err := model.DB.Select("id", "name", "status", "balance_source").Order("id desc").Find(&channels).Error; err != nil {
+	if err := model.DB.Select("id", "name", "base_url", "status", "balance_source").Order("id desc").Find(&channels).Error; err != nil {
 		common.ApiError(c, err)
 		return
 	}

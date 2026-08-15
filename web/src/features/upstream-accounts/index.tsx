@@ -17,26 +17,36 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import type { ColumnDef } from '@tanstack/react-table'
 import {
   Activity,
   CalendarCheck,
+  ChevronDown,
   CircleDollarSign,
   Edit3,
+  ExternalLink,
   HeartPulse,
   Loader2,
   Plus,
   RefreshCw,
+  Search,
   Trash2,
 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 
+import { DataTablePage, useDataTable } from '@/components/data-table'
 import { Dialog } from '@/components/dialog'
 import { SectionPageLayout } from '@/components/layout'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/components/ui/collapsible'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -68,6 +78,7 @@ import type {
   BalanceSource,
   UpstreamAccount,
   UpstreamAccountInput,
+  UpstreamAccountLog,
   UpstreamChannelOption,
   UpstreamStatus,
 } from './types'
@@ -155,11 +166,17 @@ function AccountDialog(props: AccountDialogProps) {
   }, [props.open, props.account])
 
   const selected = new Set(form.channel_ids ?? [])
-  const toggleChannel = (channelId: number, checked: boolean) => {
+  const toggleChannel = (channel: UpstreamChannelOption, checked: boolean) => {
     const next = new Set(form.channel_ids ?? [])
-    if (checked) next.add(channelId)
-    else next.delete(channelId)
-    setForm({ ...form, channel_ids: [...next] })
+    if (checked) next.add(channel.id)
+    else next.delete(channel.id)
+
+    const nextForm = { ...form, channel_ids: [...next] }
+    if (checked) {
+      nextForm.name = channel.name
+      nextForm.base_url = channel.base_url ?? ''
+    }
+    setForm(nextForm)
   }
 
   const canSave = Boolean(
@@ -330,7 +347,7 @@ function AccountDialog(props: AccountDialogProps) {
                     <Checkbox
                       checked={selected.has(channel.id)}
                       onCheckedChange={(checked) =>
-                        toggleChannel(channel.id, checked === true)
+                        toggleChannel(channel, checked === true)
                       }
                     />
                   </Label>
@@ -347,11 +364,181 @@ function AccountDialog(props: AccountDialogProps) {
   )
 }
 
+const LOG_TYPE_LABELS: Record<UpstreamAccountLog['type'], string> = {
+  checkin: '签到',
+  balance: '余额',
+  health: '健康检查',
+}
+
+const LOG_TRIGGER_LABELS: Record<UpstreamAccountLog['trigger'], string> = {
+  manual: '手动',
+  scheduled: '定时',
+}
+
+const LOG_STATUS_OPTIONS = [
+  { label: '正常', value: 'healthy' },
+  { label: '失败', value: 'failed' },
+  { label: '需要手动验证', value: 'manual_required' },
+] as const
+
+const ACCOUNT_STATUS_OPTIONS: Array<{ label: string; value: UpstreamStatus }> =
+  [
+    { label: '正常', value: 'healthy' },
+    { label: '失败', value: 'failed' },
+    { label: '需要手动验证', value: 'manual_required' },
+    { label: '未检查', value: 'unknown' },
+  ]
+
+function UpstreamLogsTable(props: {
+  logs: UpstreamAccountLog[]
+  accountNames: Map<number, string>
+  isLoading: boolean
+}) {
+  const columns = useMemo<ColumnDef<UpstreamAccountLog, unknown>[]>(
+    () => [
+      {
+        accessorKey: 'created_at',
+        header: '时间',
+        cell: ({ row }) => (
+          <span className='whitespace-nowrap'>
+            {formatTime(row.original.created_at)}
+          </span>
+        ),
+      },
+      {
+        id: 'account',
+        accessorFn: (row) => props.accountNames.get(row.account_id) ?? '',
+        header: '站点账号',
+        cell: ({ row }) =>
+          props.accountNames.get(row.original.account_id) ||
+          `#${row.original.account_id}`,
+      },
+      {
+        accessorKey: 'type',
+        header: '操作',
+        cell: ({ row }) => LOG_TYPE_LABELS[row.original.type],
+      },
+      {
+        accessorKey: 'trigger',
+        header: '触发',
+        cell: ({ row }) => LOG_TRIGGER_LABELS[row.original.trigger],
+      },
+      {
+        accessorKey: 'status',
+        header: '状态',
+        cell: ({ row }) => statusBadge(row.original.status),
+      },
+      {
+        accessorKey: 'message',
+        header: '结果',
+        cell: ({ row }) => {
+          const log = row.original
+          const result =
+            log.type === 'balance' && log.status === 'healthy'
+              ? formatBalance(log.balance, log.unit)
+              : log.message || '—'
+          return (
+            <span className='block max-w-80 truncate' title={result}>
+              {result}
+            </span>
+          )
+        },
+      },
+      {
+        accessorKey: 'duration_ms',
+        header: () => <span className='block text-right'>耗时</span>,
+        cell: ({ row }) => (
+          <span className='block text-right whitespace-nowrap'>
+            {row.original.duration_ms} ms
+          </span>
+        ),
+      },
+    ],
+    [props.accountNames]
+  )
+
+  const { table } = useDataTable({
+    data: props.logs,
+    columns,
+    getRowId: (row) => String(row.id),
+    globalFilterFn: (row, _columnId, filterValue) => {
+      const log = row.original
+      const searchValue = String(filterValue).trim().toLowerCase()
+      if (!searchValue) return true
+      return [
+        props.accountNames.get(log.account_id),
+        log.message,
+        LOG_TYPE_LABELS[log.type],
+        LOG_TRIGGER_LABELS[log.trigger],
+        log.status,
+      ]
+        .join(' ')
+        .toLowerCase()
+        .includes(searchValue)
+    },
+  })
+
+  return (
+    <DataTablePage
+      table={table}
+      columns={columns}
+      isLoading={props.isLoading}
+      emptyTitle='暂无执行日志'
+      emptyDescription='签到、余额和健康检查的执行记录会显示在这里。'
+      skeletonKeyPrefix='upstream-log-skeleton'
+      fixedHeight={false}
+      paginationInFooter={false}
+      tableClassName='rounded-none border-x-0 border-b-0'
+      toolbarProps={{
+        searchPlaceholder: '搜索站点、操作或结果…',
+        searchDebounceMs: 300,
+        hideViewOptions: true,
+        filters: [
+          {
+            columnId: 'type',
+            title: '操作',
+            options: Object.entries(LOG_TYPE_LABELS).map(([value, label]) => ({
+              value,
+              label,
+            })),
+            singleSelect: true,
+          },
+          {
+            columnId: 'trigger',
+            title: '触发',
+            options: Object.entries(LOG_TRIGGER_LABELS).map(
+              ([value, label]) => ({ value, label })
+            ),
+            singleSelect: true,
+          },
+          {
+            columnId: 'status',
+            title: '状态',
+            options: LOG_STATUS_OPTIONS.map(({ value, label }) => ({
+              value,
+              label,
+            })),
+            singleSelect: true,
+          },
+        ],
+      }}
+    />
+  )
+}
+
 export function UpstreamAccountsPage() {
   const queryClient = useQueryClient()
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editing, setEditing] = useState<UpstreamAccount | null>(null)
   const [runningKey, setRunningKey] = useState('')
+  const [accountSearch, setAccountSearch] = useState('')
+  const [accountStatusFilter, setAccountStatusFilter] = useState<
+    UpstreamStatus | 'all'
+  >('all')
+  const [accountCheckinFilter, setAccountCheckinFilter] = useState<
+    'all' | 'enabled' | 'disabled'
+  >('all')
+  const [balanceSourceOpen, setBalanceSourceOpen] = useState(false)
 
   const accountsQuery = useQuery({
     queryKey: ['upstream-accounts'],
@@ -450,6 +637,34 @@ export function UpstreamAccountsPage() {
     [accountsQuery.data]
   )
 
+  const filteredAccounts = useMemo(() => {
+    const search = accountSearch.trim().toLowerCase()
+    return (accountsQuery.data ?? []).filter((account) => {
+      const matchesSearch =
+        !search ||
+        account.name.toLowerCase().includes(search) ||
+        account.base_url.toLowerCase().includes(search)
+      const matchesStatus =
+        accountStatusFilter === 'all' ||
+        [
+          account.last_checkin_status,
+          account.balance_status,
+          account.health_status,
+        ].includes(accountStatusFilter)
+      const matchesCheckin =
+        accountCheckinFilter === 'all' ||
+        (accountCheckinFilter === 'enabled'
+          ? account.auto_checkin
+          : !account.auto_checkin)
+      return matchesSearch && matchesStatus && matchesCheckin
+    })
+  }, [
+    accountSearch,
+    accountCheckinFilter,
+    accountStatusFilter,
+    accountsQuery.data,
+  ])
+
   return (
     <SectionPageLayout>
       <SectionPageLayout.Title>
@@ -474,6 +689,65 @@ export function UpstreamAccountsPage() {
       </SectionPageLayout.Actions>
       <SectionPageLayout.Content>
         <div className='space-y-4'>
+          <div className='flex flex-wrap items-center gap-2'>
+            <div className='relative min-w-56 flex-1'>
+              <Search className='text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2' />
+              <Input
+                className='h-8 pl-8 text-sm'
+                placeholder='搜索站点名称或地址…'
+                value={accountSearch}
+                onChange={(event) => setAccountSearch(event.target.value)}
+              />
+            </div>
+            <select
+              className='border-input bg-background h-8 rounded-lg border px-2 text-sm'
+              value={accountStatusFilter}
+              onChange={(event) =>
+                setAccountStatusFilter(
+                  event.target.value as UpstreamStatus | 'all'
+                )
+              }
+            >
+              <option value='all'>全部状态</option>
+              {ACCOUNT_STATUS_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+            <select
+              className='border-input bg-background h-8 rounded-lg border px-2 text-sm'
+              value={accountCheckinFilter}
+              onChange={(event) =>
+                setAccountCheckinFilter(
+                  event.target.value as 'all' | 'enabled' | 'disabled'
+                )
+              }
+            >
+              <option value='all'>全部签到设置</option>
+              <option value='enabled'>自动签到已开启</option>
+              <option value='disabled'>自动签到已关闭</option>
+            </select>
+            <Button
+              variant='ghost'
+              size='sm'
+              onClick={() => {
+                setAccountSearch('')
+                setAccountStatusFilter('all')
+                setAccountCheckinFilter('all')
+              }}
+              disabled={
+                !accountSearch &&
+                accountStatusFilter === 'all' &&
+                accountCheckinFilter === 'all'
+              }
+            >
+              重置
+            </Button>
+            <span className='text-muted-foreground text-xs'>
+              {filteredAccounts.length}/{accountsQuery.data?.length ?? 0} 个账号
+            </span>
+          </div>
           {(() => {
             if (accountsQuery.isLoading) {
               return (
@@ -484,9 +758,18 @@ export function UpstreamAccountsPage() {
               )
             }
             if (accountsQuery.data?.length) {
+              if (!filteredAccounts.length) {
+                return (
+                  <Card>
+                    <CardContent className='text-muted-foreground flex min-h-32 items-center justify-center text-sm'>
+                      没有匹配的站点账号
+                    </CardContent>
+                  </Card>
+                )
+              }
               return (
                 <div className='grid gap-4 lg:grid-cols-2'>
-                  {accountsQuery.data.map((account) => (
+                  {filteredAccounts.map((account) => (
                     <Card key={account.id}>
                       <CardHeader className='pb-3'>
                         <div className='flex items-start justify-between gap-3'>
@@ -504,6 +787,20 @@ export function UpstreamAccountsPage() {
                             </a>
                           </div>
                           <div className='flex items-center gap-1'>
+                            <Button
+                              variant='outline'
+                              size='sm'
+                              render={
+                                <a
+                                  href={account.base_url}
+                                  target='_blank'
+                                  rel='noreferrer'
+                                />
+                              }
+                            >
+                              <ExternalLink />
+                              前往站点
+                            </Button>
                             <Button
                               variant='ghost'
                               size='icon-sm'
@@ -648,146 +945,116 @@ export function UpstreamAccountsPage() {
           })()}
 
           <Card>
-            <CardHeader>
-              <CardTitle className='flex items-center gap-2 text-sm'>
-                <CircleDollarSign className='size-4' />
-                渠道余额来源
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className='overflow-x-auto'>
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>渠道</TableHead>
-                      <TableHead>绑定账号</TableHead>
-                      <TableHead>余额来源</TableHead>
-                      <TableHead>上游真实余额</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {(channelsQuery.data ?? []).map((channel) => (
-                      <TableRow key={channel.id}>
-                        <TableCell className='font-medium'>
-                          #{channel.id} · {channel.name}
-                        </TableCell>
-                        <TableCell>
-                          {channel.upstream_account_name || '—'}
-                        </TableCell>
-                        <TableCell>
-                          <select
-                            className='border-input bg-background h-8 rounded-lg border px-2 text-sm'
-                            value={channel.balance_source || 'channel'}
-                            disabled={sourceMutation.isPending}
-                            onChange={(event) =>
-                              sourceMutation.mutate({
-                                id: channel.id,
-                                source: event.target.value as BalanceSource,
-                              })
-                            }
-                          >
-                            <option value='channel'>现有渠道接口</option>
-                            <option
-                              value='upstream'
-                              disabled={!channel.upstream_account_id}
-                            >
-                              绑定的站点账号
-                            </option>
-                            <option value='none'>不查询</option>
-                          </select>
-                        </TableCell>
-                        <TableCell>
-                          {channel.upstream_balance == null
-                            ? '—'
-                            : formatBalance(
-                                channel.upstream_balance,
-                                channel.upstream_balance_unit || 'QUOTA'
-                              )}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                    {!channelsQuery.isLoading &&
-                      (channelsQuery.data ?? []).length === 0 && (
+            <Collapsible
+              open={balanceSourceOpen}
+              onOpenChange={setBalanceSourceOpen}
+            >
+              <CardHeader className='py-3'>
+                <CollapsibleTrigger
+                  render={
+                    <Button
+                      type='button'
+                      variant='ghost'
+                      className='h-auto w-full justify-between px-0'
+                    />
+                  }
+                >
+                  <CardTitle className='flex items-center gap-2 text-sm'>
+                    <CircleDollarSign className='size-4' />
+                    渠道余额来源
+                    <span className='text-muted-foreground text-xs font-normal'>
+                      {channelsQuery.data?.length ?? 0} 个渠道
+                    </span>
+                  </CardTitle>
+                  <ChevronDown
+                    className={`text-muted-foreground size-4 transition-transform ${
+                      balanceSourceOpen ? 'rotate-180' : ''
+                    }`}
+                  />
+                </CollapsibleTrigger>
+              </CardHeader>
+              <CollapsibleContent>
+                <CardContent className='px-3 pt-0 pb-3'>
+                  <div className='max-h-72 overflow-auto rounded-lg border'>
+                    <Table>
+                      <TableHeader>
                         <TableRow>
-                          <TableCell colSpan={4} className='text-center'>
-                            暂无渠道
-                          </TableCell>
+                          <TableHead>渠道</TableHead>
+                          <TableHead>绑定账号</TableHead>
+                          <TableHead>余额来源</TableHead>
+                          <TableHead>上游真实余额</TableHead>
                         </TableRow>
-                      )}
-                  </TableBody>
-                </Table>
-              </div>
-            </CardContent>
+                      </TableHeader>
+                      <TableBody>
+                        {(channelsQuery.data ?? []).map((channel) => (
+                          <TableRow key={channel.id}>
+                            <TableCell className='font-medium'>
+                              #{channel.id} · {channel.name}
+                            </TableCell>
+                            <TableCell>
+                              {channel.upstream_account_name || '—'}
+                            </TableCell>
+                            <TableCell>
+                              <select
+                                className='border-input bg-background h-8 rounded-lg border px-2 text-sm'
+                                value={channel.balance_source || 'channel'}
+                                disabled={sourceMutation.isPending}
+                                onChange={(event) =>
+                                  sourceMutation.mutate({
+                                    id: channel.id,
+                                    source: event.target.value as BalanceSource,
+                                  })
+                                }
+                              >
+                                <option value='channel'>现有渠道接口</option>
+                                <option
+                                  value='upstream'
+                                  disabled={!channel.upstream_account_id}
+                                >
+                                  绑定的站点账号
+                                </option>
+                                <option value='none'>不查询</option>
+                              </select>
+                            </TableCell>
+                            <TableCell>
+                              {channel.upstream_balance == null
+                                ? '—'
+                                : formatBalance(
+                                    channel.upstream_balance,
+                                    channel.upstream_balance_unit || 'QUOTA'
+                                  )}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                        {!channelsQuery.isLoading &&
+                          (channelsQuery.data ?? []).length === 0 && (
+                            <TableRow>
+                              <TableCell colSpan={4} className='text-center'>
+                                暂无渠道
+                              </TableCell>
+                            </TableRow>
+                          )}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </CardContent>
+              </CollapsibleContent>
+            </Collapsible>
           </Card>
 
           <Card>
-            <CardHeader>
+            <CardHeader className='pb-3'>
               <CardTitle className='flex items-center gap-2 text-sm'>
                 <Activity className='size-4' />
                 执行日志
               </CardTitle>
             </CardHeader>
-            <CardContent>
-              <div className='overflow-x-auto'>
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>时间</TableHead>
-                      <TableHead>站点账号</TableHead>
-                      <TableHead>操作</TableHead>
-                      <TableHead>触发</TableHead>
-                      <TableHead>状态</TableHead>
-                      <TableHead>结果</TableHead>
-                      <TableHead className='text-right'>耗时</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {(logsQuery.data ?? []).map((log) => (
-                      <TableRow key={log.id}>
-                        <TableCell className='whitespace-nowrap'>
-                          {formatTime(log.created_at)}
-                        </TableCell>
-                        <TableCell>
-                          {accountNames.get(log.account_id) ||
-                            `#${log.account_id}`}
-                        </TableCell>
-                        <TableCell>
-                          {
-                            {
-                              checkin: '签到',
-                              balance: '余额',
-                              health: '健康检查',
-                            }[log.type]
-                          }
-                        </TableCell>
-                        <TableCell>
-                          {log.trigger === 'scheduled' ? '定时' : '手动'}
-                        </TableCell>
-                        <TableCell>{statusBadge(log.status)}</TableCell>
-                        <TableCell
-                          className='max-w-80 truncate'
-                          title={log.message}
-                        >
-                          {log.type === 'balance' && log.status === 'healthy'
-                            ? formatBalance(log.balance, log.unit)
-                            : log.message || '—'}
-                        </TableCell>
-                        <TableCell className='text-right'>
-                          {log.duration_ms} ms
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                    {!logsQuery.isLoading &&
-                      (logsQuery.data ?? []).length === 0 && (
-                        <TableRow>
-                          <TableCell colSpan={7} className='text-center'>
-                            暂无执行日志
-                          </TableCell>
-                        </TableRow>
-                      )}
-                  </TableBody>
-                </Table>
-              </div>
+            <CardContent className='p-0'>
+              <UpstreamLogsTable
+                logs={logsQuery.data ?? []}
+                accountNames={accountNames}
+                isLoading={logsQuery.isLoading}
+              />
             </CardContent>
           </Card>
         </div>

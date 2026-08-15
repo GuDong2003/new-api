@@ -95,6 +95,7 @@ export type BalanceSource = 'channel' | 'upstream' | 'none'
 export type UpstreamChannelOption = {
   id: number
   name: string
+  base_url: string | null
   status: number
   balance_source: BalanceSource
   upstream_account_id?: number
