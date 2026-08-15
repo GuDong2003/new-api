@@ -240,7 +240,7 @@ function AccountDialog(props: AccountDialogProps) {
             <Input
               id='upstream-name'
               value={form.name}
-              placeholder='例如 ZE 主账号'
+              placeholder='例如：主账号'
               onChange={(event) =>
                 setForm({ ...form, name: event.target.value })
               }
@@ -374,7 +374,7 @@ function AccountDialog(props: AccountDialogProps) {
             <Input
               id='upstream-tags'
               value={form.tags.join(', ')}
-              placeholder='例如 svip, 自用, ZE'
+              placeholder='例如：主账号, 自用'
               onChange={(event) =>
                 setForm({
                   ...form,
@@ -896,12 +896,6 @@ export function UpstreamAccountsPage() {
   const openExternal = (url: string) => {
     if (url) window.open(url, '_blank', 'noopener,noreferrer')
   }
-  const openAllExternalCheckins = () => {
-    filteredAccounts
-      .filter((account) => account.external_checkin_url)
-      .forEach((account) => openExternal(account.external_checkin_url))
-  }
-
   return (
     <SectionPageLayout>
       <SectionPageLayout.Title>
@@ -992,18 +986,6 @@ export function UpstreamAccountsPage() {
               </select>
             )}
             <Button
-              variant='outline'
-              size='sm'
-              onClick={openAllExternalCheckins}
-              disabled={
-                !filteredAccounts.some(
-                  (account) => account.external_checkin_url
-                )
-              }
-            >
-              <ExternalLink /> {t('Open external check-ins')}
-            </Button>
-            <Button
               variant='ghost'
               size='sm'
               onClick={() => {
@@ -1030,7 +1012,8 @@ export function UpstreamAccountsPage() {
           {(() => {
             if (accountsQuery.isLoading) {
               return (
-                <div className='grid gap-4 lg:grid-cols-2'>
+                <div className='grid grid-cols-1 gap-3 sm:gap-4 lg:grid-cols-3'>
+                  <Skeleton className='h-64' />
                   <Skeleton className='h-64' />
                   <Skeleton className='h-64' />
                 </div>
@@ -1047,7 +1030,7 @@ export function UpstreamAccountsPage() {
                 )
               }
               return (
-                <div className='grid gap-4 lg:grid-cols-2'>
+                <div className='grid grid-cols-1 gap-3 sm:gap-4 lg:grid-cols-3'>
                   {filteredAccounts.map((account) => (
                     <Card key={account.id}>
                       <CardHeader className='pb-3'>
