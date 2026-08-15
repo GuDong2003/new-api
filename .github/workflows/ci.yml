@@ -89,10 +89,9 @@ jobs:
       - name: Typecheck
         run: bun run typecheck
 
-      - name: Test avatar component
-        # Bun 1.3.14 cannot execute the repository's top-level node:test
-        # describe suites; keep the maintained component smoke test in CI.
-        run: bun test src/components/user-avatar-editor/__tests__/interaction.test.tsx
+      - name: Test
+        # Vitest runs the full frontend suite, including the avatar component smoke tests.
+        run: bun run test
 
       - name: Production build
         run: bun run build

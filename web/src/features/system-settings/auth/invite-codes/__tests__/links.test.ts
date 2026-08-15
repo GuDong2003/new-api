@@ -16,8 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import assert from 'node:assert/strict'
-import { describe, test } from 'node:test'
+import { describe, expect, test } from 'vitest'
 
 import {
   buildInviteRegistrationLink,
@@ -26,25 +25,23 @@ import {
 
 describe('invitation registration links', () => {
   test('builds an absolute sign-up URL with an encoded invitation code', () => {
-    assert.equal(
+    expect(
       buildInviteRegistrationLink(
         'https://api.gudong226.com/admin',
         'NAPI-ABCD-EFGH-JKLM-NPQR'
-      ),
-      'https://api.gudong226.com/sign-up?invite=NAPI-ABCD-EFGH-JKLM-NPQR'
-    )
+      )
+    ).toBe('https://api.gudong226.com/sign-up?invite=NAPI-ABCD-EFGH-JKLM-NPQR')
   })
 
   test('builds one link for every generated code', () => {
-    assert.deepEqual(
+    expect(
       buildInviteRegistrationLinks('https://example.com', [
         'NAPI-ONE',
         'NAPI-TWO',
-      ]),
-      [
-        'https://example.com/sign-up?invite=NAPI-ONE',
-        'https://example.com/sign-up?invite=NAPI-TWO',
-      ]
-    )
+      ])
+    ).toEqual([
+      'https://example.com/sign-up?invite=NAPI-ONE',
+      'https://example.com/sign-up?invite=NAPI-TWO',
+    ])
   })
 })

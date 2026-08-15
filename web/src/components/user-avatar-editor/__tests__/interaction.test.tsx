@@ -16,107 +16,47 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import assert from 'node:assert/strict'
-import { after, test } from 'node:test'
+import { render, screen } from '@testing-library/react'
+import i18next from 'i18next'
+import { I18nextProvider } from 'react-i18next'
+import { beforeAll, describe, expect, test } from 'vitest'
 
-import { Window } from 'happy-dom'
+import { UserAvatarEditor } from '../../user-avatar-editor'
 
-const domWindow = new Window()
-for (const key of [
-  'window',
-  'document',
-  'navigator',
-  'HTMLElement',
-  'HTMLButtonElement',
-  'HTMLInputElement',
-  'SVGElement',
-  'Node',
-  'Element',
-  'Event',
-  'MouseEvent',
-  'PointerEvent',
-  'CustomEvent',
-  'MutationObserver',
-  'ResizeObserver',
-  'requestAnimationFrame',
-  'cancelAnimationFrame',
-  'getComputedStyle',
-] as const) {
-  Object.defineProperty(globalThis, key, {
-    configurable: true,
-    value: domWindow[key],
+describe('user avatar editor', () => {
+  beforeAll(() => {
+    i18next.addResourceBundle('en', 'translation', {
+      'Change Avatar': 'Change Avatar',
+      'Change or remove avatar': 'Change or remove avatar',
+      "{{name}}'s avatar": "{{name}}'s avatar",
+    })
   })
-}
 
-const { act } = await import('react')
-const { createRoot } = await import('react-dom/client')
-const { createInstance } = await import('i18next')
-const { I18nextProvider, initReactI18next } = await import('react-i18next')
-const { UserAvatarEditor } = await import('../../user-avatar-editor')
+  test('avatar editor trigger stays keyboard-accessible without a custom image', () => {
+    render(
+      <I18nextProvider i18n={i18next}>
+        <UserAvatarEditor compact name='alice' />
+      </I18nextProvider>
+    )
 
-const i18n = createInstance()
-await i18n.use(initReactI18next).init({
-  lng: 'en',
-  resources: {
-    en: {
-      translation: {
-        'Change Avatar': 'Change Avatar',
-        'Change or remove avatar': 'Change or remove avatar',
-        "{{name}}'s avatar": "{{name}}'s avatar",
-      },
-    },
-  },
-})
+    const trigger = screen.getByRole('button', { name: 'Change Avatar' })
 
-const reactTestGlobals = globalThis as typeof globalThis & {
-  IS_REACT_ACT_ENVIRONMENT?: boolean
-}
-reactTestGlobals.IS_REACT_ACT_ENVIRONMENT = true
+    expect(trigger).toHaveAttribute('type', 'button')
+    expect(trigger.querySelector('img')).toBeNull()
+    expect(trigger).toHaveTextContent('A')
+  })
 
-async function renderEditor(avatarUrl?: string, compact = true) {
-  const container = document.createElement('div')
-  document.body.append(container)
-  const root = createRoot(container)
-  await act(async () => {
-    root.render(
-      <I18nextProvider i18n={i18n}>
+  test('avatar editor exposes change and removal when an avatar URL exists', () => {
+    render(
+      <I18nextProvider i18n={i18next}>
         <UserAvatarEditor
-          compact={compact}
+          avatarUrl='/api/avatar/0123456789abcdef0123456789abcdef.svg'
+          compact={false}
           name='alice'
-          avatarUrl={avatarUrl}
         />
       </I18nextProvider>
     )
+
+    expect(screen.getByText('Change or remove avatar')).toBeInTheDocument()
   })
-  return { container, root }
-}
-
-after(() => {
-  domWindow.close()
-})
-
-test('avatar editor trigger stays keyboard-accessible without a custom image', async () => {
-  const rendered = await renderEditor()
-  const trigger = rendered.container.querySelector('button')
-
-  assert.ok(trigger)
-  assert.equal(trigger.type, 'button')
-  assert.equal(trigger.getAttribute('aria-label'), 'Change Avatar')
-  assert.equal(rendered.container.querySelector('img'), null)
-  assert.match(rendered.container.textContent || '', /A/)
-
-  await act(async () => rendered.root.unmount())
-  rendered.container.remove()
-})
-
-test('avatar editor exposes change and removal when an avatar URL exists', async () => {
-  const rendered = await renderEditor(
-    '/api/avatar/0123456789abcdef0123456789abcdef.svg',
-    false
-  )
-
-  assert.match(rendered.container.textContent || '', /Change or remove avatar/)
-
-  await act(async () => rendered.root.unmount())
-  rendered.container.remove()
 })

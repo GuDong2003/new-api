@@ -16,8 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import assert from 'node:assert/strict'
-import { describe, test } from 'node:test'
+import { describe, expect, test } from 'vitest'
 
 import { getInviteCodeState } from '../invite-code-state.ts'
 import type { InviteCode } from '../types.ts'
@@ -39,26 +38,24 @@ const baseInviteCode: InviteCode = {
 
 describe('invitation code status shown to administrators', () => {
   test('shows enabled while uses remain and the code has not expired', () => {
-    assert.equal(getInviteCodeState(baseInviteCode, 100), 'Enabled')
+    expect(getInviteCodeState(baseInviteCode, 100)).toBe('Enabled')
   })
 
   test('shows exhausted when the configured usage limit is reached', () => {
-    assert.equal(
-      getInviteCodeState({ ...baseInviteCode, used_count: 2 }, 100),
+    expect(getInviteCodeState({ ...baseInviteCode, used_count: 2 }, 100)).toBe(
       'Exhausted'
     )
   })
 
   test('shows expired at the exact expiration timestamp', () => {
-    assert.equal(
-      getInviteCodeState({ ...baseInviteCode, expired_time: 100 }, 100),
-      'Expired'
-    )
+    expect(
+      getInviteCodeState({ ...baseInviteCode, expired_time: 100 }, 100)
+    ).toBe('Expired')
   })
 
   test('shows disabled before other computed states and for unknown states', () => {
     for (const status of [0, 2]) {
-      assert.equal(
+      expect(
         getInviteCodeState(
           {
             ...baseInviteCode,
@@ -67,9 +64,8 @@ describe('invitation code status shown to administrators', () => {
             expired_time: 50,
           },
           100
-        ),
-        'Disabled'
-      )
+        )
+      ).toBe('Disabled')
     }
   })
 })

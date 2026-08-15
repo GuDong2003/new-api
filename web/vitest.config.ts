@@ -16,29 +16,24 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { describe, expect, test } from 'vitest'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
-import { isPendingOAuthRegistration } from '../../types.ts'
+import { defineConfig } from 'vitest/config'
 
-describe('pending OAuth registration response', () => {
-  test('accepts a complete one-time registration challenge', () => {
-    expect(
-      isPendingOAuthRegistration({
-        require_invite_code: true,
-        registration_token: 'registration-token',
-        expires_at: 123,
-      })
-    ).toBe(true)
-  })
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
-  test('rejects incomplete or ordinary authentication payloads', () => {
-    expect(
-      isPendingOAuthRegistration({
-        require_invite_code: true,
-        registration_token: '',
-        expires_at: 123,
-      })
-    ).toBe(false)
-    expect(isPendingOAuthRegistration({ user: {}, session: {} })).toBe(false)
-  })
+export default defineConfig({
+  resolve: {
+    alias: {
+      '@': path.resolve(__dirname, './src'),
+    },
+  },
+  test: {
+    environment: 'jsdom',
+    setupFiles: ['./src/test-setup.ts'],
+    clearMocks: true,
+    restoreMocks: true,
+    include: ['src/**/*.{test,spec}.{ts,tsx}'],
+  },
 })

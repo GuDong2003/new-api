@@ -16,8 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import assert from 'node:assert/strict'
-import { afterEach, describe, test } from 'node:test'
+import { afterEach, describe, expect, test } from 'vitest'
 
 import {
   clearInvitationCode,
@@ -54,19 +53,18 @@ describe('invitation code storage', () => {
 
     saveOAuthInvitationForState('state-a', '  NAPI-ABCD-EFGH-JKLM-NPQR  ')
 
-    assert.equal(
-      takeOAuthInvitationForState('state-a'),
+    expect(takeOAuthInvitationForState('state-a')).toBe(
       'NAPI-ABCD-EFGH-JKLM-NPQR'
     )
-    assert.equal(takeOAuthInvitationForState('state-a'), '')
+    expect(takeOAuthInvitationForState('state-a')).toBe('')
   })
 
   test('a different OAuth state cannot inherit a stale code', () => {
     installWindowStorage()
     saveOAuthInvitationForState('state-a', 'NAPI-ABCD-EFGH-JKLM-NPQR')
 
-    assert.equal(takeOAuthInvitationForState('state-b'), '')
-    assert.equal(takeOAuthInvitationForState('state-a'), '')
+    expect(takeOAuthInvitationForState('state-b')).toBe('')
+    expect(takeOAuthInvitationForState('state-a')).toBe('')
   })
 
   test('empty input and successful authentication clear all invite state', () => {
@@ -75,10 +73,10 @@ describe('invitation code storage', () => {
     saveOAuthInvitationForState('state-a', 'NAPI-ABCD-EFGH-JKLM-NPQR')
 
     clearInvitationCode()
-    assert.equal(storage.getItem('invite'), null)
-    assert.equal(takeOAuthInvitationForState('state-a'), '')
+    expect(storage.getItem('invite')).toBeNull()
+    expect(takeOAuthInvitationForState('state-a')).toBe('')
 
     saveOAuthInvitationForState('state-a', '  ')
-    assert.equal(takeOAuthInvitationForState('state-a'), '')
+    expect(takeOAuthInvitationForState('state-a')).toBe('')
   })
 })

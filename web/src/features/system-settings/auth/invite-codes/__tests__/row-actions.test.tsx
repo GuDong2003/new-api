@@ -16,65 +16,23 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import assert from 'node:assert/strict'
-import { after, test } from 'node:test'
+import { fireEvent, render, screen } from '@testing-library/react'
+import i18next from 'i18next'
+import { I18nextProvider } from 'react-i18next'
+import { beforeAll, describe, expect, test } from 'vitest'
 
-import { Window } from 'happy-dom'
-
+import { InviteCodeRowActions } from '../invite-code-row-actions'
 import type { InviteCode } from '../types'
 
-const domWindow = new Window()
-for (const key of [
-  'window',
-  'document',
-  'navigator',
-  'HTMLElement',
-  'HTMLButtonElement',
-  'SVGElement',
-  'Node',
-  'Element',
-  'Event',
-  'MouseEvent',
-  'PointerEvent',
-  'CustomEvent',
-  'MutationObserver',
-  'ResizeObserver',
-  'requestAnimationFrame',
-  'cancelAnimationFrame',
-  'getComputedStyle',
-] as const) {
-  Object.defineProperty(globalThis, key, {
-    configurable: true,
-    value: domWindow[key],
+beforeAll(() => {
+  i18next.addResourceBundle('en', 'translation', {
+    Delete: 'Delete',
+    Edit: 'Edit',
+    'Delete Invitation Code': 'Delete Invitation Code',
+    'Used invitation codes cannot be deleted. Disable them instead.':
+      'Used invitation codes cannot be deleted. Disable them instead.',
   })
-}
-
-const { act } = await import('react')
-const { createRoot } = await import('react-dom/client')
-const { createInstance } = await import('i18next')
-const { I18nextProvider, initReactI18next } = await import('react-i18next')
-const { InviteCodeRowActions } = await import('../invite-code-row-actions')
-
-const i18n = createInstance()
-await i18n.use(initReactI18next).init({
-  lng: 'en',
-  resources: {
-    en: {
-      translation: {
-        Delete: 'Delete',
-        Edit: 'Edit',
-        'Delete Invitation Code': 'Delete Invitation Code',
-        'Used invitation codes cannot be deleted. Disable them instead.':
-          'Used invitation codes cannot be deleted. Disable them instead.',
-      },
-    },
-  },
 })
-
-const reactTestGlobals = globalThis as typeof globalThis & {
-  IS_REACT_ACT_ENVIRONMENT?: boolean
-}
-reactTestGlobals.IS_REACT_ACT_ENVIRONMENT = true
 
 const baseInviteCode: InviteCode = {
   id: 1,
@@ -91,73 +49,51 @@ const baseInviteCode: InviteCode = {
   expired_time: 0,
 }
 
-async function renderActions(inviteCode: InviteCode, onDelete: () => void) {
-  const container = document.createElement('div')
-  document.body.append(container)
-  const root = createRoot(container)
-  await act(async () => {
-    root.render(
-      <I18nextProvider i18n={i18n}>
-        <InviteCodeRowActions
-          inviteCode={inviteCode}
-          onEdit={() => undefined}
-          onDelete={onDelete}
-        />
-      </I18nextProvider>
-    )
-  })
-  return { container, root }
+function renderActions(inviteCode: InviteCode, onDelete: () => void) {
+  return render(
+    <I18nextProvider i18n={i18next}>
+      <InviteCodeRowActions
+        inviteCode={inviteCode}
+        onEdit={() => undefined}
+        onDelete={onDelete}
+      />
+    </I18nextProvider>
+  )
 }
 
-function getDeleteButton(container: HTMLElement): HTMLButtonElement {
-  const button = [...container.querySelectorAll('button')].find((candidate) =>
-    candidate.textContent?.includes('Delete')
-  )
-  assert.ok(button)
-  return button
+function getDeleteButton(name: RegExp): HTMLButtonElement {
+  return screen.getByRole('button', { name })
 }
 
-after(() => {
-  domWindow.close()
-})
-
-test('unused invitation code exposes an enabled destructive action', async () => {
-  let deleteCount = 0
-  const rendered = await renderActions(baseInviteCode, () => {
-    deleteCount += 1
-  })
-  const deleteButton = getDeleteButton(rendered.container)
-
-  assert.equal(deleteButton.disabled, false)
-  assert.equal(
-    deleteButton.getAttribute('aria-label'),
-    'Delete Invitation Code'
-  )
-  await act(async () => deleteButton.click())
-  assert.equal(deleteCount, 1)
-
-  await act(async () => rendered.root.unmount())
-  rendered.container.remove()
-})
-
-test('used invitation code keeps delete disabled and explains the fallback', async () => {
-  let deleteCount = 0
-  const rendered = await renderActions(
-    { ...baseInviteCode, used_count: 1 },
-    () => {
+describe('invitation code row actions', () => {
+  test('unused invitation code exposes an enabled destructive action', () => {
+    let deleteCount = 0
+    renderActions(baseInviteCode, () => {
       deleteCount += 1
-    }
-  )
-  const deleteButton = getDeleteButton(rendered.container)
+    })
+    const deleteButton = getDeleteButton(/^Delete Invitation Code$/)
 
-  assert.equal(deleteButton.disabled, true)
-  assert.equal(
-    deleteButton.getAttribute('aria-label'),
-    'Used invitation codes cannot be deleted. Disable them instead.'
-  )
-  await act(async () => deleteButton.click())
-  assert.equal(deleteCount, 0)
+    expect(deleteButton).toBeEnabled()
+    expect(deleteButton).toHaveAttribute('aria-label', 'Delete Invitation Code')
+    fireEvent.click(deleteButton)
+    expect(deleteCount).toBe(1)
+  })
 
-  await act(async () => rendered.root.unmount())
-  rendered.container.remove()
+  test('used invitation code keeps delete disabled and explains the fallback', () => {
+    let deleteCount = 0
+    renderActions({ ...baseInviteCode, used_count: 1 }, () => {
+      deleteCount += 1
+    })
+    const deleteButton = getDeleteButton(
+      /Used invitation codes cannot be deleted/i
+    )
+
+    expect(deleteButton).toBeDisabled()
+    expect(deleteButton).toHaveAttribute(
+      'aria-label',
+      'Used invitation codes cannot be deleted. Disable them instead.'
+    )
+    fireEvent.click(deleteButton)
+    expect(deleteCount).toBe(0)
+  })
 })
