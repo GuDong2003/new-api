@@ -23,6 +23,8 @@ const (
 	SystemTaskTypeAsyncTaskPoll      = "async_task_poll"
 	SystemTaskTypeChannelQueueWarmup = "channel_queue_warmup"
 	SystemTaskTypeUpstreamAccount    = "upstream_account_maintenance"
+	SystemTaskTypeBackup             = "database_backup"
+	SystemTaskTypeBackupRestore      = "database_backup_restore"
 )
 
 var ErrSystemTaskLockLost = errors.New("system task lock lost")

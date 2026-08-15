@@ -20,6 +20,11 @@ import { api } from '@/lib/api'
 
 import type {
   ConfirmPaymentComplianceResponse,
+  BackupManifestResponse,
+  BackupRevisionResponse,
+  BackupSettingsResponse,
+  BackupTask,
+  BackupTaskResponse,
   FetchUpstreamRatiosRequest,
   LogCleanupTask,
   SystemOptionsResponse,
@@ -39,6 +44,95 @@ export async function getSystemOptions() {
 export async function updateSystemOption(request: UpdateOptionRequest) {
   const res = await api.put<UpdateOptionResponse>('/api/option/', request)
   return res.data
+}
+
+export type UpdateBackupSettingsRequest = {
+  enabled?: boolean
+  interval_hours?: number
+  gist_id?: string
+  gist_description?: string
+  github_token?: string
+  age_identity?: string
+  clear_github_token?: boolean
+  clear_age_identity?: boolean
+}
+
+export async function getBackupSettings() {
+  const res = await api.get<BackupSettingsResponse>(
+    '/api/system-backup/settings'
+  )
+  return res.data
+}
+
+export async function updateBackupSettings(
+  request: UpdateBackupSettingsRequest
+) {
+  const res = await api.put<BackupSettingsResponse>(
+    '/api/system-backup/settings',
+    request
+  )
+  return res.data
+}
+
+export async function testBackupConnection() {
+  const res = await api.post('/api/system-backup/test')
+  return res.data as {
+    success: boolean
+    message: string
+    data?: Record<string, unknown>
+  }
+}
+
+export async function startBackup() {
+  const res = await api.post<BackupTaskResponse>('/api/system-backup/run')
+  return res.data
+}
+
+export async function getCurrentBackupTask() {
+  const res = await api.get<SystemTaskResponse<BackupTask | null>>(
+    '/api/system-task/current',
+    { params: { type: 'database_backup' } }
+  )
+  return res.data
+}
+
+export async function getCurrentBackupRestoreTask() {
+  const res = await api.get<SystemTaskResponse<BackupTask | null>>(
+    '/api/system-task/current',
+    { params: { type: 'database_backup_restore' } }
+  )
+  return res.data
+}
+
+export async function startBackupRestore(revision: string) {
+  const res = await api.post<BackupTaskResponse>('/api/system-backup/restore', {
+    revision,
+    confirmation: 'RESTORE',
+  })
+  return res.data
+}
+
+export async function listBackupRevisions() {
+  const res = await api.get<BackupRevisionResponse>(
+    '/api/system-backup/revisions'
+  )
+  return res.data
+}
+
+export async function verifyBackup(revision?: string) {
+  const res = await api.post<BackupManifestResponse>(
+    '/api/system-backup/verify',
+    null,
+    { params: revision ? { revision } : undefined }
+  )
+  return res.data
+}
+
+export async function downloadBackup(revision?: string) {
+  return api.get<Blob>('/api/system-backup/download', {
+    params: revision ? { revision } : undefined,
+    responseType: 'blob',
+  })
 }
 
 export async function confirmPaymentCompliance() {
@@ -70,8 +164,8 @@ export async function getCurrentLogCleanupTask() {
   return res.data
 }
 
-export async function getSystemTask(taskId: string) {
-  const res = await api.get<SystemTaskResponse<LogCleanupTask>>(
+export async function getSystemTask<TTask = LogCleanupTask>(taskId: string) {
+  const res = await api.get<SystemTaskResponse<TTask>>(
     `/api/system-task/${taskId}`
   )
   return res.data

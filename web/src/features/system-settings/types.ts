@@ -106,6 +106,87 @@ export type SystemTaskListResponse = {
   data?: SystemTask[]
 }
 
+export type BackupSettings = {
+  enabled: boolean
+  interval_hours: number
+  gist_id: string
+  gist_description: string
+  github_token_configured: boolean
+  age_identity_configured: boolean
+  age_recipient: string
+  crypto_secret_configured: boolean
+  database_type: string
+  supported: boolean
+  last_backup_hash: string
+  last_backup_revision: string
+  last_backup_at: number
+  last_backup_size: number
+  last_backup_status: string
+  last_backup_error: string
+  last_checked_at: number
+}
+
+export type BackupSettingsResponse = {
+  success: boolean
+  message: string
+  data?: BackupSettings
+}
+
+export type BackupRevision = {
+  version: string
+  committed_at: string
+  url?: string
+}
+
+export type BackupRevisionResponse = {
+  success: boolean
+  message: string
+  data?: BackupRevision[]
+}
+
+export type BackupManifest = {
+  version: number
+  created_at: number
+  database_type: string
+  dump_file: string
+  dump_sha256: string
+  content_sha256?: string
+  dump_size: number
+}
+
+export type BackupManifestResponse = {
+  success: boolean
+  message: string
+  data?: BackupManifest
+}
+
+export type BackupTaskState = {
+  stage?: string
+  progress?: number
+}
+
+export type BackupTaskResult = {
+  status?: string
+  hash?: string
+  size?: number
+  revision?: string
+}
+
+export type BackupTask = SystemTask<
+  Record<string, unknown>,
+  BackupTaskState,
+  BackupTaskResult
+>
+
+export type BackupTaskResponse = {
+  success: boolean
+  message: string
+  data?: {
+    task: BackupTask
+    created: boolean
+  }
+}
+
 export type SiteSettings = {
   Notice: string
   SystemName: string

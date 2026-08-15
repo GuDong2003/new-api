@@ -209,6 +209,18 @@ func SetApiRouter(router *gin.Engine) {
 			optionRoute.POST("/waffo-pancake/subscription-product", controller.CreateWaffoPancakeSubscriptionProduct)
 			optionRoute.GET("/waffo-pancake/subscription-product-options", controller.ListWaffoPancakeSubscriptionProductOptions)
 		}
+		backupRoute := apiRouter.Group("/system-backup")
+		backupRoute.Use(middleware.RootAuth())
+		{
+			backupRoute.GET("/settings", controller.GetBackupSettings)
+			backupRoute.PUT("/settings", controller.UpdateBackupSettings)
+			backupRoute.POST("/test", controller.TestBackupConnection)
+			backupRoute.POST("/run", controller.StartBackup)
+			backupRoute.POST("/restore", controller.StartBackupRestore)
+			backupRoute.GET("/revisions", controller.ListBackupRevisions)
+			backupRoute.POST("/verify", controller.VerifyBackup)
+			backupRoute.GET("/download", controller.DownloadBackup)
+		}
 
 		// Custom OAuth provider management (root only)
 		customOAuthRoute := apiRouter.Group("/custom-oauth-provider")
