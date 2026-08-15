@@ -532,10 +532,14 @@ func dumpPostgres(ctx context.Context) (string, string, string, int64, error) {
 	}
 	path := file.Name()
 	if err := file.Close(); err != nil {
-		os.Remove(path)
 		return "", "", "", 0, err
 	}
-	defer func() { _ = os.Remove(path) }()
+	removeOnReturn := true
+	defer func() {
+		if removeOnReturn {
+			_ = os.Remove(path)
+		}
+	}()
 	command := exec.CommandContext(ctx, "pg_dump", "--dbname="+safeDSN, "--format=custom", "--no-owner", "--no-privileges", "--file="+path)
 	command.Env = os.Environ()
 	if password != "" {
@@ -574,6 +578,7 @@ func dumpPostgres(ctx context.Context) (string, string, string, int64, error) {
 	if err != nil {
 		return "", "", "", 0, err
 	}
+	removeOnReturn = false
 	return path, fmt.Sprintf("%x", rawHash.Sum(nil)), contentHash, stat.Size(), nil
 }
 
@@ -830,6 +835,7 @@ func PerformBackup(ctx context.Context, report func(stage string, progress int))
 		_ = saveBackupState(settings)
 		return BackupTaskResult{}, err
 	}
+	defer func() { _ = os.Remove(dumpPath) }()
 	credentialsToken, identity, err := loadBackupCredentials(settings)
 	if err != nil {
 		settings.LastBackupStatus = "failed"
