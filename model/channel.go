@@ -21,32 +21,36 @@ import (
 )
 
 type Channel struct {
-	Id                         int      `json:"id"`
-	Type                       int      `json:"type" gorm:"default:0"`
-	Key                        string   `json:"key" gorm:"not null"`
-	OpenAIOrganization         *string  `json:"openai_organization"`
-	TestModel                  *string  `json:"test_model"`
-	Status                     int      `json:"status" gorm:"default:1"`
-	Name                       string   `json:"name" gorm:"index"`
-	Weight                     *uint    `json:"weight" gorm:"default:0"`
-	CreatedTime                int64    `json:"created_time" gorm:"bigint"`
-	TestTime                   int64    `json:"test_time" gorm:"bigint"`
-	ResponseTime               int      `json:"response_time"` // in milliseconds
-	BaseURL                    *string  `json:"base_url" gorm:"column:base_url;default:''"`
-	Other                      string   `json:"other"`
-	Balance                    float64  `json:"balance"` // in USD
-	BalanceUpdatedTime         int64    `json:"balance_updated_time" gorm:"bigint"`
-	BalanceSource              string   `json:"balance_source" gorm:"type:varchar(16);default:'channel';index"`
-	UpstreamAccountId          int      `json:"upstream_account_id,omitempty" gorm:"-:all"`
-	UpstreamAccountName        string   `json:"upstream_account_name,omitempty" gorm:"-:all"`
-	UpstreamBalance            *float64 `json:"upstream_balance,omitempty" gorm:"-:all"`
-	UpstreamBalanceUnit        string   `json:"upstream_balance_unit,omitempty" gorm:"-:all"`
-	UpstreamBalanceUpdatedTime int64    `json:"upstream_balance_updated_time,omitempty" gorm:"-:all"`
-	UpstreamBalanceStatus      string   `json:"upstream_balance_status,omitempty" gorm:"-:all"`
-	Models                     string   `json:"models"`
-	Group                      string   `json:"group" gorm:"type:varchar(64);default:'default'"`
-	UsedQuota                  int64    `json:"used_quota" gorm:"bigint;default:0"`
-	ModelMapping               *string  `json:"model_mapping" gorm:"type:text"`
+	Id                         int                      `json:"id"`
+	Type                       int                      `json:"type" gorm:"default:0"`
+	Key                        string                   `json:"key" gorm:"not null"`
+	OpenAIOrganization         *string                  `json:"openai_organization"`
+	TestModel                  *string                  `json:"test_model"`
+	Status                     int                      `json:"status" gorm:"default:1"`
+	Name                       string                   `json:"name" gorm:"index"`
+	Weight                     *uint                    `json:"weight" gorm:"default:0"`
+	CreatedTime                int64                    `json:"created_time" gorm:"bigint"`
+	TestTime                   int64                    `json:"test_time" gorm:"bigint"`
+	ResponseTime               int                      `json:"response_time"` // in milliseconds
+	BaseURL                    *string                  `json:"base_url" gorm:"column:base_url;default:''"`
+	Other                      string                   `json:"other"`
+	Balance                    float64                  `json:"balance"` // in USD
+	BalanceUpdatedTime         int64                    `json:"balance_updated_time" gorm:"bigint"`
+	BalanceSource              string                   `json:"balance_source" gorm:"type:varchar(16);default:'channel';index"`
+	UpstreamAccountId          int                      `json:"upstream_account_id,omitempty" gorm:"-:all"`
+	UpstreamAccountName        string                   `json:"upstream_account_name,omitempty" gorm:"-:all"`
+	UpstreamAccountIds         []int                    `json:"upstream_account_ids,omitempty" gorm:"-:all"`
+	UpstreamAccountNames       []string                 `json:"upstream_account_names,omitempty" gorm:"-:all"`
+	UpstreamAccountCount       int                      `json:"upstream_account_count,omitempty" gorm:"-:all"`
+	UpstreamBalance            *float64                 `json:"upstream_balance,omitempty" gorm:"-:all"`
+	UpstreamBalanceUnit        string                   `json:"upstream_balance_unit,omitempty" gorm:"-:all"`
+	UpstreamBalanceUpdatedTime int64                    `json:"upstream_balance_updated_time,omitempty" gorm:"-:all"`
+	UpstreamBalanceStatus      string                   `json:"upstream_balance_status,omitempty" gorm:"-:all"`
+	UpstreamBalanceDetails     []UpstreamAccountBalance `json:"upstream_balance_details,omitempty" gorm:"-:all"`
+	Models                     string                   `json:"models"`
+	Group                      string                   `json:"group" gorm:"type:varchar(64);default:'default'"`
+	UsedQuota                  int64                    `json:"used_quota" gorm:"bigint;default:0"`
+	ModelMapping               *string                  `json:"model_mapping" gorm:"type:text"`
 	//MaxInputTokens     *int    `json:"max_input_tokens" gorm:"default:0"`
 	StatusCodeMapping *string `json:"status_code_mapping" gorm:"type:varchar(1024);default:''"`
 	Priority          *int64  `json:"priority" gorm:"bigint;default:0"`

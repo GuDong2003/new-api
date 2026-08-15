@@ -338,6 +338,11 @@ function BalanceCell({ channel }: { channel: Channel }) {
   const balanceUnit = usesUpstream
     ? channel.upstream_balance_unit || 'QUOTA'
     : 'USD'
+  const upstreamAccountLabel = usesUpstream
+    ? channel.upstream_account_names?.length
+      ? channel.upstream_account_names.join('、')
+      : channel.upstream_account_name
+    : undefined
   const usedQuota = channel.used_quota || 0
   const [isUpdating, setIsUpdating] = useState(false)
   const [codexUsageOpen, setCodexUsageOpen] = useState(false)
@@ -393,8 +398,8 @@ function BalanceCell({ channel }: { channel: Channel }) {
   }
   const usedLabel = `${t('Used:')} ${usedFull}`
   const remainingLabel = `${t('Remaining:')} ${remainingFull}${
-    usesUpstream && channel.upstream_account_name
-      ? ` · ${channel.upstream_account_name}`
+    usesUpstream && upstreamAccountLabel
+      ? ` · ${upstreamAccountLabel}`
       : ''
   }`
   const maskedUsedLabel = `${t('Used:')} ${SENSITIVE_MASK}`

@@ -22,11 +22,28 @@ export type UpstreamStatus =
   | 'failed'
   | 'manual_required'
 
+export type UpstreamSiteTypeOption = {
+  value: string
+  label: string
+  auth_types: Array<'token' | 'cookie'>
+  supports_checkin: boolean
+  supports_balance: boolean
+  external_only: boolean
+  checkin_path?: string
+  redeem_path?: string
+  balance_path?: string
+}
+
 export type UpstreamAccount = {
   id: number
   name: string
   base_url: string
-  site_type: 'new_api'
+  site_type: string
+  notes: string
+  tags: string[]
+  external_checkin_url: string
+  redeem_url: string
+  open_redeem_with_checkin: boolean
   auth_type: 'token' | 'cookie'
   user_id: number
   credential_configured: boolean
@@ -42,6 +59,8 @@ export type UpstreamAccount = {
   last_checkin_time: number
   last_checkin_status: UpstreamStatus
   last_checkin_message: string
+  checkin_attempt_date: string
+  checkin_attempts: number
   last_health_time: number
   health_status: UpstreamStatus
   last_error: string
@@ -55,7 +74,12 @@ export type UpstreamAccount = {
 export type UpstreamAccountInput = {
   name: string
   base_url: string
-  site_type: 'new_api'
+  site_type: string
+  notes: string
+  tags: string[]
+  external_checkin_url: string
+  redeem_url: string
+  open_redeem_with_checkin: boolean
   auth_type: 'token' | 'cookie'
   user_id: number
   credential?: string
@@ -79,7 +103,7 @@ export type UpstreamAccountLog = {
   id: number
   account_id: number
   type: 'checkin' | 'balance' | 'health'
-  trigger: 'manual' | 'scheduled'
+  trigger: 'manual' | 'scheduled' | 'retry'
   status: UpstreamStatus
   message: string
   reward: number
@@ -100,10 +124,21 @@ export type UpstreamChannelOption = {
   balance_source: BalanceSource
   upstream_account_id?: number
   upstream_account_name?: string
+  upstream_account_ids?: number[]
+  upstream_account_names?: string[]
+  upstream_account_count?: number
   upstream_balance?: number
   upstream_balance_unit?: string
   upstream_balance_updated_time?: number
   upstream_balance_status?: UpstreamStatus
+  upstream_balance_details?: Array<{
+    account_id: number
+    account_name: string
+    balance: number
+    unit: string
+    updated_time: number
+    status: string
+  }>
 }
 
 export type APIResponse<T> = {

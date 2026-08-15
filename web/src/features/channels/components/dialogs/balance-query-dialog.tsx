@@ -109,6 +109,17 @@ export function BalanceQueryDialog({
                 upstream_balance: newBalance,
                 upstream_balance_unit: response.currency || 'QUOTA',
                 upstream_balance_updated_time: now,
+                upstream_account_count:
+                  response.account_count ?? currentRow.upstream_account_count,
+                upstream_balance_details:
+                  response.account_balances ??
+                  currentRow.upstream_balance_details,
+                upstream_account_ids: response.account_balances?.map(
+                  (item) => item.account_id
+                ),
+                upstream_account_names: response.account_balances?.map(
+                  (item) => item.account_name
+                ),
               }
             : {
                 ...currentRow,
@@ -172,6 +183,10 @@ export function BalanceQueryDialog({
       ? currentRow.upstream_balance_updated_time
       : currentRow.balance_updated_time) ??
     0
+  const upstreamDetails =
+    currentRow.balance_source === 'upstream'
+      ? currentRow.upstream_balance_details ?? []
+      : []
   let queryButtonLabel = t('Update Balance')
   if (currentRow.balance_source === 'none') {
     queryButtonLabel = '余额查询已关闭'
@@ -227,6 +242,22 @@ export function BalanceQueryDialog({
           <div className='text-muted-foreground mt-2 text-xs'>
             {t('Last updated:')} {formatDate(displayedUpdatedTime)}
           </div>
+          {upstreamDetails.length > 1 && (
+            <div className='mt-3 space-y-1 border-t pt-3 text-xs'>
+              <div className='text-muted-foreground'>各账号余额</div>
+              {upstreamDetails.map((item) => (
+                <div
+                  key={item.account_id}
+                  className='flex items-center justify-between gap-3'
+                >
+                  <span className='min-w-0 truncate'>{item.account_name}</span>
+                  <span className='shrink-0 font-medium'>
+                    {formatBalance(item.balance, item.unit || 'QUOTA')}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Balance Update Button */}

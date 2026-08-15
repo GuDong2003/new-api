@@ -26,7 +26,20 @@ import type {
   UpstreamAccountLog,
   UpstreamChannelOption,
   UpstreamOperationResult,
+  UpstreamSiteTypeOption,
 } from './types'
+
+export async function listUpstreamSiteTypes() {
+  const response = await api.get<APIResponse<UpstreamSiteTypeOption[]>>(
+    '/api/upstream-account/site-types'
+  )
+  if (!response.data.success) {
+    throw new Error(
+      response.data.message || 'Failed to load upstream site types'
+    )
+  }
+  return response.data.data ?? []
+}
 
 export async function listUpstreamAccounts() {
   const response = await api.get<APIResponse<UpstreamAccount[]>>(

@@ -257,6 +257,11 @@ func migrateDB() error {
 	if err := migrateTokenModelLimitsToText(); err != nil {
 		return err
 	}
+	// Upstream account bindings are many-to-many. Drop the old single-channel
+	// unique index before GORM applies the composite account/channel index.
+	if err := migrateUpstreamAccountChannelIndexes(); err != nil {
+		return err
+	}
 
 	err := DB.AutoMigrate(
 		&Channel{},
@@ -321,6 +326,9 @@ func migrateDB() error {
 }
 
 func migrateDBFast() error {
+	if err := migrateUpstreamAccountChannelIndexes(); err != nil {
+		return err
+	}
 
 	var wg sync.WaitGroup
 

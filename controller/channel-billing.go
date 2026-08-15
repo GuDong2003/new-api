@@ -365,15 +365,17 @@ func updateChannelBalance(channel *model.Channel) (float64, error) {
 	case model.ChannelBalanceSourceNone:
 		return 0, errors.New("该渠道已设置为不查询余额")
 	case model.ChannelBalanceSourceUpstream:
-		account, err := model.GetUpstreamAccountForChannel(channel.Id)
+		result, err := service.RefreshUpstreamChannelBalances(context.Background(), channel.Id, model.UpstreamTriggerManual)
 		if err != nil {
 			return 0, fmt.Errorf("获取绑定的上游站点账号失败: %w", err)
 		}
-		result, err := service.RefreshUpstreamAccountBalance(context.Background(), account, model.UpstreamTriggerManual)
-		if err != nil {
-			return 0, err
+		if result.Summary == nil {
+			return 0, errors.New("未获取到上游账号余额")
 		}
-		return result.Balance, nil
+		if result.Summary.Unit == "MIXED" {
+			return 0, errors.New("绑定的上游账号余额单位不一致，无法合计")
+		}
+		return result.Summary.Balance, nil
 	}
 	baseURL := constant.ChannelBaseURLs[channel.Type]
 	if channel.GetBaseURL() == "" {
@@ -450,6 +452,46 @@ func UpdateChannelBalance(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	if channel.BalanceSource == model.ChannelBalanceSourceUpstream {
+		refreshResult, refreshErr := service.RefreshUpstreamChannelBalances(c.Request.Context(), channel.Id, model.UpstreamTriggerManual)
+		if refreshErr != nil {
+			common.ApiError(c, refreshErr)
+			return
+		}
+		if refreshResult == nil || refreshResult.Summary == nil {
+			common.ApiError(c, errors.New("未获取到上游账号余额"))
+			return
+		}
+		summary := refreshResult.Summary
+		if summary.Unit == "MIXED" {
+			c.JSON(http.StatusOK, gin.H{
+				"success":          false,
+				"message":          "绑定的上游账号余额单位不一致，无法合计",
+				"balance_source":   channel.BalanceSource,
+				"balance_status":   summary.Status,
+				"account_balances": summary.Accounts,
+			})
+			return
+		}
+		message := ""
+		if refreshResult.Failed > 0 {
+			message = fmt.Sprintf("%d 个上游账号刷新失败，合计包含其最近一次余额", refreshResult.Failed)
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"success":              true,
+			"message":              message,
+			"balance":              summary.Balance,
+			"currency":             summary.Unit,
+			"balance_source":       channel.BalanceSource,
+			"balance_status":       summary.Status,
+			"balance_updated_time": summary.UpdatedTime,
+			"account_count":        summary.AccountCount,
+			"account_balances":     summary.Accounts,
+			"refresh_failed":       refreshResult.Failed,
+			"refresh_errors":       refreshResult.Errors,
+		})
+		return
+	}
 	if channel.ChannelInfo.IsMultiKey {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
@@ -462,22 +504,13 @@ func UpdateChannelBalance(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	currency := "USD"
-	updatedTime := common.GetTimestamp()
-	if channel.BalanceSource == model.ChannelBalanceSourceUpstream {
-		account, accountErr := model.GetUpstreamAccountForChannel(channel.Id)
-		if accountErr == nil {
-			currency = account.BalanceUnit
-			updatedTime = account.BalanceUpdatedTime
-		}
-	}
 	c.JSON(http.StatusOK, gin.H{
 		"success":              true,
 		"message":              "",
 		"balance":              balance,
-		"currency":             currency,
+		"currency":             "USD",
 		"balance_source":       channel.BalanceSource,
-		"balance_updated_time": updatedTime,
+		"balance_updated_time": common.GetTimestamp(),
 	})
 }
 
@@ -491,23 +524,25 @@ func updateAllChannelsBalance() error {
 		if channel.Status != common.ChannelStatusEnabled {
 			continue
 		}
-		if channel.ChannelInfo.IsMultiKey {
+		if channel.ChannelInfo.IsMultiKey && channel.BalanceSource != model.ChannelBalanceSourceUpstream {
 			continue // skip multi-key channels
 		}
 		if channel.BalanceSource == model.ChannelBalanceSourceNone {
 			continue
 		}
 		if channel.BalanceSource == model.ChannelBalanceSourceUpstream {
-			account, accountErr := model.GetUpstreamAccountForChannel(channel.Id)
+			accounts, accountErr := model.GetUpstreamAccountsForChannel(channel.Id)
 			if accountErr != nil {
 				continue
 			}
-			if _, refreshed := refreshedUpstreamAccounts[account.Id]; refreshed {
-				continue
+			for _, account := range accounts {
+				if _, refreshed := refreshedUpstreamAccounts[account.Id]; refreshed {
+					continue
+				}
+				refreshedUpstreamAccounts[account.Id] = struct{}{}
+				_, _ = service.RefreshUpstreamAccountBalance(context.Background(), account, model.UpstreamTriggerScheduled)
+				time.Sleep(common.RequestInterval)
 			}
-			refreshedUpstreamAccounts[account.Id] = struct{}{}
-			_, _ = service.RefreshUpstreamAccountBalance(context.Background(), account, model.UpstreamTriggerScheduled)
-			time.Sleep(common.RequestInterval)
 			continue
 		}
 		// TODO: support Azure

@@ -1,14 +1,10 @@
 package service
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -16,13 +12,12 @@ import (
 	"github.com/QuantumNous/new-api/model"
 )
 
-const upstreamAccountRequestTimeout = 30 * time.Second
-
-type upstreamAPIResponse struct {
-	Success bool            `json:"success"`
-	Message string          `json:"message"`
-	Data    json.RawMessage `json:"data"`
-}
+const (
+	upstreamAccountRequestTimeout    = 30 * time.Second
+	upstreamCheckinRetryInterval     = 6 * time.Hour
+	upstreamCheckinRetryJitter       = 30 * time.Minute
+	upstreamCheckinMaxAttemptsPerDay = 4
+)
 
 type UpstreamAccountOperationResult struct {
 	Status     string  `json:"status"`
@@ -34,110 +29,22 @@ type UpstreamAccountOperationResult struct {
 	DurationMs int64   `json:"duration_ms"`
 }
 
+// UpstreamChannelBalanceRefreshResult contains the aggregate snapshot for a
+// channel and the per-account refresh outcome. A failed account does not hide
+// the other accounts' stored balances; the aggregate status and Errors make
+// the partial result explicit to callers.
+type UpstreamChannelBalanceRefreshResult struct {
+	Summary   *model.UpstreamChannelBalanceSummary `json:"summary"`
+	Refreshed int                                  `json:"refreshed"`
+	Failed    int                                  `json:"failed"`
+	Errors    []string                             `json:"errors,omitempty"`
+}
+
 func upstreamHTTPClient() *http.Client {
 	if client := GetHttpClient(); client != nil {
 		return client
 	}
 	return http.DefaultClient
-}
-
-func doUpstreamAccountRequest(ctx context.Context, account *model.UpstreamAccount, method, path string) (*upstreamAPIResponse, int, error) {
-	credential, err := account.GetCredential()
-	if err != nil {
-		return nil, 0, err
-	}
-	requestContext, cancel := context.WithTimeout(ctx, upstreamAccountRequestTimeout)
-	defer cancel()
-	url := strings.TrimRight(account.BaseURL, "/") + path
-	request, err := http.NewRequestWithContext(requestContext, method, url, bytes.NewReader(nil))
-	if err != nil {
-		return nil, 0, err
-	}
-	request.Header.Set("Accept", "application/json")
-	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("User-Agent", "new-api-upstream-account/1.0")
-	if account.AuthType == model.UpstreamAuthTypeCookie {
-		request.Header.Set("Cookie", credential)
-	} else {
-		request.Header.Set("Authorization", "Bearer "+credential)
-		if account.UserId > 0 {
-			request.Header.Set("New-Api-User", strconv.Itoa(account.UserId))
-		}
-	}
-	response, err := upstreamHTTPClient().Do(request)
-	if err != nil {
-		return nil, 0, err
-	}
-	defer response.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(response.Body, 2<<20))
-	if err != nil {
-		return nil, response.StatusCode, err
-	}
-	apiResponse := &upstreamAPIResponse{}
-	if len(body) > 0 {
-		if err := json.Unmarshal(body, apiResponse); err != nil {
-			if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-				return nil, response.StatusCode, fmt.Errorf("upstream returned HTTP %d", response.StatusCode)
-			}
-			return nil, response.StatusCode, fmt.Errorf("invalid upstream JSON response: %w", err)
-		}
-	}
-	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		message := strings.TrimSpace(apiResponse.Message)
-		if message == "" {
-			message = fmt.Sprintf("upstream returned HTTP %d", response.StatusCode)
-		}
-		return apiResponse, response.StatusCode, errors.New(message)
-	}
-	if !apiResponse.Success {
-		message := strings.TrimSpace(apiResponse.Message)
-		if message == "" {
-			message = "upstream operation failed"
-		}
-		return apiResponse, response.StatusCode, errors.New(message)
-	}
-	return apiResponse, response.StatusCode, nil
-}
-
-func numberFromJSON(value any) (float64, bool) {
-	switch typed := value.(type) {
-	case float64:
-		return typed, true
-	case json.Number:
-		parsed, err := typed.Float64()
-		return parsed, err == nil
-	case string:
-		parsed, err := strconv.ParseFloat(strings.TrimSpace(typed), 64)
-		return parsed, err == nil
-	default:
-		return 0, false
-	}
-}
-
-func decodeDataMap(response *upstreamAPIResponse) (map[string]any, error) {
-	data := map[string]any{}
-	decoder := json.NewDecoder(bytes.NewReader(response.Data))
-	decoder.UseNumber()
-	if err := decoder.Decode(&data); err != nil {
-		return nil, err
-	}
-	return data, nil
-}
-
-func readRemoteQuotaPerUnit(ctx context.Context, account *model.UpstreamAccount) float64 {
-	response, _, err := doUpstreamAccountRequest(ctx, account, http.MethodGet, "/api/status")
-	if err != nil {
-		return account.QuotaPerUnit
-	}
-	data, err := decodeDataMap(response)
-	if err != nil {
-		return account.QuotaPerUnit
-	}
-	value, ok := numberFromJSON(data["quota_per_unit"])
-	if !ok || value <= 0 {
-		return account.QuotaPerUnit
-	}
-	return value
 }
 
 func upstreamFailureStatus(err error) string {
@@ -151,13 +58,46 @@ func upstreamFailureStatus(err error) string {
 	return model.UpstreamStatusFailed
 }
 
-func nextUpstreamCheckinTime(success bool, status string) int64 {
+func nextUpstreamCheckinDay(now time.Time) int64 {
+	tomorrow := now.AddDate(0, 0, 1)
+	return time.Date(tomorrow.Year(), tomorrow.Month(), tomorrow.Day(), 0, 5, 0, 0, tomorrow.Location()).Unix()
+}
+
+// nextUpstreamCheckinTime keeps a successful account on a once-per-day
+// cadence. Failed automatic attempts are retried after roughly six hours,
+// with a small positive jitter to avoid sending all accounts at the same
+// instant. Once the daily attempt budget is exhausted, retries stop until the
+// next daily cycle.
+func nextUpstreamCheckinTime(success bool, status string, attempts int) int64 {
 	now := time.Now()
-	if success || status == model.UpstreamStatusManualRequired {
-		tomorrow := now.AddDate(0, 0, 1)
-		return time.Date(tomorrow.Year(), tomorrow.Month(), tomorrow.Day(), 0, 5, 0, 0, tomorrow.Location()).Unix()
+	if success || status == model.UpstreamStatusManualRequired || attempts >= upstreamCheckinMaxAttemptsPerDay {
+		return nextUpstreamCheckinDay(now)
 	}
-	return now.Add(30 * time.Minute).Unix()
+	jitterMinutes := common.GetRandomInt(int(upstreamCheckinRetryJitter/time.Minute) + 1)
+	return now.Add(upstreamCheckinRetryInterval + time.Duration(jitterMinutes)*time.Minute).Unix()
+}
+
+func beginScheduledUpstreamCheckinAttempt(account *model.UpstreamAccount) (int, string, error) {
+	today := time.Now().Format("2006-01-02")
+	attempts := account.CheckinAttempts
+	if account.CheckinAttemptDate != today {
+		attempts = 0
+	}
+	attempts++
+	trigger := model.UpstreamTriggerScheduled
+	if account.CheckinAttemptDate == today && account.CheckinAttempts > 0 {
+		trigger = model.UpstreamTriggerRetry
+	}
+	if err := model.DB.Model(&model.UpstreamAccount{}).Where("id = ?", account.Id).Updates(map[string]any{
+		"checkin_attempt_date": today,
+		"checkin_attempts":     attempts,
+		"updated_time":         common.GetTimestamp(),
+	}).Error; err != nil {
+		return 0, "", err
+	}
+	account.CheckinAttemptDate = today
+	account.CheckinAttempts = attempts
+	return attempts, trigger, nil
 }
 
 func recordUpstreamOperation(accountId int, logType, trigger string, result *UpstreamAccountOperationResult) {
@@ -177,7 +117,24 @@ func recordUpstreamOperation(accountId int, logType, trigger string, result *Ups
 
 func RefreshUpstreamAccountBalance(ctx context.Context, account *model.UpstreamAccount, trigger string) (*UpstreamAccountOperationResult, error) {
 	started := time.Now()
-	response, httpStatus, err := doUpstreamAccountRequest(ctx, account, http.MethodGet, "/api/user/self")
+	adapter := upstreamSiteAdapterFor(account)
+	if adapter.mode == upstreamAdapterExternal {
+		message := "该站点不支持内置余额查询，请使用外部站点页面"
+		result := &UpstreamAccountOperationResult{Status: model.UpstreamStatusManualRequired, Message: message, DurationMs: time.Since(started).Milliseconds()}
+		_ = model.DB.Model(&model.UpstreamAccount{}).Where("id = ?", account.Id).Updates(map[string]any{
+			"balance_status":    model.UpstreamStatusManualRequired,
+			"last_error":        message,
+			"next_balance_time": time.Now().Add(30 * time.Minute).Unix(),
+			"updated_time":      common.GetTimestamp(),
+		}).Error
+		recordUpstreamOperation(account.Id, model.UpstreamLogTypeBalance, trigger, result)
+		return result, errors.New(message)
+	}
+	response, err := doUpstreamJSONRequest(ctx, account, adapter, http.MethodGet, adapter.healthPath, nil, nil)
+	httpStatus := 0
+	if response != nil {
+		httpStatus = response.httpStatus
+	}
 	if err != nil {
 		status := upstreamFailureStatus(err)
 		result := &UpstreamAccountOperationResult{Status: status, Message: err.Error(), HttpStatus: httpStatus, DurationMs: time.Since(started).Milliseconds()}
@@ -190,15 +147,9 @@ func RefreshUpstreamAccountBalance(ctx context.Context, account *model.UpstreamA
 		recordUpstreamOperation(account.Id, model.UpstreamLogTypeBalance, trigger, result)
 		return result, err
 	}
-	data, decodeErr := decodeDataMap(response)
-	if decodeErr != nil {
-		err = fmt.Errorf("cannot decode upstream user data: %w", decodeErr)
-	} else if _, ok := data["quota"]; !ok {
-		err = errors.New("upstream user response does not contain quota")
-	}
-	quota, quotaOK := numberFromJSON(data["quota"])
-	if err == nil && !quotaOK {
-		err = errors.New("upstream quota is not numeric")
+	snapshot, parseErr := parseUpstreamBalance(ctx, account, adapter, response.payload)
+	if parseErr != nil {
+		err = parseErr
 	}
 	if err != nil {
 		result := &UpstreamAccountOperationResult{Status: model.UpstreamStatusFailed, Message: err.Error(), HttpStatus: httpStatus, DurationMs: time.Since(started).Milliseconds()}
@@ -211,13 +162,10 @@ func RefreshUpstreamAccountBalance(ctx context.Context, account *model.UpstreamA
 		recordUpstreamOperation(account.Id, model.UpstreamLogTypeBalance, trigger, result)
 		return result, err
 	}
-	quotaPerUnit := readRemoteQuotaPerUnit(ctx, account)
-	balance := quota
-	unit := "QUOTA"
-	if quotaPerUnit > 0 {
-		balance = quota / quotaPerUnit
-		unit = "USD"
-	}
+	quota := snapshot.rawQuota
+	quotaPerUnit := snapshot.quotaPerUnit
+	balance := snapshot.balance
+	unit := snapshot.unit
 	now := common.GetTimestamp()
 	nextBalance := time.Now().Add(time.Duration(account.BalanceInterval) * time.Minute).Unix()
 	updates := map[string]any{
@@ -249,12 +197,86 @@ func RefreshUpstreamAccountBalance(ctx context.Context, account *model.UpstreamA
 	return result, nil
 }
 
-func CheckinUpstreamAccount(ctx context.Context, account *model.UpstreamAccount, trigger string) (*UpstreamAccountOperationResult, error) {
-	started := time.Now()
-	response, httpStatus, err := doUpstreamAccountRequest(ctx, account, http.MethodPost, "/api/user/checkin")
+// RefreshUpstreamChannelBalances refreshes each account bound to a channel at
+// most once and then returns the aggregate persisted balance. The link table
+// is many-to-many, so this is the single entry point used by channel-level
+// manual balance queries.
+func RefreshUpstreamChannelBalances(ctx context.Context, channelId int, trigger string) (*UpstreamChannelBalanceRefreshResult, error) {
+	accounts, err := model.GetUpstreamAccountsForChannel(channelId)
 	if err != nil {
-		lowerMessage := strings.ToLower(err.Error())
-		if strings.Contains(lowerMessage, "already") || strings.Contains(lowerMessage, "已签到") || strings.Contains(lowerMessage, "重复签到") {
+		return nil, err
+	}
+	result := &UpstreamChannelBalanceRefreshResult{}
+	for _, account := range accounts {
+		if _, refreshErr := RefreshUpstreamAccountBalance(ctx, account, trigger); refreshErr != nil {
+			result.Failed++
+			result.Errors = append(result.Errors, fmt.Sprintf("%s: %s", account.Name, refreshErr.Error()))
+			continue
+		}
+		result.Refreshed++
+	}
+	summary, err := model.GetUpstreamChannelBalanceSummary(channelId)
+	if err != nil {
+		return nil, err
+	}
+	result.Summary = summary
+	return result, nil
+}
+
+func CheckinUpstreamAccount(ctx context.Context, account *model.UpstreamAccount, trigger string) (*UpstreamAccountOperationResult, error) {
+	attempts := account.CheckinAttempts
+	operationTrigger := trigger
+	isAutomaticAttempt := trigger == model.UpstreamTriggerScheduled || trigger == model.UpstreamTriggerRetry
+	if isAutomaticAttempt {
+		today := time.Now().Format("2006-01-02")
+		if account.CheckinAttemptDate == today && account.CheckinAttempts >= upstreamCheckinMaxAttemptsPerDay {
+			// This is a defensive guard for stale due rows. The normal scheduler
+			// will already have moved the account to the next daily cycle.
+			next := nextUpstreamCheckinDay(time.Now())
+			_ = model.DB.Model(&model.UpstreamAccount{}).Where("id = ?", account.Id).Updates(map[string]any{
+				"next_checkin_time": next,
+				"updated_time":      common.GetTimestamp(),
+			}).Error
+			return &UpstreamAccountOperationResult{
+				Status:  model.UpstreamStatusHealthy,
+				Message: "今日自动签到次数已达上限",
+			}, nil
+		}
+		var err error
+		attempts, operationTrigger, err = beginScheduledUpstreamCheckinAttempt(account)
+		if err != nil {
+			return nil, err
+		}
+	}
+	started := time.Now()
+	adapter := upstreamSiteAdapterFor(account)
+	if adapter.mode == upstreamAdapterExternal || !adapter.option.SupportsCheckin {
+		message := "该站点不支持内置签到，请打开外部签到页面"
+		result := &UpstreamAccountOperationResult{Status: model.UpstreamStatusManualRequired, Message: message, DurationMs: time.Since(started).Milliseconds()}
+		now := common.GetTimestamp()
+		_ = model.DB.Model(&model.UpstreamAccount{}).Where("id = ?", account.Id).Updates(map[string]any{
+			"last_checkin_time":    now,
+			"last_checkin_status":  model.UpstreamStatusManualRequired,
+			"last_checkin_message": message,
+			"last_error":           message,
+			"next_checkin_time":    nextUpstreamCheckinTime(false, model.UpstreamStatusManualRequired, attempts),
+			"updated_time":         now,
+		}).Error
+		recordUpstreamOperation(account.Id, model.UpstreamLogTypeCheckin, operationTrigger, result)
+		return result, errors.New(message)
+	}
+	checkinPath := adapter.option.CheckinPath
+	extraHeaders := map[string]string(nil)
+	if adapter.mode == upstreamAdapterAnyRouter {
+		extraHeaders = map[string]string{"X-Requested-With": "XMLHttpRequest"}
+	}
+	response, err := doUpstreamJSONRequest(ctx, account, adapter, adapter.checkinMethod, checkinPath, []byte("{}"), extraHeaders)
+	httpStatus := 0
+	if response != nil {
+		httpStatus = response.httpStatus
+	}
+	if err != nil {
+		if upstreamAlreadyChecked(err.Error()) {
 			message := err.Error()
 			result := &UpstreamAccountOperationResult{Status: model.UpstreamStatusHealthy, Message: message, HttpStatus: httpStatus, DurationMs: time.Since(started).Milliseconds()}
 			now := common.GetTimestamp()
@@ -263,13 +285,13 @@ func CheckinUpstreamAccount(ctx context.Context, account *model.UpstreamAccount,
 				"last_checkin_status":  model.UpstreamStatusHealthy,
 				"last_checkin_message": message,
 				"last_error":           "",
-				"next_checkin_time":    nextUpstreamCheckinTime(true, model.UpstreamStatusHealthy),
+				"next_checkin_time":    nextUpstreamCheckinTime(true, model.UpstreamStatusHealthy, attempts),
 				"updated_time":         now,
 			}).Error; updateErr != nil {
 				return nil, updateErr
 			}
-			recordUpstreamOperation(account.Id, model.UpstreamLogTypeCheckin, trigger, result)
-			_, _ = RefreshUpstreamAccountBalance(ctx, account, trigger)
+			recordUpstreamOperation(account.Id, model.UpstreamLogTypeCheckin, operationTrigger, result)
+			_, _ = RefreshUpstreamAccountBalance(ctx, account, operationTrigger)
 			return result, nil
 		}
 		status := upstreamFailureStatus(err)
@@ -280,15 +302,17 @@ func CheckinUpstreamAccount(ctx context.Context, account *model.UpstreamAccount,
 			"last_checkin_status":  status,
 			"last_checkin_message": err.Error(),
 			"last_error":           err.Error(),
-			"next_checkin_time":    nextUpstreamCheckinTime(false, status),
+			"next_checkin_time":    nextUpstreamCheckinTime(false, status, attempts),
 			"updated_time":         now,
 		}).Error
-		recordUpstreamOperation(account.Id, model.UpstreamLogTypeCheckin, trigger, result)
+		recordUpstreamOperation(account.Id, model.UpstreamLogTypeCheckin, operationTrigger, result)
 		return result, err
 	}
-	data, _ := decodeDataMap(response)
-	reward, _ := numberFromJSON(data["quota_awarded"])
-	message := strings.TrimSpace(response.Message)
+	reward := upstreamCheckinReward(response.payload)
+	message := strings.TrimSpace(upstreamResponseMessage(response.payload))
+	if upstreamCheckinPayloadAlreadyChecked(response.payload) {
+		message = "今日已签到"
+	}
 	if message == "" {
 		message = "签到成功"
 	}
@@ -302,21 +326,39 @@ func CheckinUpstreamAccount(ctx context.Context, account *model.UpstreamAccount,
 		"last_checkin_status":  model.UpstreamStatusHealthy,
 		"last_checkin_message": message,
 		"last_error":           "",
-		"next_checkin_time":    nextUpstreamCheckinTime(true, model.UpstreamStatusHealthy),
+		"next_checkin_time":    nextUpstreamCheckinTime(true, model.UpstreamStatusHealthy, attempts),
 		"updated_time":         now,
 	}).Error; err != nil {
 		return nil, err
 	}
-	recordUpstreamOperation(account.Id, model.UpstreamLogTypeCheckin, trigger, result)
+	recordUpstreamOperation(account.Id, model.UpstreamLogTypeCheckin, operationTrigger, result)
 	// A successful check-in can change quota. Use the exact same balance path
 	// as manual/channel refreshes so units and channel views remain consistent.
-	_, _ = RefreshUpstreamAccountBalance(ctx, account, trigger)
+	_, _ = RefreshUpstreamAccountBalance(ctx, account, operationTrigger)
 	return result, nil
 }
 
 func HealthCheckUpstreamAccount(ctx context.Context, account *model.UpstreamAccount, trigger string) (*UpstreamAccountOperationResult, error) {
 	started := time.Now()
-	_, httpStatus, err := doUpstreamAccountRequest(ctx, account, http.MethodGet, "/api/user/self")
+	adapter := upstreamSiteAdapterFor(account)
+	if adapter.mode == upstreamAdapterExternal {
+		message := "该站点不支持内置健康检查，请使用外部站点页面"
+		result := &UpstreamAccountOperationResult{Status: model.UpstreamStatusManualRequired, Message: message, DurationMs: time.Since(started).Milliseconds()}
+		now := common.GetTimestamp()
+		_ = model.DB.Model(&model.UpstreamAccount{}).Where("id = ?", account.Id).Updates(map[string]any{
+			"last_health_time": now,
+			"health_status":    model.UpstreamStatusManualRequired,
+			"last_error":       message,
+			"updated_time":     now,
+		}).Error
+		recordUpstreamOperation(account.Id, model.UpstreamLogTypeHealth, trigger, result)
+		return result, errors.New(message)
+	}
+	response, err := doUpstreamJSONRequest(ctx, account, adapter, http.MethodGet, adapter.healthPath, nil, nil)
+	httpStatus := 0
+	if response != nil {
+		httpStatus = response.httpStatus
+	}
 	status := model.UpstreamStatusHealthy
 	message := "连接和认证正常"
 	if err != nil {

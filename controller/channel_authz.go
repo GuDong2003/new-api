@@ -90,10 +90,14 @@ var channelReadOnlyFields = map[string]struct{}{
 	"balance_source":                {},
 	"upstream_account_id":           {},
 	"upstream_account_name":         {},
+	"upstream_account_ids":          {},
+	"upstream_account_names":        {},
+	"upstream_account_count":        {},
 	"upstream_balance":              {},
 	"upstream_balance_unit":         {},
 	"upstream_balance_updated_time": {},
 	"upstream_balance_status":       {},
+	"upstream_balance_details":      {},
 	"used_quota":                    {},
 }
 
@@ -118,10 +122,14 @@ func clearChannelReadOnlyFields(channel *PatchChannel, requestData map[string]an
 	}
 	channel.UpstreamAccountId = 0
 	channel.UpstreamAccountName = ""
+	channel.UpstreamAccountIds = nil
+	channel.UpstreamAccountNames = nil
+	channel.UpstreamAccountCount = 0
 	channel.UpstreamBalance = nil
 	channel.UpstreamBalanceUnit = ""
 	channel.UpstreamBalanceUpdatedTime = 0
 	channel.UpstreamBalanceStatus = ""
+	channel.UpstreamBalanceDetails = nil
 	if _, ok := requestData["used_quota"]; ok {
 		channel.UsedQuota = 0
 	}

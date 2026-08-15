@@ -312,6 +312,7 @@ func SetApiRouter(router *gin.Engine) {
 		upstreamAccountRoute := apiRouter.Group("/upstream-account")
 		upstreamAccountRoute.Use(middleware.AdminAuth())
 		{
+			upstreamAccountRoute.GET("/site-types", controller.ListUpstreamSiteTypes)
 			upstreamAccountRoute.GET("/", controller.ListUpstreamAccounts)
 			upstreamAccountRoute.GET("/channels", controller.ListUpstreamAccountChannels)
 			upstreamAccountRoute.POST("/", controller.CreateUpstreamAccount)

@@ -53,11 +53,26 @@ export const channelSchema = z.object({
   balance_source: z.enum(['channel', 'upstream', 'none']).default('channel'),
   upstream_account_id: z.number().optional(),
   upstream_account_name: z.string().optional(),
+  upstream_account_ids: z.array(z.number()).optional(),
+  upstream_account_names: z.array(z.string()).optional(),
+  upstream_account_count: z.number().optional(),
   upstream_balance: z.number().optional(),
   upstream_balance_unit: z.string().optional(),
   upstream_balance_updated_time: z.number().optional(),
   upstream_balance_status: z
     .enum(['unknown', 'healthy', 'failed', 'manual_required'])
+    .optional(),
+  upstream_balance_details: z
+    .array(
+      z.object({
+        account_id: z.number(),
+        account_name: z.string(),
+        balance: z.number(),
+        unit: z.string(),
+        updated_time: z.number(),
+        status: z.string(),
+      })
+    )
     .optional(),
   models: z.string().default(''),
   group: z.string().default('default'),
@@ -218,6 +233,18 @@ export interface ChannelBalanceResponse {
   currency?: string
   balance_source?: 'channel' | 'upstream' | 'none'
   balance_updated_time?: number
+  balance_status?: 'unknown' | 'healthy' | 'failed' | 'manual_required'
+  account_count?: number
+  account_balances?: Array<{
+    account_id: number
+    account_name: string
+    balance: number
+    unit: string
+    updated_time: number
+    status: string
+  }>
+  refresh_failed?: number
+  refresh_errors?: string[]
 }
 
 export interface FetchModelsResponse {

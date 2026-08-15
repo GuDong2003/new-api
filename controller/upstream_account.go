@@ -30,6 +30,10 @@ func ListUpstreamAccounts(c *gin.Context) {
 	common.ApiSuccess(c, accounts)
 }
 
+func ListUpstreamSiteTypes(c *gin.Context) {
+	common.ApiSuccess(c, model.GetUpstreamSiteTypeOptions())
+}
+
 func ListUpstreamAccountChannels(c *gin.Context) {
 	channels := make([]*model.Channel, 0)
 	if err := model.DB.Select("id", "name", "base_url", "status", "balance_source").Order("id desc").Find(&channels).Error; err != nil {
@@ -67,7 +71,7 @@ func CreateUpstreamAccount(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	created.ChannelIds = channelIds
+	created.ChannelIds = append([]int{}, channelIds...)
 	common.ApiSuccess(c, created)
 }
 

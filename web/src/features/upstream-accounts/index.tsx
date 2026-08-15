@@ -33,8 +33,10 @@ import {
   Trash2,
 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
+import { ConfirmDialog } from '@/components/confirm-dialog'
 import { DataTablePage, useDataTable } from '@/components/data-table'
 import { Dialog } from '@/components/dialog'
 import { SectionPageLayout } from '@/components/layout'
@@ -59,6 +61,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { Textarea } from '@/components/ui/textarea'
 import { formatCurrencyFromUSD } from '@/lib/currency'
 
 import {
@@ -69,6 +72,7 @@ import {
   listUpstreamAccountLogs,
   listUpstreamAccounts,
   listUpstreamChannelOptions,
+  listUpstreamSiteTypes,
   refreshUpstreamAccountBalance,
   replaceUpstreamAccountChannels,
   updateChannelBalanceSource,
@@ -80,6 +84,7 @@ import type {
   UpstreamAccountInput,
   UpstreamAccountLog,
   UpstreamChannelOption,
+  UpstreamSiteTypeOption,
   UpstreamStatus,
 } from './types'
 
@@ -87,6 +92,11 @@ const EMPTY_FORM: UpstreamAccountInput = {
   name: '',
   base_url: '',
   site_type: 'new_api',
+  notes: '',
+  tags: [],
+  external_checkin_url: '',
+  redeem_url: '',
+  open_redeem_with_checkin: true,
   auth_type: 'token',
   user_id: 0,
   credential: '',
@@ -132,6 +142,7 @@ type AccountDialogProps = {
   open: boolean
   account: UpstreamAccount | null
   channels: UpstreamChannelOption[]
+  siteTypes: UpstreamSiteTypeOption[]
   saving: boolean
   onOpenChange: (open: boolean) => void
   onSave: (input: UpstreamAccountInput) => void
@@ -145,18 +156,24 @@ function createAccountForm(
   return {
     name: account.name,
     base_url: account.base_url,
-    site_type: 'new_api',
+    site_type: account.site_type,
+    notes: account.notes ?? '',
+    tags: account.tags ?? [],
+    external_checkin_url: account.external_checkin_url ?? '',
+    redeem_url: account.redeem_url ?? '',
+    open_redeem_with_checkin: account.open_redeem_with_checkin,
     auth_type: account.auth_type,
     user_id: account.user_id,
     credential: '',
     auto_checkin: account.auto_checkin,
     auto_balance: account.auto_balance,
     balance_interval: account.balance_interval,
-    channel_ids: account.channel_ids,
+    channel_ids: account.channel_ids ?? [],
   }
 }
 
 function AccountDialog(props: AccountDialogProps) {
+  const { t } = useTranslation()
   const [form, setForm] = useState<UpstreamAccountInput>(() =>
     createAccountForm(props.account)
   )
@@ -166,6 +183,11 @@ function AccountDialog(props: AccountDialogProps) {
   }, [props.open, props.account])
 
   const selected = new Set(form.channel_ids ?? [])
+  const selectedSiteType = props.siteTypes.find(
+    (option) => option.value === form.site_type
+  )
+  const supportsCheckin = selectedSiteType?.supports_checkin ?? true
+  const supportsBalance = selectedSiteType?.supports_balance ?? true
   const toggleChannel = (channel: UpstreamChannelOption, checked: boolean) => {
     const next = new Set(form.channel_ids ?? [])
     if (checked) next.add(channel.id)
@@ -236,6 +258,52 @@ function AccountDialog(props: AccountDialogProps) {
             />
           </div>
           <div className='space-y-2'>
+            <Label htmlFor='upstream-site-type'>{t('Site type')}</Label>
+            <select
+              id='upstream-site-type'
+              className='border-input bg-background h-9 w-full rounded-lg border px-3 text-sm'
+              value={form.site_type}
+              onChange={(event) => {
+                const siteType = event.target.value
+                const option = props.siteTypes.find(
+                  (item) => item.value === siteType
+                )
+                const authType = option?.auth_types.includes(form.auth_type)
+                  ? form.auth_type
+                  : option?.auth_types[0] || 'token'
+                setForm({
+                  ...form,
+                  site_type: siteType,
+                  auth_type: authType,
+                  auto_checkin: option?.supports_checkin
+                    ? form.auto_checkin
+                    : false,
+                  auto_balance: option?.supports_balance
+                    ? form.auto_balance
+                    : false,
+                })
+              }}
+            >
+              {(props.siteTypes.length
+                ? props.siteTypes
+                : [
+                    {
+                      value: 'new_api',
+                      label: 'New API',
+                      auth_types: ['token', 'cookie'],
+                      supports_checkin: true,
+                      supports_balance: true,
+                      external_only: false,
+                    },
+                  ]
+              ).map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className='space-y-2'>
             <Label htmlFor='upstream-auth'>认证方式</Label>
             <select
               id='upstream-auth'
@@ -248,8 +316,13 @@ function AccountDialog(props: AccountDialogProps) {
                 })
               }
             >
-              <option value='token'>系统访问令牌</option>
-              <option value='cookie'>浏览器 Cookie</option>
+              {(selectedSiteType?.auth_types ?? ['token', 'cookie']).map(
+                (authType) => (
+                  <option key={authType} value={authType}>
+                    {authType === 'cookie' ? '浏览器 Cookie' : '系统访问令牌'}
+                  </option>
+                )
+              )}
             </select>
           </div>
           <div className='space-y-2'>
@@ -283,11 +356,101 @@ function AccountDialog(props: AccountDialogProps) {
             凭据会加密保存，接口和页面都不会返回明文。
           </p>
         </div>
+        <div className='grid gap-4 sm:grid-cols-2'>
+          <div className='space-y-2'>
+            <Label htmlFor='upstream-notes'>{t('Notes')}</Label>
+            <Textarea
+              id='upstream-notes'
+              value={form.notes}
+              placeholder={t('Add account purpose, plan, or other notes')}
+              rows={2}
+              onChange={(event) =>
+                setForm({ ...form, notes: event.target.value })
+              }
+            />
+          </div>
+          <div className='space-y-2'>
+            <Label htmlFor='upstream-tags'>{t('Tags')}</Label>
+            <Input
+              id='upstream-tags'
+              value={form.tags.join(', ')}
+              placeholder='例如 svip, 自用, ZE'
+              onChange={(event) =>
+                setForm({
+                  ...form,
+                  tags: event.target.value
+                    .split(',')
+                    .map((tag) => tag.trim())
+                    .filter(Boolean),
+                })
+              }
+            />
+            <p className='text-muted-foreground text-xs'>
+              {t('Separate multiple tags with commas.')}
+            </p>
+          </div>
+        </div>
+        <div className='grid gap-4 sm:grid-cols-2'>
+          <div className='space-y-2'>
+            <Label htmlFor='upstream-external-checkin'>
+              {t('External check-in URL')}
+            </Label>
+            <Input
+              id='upstream-external-checkin'
+              type='url'
+              value={form.external_checkin_url}
+              placeholder='https://example.com/checkin'
+              onChange={(event) =>
+                setForm({ ...form, external_checkin_url: event.target.value })
+              }
+            />
+          </div>
+          <div className='space-y-2'>
+            <Label htmlFor='upstream-redeem'>
+              {t('Recharge / redeem URL')}
+            </Label>
+            <Input
+              id='upstream-redeem'
+              type='url'
+              value={form.redeem_url}
+              placeholder='https://example.com/redeem'
+              onChange={(event) =>
+                setForm({ ...form, redeem_url: event.target.value })
+              }
+            />
+          </div>
+        </div>
+        {form.redeem_url && form.external_checkin_url && (
+          <Label className='justify-between gap-3 rounded-lg border p-3'>
+            <span>{t('Open recharge / redeem page after check-in')}</span>
+            <Switch
+              checked={form.open_redeem_with_checkin}
+              onCheckedChange={(checked) =>
+                setForm({ ...form, open_redeem_with_checkin: checked })
+              }
+            />
+          </Label>
+        )}
+        {selectedSiteType && (
+          <p className='text-muted-foreground rounded-lg border border-dashed p-3 text-xs'>
+            {selectedSiteType.external_only
+              ? t('This site type only provides external management links.')
+              : t('Capabilities: {{checkin}}, {{balance}}', {
+                  checkin: selectedSiteType.supports_checkin
+                    ? t('Built-in check-in')
+                    : t('External check-in'),
+                  balance: selectedSiteType.supports_balance
+                    ? t('Real balance query')
+                    : t('Manual balance'),
+                })}
+          </p>
+        )}
         <div className='grid gap-3 rounded-lg border p-3 sm:grid-cols-2'>
           <Label className='justify-between gap-3'>
             <span>自动签到</span>
             <Switch
               checked={form.auto_checkin}
+              disabled={!supportsCheckin}
               onCheckedChange={(checked) =>
                 setForm({ ...form, auto_checkin: checked })
               }
@@ -297,6 +460,7 @@ function AccountDialog(props: AccountDialogProps) {
             <span>自动刷新真实余额</span>
             <Switch
               checked={form.auto_balance}
+              disabled={!supportsBalance}
               onCheckedChange={(checked) =>
                 setForm({ ...form, auto_balance: checked })
               }
@@ -319,6 +483,13 @@ function AccountDialog(props: AccountDialogProps) {
                 })
               }
             />
+            {!supportsBalance && (
+              <p className='text-muted-foreground text-xs'>
+                {t(
+                  'Current site type does not support built-in balance queries.'
+                )}
+              </p>
+            )}
           </div>
         </div>
         <div className='space-y-2'>
@@ -328,9 +499,13 @@ function AccountDialog(props: AccountDialogProps) {
               <p className='text-muted-foreground p-2 text-sm'>暂无现有渠道</p>
             ) : (
               props.channels.map((channel) => {
-                const occupiedByOther =
-                  Boolean(channel.upstream_account_id) &&
-                  channel.upstream_account_id !== props.account?.id
+                const boundNames = channel.upstream_account_names?.length
+                  ? channel.upstream_account_names.join('、')
+                  : channel.upstream_account_name
+                const boundCount =
+                  channel.upstream_account_count ??
+                  channel.upstream_account_ids?.length ??
+                  (channel.upstream_account_id ? 1 : 0)
                 return (
                   <Label
                     key={channel.id}
@@ -338,9 +513,10 @@ function AccountDialog(props: AccountDialogProps) {
                   >
                     <span className='min-w-0 truncate'>
                       #{channel.id} · {channel.name}
-                      {occupiedByOther && (
+                      {boundCount > 0 && (
                         <span className='text-muted-foreground ml-2 text-xs'>
-                          当前绑定：{channel.upstream_account_name}
+                          已绑定 {boundCount} 个账号
+                          {boundNames ? `：${boundNames}` : ''}
                         </span>
                       )}
                     </span>
@@ -356,7 +532,7 @@ function AccountDialog(props: AccountDialogProps) {
             )}
           </div>
           <p className='text-muted-foreground text-xs'>
-            绑定后该渠道默认使用此账号的真实余额；同一渠道重新绑定时会移动到新账号。
+            一个渠道可以绑定多个站点账号，渠道余额会合并这些账号的余额；取消勾选只会解除当前账号的绑定。
           </p>
         </div>
       </div>
@@ -373,7 +549,10 @@ const LOG_TYPE_LABELS: Record<UpstreamAccountLog['type'], string> = {
 const LOG_TRIGGER_LABELS: Record<UpstreamAccountLog['trigger'], string> = {
   manual: '手动',
   scheduled: '定时',
+  retry: '自动重试',
 }
+
+const CHECKIN_MAX_ATTEMPTS_PER_DAY = 4
 
 const LOG_STATUS_OPTIONS = [
   { label: '正常', value: 'healthy' },
@@ -527,9 +706,11 @@ function UpstreamLogsTable(props: {
 }
 
 export function UpstreamAccountsPage() {
+  const { t } = useTranslation()
   const queryClient = useQueryClient()
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editing, setEditing] = useState<UpstreamAccount | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<UpstreamAccount | null>(null)
   const [runningKey, setRunningKey] = useState('')
   const [accountSearch, setAccountSearch] = useState('')
   const [accountStatusFilter, setAccountStatusFilter] = useState<
@@ -538,6 +719,8 @@ export function UpstreamAccountsPage() {
   const [accountCheckinFilter, setAccountCheckinFilter] = useState<
     'all' | 'enabled' | 'disabled'
   >('all')
+  const [accountSiteTypeFilter, setAccountSiteTypeFilter] = useState('all')
+  const [accountTagFilter, setAccountTagFilter] = useState('all')
   const [balanceSourceOpen, setBalanceSourceOpen] = useState(false)
 
   const accountsQuery = useQuery({
@@ -551,6 +734,11 @@ export function UpstreamAccountsPage() {
   const logsQuery = useQuery({
     queryKey: ['upstream-account-logs'],
     queryFn: () => listUpstreamAccountLogs(100),
+  })
+  const siteTypesQuery = useQuery({
+    queryKey: ['upstream-account-site-types'],
+    queryFn: listUpstreamSiteTypes,
+    staleTime: 30 * 60 * 1000,
   })
 
   const refreshAll = async () => {
@@ -589,6 +777,7 @@ export function UpstreamAccountsPage() {
     mutationFn: deleteUpstreamAccount,
     onSuccess: async () => {
       toast.success('上游站点账号已删除')
+      setDeleteTarget(null)
       await refreshAll()
     },
     onError: (error) => toast.error(error.message),
@@ -656,14 +845,53 @@ export function UpstreamAccountsPage() {
         (accountCheckinFilter === 'enabled'
           ? account.auto_checkin
           : !account.auto_checkin)
-      return matchesSearch && matchesStatus && matchesCheckin
+      const matchesSiteType =
+        accountSiteTypeFilter === 'all' ||
+        account.site_type === accountSiteTypeFilter
+      const matchesTag =
+        accountTagFilter === 'all' ||
+        (account.tags ?? []).includes(accountTagFilter)
+      return (
+        matchesSearch &&
+        matchesStatus &&
+        matchesCheckin &&
+        matchesSiteType &&
+        matchesTag
+      )
     })
   }, [
     accountSearch,
     accountCheckinFilter,
     accountStatusFilter,
+    accountSiteTypeFilter,
+    accountTagFilter,
     accountsQuery.data,
   ])
+
+  const siteTypeMap = useMemo(
+    () =>
+      new Map(
+        (siteTypesQuery.data ?? []).map((option) => [option.value, option])
+      ),
+    [siteTypesQuery.data]
+  )
+  const availableTags = useMemo(
+    () =>
+      [
+        ...new Set(
+          (accountsQuery.data ?? []).flatMap((account) => account.tags ?? [])
+        ),
+      ].sort(),
+    [accountsQuery.data]
+  )
+  const openExternal = (url: string) => {
+    if (url) window.open(url, '_blank', 'noopener,noreferrer')
+  }
+  const openAllExternalCheckins = () => {
+    filteredAccounts
+      .filter((account) => account.external_checkin_url)
+      .forEach((account) => openExternal(account.external_checkin_url))
+  }
 
   return (
     <SectionPageLayout>
@@ -728,6 +956,44 @@ export function UpstreamAccountsPage() {
               <option value='enabled'>自动签到已开启</option>
               <option value='disabled'>自动签到已关闭</option>
             </select>
+            <select
+              className='border-input bg-background h-8 rounded-lg border px-2 text-sm'
+              value={accountSiteTypeFilter}
+              onChange={(event) => setAccountSiteTypeFilter(event.target.value)}
+            >
+              <option value='all'>{t('All site types')}</option>
+              {(siteTypesQuery.data ?? []).map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+            {availableTags.length > 0 && (
+              <select
+                className='border-input bg-background h-8 rounded-lg border px-2 text-sm'
+                value={accountTagFilter}
+                onChange={(event) => setAccountTagFilter(event.target.value)}
+              >
+                <option value='all'>{t('All tags')}</option>
+                {availableTags.map((tag) => (
+                  <option key={tag} value={tag}>
+                    {tag}
+                  </option>
+                ))}
+              </select>
+            )}
+            <Button
+              variant='outline'
+              size='sm'
+              onClick={openAllExternalCheckins}
+              disabled={
+                !filteredAccounts.some(
+                  (account) => account.external_checkin_url
+                )
+              }
+            >
+              <ExternalLink /> {t('Open external check-ins')}
+            </Button>
             <Button
               variant='ghost'
               size='sm'
@@ -735,11 +1001,15 @@ export function UpstreamAccountsPage() {
                 setAccountSearch('')
                 setAccountStatusFilter('all')
                 setAccountCheckinFilter('all')
+                setAccountSiteTypeFilter('all')
+                setAccountTagFilter('all')
               }}
               disabled={
                 !accountSearch &&
                 accountStatusFilter === 'all' &&
-                accountCheckinFilter === 'all'
+                accountCheckinFilter === 'all' &&
+                accountSiteTypeFilter === 'all' &&
+                accountTagFilter === 'all'
               }
             >
               重置
@@ -774,9 +1044,21 @@ export function UpstreamAccountsPage() {
                       <CardHeader className='pb-3'>
                         <div className='flex items-start justify-between gap-3'>
                           <div className='min-w-0'>
-                            <CardTitle className='truncate text-base'>
-                              {account.name}
-                            </CardTitle>
+                            <div className='flex flex-wrap items-center gap-2'>
+                              <CardTitle className='truncate text-base'>
+                                {account.name}
+                              </CardTitle>
+                              <Badge variant='outline'>
+                                {siteTypeMap.get(account.site_type)?.label ||
+                                  account.site_type}
+                              </Badge>
+                              {siteTypeMap.get(account.site_type)
+                                ?.external_only && (
+                                <Badge variant='warning'>
+                                  {t('External management')}
+                                </Badge>
+                              )}
+                            </div>
                             <a
                               className='text-muted-foreground hover:text-foreground text-xs'
                               href={account.base_url}
@@ -785,6 +1067,28 @@ export function UpstreamAccountsPage() {
                             >
                               {account.base_url}
                             </a>
+                            {(account.notes ||
+                              (account.tags ?? []).length > 0) && (
+                              <div className='mt-1 flex flex-wrap items-center gap-1 text-xs'>
+                                {account.notes && (
+                                  <span
+                                    className='text-muted-foreground truncate'
+                                    title={account.notes}
+                                  >
+                                    {account.notes}
+                                  </span>
+                                )}
+                                {(account.tags ?? []).map((tag) => (
+                                  <Badge
+                                    key={tag}
+                                    variant='secondary'
+                                    className='text-[11px]'
+                                  >
+                                    {tag}
+                                  </Badge>
+                                ))}
+                              </div>
+                            )}
                           </div>
                           <div className='flex items-center gap-1'>
                             <Button
@@ -816,13 +1120,7 @@ export function UpstreamAccountsPage() {
                               variant='ghost'
                               size='icon-sm'
                               onClick={() => {
-                                if (
-                                  window.confirm(
-                                    `确定删除“${account.name}”及其执行日志吗？绑定渠道会恢复使用原渠道接口。`
-                                  )
-                                ) {
-                                  deleteMutation.mutate(account.id)
-                                }
+                                setDeleteTarget(account)
                               }}
                               aria-label='删除'
                             >
@@ -867,10 +1165,22 @@ export function UpstreamAccountsPage() {
                             自动余额：
                             {account.auto_balance ? '开启' : '关闭'}
                           </p>
+                          {account.auto_checkin && (
+                            <p>
+                              失败重试：约每 6 小时一次（随机延迟 0～30 分钟），
+                              今日 {account.checkin_attempts || 0}/
+                              {CHECKIN_MAX_ATTEMPTS_PER_DAY} 次
+                              {account.checkin_attempt_date
+                                ? `（${account.checkin_attempt_date}）`
+                                : ''}{' '}
+                              · 下次：
+                              {formatTime(account.next_checkin_time)}
+                            </p>
+                          )}
                           <p>
                             绑定渠道：
-                            {account.channel_ids.length
-                              ? account.channel_ids
+                            {(account.channel_ids ?? []).length
+                              ? (account.channel_ids ?? [])
                                   .map((id) =>
                                     channelsQuery.data?.find(
                                       (item) => item.id === id
@@ -892,7 +1202,11 @@ export function UpstreamAccountsPage() {
                             variant='outline'
                             size='sm'
                             onClick={() => void run(account, 'checkin')}
-                            disabled={runningKey !== ''}
+                            disabled={
+                              runningKey !== '' ||
+                              siteTypeMap.get(account.site_type)
+                                ?.supports_checkin === false
+                            }
                           >
                             {runningKey === `${account.id}:checkin` ? (
                               <Loader2 className='animate-spin' />
@@ -905,7 +1219,11 @@ export function UpstreamAccountsPage() {
                             variant='outline'
                             size='sm'
                             onClick={() => void run(account, 'balance')}
-                            disabled={runningKey !== ''}
+                            disabled={
+                              runningKey !== '' ||
+                              siteTypeMap.get(account.site_type)
+                                ?.supports_balance === false
+                            }
                           >
                             {runningKey === `${account.id}:balance` ? (
                               <Loader2 className='animate-spin' />
@@ -918,7 +1236,10 @@ export function UpstreamAccountsPage() {
                             variant='outline'
                             size='sm'
                             onClick={() => void run(account, 'health')}
-                            disabled={runningKey !== ''}
+                            disabled={
+                              runningKey !== '' ||
+                              siteTypeMap.get(account.site_type)?.external_only
+                            }
                           >
                             {runningKey === `${account.id}:health` ? (
                               <Loader2 className='animate-spin' />
@@ -928,6 +1249,37 @@ export function UpstreamAccountsPage() {
                             检查
                           </Button>
                         </div>
+                        {(account.external_checkin_url ||
+                          account.redeem_url) && (
+                          <div className='grid grid-cols-2 gap-2'>
+                            {account.external_checkin_url && (
+                              <Button
+                                variant='ghost'
+                                size='sm'
+                                onClick={() => {
+                                  openExternal(account.external_checkin_url)
+                                  if (
+                                    account.open_redeem_with_checkin &&
+                                    account.redeem_url
+                                  ) {
+                                    openExternal(account.redeem_url)
+                                  }
+                                }}
+                              >
+                                <ExternalLink /> {t('External check-in')}
+                              </Button>
+                            )}
+                            {account.redeem_url && (
+                              <Button
+                                variant='ghost'
+                                size='sm'
+                                onClick={() => openExternal(account.redeem_url)}
+                              >
+                                <ExternalLink /> {t('Recharge / redeem')}
+                              </Button>
+                            )}
+                          </div>
+                        )}
                       </CardContent>
                     </Card>
                   ))}
@@ -992,7 +1344,9 @@ export function UpstreamAccountsPage() {
                               #{channel.id} · {channel.name}
                             </TableCell>
                             <TableCell>
-                              {channel.upstream_account_name || '—'}
+                              {channel.upstream_account_names?.length
+                                ? channel.upstream_account_names.join('、')
+                                : channel.upstream_account_name || '—'}
                             </TableCell>
                             <TableCell>
                               <select
@@ -1009,7 +1363,13 @@ export function UpstreamAccountsPage() {
                                 <option value='channel'>现有渠道接口</option>
                                 <option
                                   value='upstream'
-                                  disabled={!channel.upstream_account_id}
+                                  disabled={
+                                    !(
+                                      (channel.upstream_account_count ??
+                                        channel.upstream_account_ids?.length ??
+                                        0) > 0 || channel.upstream_account_id
+                                    )
+                                  }
                                 >
                                   绑定的站点账号
                                 </option>
@@ -1062,12 +1422,32 @@ export function UpstreamAccountsPage() {
           open={dialogOpen}
           account={editing}
           channels={channelsQuery.data ?? []}
+          siteTypes={siteTypesQuery.data ?? []}
           saving={saveMutation.isPending}
           onOpenChange={(open) => {
             setDialogOpen(open)
             if (!open) setEditing(null)
           }}
           onSave={(input) => saveMutation.mutate(input)}
+        />
+        <ConfirmDialog
+          open={deleteTarget !== null}
+          onOpenChange={(open) => {
+            if (!open && !deleteMutation.isPending) setDeleteTarget(null)
+          }}
+          title='删除上游站点账号'
+          desc={
+            deleteTarget
+              ? `确定删除“${deleteTarget.name}”及其执行日志吗？绑定渠道会恢复使用原渠道接口。`
+              : ''
+          }
+          confirmText='删除'
+          destructive
+          isLoading={deleteMutation.isPending}
+          disabled={!deleteTarget}
+          handleConfirm={() => {
+            if (deleteTarget) deleteMutation.mutate(deleteTarget.id)
+          }}
         />
       </SectionPageLayout.Content>
     </SectionPageLayout>
