@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import type { ColumnDef } from '@tanstack/react-table'
+import type { ColumnDef, ColumnFiltersState } from '@tanstack/react-table'
 import {
   Activity,
   CalendarCheck,
@@ -573,6 +573,9 @@ function UpstreamLogsTable(props: {
   accountNames: Map<number, string>
   isLoading: boolean
 }) {
+  const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([])
+  const [globalFilter, setGlobalFilter] = useState('')
+
   const columns = useMemo<ColumnDef<UpstreamAccountLog, unknown>[]>(
     () => [
       {
@@ -640,6 +643,10 @@ function UpstreamLogsTable(props: {
     data: props.logs,
     columns,
     getRowId: (row) => String(row.id),
+    columnFilters,
+    onColumnFiltersChange: setColumnFilters,
+    globalFilter,
+    onGlobalFilterChange: setGlobalFilter,
     globalFilterFn: (row, _columnId, filterValue) => {
       const log = row.original
       const searchValue = String(filterValue).trim().toLowerCase()
