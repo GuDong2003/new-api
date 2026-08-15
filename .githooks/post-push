@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+repo_url="$(git remote get-url origin)"
+if [[ "$repo_url" =~ github\.com[:/]([^/]+/[^/]+)(\.git)?$ ]]; then
+  repo="${BASH_REMATCH[1]}"
+else
+  echo "post-push: origin is not a GitHub repository; skipping GD release dispatch" >&2
+  exit 0
+fi
+
+while read -r _local_ref _local_sha remote_ref _remote_sha; do
+  [[ "$remote_ref" == refs/tags/* ]] || continue
+
+  tag="${remote_ref#refs/tags/}"
+  [[ "$tag" =~ ^[0-9]{6}-gd-[0-9]+$ ]] || continue
+
+  echo "post-push: dispatching GD release workflow for $tag"
+  gh workflow run release.yml --repo "$repo" --ref main -f "tag=$tag"
+done

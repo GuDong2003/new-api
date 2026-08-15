@@ -1,7 +1,6 @@
 name: Publish GD release
 
 on:
-  create:
   workflow_dispatch:
     inputs:
       tag:
@@ -13,7 +12,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: gd-release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.event_name == 'create' && github.event.ref || github.ref_name }}
+  group: gd-release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
   cancel-in-progress: false
 
 env:
@@ -22,7 +21,6 @@ env:
 jobs:
   prepare:
     name: Validate release tag
-    if: ${{ github.event_name != 'create' || (github.event.ref_type == 'tag' && contains(github.event.ref, '-gd-')) }}
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.tag.outputs.tag }}
@@ -30,7 +28,7 @@ jobs:
       - name: Validate tag format
         id: tag
         env:
-          RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.event_name == 'create' && github.event.ref || github.ref_name }}
+          RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
         run: |
           set -euo pipefail
 
