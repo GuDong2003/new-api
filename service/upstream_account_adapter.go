@@ -61,6 +61,9 @@ func upstreamSiteAdapterFor(account *model.UpstreamAccount) upstreamSiteAdapter 
 	if siteType == "" {
 		siteType = model.UpstreamSiteTypeNewAPI
 	}
+	if strings.EqualFold(siteType, "new-api") || strings.EqualFold(siteType, "newapi") {
+		siteType = model.UpstreamSiteTypeNewAPI
+	}
 	option, ok := findUpstreamSiteTypeOption(siteType)
 	if !ok {
 		option = model.UpstreamSiteTypeOption{

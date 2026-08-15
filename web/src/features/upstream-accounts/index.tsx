@@ -832,7 +832,9 @@ export function UpstreamAccountsPage() {
       const matchesSearch =
         !search ||
         account.name.toLowerCase().includes(search) ||
-        account.base_url.toLowerCase().includes(search)
+        account.base_url.toLowerCase().includes(search) ||
+        (account.notes ?? '').toLowerCase().includes(search) ||
+        (account.tags ?? []).some((tag) => tag.toLowerCase().includes(search))
       const matchesStatus =
         accountStatusFilter === 'all' ||
         [
