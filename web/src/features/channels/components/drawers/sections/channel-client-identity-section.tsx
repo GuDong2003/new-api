@@ -103,6 +103,10 @@ const LIGHTWEIGHT_PROFILE_OPTIONS: Array<{
   { clientType: 'workbuddy', profile: 'workbuddy_desktop' },
 ]
 
+const CLIENT_IDENTITY_SELECT_CONTENT_CLASS =
+  'min-w-[16rem] max-w-[calc(100vw-2rem)]'
+const CLIENT_IDENTITY_VERSION_CACHE_TIME = 24 * 60 * 60 * 1000
+
 function isLightweightChannel(channelType: number): boolean {
   return channelType === 1 || channelType === 14
 }
@@ -191,6 +195,8 @@ export function ChannelClientIdentitySection(
   const versionsQuery = useQuery({
     queryKey,
     enabled: supported && effectiveProfile !== 'none',
+    staleTime: CLIENT_IDENTITY_VERSION_CACHE_TIME,
+    gcTime: CLIENT_IDENTITY_VERSION_CACHE_TIME,
     queryFn: async () =>
       unwrapLookup(
         await getClientIdentityVersions(effectiveProfile, effectivePlatform)
@@ -325,11 +331,14 @@ export function ChannelClientIdentitySection(
                   disabled={props.disabled || props.isSubmitting}
                 >
                   <FormControl>
-                    <SelectTrigger>
+                    <SelectTrigger className='w-full'>
                       <SelectValue placeholder={t('Client identity')} />
                     </SelectTrigger>
                   </FormControl>
-                  <SelectContent>
+                  <SelectContent
+                    alignItemWithTrigger={false}
+                    className={CLIENT_IDENTITY_SELECT_CONTENT_CLASS}
+                  >
                     <SelectGroup>
                       {profileOptions.map((option) => (
                         <SelectItem key={option.profile} value={option.profile}>
@@ -361,11 +370,14 @@ export function ChannelClientIdentitySection(
                   disabled={props.disabled || props.isSubmitting || isNoClient}
                 >
                   <FormControl>
-                    <SelectTrigger>
+                    <SelectTrigger className='w-full'>
                       <SelectValue placeholder={t('Client profile')} />
                     </SelectTrigger>
                   </FormControl>
-                  <SelectContent>
+                  <SelectContent
+                    alignItemWithTrigger={false}
+                    className={CLIENT_IDENTITY_SELECT_CONTENT_CLASS}
+                  >
                     <SelectGroup>
                       <SelectItem value={defaultProfile}>
                         {t(PROFILE_LABELS[defaultProfile])}
@@ -407,13 +419,16 @@ export function ChannelClientIdentitySection(
                   }
                 >
                   <FormControl>
-                    <SelectTrigger>
+                    <SelectTrigger className='w-full'>
                       <SelectValue
                         placeholder={t('Use default client version')}
                       />
                     </SelectTrigger>
                   </FormControl>
-                  <SelectContent>
+                  <SelectContent
+                    alignItemWithTrigger={false}
+                    className={CLIENT_IDENTITY_SELECT_CONTENT_CLASS}
+                  >
                     <SelectGroup>
                       <SelectItem value='default'>
                         {t('Use default client version')}
@@ -475,13 +490,16 @@ export function ChannelClientIdentitySection(
                 disabled={props.disabled || props.isSubmitting || isNoClient}
               >
                 <FormControl>
-                  <SelectTrigger>
+                  <SelectTrigger className='w-full'>
                     <SelectValue
                       placeholder={t('Use default client platform')}
                     />
                   </SelectTrigger>
                 </FormControl>
-                <SelectContent>
+                <SelectContent
+                  alignItemWithTrigger={false}
+                  className={CLIENT_IDENTITY_SELECT_CONTENT_CLASS}
+                >
                   <SelectGroup>
                     <SelectItem value='default'>
                       {t('Use default client platform')}

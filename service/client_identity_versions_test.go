@@ -48,6 +48,88 @@ func TestClientIdentityVersionServiceLoadsNPMVersionsAndFallsBackToCache(t *test
 	assert.Equal(t, "1.2.3", stale.Latest)
 }
 
+func TestClientIdentityVersionServiceRefreshesCachedEntriesOnly(t *testing.T) {
+	requestCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		_, _ = w.Write([]byte(`{"name":"@openai/codex","dist-tags":{"latest":"1.2.3"},"versions":{"1.2.3":{}}}`))
+	}))
+	defer server.Close()
+
+	service := NewClientIdentityVersionService(ClientIdentityVersionServiceOptions{
+		HTTPClient:     server.Client(),
+		NPMRegistryURL: server.URL,
+	})
+
+	_, err := service.ListVersions(t.Context(), dto.ClientIdentityProfileCodexLegacy, "")
+	require.NoError(t, err)
+	assert.Equal(t, 1, requestCount)
+
+	summary, err := service.RefreshCachedVersions(t.Context())
+	require.NoError(t, err)
+	assert.Equal(t, ClientIdentityVersionRefreshSummary{Checked: 1, Refreshed: 1}, summary)
+	assert.Equal(t, 2, requestCount)
+
+	// Unused profiles are not fetched by the scheduled refresh pass.
+	_, err = service.RefreshCachedVersions(t.Context())
+	require.NoError(t, err)
+	assert.Equal(t, 3, requestCount)
+}
+
+func TestClientIdentityVersionServiceMarksCacheDueAfterTTL(t *testing.T) {
+	now := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
+	service := NewClientIdentityVersionService(ClientIdentityVersionServiceOptions{
+		CacheTTL: time.Hour,
+		Now:      func() time.Time { return now },
+	})
+
+	_, err := service.ListVersions(
+		t.Context(),
+		dto.ClientIdentityProfileCodeBuddyCLI,
+		dto.ClientIdentityPlatformLinuxX64,
+	)
+	require.NoError(t, err)
+	assert.False(t, service.HasDueVersions())
+
+	now = now.Add(time.Hour)
+	assert.True(t, service.HasDueVersions())
+}
+
+func TestClientIdentityVersionServiceFailedRefreshExtendsCacheWindow(t *testing.T) {
+	requestCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		if requestCount > 1 {
+			w.WriteHeader(http.StatusBadGateway)
+			return
+		}
+		_, _ = w.Write([]byte(`{"name":"@openai/codex","dist-tags":{"latest":"1.2.3"},"versions":{"1.2.3":{}}}`))
+	}))
+	defer server.Close()
+
+	service := NewClientIdentityVersionService(ClientIdentityVersionServiceOptions{
+		HTTPClient:     server.Client(),
+		NPMRegistryURL: server.URL,
+		CacheTTL:       time.Hour,
+	})
+
+	first, err := service.ListVersions(t.Context(), dto.ClientIdentityProfileCodexLegacy, "")
+	require.NoError(t, err)
+	assert.Equal(t, "1.2.3", first.Latest)
+
+	stale, err := service.RefreshVersions(t.Context(), dto.ClientIdentityProfileCodexLegacy, "")
+	require.NoError(t, err)
+	assert.True(t, stale.Stale)
+	assert.Equal(t, 2, requestCount)
+
+	cached, err := service.ListVersions(t.Context(), dto.ClientIdentityProfileCodexLegacy, "")
+	require.NoError(t, err)
+	assert.Equal(t, "1.2.3", cached.Latest)
+	assert.True(t, cached.Cached)
+	assert.False(t, cached.Stale)
+	assert.Equal(t, 2, requestCount)
+}
+
 func TestClientIdentityVersionServiceFiltersNPMBuildsByPlatform(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "application/vnd.npm.install-v1+json", r.Header.Get("Accept"))

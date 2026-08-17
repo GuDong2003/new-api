@@ -19,7 +19,7 @@ import (
 const (
 	defaultNPMRegistryURL      = "https://registry.npmjs.org"
 	defaultWorkBuddyUpdateURL  = "https://www.codebuddy.cn/v2/update"
-	clientIdentityVersionTTL   = time.Hour
+	clientIdentityVersionTTL   = 24 * time.Hour
 	clientIdentityRequestLimit = 10 * time.Second
 	clientIdentityMaxBodyBytes = 8 << 20
 	clientIdentityMaxVersions  = 64
@@ -54,6 +54,15 @@ type ClientIdentityVersionLookup struct {
 	Source     dto.ClientIdentitySourceMetadata `json:"source"`
 	Cached     bool                             `json:"cached"`
 	Stale      bool                             `json:"stale"`
+}
+
+// ClientIdentityVersionRefreshSummary describes one scheduled refresh pass.
+// Failed entries keep their previous cached value and are counted separately
+// so a temporary upstream outage does not make the whole task unusable.
+type ClientIdentityVersionRefreshSummary struct {
+	Checked   int `json:"checked"`
+	Refreshed int `json:"refreshed"`
+	Failed    int `json:"failed"`
 }
 
 type ClientIdentityVersionService struct {
@@ -120,6 +129,62 @@ func RefreshClientIdentityVersions(ctx context.Context, profile, platform string
 	return defaultClientIdentityVersionService.RefreshVersions(ctx, profile, platform)
 }
 
+func HasDueCachedClientIdentityVersions() bool {
+	return defaultClientIdentityVersionService.HasDueVersions()
+}
+
+func RefreshCachedClientIdentityVersions(ctx context.Context) (ClientIdentityVersionRefreshSummary, error) {
+	return defaultClientIdentityVersionService.RefreshCachedVersions(ctx)
+}
+
+func (s *ClientIdentityVersionService) HasDueVersions() bool {
+	now := s.now()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, entry := range s.cache {
+		if !now.Before(entry.expiresAt) {
+			return true
+		}
+	}
+	return false
+}
+
+// RefreshCachedVersions refreshes only profiles/platforms that have already
+// been looked up. This keeps the daily task quiet for unused client types while
+// ensuring actively configured clients are checked once per day.
+func (s *ClientIdentityVersionService) RefreshCachedVersions(ctx context.Context) (ClientIdentityVersionRefreshSummary, error) {
+	s.mu.Lock()
+	keys := make([]string, 0, len(s.cache))
+	for key := range s.cache {
+		keys = append(keys, key)
+	}
+	s.mu.Unlock()
+	sort.Strings(keys)
+
+	var summary ClientIdentityVersionRefreshSummary
+	for _, key := range keys {
+		if ctx != nil {
+			select {
+			case <-ctx.Done():
+				return summary, ctx.Err()
+			default:
+			}
+		}
+
+		parts := strings.SplitN(key, "|", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		summary.Checked++
+		if _, err := s.lookup(ctx, parts[0], parts[1], true); err != nil {
+			summary.Failed++
+			continue
+		}
+		summary.Refreshed++
+	}
+	return summary, nil
+}
+
 func (s *ClientIdentityVersionService) ListVersions(ctx context.Context, profile, platform string) (ClientIdentityVersionLookup, error) {
 	return s.lookup(ctx, profile, platform, false)
 }
@@ -171,6 +236,15 @@ func (s *ClientIdentityVersionService) lookup(ctx context.Context, profile, plat
 		fallback := cloneClientIdentityVersionLookup(entry.lookup)
 		fallback.Cached = true
 		fallback.Stale = true
+		// Avoid retrying the same unavailable upstream on every subsequent
+		// request. The next normal lookup will try again after one cache period,
+		// while an explicit refresh still bypasses this value immediately.
+		s.mu.Lock()
+		if current, ok := s.cache[key]; ok && current.expiresAt.Equal(entry.expiresAt) {
+			current.expiresAt = now.Add(s.cacheTTL)
+			s.cache[key] = current
+		}
+		s.mu.Unlock()
 		return fallback, nil
 	}
 	return ClientIdentityVersionLookup{}, err

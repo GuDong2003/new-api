@@ -13,11 +13,11 @@ import (
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 )
 
-// RegisterScheduledSystemTasks wires the periodic channel test, upstream model
-// update, and async task polling (Midjourney / Suno / video) jobs into the
-// system task framework so a DB lease dedups execution across multiple master
-// instances and each run is recorded as one task row. Call this before
-// service.StartSystemTaskRunner.
+// RegisterScheduledSystemTasks wires periodic channel test, upstream model
+// update, async task polling (Midjourney / Suno / video), and client version
+// refresh jobs into the system task framework so a DB lease dedups execution
+// across multiple master instances and each run is recorded as one task row.
+// Call this before service.StartSystemTaskRunner.
 func RegisterScheduledSystemTasks() {
 	service.RegisterBackupSystemTaskHandler()
 	service.RegisterSystemTaskHandler(channelTestHandler{})
@@ -26,6 +26,35 @@ func RegisterScheduledSystemTasks() {
 	service.RegisterSystemTaskHandler(asyncTaskPollHandler{})
 	service.RegisterSystemTaskHandler(channelQueueWarmupHandler{})
 	service.RegisterSystemTaskHandler(upstreamAccountHandler{})
+	service.RegisterSystemTaskHandler(clientIdentityVersionRefreshHandler{})
+}
+
+// clientIdentityVersionRefreshHandler checks the official client catalogs once
+// per day for entries that have already been requested by an administrator.
+// Manual refreshes continue to use the channel endpoint and bypass this cache.
+type clientIdentityVersionRefreshHandler struct{}
+
+func (clientIdentityVersionRefreshHandler) Type() string {
+	return model.SystemTaskTypeClientIdentityVersionRefresh
+}
+
+func (clientIdentityVersionRefreshHandler) Enabled() bool {
+	return service.HasDueCachedClientIdentityVersions()
+}
+
+func (clientIdentityVersionRefreshHandler) Interval() time.Duration {
+	return 24 * time.Hour
+}
+
+func (clientIdentityVersionRefreshHandler) NewPayload() any { return nil }
+
+func (clientIdentityVersionRefreshHandler) Run(ctx context.Context, task *model.SystemTask, runnerID string) {
+	summary, err := service.RefreshCachedClientIdentityVersions(ctx)
+	if err != nil {
+		finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusFailed, summary, err)
+		return
+	}
+	finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusSucceeded, summary, nil)
 }
 
 type upstreamAccountHandler struct{}
