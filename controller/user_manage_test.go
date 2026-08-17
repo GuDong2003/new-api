@@ -48,17 +48,158 @@ func setupManageUserTestDB(t *testing.T) *gorm.DB {
 }
 
 func performManageUserRequest(t *testing.T, body string) *httptest.ResponseRecorder {
+	return performManageUserAs(t, 9999, common.RoleRootUser, body)
+}
+
+func performManageUserAs(t *testing.T, actorID int, actorRole int, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodPost, "/api/user/manage", strings.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
-	c.Set("id", 9999)
-	c.Set("role", common.RoleRootUser)
+	c.Set("id", actorID)
+	c.Set("role", actorRole)
 	c.Set("username", "root-operator")
 	ManageUser(c)
 	return recorder
+}
+
+func performGetManagedUserRequest(t *testing.T, actorID int, actorRole int, targetID int) *httptest.ResponseRecorder {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/user/%d", targetID), nil)
+	c.Params = gin.Params{{Key: "id", Value: fmt.Sprintf("%d", targetID)}}
+	c.Set("id", actorID)
+	c.Set("role", actorRole)
+	GetUser(c)
+	return recorder
+}
+
+func performUpdateManagedUserRequest(t *testing.T, actorID int, actorRole int, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPut, "/api/user/", strings.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set("id", actorID)
+	c.Set("role", actorRole)
+	c.Set("username", "self-admin")
+	UpdateUser(c)
+	return recorder
+}
+
+func initManageUserAuthz(t *testing.T, db *gorm.DB) {
+	t.Helper()
+	previousMaster := common.IsMasterNode
+	common.IsMasterNode = true
+	require.NoError(t, authz.Init(db))
+	t.Cleanup(func() { common.IsMasterNode = previousMaster })
+}
+
+func TestManagedUserSelfAccessUpdatesProfileAndSecurityFields(t *testing.T) {
+	db := setupManageUserTestDB(t)
+	initManageUserAuthz(t, db)
+	user := model.User{
+		Username: "self-admin", Password: "existing-password-hash", DisplayName: "Old Name",
+		Role: common.RoleAdminUser, Status: common.UserStatusEnabled, Group: "default", Remark: "root-owned note", Email: "admin@example.com",
+	}
+	require.NoError(t, db.Create(&user).Error)
+
+	getRecorder := performGetManagedUserRequest(t, user.Id, user.Role, user.Id)
+	assert.Equal(t, http.StatusOK, getRecorder.Code)
+	assert.Contains(t, getRecorder.Body.String(), `"success":true`)
+
+	updateRecorder := performUpdateManagedUserRequest(
+		t, user.Id, user.Role,
+		fmt.Sprintf(`{"id":%d,"username":"renamed-admin","display_name":"New Name","password":"NewPassword123","role":1,"status":2,"group":"vip","remark":"changed","email":"changed@example.com"}`, user.Id),
+	)
+	assert.Equal(t, http.StatusOK, updateRecorder.Code)
+	assert.Contains(t, updateRecorder.Body.String(), `"success":true`)
+
+	var updated model.User
+	require.NoError(t, db.First(&updated, user.Id).Error)
+	assert.Equal(t, "renamed-admin", updated.Username)
+	assert.Equal(t, "New Name", updated.DisplayName)
+	assert.NotEqual(t, "existing-password-hash", updated.Password)
+	assert.Equal(t, common.RoleAdminUser, updated.Role)
+	assert.Equal(t, common.UserStatusEnabled, updated.Status)
+	assert.Equal(t, "vip", updated.Group)
+	assert.Equal(t, "changed", updated.Remark)
+	assert.Equal(t, "admin@example.com", updated.Email)
+}
+
+func TestManagedUserPeerAccessRemainsDenied(t *testing.T) {
+	db := setupManageUserTestDB(t)
+	initManageUserAuthz(t, db)
+	target := model.User{
+		Username: "peer-admin", Password: "existing-password-hash", DisplayName: "Peer Name",
+		Role: common.RoleAdminUser, Status: common.UserStatusEnabled, Group: "default",
+	}
+	require.NoError(t, db.Create(&target).Error)
+
+	getRecorder := performGetManagedUserRequest(t, target.Id+100, common.RoleAdminUser, target.Id)
+	assert.Contains(t, getRecorder.Body.String(), `"success":false`)
+
+	updateRecorder := performUpdateManagedUserRequest(
+		t, target.Id+100, common.RoleAdminUser,
+		fmt.Sprintf(`{"id":%d,"username":"peer-admin","display_name":"Changed Name"}`, target.Id),
+	)
+	assert.Contains(t, updateRecorder.Body.String(), `"success":false`)
+
+	var unchanged model.User
+	require.NoError(t, db.First(&unchanged, target.Id).Error)
+	assert.Equal(t, "Peer Name", unchanged.DisplayName)
+}
+
+func TestManagedUserSelfStatusAndQuotaActionsAreAllowed(t *testing.T) {
+	db := setupManageUserTestDB(t)
+	initManageUserAuthz(t, db)
+	user := model.User{
+		Username: "self-actions", Password: "existing-password-hash", DisplayName: "Self Actions",
+		Role: common.RoleAdminUser, Status: common.UserStatusEnabled, Group: "default", Quota: 100,
+	}
+	require.NoError(t, db.Create(&user).Error)
+
+	recorder := performManageUserAs(t, user.Id, user.Role, fmt.Sprintf(`{"id":%d,"action":"disable"}`, user.Id))
+	assert.Contains(t, recorder.Body.String(), `"success":true`)
+	recorder = performManageUserAs(t, user.Id, user.Role, fmt.Sprintf(`{"id":%d,"action":"add_quota","mode":"add","value":50}`, user.Id))
+	assert.Contains(t, recorder.Body.String(), `"success":true`)
+
+	var updated model.User
+	require.NoError(t, db.First(&updated, user.Id).Error)
+	assert.Equal(t, common.UserStatusDisabled, updated.Status)
+	assert.Equal(t, 150, updated.Quota)
+}
+
+func TestManagedAvatarTargetAllowsSelfButRejectsPeer(t *testing.T) {
+	db := setupManageUserTestDB(t)
+	initManageUserAuthz(t, db)
+	target := model.User{
+		Username: "avatar-admin", Password: "existing-password-hash",
+		Role: common.RoleAdminUser, Status: common.UserStatusEnabled, Group: "default",
+	}
+	require.NoError(t, db.Create(&target).Error)
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Params = gin.Params{{Key: "id", Value: fmt.Sprintf("%d", target.Id)}}
+	c.Set("id", target.Id)
+	c.Set("role", common.RoleAdminUser)
+	userID, ok := managedAvatarTarget(c)
+	assert.True(t, ok)
+	assert.Equal(t, target.Id, userID)
+
+	peerRecorder := httptest.NewRecorder()
+	peerContext, _ := gin.CreateTestContext(peerRecorder)
+	peerContext.Params = gin.Params{{Key: "id", Value: fmt.Sprintf("%d", target.Id)}}
+	peerContext.Set("id", target.Id+100)
+	peerContext.Set("role", common.RoleAdminUser)
+	_, ok = managedAvatarTarget(peerContext)
+	assert.False(t, ok)
 }
 
 func TestManageUserDisableAdvancesAuthVersionOnceAndRevokesSession(t *testing.T) {

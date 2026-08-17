@@ -9,6 +9,7 @@ import (
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/service/authz"
 
 	"github.com/gin-gonic/gin"
 )
@@ -559,12 +560,7 @@ func AdminDisable2FA(c *gin.Context) {
 		return
 	}
 
-	myRole := c.GetInt("role")
-	if !canManageTargetRole(myRole, targetUser.Role) {
-		c.JSON(http.StatusOK, gin.H{
-			"success": false,
-			"message": "无权操作同级或更高级用户的2FA设置",
-		})
+	if !requireUserTargetPermission(c, targetUser.Id, targetUser.Role, authz.UserSecurityWrite) {
 		return
 	}
 

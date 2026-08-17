@@ -13,6 +13,7 @@ import (
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/service/authz"
 
 	"github.com/gin-gonic/gin"
 )
@@ -90,8 +91,7 @@ func managedAvatarTarget(c *gin.Context) (int, bool) {
 		common.ApiError(c, err)
 		return 0, false
 	}
-	if !canManageTargetRole(c.GetInt("role"), targetUser.Role) {
-		common.ApiErrorI18n(c, i18n.MsgUserNoPermissionSameLevel)
+	if !requireUserTargetPermission(c, targetUser.Id, targetUser.Role, authz.UserProfileWrite) {
 		return 0, false
 	}
 	return userID, true

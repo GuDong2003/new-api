@@ -234,6 +234,27 @@ export const STATIC_I18N_KEYS = [
   'Enter quota in tokens',
   'Enter quota in {{currency}}',
 
+  // Authorization catalog — user management
+  'User Management',
+  'View users',
+  'Create users',
+  'Edit user profiles',
+  'Manage user status',
+  'Adjust user quota',
+  'Manage user security',
+  'Manage user roles',
+  'Delete users',
+  'Assign user permissions',
+  'View users you are allowed to manage.',
+  'Create users below your permission level.',
+  'Edit usernames, display names, groups, and remarks.',
+  'Enable or disable users below your permission level.',
+  'Adjust quota for users below your permission level.',
+  'Reset passwords, two-factor authentication, Passkeys, and bindings.',
+  'Promote or demote users.',
+  'Delete users below your permission level.',
+  'Adjust per-user administrator permissions.',
+
   // Setup wizard — steps
   'Database check',
   'Verify your database connection',

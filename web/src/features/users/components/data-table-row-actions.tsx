@@ -47,6 +47,12 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { UserSubscriptionsDialog } from '@/features/subscriptions/components/dialogs/user-subscriptions-dialog'
+import {
+  canManageUserTarget,
+  hasUserPermission,
+  USER_PERMISSION_ACTIONS,
+} from '@/lib/admin-permissions'
+import { useAuthStore } from '@/stores/auth-store'
 
 import { manageUser, resetUserPasskey, resetUserTwoFA } from '../api'
 import {
@@ -67,23 +73,54 @@ interface DataTableRowActionsProps {
 export function DataTableRowActions({ row }: DataTableRowActionsProps) {
   const { t } = useTranslation()
   const user = row.original
+  const currentUser = useAuthStore((s) => s.auth.user)
   const { setOpen, setCurrentRow, triggerRefresh } = useUsers()
   const [resetPasskeyOpen, setResetPasskeyOpen] = useState(false)
   const [resetTwoFAOpen, setResetTwoFAOpen] = useState(false)
   const [bindingDialogOpen, setBindingDialogOpen] = useState(false)
   const [subscriptionsDialogOpen, setSubscriptionsDialogOpen] = useState(false)
 
+  const isDisabled = user.status === USER_STATUS.DISABLED
+  const isAdmin = user.role >= USER_ROLE.ADMIN
+  const isRoot = user.role === USER_ROLE.ROOT
+  const canManageTarget = canManageUserTarget(currentUser, user)
+  const canEditProfile =
+    canManageTarget &&
+    hasUserPermission(currentUser, USER_PERMISSION_ACTIONS.PROFILE_WRITE)
+  const canManageStatus =
+    canManageTarget &&
+    hasUserPermission(currentUser, USER_PERMISSION_ACTIONS.STATUS_WRITE)
+  const canManageRole =
+    canManageTarget &&
+    user.id !== currentUser?.id &&
+    hasUserPermission(currentUser, USER_PERMISSION_ACTIONS.ROLE_WRITE)
+  const canManageSecurity =
+    canManageTarget &&
+    hasUserPermission(currentUser, USER_PERMISSION_ACTIONS.SECURITY_WRITE)
+  const canDelete =
+    canManageTarget &&
+    user.id !== currentUser?.id &&
+    hasUserPermission(currentUser, USER_PERMISSION_ACTIONS.DELETE)
+
   const handleEdit = () => {
+    if (!canEditProfile && !canManageSecurity) return
     setCurrentRow(user)
     setOpen('update')
   }
 
   const handleDelete = () => {
+    if (!canDelete) return
     setCurrentRow(user)
     setOpen('delete')
   }
 
   const handleManage = async (action: Exclude<ManageUserAction, 'delete'>) => {
+    if ((action === 'enable' || action === 'disable') && !canManageStatus) {
+      return
+    }
+    if ((action === 'promote' || action === 'demote') && !canManageRole) {
+      return
+    }
     try {
       const result = await manageUser(user.id, action)
       if (result.success) {
@@ -100,6 +137,7 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
   }
 
   const handleResetPasskey = async () => {
+    if (!canManageSecurity) return
     try {
       const result = await resetUserPasskey(user.id)
       if (result.success) {
@@ -116,6 +154,7 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
   }
 
   const handleResetTwoFA = async () => {
+    if (!canManageSecurity) return
     try {
       const result = await resetUserTwoFA(user.id)
       if (result.success) {
@@ -131,10 +170,6 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
     }
   }
 
-  const isDisabled = user.status === USER_STATUS.DISABLED
-  const isAdmin = user.role >= USER_ROLE.ADMIN
-  const isRoot = user.role === USER_ROLE.ROOT
-
   if (isUserDeleted(user)) {
     return null
   }
@@ -148,6 +183,7 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
               variant='ghost'
               size='icon-sm'
               onClick={handleEdit}
+              disabled={!canEditProfile && !canManageSecurity}
               aria-label={t('Edit')}
             />
           }
@@ -162,7 +198,10 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
         contentClassName='w-48'
       >
         {isDisabled ? (
-          <DropdownMenuItem onClick={() => handleManage('enable')}>
+          <DropdownMenuItem
+            onClick={() => handleManage('enable')}
+            disabled={!canManageStatus}
+          >
             {t('Enable')}
             <DropdownMenuShortcut>
               <Power size={16} />
@@ -171,7 +210,7 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
         ) : (
           <DropdownMenuItem
             onClick={() => handleManage('disable')}
-            disabled={isRoot}
+            disabled={isRoot || !canManageStatus}
           >
             {t('Disable')}
             <DropdownMenuShortcut>
@@ -181,7 +220,10 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
         )}
 
         {isAdmin && !isRoot && (
-          <DropdownMenuItem onClick={() => handleManage('demote')}>
+          <DropdownMenuItem
+            onClick={() => handleManage('demote')}
+            disabled={!canManageRole}
+          >
             {t('Demote')}
             <DropdownMenuShortcut>
               <ArrowDown size={16} />
@@ -190,7 +232,10 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
         )}
 
         {!isAdmin && (
-          <DropdownMenuItem onClick={() => handleManage('promote')}>
+          <DropdownMenuItem
+            onClick={() => handleManage('promote')}
+            disabled={!canManageRole || currentUser?.role !== USER_ROLE.ROOT}
+          >
             {t('Promote')}
             <DropdownMenuShortcut>
               <ArrowUp size={16} />
@@ -201,8 +246,10 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
         <DropdownMenuItem
           onSelect={(event) => {
             event.preventDefault()
+            if (!canManageSecurity) return
             setBindingDialogOpen(true)
           }}
+          disabled={!canManageSecurity}
         >
           {t('Manage Bindings')}
           <DropdownMenuShortcut>
@@ -213,8 +260,10 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
         <DropdownMenuItem
           onSelect={(event) => {
             event.preventDefault()
+            if (!canManageTarget) return
             setSubscriptionsDialogOpen(true)
           }}
+          disabled={!canManageTarget}
         >
           {t('Manage Subscriptions')}
           <DropdownMenuShortcut>
@@ -229,7 +278,7 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
             event.preventDefault()
             setResetPasskeyOpen(true)
           }}
-          disabled={isRoot}
+          disabled={isRoot || !canManageSecurity}
         >
           {t('Reset Passkey')}
           <DropdownMenuShortcut>
@@ -242,7 +291,7 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
             event.preventDefault()
             setResetTwoFAOpen(true)
           }}
-          disabled={isRoot}
+          disabled={isRoot || !canManageSecurity}
         >
           {t('Reset 2FA')}
           <DropdownMenuShortcut>
@@ -255,7 +304,7 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
         <DropdownMenuItem
           onClick={handleDelete}
           className='text-destructive focus:text-destructive'
-          disabled={isRoot}
+          disabled={isRoot || !canDelete}
         >
           {t('Delete')}
           <DropdownMenuShortcut>

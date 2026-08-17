@@ -400,7 +400,27 @@ func SearchUsers(c *gin.Context) {
 }
 
 func canManageTargetRole(myRole int, targetRole int) bool {
-	return myRole == common.RoleRootUser || myRole > targetRole
+	return myRole > targetRole
+}
+
+func canManageUserTarget(actorID int, actorRole int, targetID int, targetRole int) bool {
+	return actorID == targetID || canManageTargetRole(actorRole, targetRole)
+}
+
+func requireUserPermission(c *gin.Context, permission authz.Permission) bool {
+	if authz.Can(c.GetInt("id"), c.GetInt("role"), permission) {
+		return true
+	}
+	common.ApiErrorI18n(c, i18n.MsgAuthInsufficientPrivilege)
+	return false
+}
+
+func requireUserTargetPermission(c *gin.Context, targetID int, targetRole int, permission authz.Permission) bool {
+	if !canManageUserTarget(c.GetInt("id"), c.GetInt("role"), targetID, targetRole) {
+		common.ApiErrorI18n(c, i18n.MsgUserNoPermissionHigherLevel)
+		return false
+	}
+	return requireUserPermission(c, permission)
 }
 
 func GetUser(c *gin.Context) {
@@ -414,9 +434,7 @@ func GetUser(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	myRole := c.GetInt("role")
-	if !canManageTargetRole(myRole, user.Role) {
-		common.ApiErrorI18n(c, i18n.MsgUserNoPermissionSameLevel)
+	if !requireUserTargetPermission(c, user.Id, user.Role, authz.UserRead) {
 		return
 	}
 	user.AdminPermissions = authz.Capabilities(user.Id, user.Role)
@@ -694,14 +712,69 @@ func GetUserModels(c *gin.Context) {
 	})
 }
 
+type updateUserRequest struct {
+	Id               int                        `json:"id"`
+	Username         *string                    `json:"username"`
+	DisplayName      *string                    `json:"display_name"`
+	Password         *string                    `json:"password"`
+	Group            *string                    `json:"group"`
+	Remark           *string                    `json:"remark"`
+	AdminPermissions map[string]map[string]bool `json:"admin_permissions"`
+}
+
 func UpdateUser(c *gin.Context) {
-	var updatedUser model.User
-	err := common.DecodeJson(c.Request.Body, &updatedUser)
-	if err != nil || updatedUser.Id == 0 {
+	var request updateUserRequest
+	if err := common.DecodeJson(c.Request.Body, &request); err != nil || request.Id == 0 {
 		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
 		return
 	}
-	updatedUser.Username = strings.TrimSpace(updatedUser.Username)
+	originUser, err := model.GetUserById(request.Id, false)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if !canManageUserTarget(c.GetInt("id"), c.GetInt("role"), originUser.Id, originUser.Role) {
+		common.ApiErrorI18n(c, i18n.MsgUserNoPermissionHigherLevel)
+		return
+	}
+
+	profileTouched := request.Username != nil || request.DisplayName != nil || request.Group != nil || request.Remark != nil
+	password := ""
+	if request.Password != nil {
+		password = *request.Password
+	}
+	if profileTouched && !requireUserPermission(c, authz.UserProfileWrite) {
+		return
+	}
+	if password != "" && !requireUserPermission(c, authz.UserSecurityWrite) {
+		return
+	}
+	if !profileTouched && password == "" && request.AdminPermissions == nil {
+		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+		return
+	}
+
+	updatedUser := model.User{
+		Id:          originUser.Id,
+		Username:    originUser.Username,
+		DisplayName: originUser.DisplayName,
+		Group:       originUser.Group,
+		Remark:      originUser.Remark,
+		Role:        originUser.Role,
+		Password:    password,
+	}
+	if request.Username != nil {
+		updatedUser.Username = strings.TrimSpace(*request.Username)
+	}
+	if request.DisplayName != nil {
+		updatedUser.DisplayName = *request.DisplayName
+	}
+	if request.Group != nil {
+		updatedUser.Group = *request.Group
+	}
+	if request.Remark != nil {
+		updatedUser.Remark = *request.Remark
+	}
 	if updatedUser.Username == "" {
 		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
 		return
@@ -713,33 +786,29 @@ func UpdateUser(c *gin.Context) {
 		common.ApiErrorI18n(c, i18n.MsgUserInputInvalid, map[string]any{"Error": err.Error()})
 		return
 	}
-	originUser, err := model.GetUserById(updatedUser.Id, false)
-	if err != nil {
-		common.ApiError(c, err)
-		return
-	}
-	if updatedUser.Role != common.RoleGuestUser && updatedUser.Role != originUser.Role {
-		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
-		return
-	}
-	updatedUser.Role = originUser.Role
-	myRole := c.GetInt("role")
-	if !canManageTargetRole(myRole, originUser.Role) {
-		common.ApiErrorI18n(c, i18n.MsgUserNoPermissionHigherLevel)
-		return
-	}
 	if updatedUser.Password == "$I_LOVE_U" {
-		updatedUser.Password = "" // rollback to what it should be
+		updatedUser.Password = ""
 	}
 	updatePassword := updatedUser.Password != ""
 	authzTouched := false
+	if request.AdminPermissions != nil {
+		if c.GetInt("role") != common.RoleRootUser || !requireUserPermission(c, authz.UserPermissionWrite) {
+			return
+		}
+		updatedUser.AdminPermissions = request.AdminPermissions
+	}
 	if err := model.DB.Transaction(func(tx *gorm.DB) error {
-		if err := updatedUser.EditWithTx(tx, updatePassword); err != nil {
+		if profileTouched || updatePassword {
+			if err := updatedUser.EditWithTx(tx, updatePassword); err != nil {
+				return err
+			}
+		}
+		if request.AdminPermissions != nil {
+			touched, err := updateAdminPermissionsForUserInTx(c, tx, updatedUser.Id, originUser.Role, updatedUser.AdminPermissions)
+			authzTouched = touched
 			return err
 		}
-		touched, err := updateAdminPermissionsForUserInTx(c, tx, updatedUser.Id, originUser.Role, updatedUser.AdminPermissions)
-		authzTouched = touched
-		return err
+		return nil
 	}); err != nil {
 		common.ApiError(c, err)
 		return
@@ -790,9 +859,7 @@ func AdminClearUserBinding(c *gin.Context) {
 		return
 	}
 
-	myRole := c.GetInt("role")
-	if !canManageTargetRole(myRole, user.Role) {
-		common.ApiErrorI18n(c, i18n.MsgUserNoPermissionSameLevel)
+	if !requireUserTargetPermission(c, user.Id, user.Role, authz.UserSecurityWrite) {
 		return
 	}
 
@@ -995,6 +1062,9 @@ func DeleteUser(c *gin.Context) {
 		common.ApiErrorI18n(c, i18n.MsgUserNoPermissionHigherLevel)
 		return
 	}
+	if !requireUserPermission(c, authz.UserDelete) {
+		return
+	}
 	err = model.HardDeleteUserById(id)
 	if err != nil {
 		common.ApiError(c, err)
@@ -1039,6 +1109,9 @@ func DeleteSelf(c *gin.Context) {
 }
 
 func CreateUser(c *gin.Context) {
+	if !requireUserPermission(c, authz.UserCreate) {
+		return
+	}
 	var user model.User
 	err := common.DecodeJson(c.Request.Body, &user)
 	user.Username = strings.TrimSpace(user.Username)
@@ -1056,6 +1129,9 @@ func CreateUser(c *gin.Context) {
 	myRole := c.GetInt("role")
 	if user.Role >= myRole {
 		common.ApiErrorI18n(c, i18n.MsgUserCannotCreateHigherLevel)
+		return
+	}
+	if user.AdminPermissions != nil && !requireUserPermission(c, authz.UserPermissionWrite) {
 		return
 	}
 	// Even for admin users, we cannot fully trust them!
@@ -1138,7 +1214,33 @@ func ManageUser(c *gin.Context) {
 		return
 	}
 	myRole := c.GetInt("role")
-	if !canManageTargetRole(myRole, user.Role) {
+	if req.Action == "delete" {
+		if !canManageTargetRole(myRole, user.Role) {
+			common.ApiErrorI18n(c, i18n.MsgUserNoPermissionHigherLevel)
+			return
+		}
+	} else if !canManageUserTarget(c.GetInt("id"), myRole, user.Id, user.Role) {
+		common.ApiErrorI18n(c, i18n.MsgUserNoPermissionHigherLevel)
+		return
+	}
+	var permission authz.Permission
+	switch req.Action {
+	case "disable", "enable":
+		permission = authz.UserStatusWrite
+	case "add_quota":
+		permission = authz.UserQuotaWrite
+	case "promote", "demote":
+		permission = authz.UserRoleWrite
+	case "delete":
+		permission = authz.UserDelete
+	default:
+		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+		return
+	}
+	if !requireUserPermission(c, permission) {
+		return
+	}
+	if (req.Action == "promote" || req.Action == "demote") && user.Id == c.GetInt("id") {
 		common.ApiErrorI18n(c, i18n.MsgUserNoPermissionHigherLevel)
 		return
 	}

@@ -81,7 +81,7 @@ const PLATFORM_OPTIONS: Array<{
 ]
 
 const PROFILE_LABELS: Record<ClientIdentityProfile, string> = {
-  none: 'No client',
+  none: 'None',
   codex_legacy: 'Codex (legacy)',
   codex_compatibility: 'Codex',
   claude_code: 'Claude Code',
@@ -226,6 +226,35 @@ export function ChannelClientIdentitySection(
   const selectedPlatform = platform || 'default'
   const isNoClient = effectiveProfile === 'none'
   const setClientIdentityValue = props.setValue
+  const profileSelectItems = profileOptions.map((option) => ({
+    value: option.profile,
+    label: t(PROFILE_LABELS[option.profile]),
+  }))
+  const fixedProfileSelectItems = [
+    {
+      value: defaultProfile,
+      label: t(PROFILE_LABELS[defaultProfile]),
+    },
+  ]
+  const versionSelectItems = [
+    { value: 'default', label: t('Use default client version') },
+    ...(selectedVersion && !hasSelectedVersion
+      ? [
+          {
+            value: selectedVersion,
+            label: `${selectedVersion} (${t('retained selection')})`,
+          },
+        ]
+      : []),
+    ...versionOptions.map((option) => ({ value: option, label: option })),
+  ]
+  const platformSelectItems = [
+    { value: 'default', label: t('Use default client platform') },
+    ...PLATFORM_OPTIONS.map((option) => ({
+      value: option.value,
+      label: t(option.label),
+    })),
+  ]
 
   useEffect(() => {
     if (isNoClient) return
@@ -307,6 +336,7 @@ export function ChannelClientIdentitySection(
               <FormItem>
                 <FormLabel>{t('Client identity')}</FormLabel>
                 <Select
+                  items={profileSelectItems}
                   value={field.value || defaultProfile}
                   onValueChange={(value) => {
                     const option = profileOptions.find(
@@ -365,6 +395,7 @@ export function ChannelClientIdentitySection(
               <FormItem>
                 <FormLabel>{t('Client profile')}</FormLabel>
                 <Select
+                  items={fixedProfileSelectItems}
                   value={field.value || defaultProfile}
                   onValueChange={field.onChange}
                   disabled={props.disabled || props.isSubmitting || isNoClient}
@@ -404,6 +435,7 @@ export function ChannelClientIdentitySection(
               <FormLabel>{t('Client version')}</FormLabel>
               {versionOptions.length > 0 ? (
                 <Select
+                  items={versionSelectItems}
                   value={displayVersion}
                   onValueChange={(value) =>
                     props.setValue(
@@ -477,6 +509,7 @@ export function ChannelClientIdentitySection(
             <FormItem>
               <FormLabel>{t('Client platform')}</FormLabel>
               <Select
+                items={platformSelectItems}
                 value={selectedPlatform}
                 onValueChange={(value) =>
                   props.setValue(

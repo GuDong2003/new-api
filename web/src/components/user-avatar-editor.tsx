@@ -39,6 +39,7 @@ interface UserAvatarEditorProps {
   name: string
   userId?: number
   compact?: boolean
+  disabled?: boolean
   onChanged?: (avatarUrl: string) => void | Promise<void>
 }
 
@@ -159,6 +160,15 @@ export function UserAvatarEditor(props: UserAvatarEditorProps) {
       </AvatarFallback>
     </Avatar>
   )
+  let triggerClassName =
+    'hover:bg-muted flex w-full items-center gap-3 rounded-lg border p-3 text-left transition-colors'
+  if (props.disabled) {
+    triggerClassName =
+      'flex w-full cursor-not-allowed items-center gap-3 rounded-lg border p-3 text-left opacity-60'
+  } else if (props.compact) {
+    triggerClassName =
+      'group focus-visible:ring-ring relative shrink-0 rounded-2xl outline-none focus-visible:ring-2'
+  }
 
   return (
     <Dialog
@@ -172,11 +182,8 @@ export function UserAvatarEditor(props: UserAvatarEditorProps) {
       trigger={
         <button
           type='button'
-          className={
-            props.compact
-              ? 'group focus-visible:ring-ring relative shrink-0 rounded-2xl outline-none focus-visible:ring-2'
-              : 'hover:bg-muted flex w-full items-center gap-3 rounded-lg border p-3 text-left transition-colors'
-          }
+          disabled={props.disabled || loading}
+          className={triggerClassName}
           aria-label={t('Change Avatar')}
         >
           {avatar}

@@ -8,11 +8,11 @@ import (
 )
 
 // registerAuthzRoutes mounts the authorization API under its own /authz
-// namespace. GET /authz/catalog returns the permission schema (resources,
-// actions, and role baselines) used by the client permission editor.
+// namespace. Only root may read the permission schema used by the client
+// permission editor because it controls per-user administrator grants.
 func registerAuthzRoutes(apiRouter *gin.RouterGroup) {
 	authzRoute := apiRouter.Group("/authz")
-	authzRoute.Use(middleware.AdminAuth())
+	authzRoute.Use(middleware.RootAuth())
 	{
 		authzRoute.GET("/catalog", controller.GetPermissionCatalog)
 	}

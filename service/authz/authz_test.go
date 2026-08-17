@@ -50,6 +50,10 @@ func TestInitSeedsBuiltInRolesAndPoliciesOnce(t *testing.T) {
 	assert.True(t, Can(2, common.RoleAdminUser, ChannelOperate))
 	assert.True(t, Can(2, common.RoleAdminUser, ChannelWrite))
 	assert.False(t, Can(2, common.RoleAdminUser, ChannelSensitiveWrite))
+	assert.True(t, Can(2, common.RoleAdminUser, UserRead))
+	assert.True(t, Can(2, common.RoleAdminUser, UserProfileWrite))
+	assert.True(t, Can(2, common.RoleAdminUser, UserQuotaWrite))
+	assert.False(t, Can(2, common.RoleAdminUser, UserPermissionWrite))
 	assert.False(t, Can(3, common.RoleCommonUser, ChannelRead))
 }
 
@@ -97,15 +101,13 @@ func TestSetUserPermissionsStoresOnlyOverrides(t *testing.T) {
 
 	assert.True(t, Can(42, common.RoleAdminUser, ChannelSensitiveWrite))
 	assert.False(t, Can(42, common.RoleAdminUser, ChannelWrite))
-	assert.Equal(t, PermissionsMap{
-		ResourceChannel: {
-			ActionRead:           true,
-			ActionOperate:        true,
-			ActionWrite:          false,
-			ActionSensitiveWrite: true,
-			ActionSecretView:     false,
-		},
-	}, ExplicitUserPermissions(42))
+	assert.Equal(t, map[string]bool{
+		ActionRead:           true,
+		ActionOperate:        true,
+		ActionWrite:          false,
+		ActionSensitiveWrite: true,
+		ActionSecretView:     false,
+	}, ExplicitUserPermissions(42)[ResourceChannel])
 	assert.Equal(t, PermissionsMap{
 		ResourceChannel: {
 			ActionSensitiveWrite: true,
@@ -125,15 +127,13 @@ func TestSetUserPermissionsStoresOnlyOverrides(t *testing.T) {
 		ActionSecretView:     false,
 	}}))
 	assert.False(t, Can(42, common.RoleAdminUser, ChannelSensitiveWrite))
-	assert.Equal(t, PermissionsMap{
-		ResourceChannel: {
-			ActionRead:           true,
-			ActionOperate:        true,
-			ActionWrite:          true,
-			ActionSensitiveWrite: false,
-			ActionSecretView:     false,
-		},
-	}, ExplicitUserPermissions(42))
+	assert.Equal(t, map[string]bool{
+		ActionRead:           true,
+		ActionOperate:        true,
+		ActionWrite:          true,
+		ActionSensitiveWrite: false,
+		ActionSecretView:     false,
+	}, ExplicitUserPermissions(42)[ResourceChannel])
 	assert.Empty(t, ExplicitUserOverrides(42))
 }
 

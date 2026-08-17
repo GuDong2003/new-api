@@ -25,6 +25,7 @@ export type AdminCapabilities = AdminPermissionMatrix
 
 export const ADMIN_PERMISSION_RESOURCES = {
   CHANNEL: 'channel',
+  USER: 'user',
 } as const
 
 export const ADMIN_PERMISSION_ACTIONS = {
@@ -33,6 +34,18 @@ export const ADMIN_PERMISSION_ACTIONS = {
   WRITE: 'write',
   SENSITIVE_WRITE: 'sensitive_write',
   SECRET_VIEW: 'secret_view',
+} as const
+
+export const USER_PERMISSION_ACTIONS = {
+  READ: 'read',
+  CREATE: 'create',
+  PROFILE_WRITE: 'profile_write',
+  STATUS_WRITE: 'status_write',
+  QUOTA_WRITE: 'quota_write',
+  SECURITY_WRITE: 'security_write',
+  ROLE_WRITE: 'role_write',
+  DELETE: 'delete',
+  PERMISSION_WRITE: 'permission_write',
 } as const
 
 // The role whose baseline grants are used as defaults in the permission editor.
@@ -80,6 +93,21 @@ export function hasPermission(
   if (!user) return false
   if (user.role === ROLE.SUPER_ADMIN) return true
   return user.permissions?.admin_permissions?.[resource]?.[action] === true
+}
+
+export function hasUserPermission(
+  user: AuthUser | null | undefined,
+  action: string
+): boolean {
+  return hasPermission(user, ADMIN_PERMISSION_RESOURCES.USER, action)
+}
+
+export function canManageUserTarget(
+  actor: AuthUser | null | undefined,
+  target: { id: number; role: number } | null | undefined
+): boolean {
+  if (!actor || !target) return false
+  return actor.id === target.id || actor.role > target.role
 }
 
 // roleGrants returns the baseline grant matrix for the given role key.

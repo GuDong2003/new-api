@@ -12,6 +12,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/oauth"
+	"github.com/QuantumNous/new-api/service/authz"
 	"github.com/gin-gonic/gin"
 )
 
@@ -500,9 +501,7 @@ func GetUserOAuthBindingsByAdmin(c *gin.Context) {
 		return
 	}
 
-	myRole := c.GetInt("role")
-	if !canManageTargetRole(myRole, targetUser.Role) {
-		common.ApiErrorMsg(c, "no permission")
+	if !requireUserTargetPermission(c, targetUser.Id, targetUser.Role, authz.UserSecurityWrite) {
 		return
 	}
 
@@ -559,9 +558,7 @@ func UnbindCustomOAuthByAdmin(c *gin.Context) {
 		return
 	}
 
-	myRole := c.GetInt("role")
-	if !canManageTargetRole(myRole, targetUser.Role) {
-		common.ApiErrorMsg(c, "no permission")
+	if !requireUserTargetPermission(c, targetUser.Id, targetUser.Role, authz.UserSecurityWrite) {
 		return
 	}
 

@@ -67,7 +67,10 @@ import {
   ADMIN_PERMISSION_ACTIONS,
   ADMIN_PERMISSION_RESOURCES,
   EMPTY_PERMISSION_CATALOG,
+  USER_PERMISSION_ACTIONS,
+  canManageUserTarget,
   hasPermission,
+  hasUserPermission,
   normalizeAdminPermissions,
 } from '@/lib/admin-permissions'
 import { getCurrencyDisplay, getCurrencyLabel } from '@/lib/currency'
@@ -127,6 +130,7 @@ export function UsersMutateDrawer({
     queryKey: ['admin-permission-catalog'],
     queryFn: getPermissionCatalog,
     staleTime: 5 * 60 * 1000,
+    enabled: currentUser?.role === ROLE.SUPER_ADMIN,
   })
 
   const form = useForm<UserFormValues>({
@@ -159,8 +163,31 @@ export function UsersMutateDrawer({
 
   const currentQuotaRaw = form.watch('quota_dollars') || 0
   const selectedRole = form.watch('role')
-  const canEditAdminPermissions = currentUser?.role === ROLE.SUPER_ADMIN
   const targetIsAdmin = (selectedRole ?? currentRow?.role ?? 0) >= ROLE.ADMIN
+  const targetIsManageable = isUpdate
+    ? canManageUserTarget(currentUser, currentRow)
+    : true
+  const canCreateUsers = hasUserPermission(
+    currentUser,
+    USER_PERMISSION_ACTIONS.CREATE
+  )
+  const canEditProfile = isUpdate
+    ? targetIsManageable &&
+      hasUserPermission(currentUser, USER_PERMISSION_ACTIONS.PROFILE_WRITE)
+    : canCreateUsers
+  const canEditSecurity = isUpdate
+    ? targetIsManageable &&
+      hasUserPermission(currentUser, USER_PERMISSION_ACTIONS.SECURITY_WRITE)
+    : canCreateUsers
+  const canAdjustQuota =
+    isUpdate &&
+    targetIsManageable &&
+    hasUserPermission(currentUser, USER_PERMISSION_ACTIONS.QUOTA_WRITE)
+  const canEditAdminPermissions =
+    currentUser?.role === ROLE.SUPER_ADMIN &&
+    hasUserPermission(currentUser, USER_PERMISSION_ACTIONS.PERMISSION_WRITE) &&
+    targetIsAdmin &&
+    targetIsManageable
 
   const onSubmit = async (data: UserFormValues) => {
     if (!isUpdate) {
@@ -174,6 +201,17 @@ export function UsersMutateDrawer({
       }
     }
 
+    if (
+      (!isUpdate && !canCreateUsers) ||
+      (isUpdate &&
+        !canEditProfile &&
+        !canEditSecurity &&
+        !canEditAdminPermissions)
+    ) {
+      toast.error(t('You do not have permission to update this user'))
+      return
+    }
+
     setIsSubmitting(true)
     try {
       const payload = transformFormDataToPayload(
@@ -181,11 +219,31 @@ export function UsersMutateDrawer({
         currentRow?.id,
         permissionCatalog
       )
+      if (isUpdate && !canEditProfile) {
+        delete (payload as Partial<typeof payload>).username
+        delete (payload as Partial<typeof payload>).display_name
+        delete (payload as Partial<typeof payload>).group
+        delete (payload as Partial<typeof payload>).remark
+      }
+      if (!canEditSecurity) {
+        delete payload.password
+      }
+      if (!canEditAdminPermissions) {
+        delete payload.admin_permissions
+      }
       const result = isUpdate
         ? await updateUser(payload as typeof payload & { id: number })
         : await createUser(payload)
 
       if (result.success) {
+        if (isUpdate && currentRow?.id === currentUser?.id && currentUser) {
+          useAuthStore.getState().auth.setUser({
+            ...currentUser,
+            username: payload.username ?? currentUser.username,
+            display_name: payload.display_name ?? currentUser.display_name,
+            group: payload.group ?? currentUser.group,
+          })
+        }
         toast.success(
           isUpdate
             ? t(SUCCESS_MESSAGES.USER_UPDATED)
@@ -258,7 +316,12 @@ export function UsersMutateDrawer({
                   <UserAvatarEditor
                     avatarUrl={avatarUrl}
                     name={currentRow.username}
-                    userId={currentRow.id}
+                    userId={
+                      currentRow.id === currentUser?.id
+                        ? undefined
+                        : currentRow.id
+                    }
+                    disabled={!canEditProfile}
                     onChanged={async (nextAvatarUrl) => {
                       setAvatarUrl(nextAvatarUrl)
                       await refreshUserData()
@@ -276,7 +339,7 @@ export function UsersMutateDrawer({
                         <Input
                           {...field}
                           placeholder={t('Enter username')}
-                          disabled={isUpdate}
+                          disabled={isUpdate && !canEditProfile}
                         />
                       </FormControl>
                       <FormMessage />
@@ -312,7 +375,14 @@ export function UsersMutateDrawer({
                               <SelectItem value='1'>
                                 {t('Common User')}
                               </SelectItem>
-                              <SelectItem value='10'>{t('Admin')}</SelectItem>
+                              <SelectItem
+                                value='10'
+                                disabled={
+                                  currentUser?.role !== ROLE.SUPER_ADMIN
+                                }
+                              >
+                                {t('Admin')}
+                              </SelectItem>
                             </SelectGroup>
                           </SelectContent>
                         </Select>
@@ -334,6 +404,7 @@ export function UsersMutateDrawer({
                       <FormControl>
                         <Input
                           {...field}
+                          disabled={!canEditProfile}
                           placeholder={t('Enter display name')}
                         />
                       </FormControl>
@@ -355,6 +426,7 @@ export function UsersMutateDrawer({
                         <Input
                           {...field}
                           type='password'
+                          disabled={!canEditSecurity}
                           placeholder={
                             isUpdate
                               ? t('Leave empty to keep unchanged')
@@ -386,6 +458,7 @@ export function UsersMutateDrawer({
                           }))}
                           onValueChange={field.onChange}
                           value={field.value}
+                          disabled={!canEditProfile}
                         >
                           <FormControl>
                             <SelectTrigger>
@@ -432,6 +505,7 @@ export function UsersMutateDrawer({
                           <Button
                             type='button'
                             variant='outline'
+                            disabled={!canAdjustQuota}
                             onClick={() => setQuotaDialogOpen(true)}
                           >
                             <Pencil className='mr-1 h-4 w-4' />
@@ -455,6 +529,7 @@ export function UsersMutateDrawer({
                         <FormControl>
                           <Textarea
                             {...field}
+                            disabled={!canEditProfile}
                             placeholder={t(
                               'Admin notes (only visible to admins)'
                             )}
@@ -506,6 +581,7 @@ export function UsersMutateDrawer({
                                         className='flex items-start gap-3'
                                       >
                                         <Checkbox
+                                          disabled={!canEditAdminPermissions}
                                           checked={
                                             selected[resource.resource]?.[
                                               option.action
@@ -595,7 +671,18 @@ export function UsersMutateDrawer({
             <SheetClose render={<Button variant='outline' />}>
               {t('Close')}
             </SheetClose>
-            <Button form='user-form' type='submit' disabled={isSubmitting}>
+            <Button
+              form='user-form'
+              type='submit'
+              disabled={
+                isSubmitting ||
+                (!isUpdate && !canCreateUsers) ||
+                (isUpdate &&
+                  !canEditProfile &&
+                  !canEditSecurity &&
+                  !canEditAdminPermissions)
+              }
+            >
               {isSubmitting ? t('Saving...') : t('Save changes')}
             </Button>
           </SheetFooter>
