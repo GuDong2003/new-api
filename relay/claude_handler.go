@@ -246,8 +246,7 @@ func ClaudeCountTokensHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAP
 	if err != nil {
 		return types.NewErrorWithStatusCode(err, types.ErrorCodeReadRequestBodyFailed, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
 	}
-	info.UpstreamRequestBodySize = bodyStorage.Size()
-	requestBody := common.ReaderOnly(bodyStorage)
+	requestBody := common.NewReplayableBodyReader(bodyStorage)
 
 	statusCodeMappingStr := c.GetString("status_code_mapping")
 	resp, err := adaptor.DoRequest(c, info, requestBody)

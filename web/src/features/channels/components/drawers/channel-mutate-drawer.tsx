@@ -3684,9 +3684,7 @@ export function ChannelMutateDrawer({
                       >
                         {CLIENT_IDENTITY_CHANNEL_TYPES.has(currentType) && (
                           <div
-                            id={getEditorElementId(
-                              ADVANCED_SETTINGS_SECTION_IDS.clientIdentity
-                            )}
+                            id={ADVANCED_SETTINGS_SECTION_IDS.clientIdentity}
                             className={configuredAdvancedSectionClassName(
                               'scroll-mt-4',
                               clientIdentityConfigured

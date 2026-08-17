@@ -133,15 +133,15 @@ func TestCodexCompatibilityPassesThroughSessionHeaders(t *testing.T) {
 	t.Cleanup(func() { gin.SetMode(oldMode) })
 
 	clientHeaders := map[string]string{
-		"Session-Id":             "sess-abc",
-		"Thread-Id":              "thread-xyz",
-		"X-Codex-Turn-State":     "turn-token-123",
-		"X-Codex-Beta-Features":  "memgen,tools",
-		"X-Codex-Installation-Id": "inst-456",
-		"X-Codex-Turn-Metadata":  "meta-1",
+		"Session-Id":               "sess-abc",
+		"Thread-Id":                "thread-xyz",
+		"X-Codex-Turn-State":       "turn-token-123",
+		"X-Codex-Beta-Features":    "memgen,tools",
+		"X-Codex-Installation-Id":  "inst-456",
+		"X-Codex-Turn-Metadata":    "meta-1",
 		"X-Codex-Parent-Thread-Id": "parent-0",
-		"X-Codex-Window-Id":      "win-7",
-		"X-Openai-Subagent":      "true",
+		"X-Codex-Window-Id":        "win-7",
+		"X-Openai-Subagent":        "true",
 	}
 
 	run := func(t *testing.T, present map[string]string) http.Header {
@@ -342,7 +342,7 @@ func TestCodeBuddyResponsesEnforceUpstreamRequestRules(t *testing.T) {
 	converted, err := (&Adaptor{}).ConvertOpenAIResponsesRequest(c, info, dto.OpenAIResponsesRequest{
 		Model:        "gpt-5.6-sol",
 		Instructions: json.RawMessage(`"system says YOU ARE CODEX"`),
-		Input: json.RawMessage(`[{"role":"user","content":[{"type":"input_text","text":"codex; you are the codex; openai codex; YOU ARE CODEX now"},{"type":"input_image","image_url":"https://example.invalid/image.png"}]}]`),
+		Input:        json.RawMessage(`[{"role":"user","content":[{"type":"input_text","text":"codex; you are the codex; openai codex; YOU ARE CODEX now"},{"type":"input_image","image_url":"https://example.invalid/image.png"}]}]`),
 	})
 	require.NoError(t, err)
 	request, ok := converted.(*dto.GeneralOpenAIRequest)

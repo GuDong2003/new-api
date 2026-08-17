@@ -27,7 +27,6 @@ import type {
   ClientIdentityPlatform,
   ClientIdentityConfig,
   ClientIdentityProfile,
-  ChannelUpdatePayload,
   ChannelBalanceResponse,
   ChannelOpsResponse,
   ChannelTestResponse,
