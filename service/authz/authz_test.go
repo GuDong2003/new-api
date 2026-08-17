@@ -52,7 +52,12 @@ func TestInitSeedsBuiltInRolesAndPoliciesOnce(t *testing.T) {
 	assert.False(t, Can(2, common.RoleAdminUser, ChannelSensitiveWrite))
 	assert.True(t, Can(2, common.RoleAdminUser, UserRead))
 	assert.True(t, Can(2, common.RoleAdminUser, UserProfileWrite))
+	assert.True(t, Can(2, common.RoleAdminUser, UserStatusWrite))
 	assert.True(t, Can(2, common.RoleAdminUser, UserQuotaWrite))
+	assert.False(t, Can(2, common.RoleAdminUser, UserCreate))
+	assert.False(t, Can(2, common.RoleAdminUser, UserSecurityWrite))
+	assert.False(t, Can(2, common.RoleAdminUser, UserRoleWrite))
+	assert.False(t, Can(2, common.RoleAdminUser, UserDelete))
 	assert.False(t, Can(2, common.RoleAdminUser, UserPermissionWrite))
 	assert.False(t, Can(3, common.RoleCommonUser, ChannelRead))
 }

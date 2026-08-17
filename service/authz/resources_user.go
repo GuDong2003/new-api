@@ -41,7 +41,6 @@ func init() {
 				Action:         UserActionCreate,
 				LabelKey:       "Create users",
 				DescriptionKey: "Create users below your permission level.",
-				DefaultRoles:   []string{BuiltInRoleAdmin},
 			},
 			{
 				Action:         UserActionProfileWrite,
@@ -65,19 +64,16 @@ func init() {
 				Action:         UserActionSecurityWrite,
 				LabelKey:       "Manage user security",
 				DescriptionKey: "Reset passwords, two-factor authentication, Passkeys, and bindings.",
-				DefaultRoles:   []string{BuiltInRoleAdmin},
 			},
 			{
 				Action:         UserActionRoleWrite,
 				LabelKey:       "Manage user roles",
 				DescriptionKey: "Promote or demote users.",
-				DefaultRoles:   []string{BuiltInRoleAdmin},
 			},
 			{
 				Action:         UserActionDelete,
 				LabelKey:       "Delete users",
 				DescriptionKey: "Delete users below your permission level.",
-				DefaultRoles:   []string{BuiltInRoleAdmin},
 			},
 			{
 				Action:         UserActionPermissionWrite,

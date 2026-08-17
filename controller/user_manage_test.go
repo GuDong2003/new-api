@@ -100,7 +100,7 @@ func initManageUserAuthz(t *testing.T, db *gorm.DB) {
 	t.Cleanup(func() { common.IsMasterNode = previousMaster })
 }
 
-func TestManagedUserSelfAccessUpdatesProfileAndSecurityFields(t *testing.T) {
+func TestManagedUserSelfAccessUpdatesProfileFieldsOnly(t *testing.T) {
 	db := setupManageUserTestDB(t)
 	initManageUserAuthz(t, db)
 	user := model.User{
@@ -115,7 +115,7 @@ func TestManagedUserSelfAccessUpdatesProfileAndSecurityFields(t *testing.T) {
 
 	updateRecorder := performUpdateManagedUserRequest(
 		t, user.Id, user.Role,
-		fmt.Sprintf(`{"id":%d,"username":"renamed-admin","display_name":"New Name","password":"NewPassword123","role":1,"status":2,"group":"vip","remark":"changed","email":"changed@example.com"}`, user.Id),
+		fmt.Sprintf(`{"id":%d,"username":"renamed-admin","display_name":"New Name","group":"vip","remark":"changed"}`, user.Id),
 	)
 	assert.Equal(t, http.StatusOK, updateRecorder.Code)
 	assert.Contains(t, updateRecorder.Body.String(), `"success":true`)
@@ -124,7 +124,7 @@ func TestManagedUserSelfAccessUpdatesProfileAndSecurityFields(t *testing.T) {
 	require.NoError(t, db.First(&updated, user.Id).Error)
 	assert.Equal(t, "renamed-admin", updated.Username)
 	assert.Equal(t, "New Name", updated.DisplayName)
-	assert.NotEqual(t, "existing-password-hash", updated.Password)
+	assert.Equal(t, "existing-password-hash", updated.Password)
 	assert.Equal(t, common.RoleAdminUser, updated.Role)
 	assert.Equal(t, common.UserStatusEnabled, updated.Status)
 	assert.Equal(t, "vip", updated.Group)

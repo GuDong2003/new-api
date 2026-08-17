@@ -140,20 +140,49 @@ export function UsersMutateDrawer({
 
   // Load existing data when updating
   useEffect(() => {
+    let cancelled = false
+
     if (open && isUpdate && currentRow) {
-      // For update, fetch fresh data
+      // Populate from the table row first so a failed or partial detail request
+      // cannot leave required fields (especially username) empty.
+      form.reset(transformUserToFormDefaults(currentRow))
+      setAvatarUrl(currentRow.avatar_url || '')
+
+      // Then replace the row data with the freshest details available.
       void getUser(currentRow.id)
         .then((result) => {
+          if (cancelled) return
           if (result.success && result.data) {
-            form.reset(transformUserToFormDefaults(result.data))
-            setAvatarUrl(result.data.avatar_url || '')
+            const freshUser = result.data
+            const mergedUser: User = {
+              ...currentRow,
+              ...freshUser,
+              // Keep the visible row value when an older backend response does
+              // not include a username.
+              username: freshUser.username?.trim()
+                ? freshUser.username
+                : currentRow.username,
+              display_name: freshUser.display_name ?? currentRow.display_name,
+              group: freshUser.group ?? currentRow.group,
+              remark: freshUser.remark ?? currentRow.remark,
+            }
+            form.reset(transformUserToFormDefaults(mergedUser))
+            setAvatarUrl(freshUser.avatar_url ?? currentRow.avatar_url ?? '')
+          } else {
+            toast.error(result.message || t(ERROR_MESSAGES.UNEXPECTED))
           }
         })
-        .catch(() => toast.error(t(ERROR_MESSAGES.UNEXPECTED)))
+        .catch(() => {
+          if (!cancelled) toast.error(t(ERROR_MESSAGES.UNEXPECTED))
+        })
     } else if (open && !isUpdate) {
       // For create, reset to defaults
       form.reset(USER_FORM_DEFAULT_VALUES)
       setAvatarUrl('')
+    }
+
+    return () => {
+      cancelled = true
     }
   }, [open, isUpdate, currentRow, form, t])
 
@@ -188,6 +217,11 @@ export function UsersMutateDrawer({
     hasUserPermission(currentUser, USER_PERMISSION_ACTIONS.PERMISSION_WRITE) &&
     targetIsAdmin &&
     targetIsManageable
+  const permissionResources = [...permissionCatalog.resources].sort((a, b) => {
+    if (a.resource === ADMIN_PERMISSION_RESOURCES.USER) return -1
+    if (b.resource === ADMIN_PERMISSION_RESOURCES.USER) return 1
+    return 0
+  })
 
   const onSubmit = async (data: UserFormValues) => {
     if (!isUpdate) {
@@ -566,7 +600,7 @@ export function UsersMutateDrawer({
                         return (
                           <FormItem>
                             <div className='space-y-3'>
-                              {permissionCatalog.resources.map((resource) => (
+                              {permissionResources.map((resource) => (
                                 <div
                                   key={resource.resource}
                                   className='space-y-2 rounded-md border p-3'
