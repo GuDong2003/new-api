@@ -115,6 +115,7 @@ export interface ChannelSettings {
 }
 
 export interface ChannelOtherSettings {
+  client_identity?: ClientIdentityConfig
   azure_responses_version?: string
   vertex_key_type?: 'json' | 'api_key'
   openrouter_enterprise?: boolean
@@ -133,6 +134,46 @@ export interface ChannelOtherSettings {
   upstream_model_update_last_check_time?: number
   upstream_model_update_last_detected_models?: string[]
   advanced_custom?: AdvancedCustomConfig
+}
+
+export type ClientIdentityProfile =
+  | 'none'
+  | 'codex_legacy'
+  | 'codex_compatibility'
+  | 'claude_code'
+  | 'codebuddy'
+  | 'codex_cli'
+  | 'claude_cli'
+  | 'codebuddy_cli'
+  | 'workbuddy_desktop'
+
+export type ClientIdentityPlatform =
+  | 'windows-x64'
+  | 'macos-x64'
+  | 'macos-arm64'
+  | 'linux-x64'
+  | 'linux-arm64'
+
+export interface ClientIdentitySourceMetadata {
+  kind?: 'npm' | 'workbuddy' | 'manual' | 'official' | 'community'
+  package?: string
+  platform?: ClientIdentityPlatform
+  checked_at?: number
+}
+
+export interface ClientIdentityConfig {
+  client_type?:
+    | 'none'
+    | 'codex'
+    | 'claude'
+    | 'claude_code'
+    | 'codebuddy'
+    | 'workbuddy'
+  profile?: ClientIdentityProfile
+  version?: string
+  platform?: ClientIdentityPlatform
+  context_1m_enabled?: boolean
+  source?: ClientIdentitySourceMetadata
 }
 
 export interface AdvancedCustomConfig {

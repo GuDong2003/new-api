@@ -18,13 +18,15 @@ func GetEndpointTypesByChannelType(channelType int, modelName string) []constant
 	//	endpointTypes = []constant.EndpointType{constant.EndpointTypeJimeng}
 	case constant.ChannelTypeAws:
 		fallthrough
-	case constant.ChannelTypeAnthropic:
+	case constant.ChannelTypeAnthropic, constant.ChannelTypeClaudeCode:
 		endpointTypes = []constant.EndpointType{constant.EndpointTypeAnthropic, constant.EndpointTypeOpenAI}
 	case constant.ChannelTypeVertexAi:
 		fallthrough
 	case constant.ChannelTypeGemini:
 		endpointTypes = []constant.EndpointType{constant.EndpointTypeGemini, constant.EndpointTypeOpenAI}
 	case constant.ChannelTypeOpenRouter: // OpenRouter 只支持 OpenAI 端点
+		endpointTypes = []constant.EndpointType{constant.EndpointTypeOpenAI}
+	case constant.ChannelTypeCodeBuddy:
 		endpointTypes = []constant.EndpointType{constant.EndpointTypeOpenAI}
 	case constant.ChannelTypeXai:
 		endpointTypes = []constant.EndpointType{constant.EndpointTypeOpenAI, constant.EndpointTypeOpenAIResponse}
@@ -45,6 +47,8 @@ func GetEndpointTypesByChannelType(channelType int, modelName string) []constant
 			constant.EndpointTypeOpenAIResponseCompact,
 			constant.EndpointTypeOpenAIAlphaSearch,
 		}
+	case constant.ChannelTypeCodexCompatibility:
+		endpointTypes = []constant.EndpointType{constant.EndpointTypeOpenAIResponse}
 	default:
 		if IsOpenAIResponseOnlyModel(modelName) {
 			endpointTypes = []constant.EndpointType{constant.EndpointTypeOpenAIResponse}
@@ -52,7 +56,7 @@ func GetEndpointTypesByChannelType(channelType int, modelName string) []constant
 			endpointTypes = []constant.EndpointType{constant.EndpointTypeOpenAI}
 		}
 	}
-	if IsImageGenerationModel(modelName) {
+	if channelType != constant.ChannelTypeCodeBuddy && IsImageGenerationModel(modelName) {
 		// add to first
 		endpointTypes = append([]constant.EndpointType{constant.EndpointTypeImageGeneration}, endpointTypes...)
 	}

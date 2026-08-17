@@ -131,7 +131,8 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 				if len(systemContents) == 0 {
 					request.System = []dto.ClaudeMediaMessage{newSystem}
 				} else {
-					request.System = append([]dto.ClaudeMediaMessage{newSystem}, systemContents...)
+					// 追加到末尾，保持原有 system[0]（计费/归属块，含 x-anthropic-billing-header）在最前。
+					request.System = append(systemContents, newSystem)
 				}
 			}
 		}
@@ -226,5 +227,55 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 	}
 
 	service.PostTextConsumeQuota(c, info, usage.(*dto.Usage), nil)
+	return nil
+}
+
+// ClaudeCountTokensHelper forwards POST /v1/messages/count_tokens to the
+// upstream and passes the input_tokens response back to the client. It is
+// used by Claude Code for token budgeting and does not consume quota.
+func ClaudeCountTokensHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types.NewAPIError) {
+	info.InitChannelMeta(c)
+
+	adaptor := GetAdaptor(info.ApiType)
+	if adaptor == nil {
+		return types.NewError(fmt.Errorf("invalid api type: %d", info.ApiType), types.ErrorCodeInvalidApiType, types.ErrOptionWithSkipRetry())
+	}
+	adaptor.Init(info)
+
+	bodyStorage, err := common.GetBodyStorage(c)
+	if err != nil {
+		return types.NewErrorWithStatusCode(err, types.ErrorCodeReadRequestBodyFailed, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
+	}
+	requestBody := common.NewReplayableBodyReader(bodyStorage)
+
+	statusCodeMappingStr := c.GetString("status_code_mapping")
+	resp, err := adaptor.DoRequest(c, info, requestBody)
+	if err != nil {
+		return types.NewOpenAIError(err, types.ErrorCodeDoRequestFailed, http.StatusInternalServerError)
+	}
+	var httpResp *http.Response
+	if resp != nil {
+		httpResp = resp.(*http.Response)
+	}
+	if httpResp == nil {
+		return types.NewError(fmt.Errorf("empty upstream response"), types.ErrorCodeBadResponse)
+	}
+	defer service.CloseResponseBodyGracefully(httpResp)
+
+	if httpResp.StatusCode != http.StatusOK {
+		newAPIError = service.RelayErrorHandler(c.Request.Context(), httpResp, false)
+		service.ResetStatusCode(newAPIError, statusCodeMappingStr)
+		return newAPIError
+	}
+
+	// The upstream returns {"input_tokens": N}; forward it verbatim.
+	responseBody, err := io.ReadAll(httpResp.Body)
+	if err != nil {
+		return types.NewOpenAIError(err, types.ErrorCodeReadResponseBodyFailed, http.StatusInternalServerError)
+	}
+	service.IOCopyBytesGracefully(c, httpResp, responseBody)
+
+	// count_tokens only estimates; consume zero quota so any pre-charge is refunded.
+	service.PostTextConsumeQuota(c, info, &dto.Usage{}, nil)
 	return nil
 }

@@ -122,6 +122,104 @@ func TestResponsesRequestToChatCompletionsRequestMultimodalInput(t *testing.T) {
 	assert.Equal(t, "https://example.test/v.mp4", parts[4].GetVideoUrl().Url)
 }
 
+func TestResponsesRequestToChatCompletionsRequestInputImagesMarshalAsChatImageURLs(t *testing.T) {
+	tests := []struct {
+		name     string
+		imageURL string
+		detail   string
+		wantJSON string
+	}{
+		{
+			name:     "remote URL",
+			imageURL: "https://example.test/a.png",
+			detail:   "low",
+			wantJSON: `{
+				"model": "gpt-test",
+				"messages": [{
+					"role": "user",
+					"content": [{
+						"type": "image_url",
+						"image_url": {"url": "https://example.test/a.png", "detail": "low"}
+					}]
+				}]
+			}`,
+		},
+		{
+			name:     "data URL",
+			imageURL: "data:image/png;base64,aGVsbG8=",
+			detail:   "high",
+			wantJSON: `{
+				"model": "gpt-test",
+				"messages": [{
+					"role": "user",
+					"content": [{
+						"type": "image_url",
+						"image_url": {"url": "data:image/png;base64,aGVsbG8=", "detail": "high"}
+					}]
+				}]
+			}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ResponsesRequestToChatCompletionsRequest(&dto.OpenAIResponsesRequest{
+				Model: "gpt-test",
+				Input: mustRawMessage(t, []map[string]any{
+					{
+						"role": "user",
+						"content": []map[string]any{
+							{"type": "input_image", "image_url": tt.imageURL, "detail": tt.detail},
+						},
+					},
+				}),
+			})
+			require.NoError(t, err)
+
+			encoded, err := kitutil.Marshal(got)
+			require.NoError(t, err)
+			assert.JSONEq(t, tt.wantJSON, string(encoded))
+		})
+	}
+}
+
+func TestResponsesImagePartToChatImageURLCopiesObjectAndMergesDetail(t *testing.T) {
+	tests := []struct {
+		name     string
+		imageURL map[string]any
+		detail   string
+		want     map[string]any
+	}{
+		{
+			name:     "adds top-level detail when absent",
+			imageURL: map[string]any{"url": "https://example.test/a.png", "provider_option": true},
+			detail:   "low",
+			want:     map[string]any{"url": "https://example.test/a.png", "provider_option": true, "detail": "low"},
+		},
+		{
+			name:     "preserves object detail",
+			imageURL: map[string]any{"url": "https://example.test/a.png", "detail": "high", "provider_option": true},
+			detail:   "low",
+			want:     map[string]any{"url": "https://example.test/a.png", "detail": "high", "provider_option": true},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			before := mustRawMessage(t, tt.imageURL)
+			part := map[string]any{"image_url": tt.imageURL, "detail": tt.detail}
+
+			got, ok := responsesImagePartToChatImageURL(part).(map[string]any)
+			require.True(t, ok)
+			assert.Equal(t, tt.want, got)
+			assert.JSONEq(t, string(before), string(mustRawMessage(t, tt.imageURL)))
+
+			got["url"] = "https://example.test/changed.png"
+			assert.Equal(t, "https://example.test/a.png", tt.imageURL["url"])
+		})
+	}
+}
+
 func TestResponsesRequestToChatCompletionsRequestAssistantTextAndFunctionCallCoexist(t *testing.T) {
 	got, err := ResponsesRequestToChatCompletionsRequest(&dto.OpenAIResponsesRequest{
 		Model: "gpt-test",

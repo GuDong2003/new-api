@@ -578,3 +578,399 @@ func TestChannelSettingsValidateHTTPTransport(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "http2_connection_shards")
 }
+
+func TestClientIdentityDefaultsKeepCodexProfilesDistinct(t *testing.T) {
+	legacy := DefaultClientIdentityConfig(ClientIdentityChannelTypeCodexLegacy)
+	compatible := DefaultClientIdentityConfig(ClientIdentityChannelTypeCodexCompatible)
+	standardOpenAI := DefaultClientIdentityConfig(ClientIdentityChannelTypeOpenAI)
+	standardAnthropic := DefaultClientIdentityConfig(ClientIdentityChannelTypeAnthropic)
+
+	require.Equal(t, ClientIdentityClientTypeCodex, legacy.ClientType)
+	require.Equal(t, ClientIdentityProfileCodexLegacy, legacy.Profile)
+	require.Equal(t, ClientIdentityProfileCodexCompatibility, compatible.Profile)
+	require.Equal(t, ClientIdentityClientTypeNone, standardOpenAI.ClientType)
+	require.Equal(t, ClientIdentityProfileNone, standardOpenAI.Profile)
+	require.Equal(t, ClientIdentityClientTypeNone, standardAnthropic.ClientType)
+	require.Equal(t, ClientIdentityProfileNone, standardAnthropic.Profile)
+	require.NotEqual(t, legacy.Profile, compatible.Profile)
+	require.Empty(t, legacy.Version)
+	require.Empty(t, legacy.Platform)
+	require.Empty(t, standardOpenAI.Version)
+	require.Empty(t, standardOpenAI.Platform)
+	require.Empty(t, standardAnthropic.Version)
+	require.Empty(t, standardAnthropic.Platform)
+}
+
+func TestClientIdentityStandardChannelsAcceptOnlyTheirTemplateProfile(t *testing.T) {
+	tests := []struct {
+		name        string
+		channelType int
+		config      ClientIdentityConfig
+		wantErr     string
+	}{
+		{
+			name:        "openai Codex CLI profile",
+			channelType: ClientIdentityChannelTypeOpenAI,
+			config: ClientIdentityConfig{
+				ClientType: ClientIdentityClientTypeCodex,
+				Profile:    ClientIdentityProfileCodexCLI,
+				Version:    "0.147.0",
+				Platform:   ClientIdentityPlatformLinuxX64,
+			},
+		},
+		{
+			name:        "anthropic Claude CLI profile",
+			channelType: ClientIdentityChannelTypeAnthropic,
+			config: ClientIdentityConfig{
+				ClientType: ClientIdentityClientTypeClaude,
+				Profile:    ClientIdentityProfileClaudeCLI,
+				Version:    "2.1.224",
+				Platform:   ClientIdentityPlatformMacOSArm64,
+			},
+		},
+		{
+			name:        "openai rejects legacy Codex profile",
+			channelType: ClientIdentityChannelTypeOpenAI,
+			config: ClientIdentityConfig{
+				ClientType: ClientIdentityClientTypeCodex,
+				Profile:    ClientIdentityProfileCodexLegacy,
+			},
+			wantErr: "not supported",
+		},
+		{
+			name:        "anthropic rejects deep WorkBuddy profile",
+			channelType: ClientIdentityChannelTypeAnthropic,
+			config: ClientIdentityConfig{
+				ClientType: ClientIdentityClientTypeCodeBuddy,
+				Profile:    ClientIdentityProfileCodeBuddy,
+			},
+			wantErr: "not supported",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.config.Validate(tt.channelType)
+			if tt.wantErr == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.wantErr)
+		})
+	}
+}
+
+func TestClientIdentityLegacySettingsRoundTripWithoutClientIdentity(t *testing.T) {
+	legacy := `{"aws_key_type":"ak_sk","disable_store":true}`
+	var settings ChannelOtherSettings
+	require.NoError(t, json.Unmarshal([]byte(legacy), &settings))
+	require.Nil(t, settings.ClientIdentity)
+	require.Equal(t, AwsKeyTypeAKSK, settings.AwsKeyType)
+	require.True(t, settings.DisableStore)
+
+	encoded, err := json.Marshal(settings)
+	require.NoError(t, err)
+	assert.NotContains(t, string(encoded), "client_identity")
+}
+
+func TestClientIdentityNormalizeAndValidate(t *testing.T) {
+	config := ClientIdentityConfig{
+		Version:  " 2.1.214 ",
+		Platform: "darwin-arm64-user",
+	}
+	require.NoError(t, config.Normalize(ClientIdentityChannelTypeClaudeCode))
+	assert.Equal(t, ClientIdentityClientTypeClaudeCode, config.ClientType)
+	assert.Equal(t, ClientIdentityProfileClaudeCode, config.Profile)
+	assert.Equal(t, "2.1.214", config.Version)
+	assert.Equal(t, ClientIdentityPlatformMacOSArm64, config.Platform)
+
+	workBuddy := ClientIdentityConfig{Version: "5.3.8.34705286", Platform: "win32-x64-user"}
+	require.NoError(t, workBuddy.Normalize(ClientIdentityChannelTypeCodeBuddy))
+	assert.Equal(t, ClientIdentityPlatformWindowsX64, workBuddy.Platform)
+	assert.Equal(t, ClientIdentityProfileCodeBuddy, workBuddy.Profile)
+}
+
+func TestClientIdentityContext1MJSONRoundTripAndZeroValue(t *testing.T) {
+	config := ClientIdentityConfig{
+		Profile:          ClientIdentityProfileClaudeCode,
+		Context1MEnabled: true,
+	}
+
+	assert.False(t, config.IsZero())
+	assert.True(t, (ClientIdentityConfig{}).IsZero())
+	assert.True(t, (ClientIdentityConfig{Context1MEnabled: false}).IsZero())
+
+	encoded, err := json.Marshal(config)
+	require.NoError(t, err)
+	assert.Contains(t, string(encoded), `"context_1m_enabled":true`)
+
+	var decoded ClientIdentityConfig
+	require.NoError(t, json.Unmarshal(encoded, &decoded))
+	assert.Equal(t, config, decoded)
+}
+
+func TestClientIdentityContext1MRequiresClaudeCodeProfile(t *testing.T) {
+	tests := []struct {
+		name        string
+		channelType int
+		config      ClientIdentityConfig
+	}{
+		{
+			name:        "none profile",
+			channelType: ClientIdentityChannelTypeOpenAI,
+			config: ClientIdentityConfig{
+				Profile:          ClientIdentityProfileNone,
+				Context1MEnabled: true,
+			},
+		},
+		{
+			name:        "codex profile",
+			channelType: ClientIdentityChannelTypeCodexCompatible,
+			config: ClientIdentityConfig{
+				Profile:          ClientIdentityProfileCodexCompatibility,
+				Context1MEnabled: true,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.config.Validate(tt.channelType)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "context_1m_enabled")
+		})
+	}
+
+	valid := ClientIdentityConfig{
+		Profile:          ClientIdentityProfileClaudeCode,
+		Context1MEnabled: true,
+	}
+	require.NoError(t, valid.Validate(ClientIdentityChannelTypeClaudeCode))
+}
+
+func TestClientIdentityNormalizeRejectsNPMPrereleases(t *testing.T) {
+	tests := []struct {
+		name        string
+		channelType int
+		profile     string
+		version     string
+	}{
+		{
+			name:        "codex legacy alpha",
+			channelType: ClientIdentityChannelTypeCodexLegacy,
+			profile:     ClientIdentityProfileCodexLegacy,
+			version:     "1.4.0-alpha.1",
+		},
+		{
+			name:        "codex compatibility beta",
+			channelType: ClientIdentityChannelTypeCodexCompatible,
+			profile:     ClientIdentityProfileCodexCompatibility,
+			version:     "1.4.0-beta.1",
+		},
+		{
+			name:        "codex cli release candidate",
+			channelType: ClientIdentityChannelTypeOpenAI,
+			profile:     ClientIdentityProfileCodexCLI,
+			version:     "1.4.0-rc.1",
+		},
+		{
+			name:        "claude code prerelease",
+			channelType: ClientIdentityChannelTypeClaudeCode,
+			profile:     ClientIdentityProfileClaudeCode,
+			version:     "2.1.214-beta",
+		},
+		{
+			name:        "claude cli prerelease",
+			channelType: ClientIdentityChannelTypeAnthropic,
+			profile:     ClientIdentityProfileClaudeCLI,
+			version:     "2.1.214-alpha",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := ClientIdentityConfig{
+				Profile:  tt.profile,
+				Version:  tt.version,
+				Platform: ClientIdentityPlatformLinuxX64,
+			}
+			err := config.Normalize(tt.channelType)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "prerelease")
+		})
+	}
+}
+
+func TestClientIdentityNormalizeAcceptsStableNPMVersions(t *testing.T) {
+	tests := []struct {
+		name        string
+		channelType int
+		profile     string
+		version     string
+	}{
+		{
+			name:        "codex legacy",
+			channelType: ClientIdentityChannelTypeCodexLegacy,
+			profile:     ClientIdentityProfileCodexLegacy,
+			version:     "1.4.0",
+		},
+		{
+			name:        "codex compatibility with metadata",
+			channelType: ClientIdentityChannelTypeCodexCompatible,
+			profile:     ClientIdentityProfileCodexCompatibility,
+			version:     "1.4.0+foo-linux-x64",
+		},
+		{
+			name:        "codex cli",
+			channelType: ClientIdentityChannelTypeOpenAI,
+			profile:     ClientIdentityProfileCodexCLI,
+			version:     "0.147.0",
+		},
+		{
+			name:        "claude code",
+			channelType: ClientIdentityChannelTypeClaudeCode,
+			profile:     ClientIdentityProfileClaudeCode,
+			version:     "2.1.214+build.7",
+		},
+		{
+			name:        "claude cli",
+			channelType: ClientIdentityChannelTypeAnthropic,
+			profile:     ClientIdentityProfileClaudeCLI,
+			version:     "2.1.214",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := ClientIdentityConfig{
+				Profile:  tt.profile,
+				Version:  tt.version,
+				Platform: ClientIdentityPlatformLinuxX64,
+			}
+			require.NoError(t, config.Normalize(tt.channelType))
+		})
+	}
+}
+
+func TestClientIdentityNormalizeRequiresMatchingPlatformForNPMBuilds(t *testing.T) {
+	tests := []struct {
+		name     string
+		platform string
+		version  string
+		wantErr  string
+	}{
+		{
+			name:     "matching platform build",
+			platform: ClientIdentityPlatformLinuxX64,
+			version:  "1.4.0-linux-x64+foo",
+		},
+		{
+			name:    "missing platform",
+			version: "1.4.0-linux-x64",
+			wantErr: "requires an explicit platform",
+		},
+		{
+			name:     "wrong platform",
+			platform: ClientIdentityPlatformWindowsX64,
+			version:  "1.4.0-linux-x64",
+			wantErr:  "does not match platform",
+		},
+		{
+			name:     "metadata suffix is not a platform build",
+			platform: ClientIdentityPlatformWindowsX64,
+			version:  "1.4.0+foo-linux-x64",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := ClientIdentityConfig{
+				Profile:  ClientIdentityProfileCodexCompatibility,
+				Version:  tt.version,
+				Platform: tt.platform,
+			}
+			err := config.Normalize(ClientIdentityChannelTypeCodexCompatible)
+			if tt.wantErr == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.wantErr)
+		})
+	}
+}
+
+func TestValidateClientIdentityVersionRemainsSyntaxOnlyForNPMVersions(t *testing.T) {
+	for _, version := range []string{
+		"1.4.0-alpha.1",
+		"1.4.0-linux-x64+foo",
+		"1.4.0+foo-linux-x64",
+	} {
+		t.Run(version, func(t *testing.T) {
+			require.NoError(t, ValidateClientIdentityVersion(ClientIdentityProfileCodexCompatibility, version))
+		})
+	}
+}
+
+func TestClientIdentityRejectsInvalidValues(t *testing.T) {
+	tests := []struct {
+		name        string
+		channelType int
+		config      ClientIdentityConfig
+		want        string
+	}{
+		{
+			name:        "codex profiles cannot be merged",
+			channelType: ClientIdentityChannelTypeCodexLegacy,
+			config:      ClientIdentityConfig{Profile: ClientIdentityProfileCodexCompatibility},
+			want:        "not supported",
+		},
+		{
+			name:        "npm versions require semver",
+			channelType: ClientIdentityChannelTypeCodexCompatible,
+			config:      ClientIdentityConfig{Version: "0.146"},
+			want:        "invalid client identity version",
+		},
+		{
+			name:        "platform is allowlisted",
+			channelType: ClientIdentityChannelTypeClaudeCode,
+			config:      ClientIdentityConfig{Platform: "freebsd-x64"},
+			want:        "invalid client identity platform",
+		},
+		{
+			name:        "codebuddy product source is not npm",
+			channelType: ClientIdentityChannelTypeCodeBuddy,
+			config: ClientIdentityConfig{
+				Version: "5.3.8.34705286",
+				Source:  &ClientIdentitySourceMetadata{Kind: ClientIdentitySourceNPM},
+			},
+			want: "invalid client identity source kind",
+		},
+		{
+			name:        "source package is fixed",
+			channelType: ClientIdentityChannelTypeCodexCompatible,
+			config: ClientIdentityConfig{
+				Version: "0.146.0",
+				Source:  &ClientIdentitySourceMetadata{Kind: ClientIdentitySourceNPM, Package: "evil/package"},
+			},
+			want: "invalid client identity source package",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.config.Validate(tt.channelType)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.want)
+		})
+	}
+}
+
+func TestClientIdentityUnsupportedChannelRejectsNonEmptyConfig(t *testing.T) {
+	config := ClientIdentityConfig{Version: "1.2.3"}
+	err := config.Validate(2)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not supported")
+	assert.False(t, config.SupportsChannelType(2))
+}

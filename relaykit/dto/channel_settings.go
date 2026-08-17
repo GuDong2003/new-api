@@ -57,6 +57,564 @@ const (
 	MaxHTTP2ConnectionShards = 8
 )
 
+// Client identity channel type values intentionally mirror the root module's
+// channel constants. relaykit must stay independently buildable and therefore
+// cannot import github.com/QuantumNous/new-api/constant.
+const (
+	ClientIdentityChannelTypeOpenAI          = 1
+	ClientIdentityChannelTypeAnthropic       = 14
+	ClientIdentityChannelTypeCodexLegacy     = 57
+	ClientIdentityChannelTypeCodexCompatible = 61
+	ClientIdentityChannelTypeClaudeCode      = 62
+	ClientIdentityChannelTypeCodeBuddy       = 63
+	ClientIdentityClientTypeNone             = "none"
+	ClientIdentityClientTypeCodex            = "codex"
+	ClientIdentityClientTypeClaude           = "claude"
+	ClientIdentityClientTypeClaudeCode       = "claude_code"
+	ClientIdentityClientTypeCodeBuddy        = "codebuddy"
+	ClientIdentityClientTypeWorkBuddy        = "workbuddy"
+	ClientIdentityProfileNone                = "none"
+	ClientIdentityProfileCodexLegacy         = "codex_legacy"
+	ClientIdentityProfileCodexCompatibility  = "codex_compatibility"
+	ClientIdentityProfileClaudeCode          = "claude_code"
+	ClientIdentityProfileCodeBuddy           = "codebuddy"
+	ClientIdentityProfileCodexCLI            = "codex_cli"
+	ClientIdentityProfileClaudeCLI           = "claude_cli"
+	ClientIdentityProfileCodeBuddyCLI        = "codebuddy_cli"
+	ClientIdentityProfileWorkBuddyDesktop    = "workbuddy_desktop"
+	ClientIdentitySourceNPM                  = "npm"
+	ClientIdentitySourceWorkBuddy            = "workbuddy"
+	ClientIdentitySourceManual               = "manual"
+	ClientIdentitySourceOfficial             = "official"
+	ClientIdentitySourceCommunity            = "community"
+	ClientIdentityNPMCodexPackage            = "@openai/codex"
+	ClientIdentityNPMClaudeCodePackage       = "@anthropic-ai/claude-code"
+	ClientIdentityPlatformWindowsX64         = "windows-x64"
+	ClientIdentityPlatformMacOSX64           = "macos-x64"
+	ClientIdentityPlatformMacOSArm64         = "macos-arm64"
+	ClientIdentityPlatformLinuxX64           = "linux-x64"
+	ClientIdentityPlatformLinuxArm64         = "linux-arm64"
+)
+
+// ClientIdentitySourceMetadata records where a selected version came from.
+// It is deliberately limited to safe provenance data; client identity settings
+// never contain arbitrary request headers or transport options.
+type ClientIdentitySourceMetadata struct {
+	Kind      string `json:"kind,omitempty"`
+	Package   string `json:"package,omitempty"`
+	Platform  string `json:"platform,omitempty"`
+	CheckedAt int64  `json:"checked_at,omitempty"`
+}
+
+// ClientIdentityConfig is the persisted, channel-scoped client identity
+// contract. An absent client_identity object, or an object with only empty
+// values, keeps the legacy runtime defaults unchanged.
+type ClientIdentityConfig struct {
+	ClientType       string                        `json:"client_type,omitempty"`
+	Profile          string                        `json:"profile,omitempty"`
+	Version          string                        `json:"version,omitempty"`
+	Platform         string                        `json:"platform,omitempty"`
+	Context1MEnabled bool                          `json:"context_1m_enabled,omitempty"`
+	Source           *ClientIdentitySourceMetadata `json:"source,omitempty"`
+}
+
+func (c ClientIdentityConfig) isEmpty() bool {
+	return strings.TrimSpace(c.ClientType) == "" &&
+		strings.TrimSpace(c.Profile) == "" &&
+		strings.TrimSpace(c.Version) == "" &&
+		strings.TrimSpace(c.Platform) == "" &&
+		!c.Context1MEnabled &&
+		(c.Source == nil || c.Source.isEmpty())
+}
+
+// IsZero reports whether the config carries no identity or provenance data.
+// It is useful to preserve the exact legacy runtime behavior for absent
+// settings.
+func (c ClientIdentityConfig) IsZero() bool {
+	return c.isEmpty()
+}
+
+func (s *ClientIdentitySourceMetadata) isEmpty() bool {
+	return s == nil || (strings.TrimSpace(s.Kind) == "" &&
+		strings.TrimSpace(s.Package) == "" &&
+		strings.TrimSpace(s.Platform) == "" &&
+		s.CheckedAt == 0)
+}
+
+// DefaultClientIdentityConfig returns the profile associated with a supported
+// channel. Standard channels intentionally default to no client so their
+// normal protocol/adaptor behavior remains unchanged.
+func DefaultClientIdentityConfig(channelType int) ClientIdentityConfig {
+	switch channelType {
+	case ClientIdentityChannelTypeOpenAI:
+		return ClientIdentityConfig{
+			ClientType: ClientIdentityClientTypeNone,
+			Profile:    ClientIdentityProfileNone,
+		}
+	case ClientIdentityChannelTypeAnthropic:
+		return ClientIdentityConfig{
+			ClientType: ClientIdentityClientTypeNone,
+			Profile:    ClientIdentityProfileNone,
+		}
+	case ClientIdentityChannelTypeCodexLegacy:
+		return ClientIdentityConfig{
+			ClientType: ClientIdentityClientTypeCodex,
+			Profile:    ClientIdentityProfileCodexLegacy,
+		}
+	case ClientIdentityChannelTypeCodexCompatible:
+		return ClientIdentityConfig{
+			ClientType: ClientIdentityClientTypeCodex,
+			Profile:    ClientIdentityProfileCodexCompatibility,
+		}
+	case ClientIdentityChannelTypeClaudeCode:
+		return ClientIdentityConfig{
+			ClientType: ClientIdentityClientTypeClaudeCode,
+			Profile:    ClientIdentityProfileClaudeCode,
+		}
+	case ClientIdentityChannelTypeCodeBuddy:
+		return ClientIdentityConfig{
+			ClientType: ClientIdentityClientTypeCodeBuddy,
+			Profile:    ClientIdentityProfileCodeBuddy,
+		}
+	default:
+		return ClientIdentityConfig{}
+	}
+}
+
+// SupportsClientIdentityChannelType reports whether a channel has a built-in
+// client identity profile.
+func SupportsClientIdentityChannelType(channelType int) bool {
+	return channelType == ClientIdentityChannelTypeOpenAI ||
+		channelType == ClientIdentityChannelTypeAnthropic ||
+		channelType == ClientIdentityChannelTypeCodexLegacy ||
+		channelType == ClientIdentityChannelTypeCodexCompatible ||
+		channelType == ClientIdentityChannelTypeClaudeCode ||
+		channelType == ClientIdentityChannelTypeCodeBuddy
+}
+
+// SupportsChannelType reports whether this config is valid for channelType.
+// An empty config is considered supported for a supported channel because it
+// represents the legacy default.
+func (c ClientIdentityConfig) SupportsChannelType(channelType int) bool {
+	if !SupportsClientIdentityChannelType(channelType) {
+		return false
+	}
+	return c.Validate(channelType) == nil
+}
+
+// ClientIdentityProfileForChannelType returns the explicit profile for a
+// channel. The two Codex profiles intentionally remain distinct.
+func ClientIdentityProfileForChannelType(channelType int) string {
+	return DefaultClientIdentityConfig(channelType).Profile
+}
+
+// ClientIdentityChannelTypeForProfile returns the canonical compatibility
+// channel used to validate a profile for the version-source API. Standard
+// OpenAI and Anthropic channels reuse those same profiles at runtime.
+func ClientIdentityChannelTypeForProfile(profile string) int {
+	switch profile {
+	case ClientIdentityProfileNone,
+		ClientIdentityProfileCodexCLI,
+		ClientIdentityProfileClaudeCLI,
+		ClientIdentityProfileCodeBuddyCLI,
+		ClientIdentityProfileWorkBuddyDesktop:
+		return ClientIdentityChannelTypeOpenAI
+	case ClientIdentityProfileCodexLegacy:
+		return ClientIdentityChannelTypeCodexLegacy
+	case ClientIdentityProfileCodexCompatibility:
+		return ClientIdentityChannelTypeCodexCompatible
+	case ClientIdentityProfileClaudeCode:
+		return ClientIdentityChannelTypeClaudeCode
+	case ClientIdentityProfileCodeBuddy:
+		return ClientIdentityChannelTypeCodeBuddy
+	default:
+		return 0
+	}
+}
+
+func clientIdentityClientTypeForProfile(profile string) string {
+	switch profile {
+	case ClientIdentityProfileNone:
+		return ClientIdentityClientTypeNone
+	case ClientIdentityProfileCodexLegacy, ClientIdentityProfileCodexCompatibility:
+		return ClientIdentityClientTypeCodex
+	case ClientIdentityProfileCodexCLI:
+		return ClientIdentityClientTypeCodex
+	case ClientIdentityProfileClaudeCLI:
+		return ClientIdentityClientTypeClaude
+	case ClientIdentityProfileClaudeCode:
+		return ClientIdentityClientTypeClaudeCode
+	case ClientIdentityProfileCodeBuddy, ClientIdentityProfileCodeBuddyCLI:
+		return ClientIdentityClientTypeCodeBuddy
+	case ClientIdentityProfileWorkBuddyDesktop:
+		return ClientIdentityClientTypeWorkBuddy
+	default:
+		return ""
+	}
+}
+
+// NormalizeClientIdentityProfile validates and canonicalizes a profile used by
+// the version-source API.
+func NormalizeClientIdentityProfile(profile string) (string, error) {
+	profile = strings.ToLower(strings.TrimSpace(profile))
+	switch profile {
+	case ClientIdentityProfileNone,
+		ClientIdentityProfileCodexLegacy,
+		ClientIdentityProfileCodexCompatibility,
+		ClientIdentityProfileClaudeCode,
+		ClientIdentityProfileCodeBuddy,
+		ClientIdentityProfileCodexCLI,
+		ClientIdentityProfileClaudeCLI,
+		ClientIdentityProfileCodeBuddyCLI,
+		ClientIdentityProfileWorkBuddyDesktop:
+		return profile, nil
+	default:
+		return "", fmt.Errorf("invalid client identity profile: %s", profile)
+	}
+}
+
+// NormalizeClientIdentityPlatform validates and canonicalizes the safe
+// platform vocabulary. Official WorkBuddy platform identifiers are accepted as
+// input aliases and normalized to the product-neutral values persisted in a
+// channel setting.
+func NormalizeClientIdentityPlatform(platform string) (string, error) {
+	platform = strings.ToLower(strings.TrimSpace(platform))
+	switch platform {
+	case "":
+		return "", nil
+	case ClientIdentityPlatformWindowsX64, "win32-x64-user", "workbuddy-win32-x64-user":
+		return ClientIdentityPlatformWindowsX64, nil
+	case ClientIdentityPlatformMacOSX64, "darwin-x64-user", "workbuddy-darwin-x64-user":
+		return ClientIdentityPlatformMacOSX64, nil
+	case ClientIdentityPlatformMacOSArm64, "darwin-arm64-user", "workbuddy-darwin-arm64-user":
+		return ClientIdentityPlatformMacOSArm64, nil
+	case ClientIdentityPlatformLinuxX64, ClientIdentityPlatformLinuxArm64:
+		return platform, nil
+	default:
+		return "", fmt.Errorf("invalid client identity platform: %s", platform)
+	}
+}
+
+// WorkBuddyUpdatePlatform maps a normalized platform to the official update
+// API query value. There is intentionally no CodeBuddy npm fallback for this
+// product version source.
+func WorkBuddyUpdatePlatform(platform string) (string, error) {
+	normalized, err := NormalizeClientIdentityPlatform(platform)
+	if err != nil {
+		return "", err
+	}
+	if normalized == "" {
+		normalized = ClientIdentityPlatformWindowsX64
+	}
+	switch normalized {
+	case ClientIdentityPlatformWindowsX64:
+		return "workbuddy-win32-x64-user", nil
+	default:
+		return "", fmt.Errorf("client identity platform %s is not supported by WorkBuddy update service", normalized)
+	}
+}
+
+// ClientIdentityPlatformRuntime returns the conventional OS and architecture
+// labels used by the supported client identity headers.
+func ClientIdentityPlatformRuntime(platform string) (string, string, bool) {
+	normalized, err := NormalizeClientIdentityPlatform(platform)
+	if err != nil {
+		return "", "", false
+	}
+	switch normalized {
+	case ClientIdentityPlatformWindowsX64:
+		return "Windows", "x64", true
+	case ClientIdentityPlatformMacOSX64:
+		return "macOS", "x64", true
+	case ClientIdentityPlatformMacOSArm64:
+		return "macOS", "arm64", true
+	case ClientIdentityPlatformLinuxX64:
+		return "Linux", "x64", true
+	case ClientIdentityPlatformLinuxArm64:
+		return "Linux", "arm64", true
+	default:
+		return "", "", false
+	}
+}
+
+var (
+	clientIdentityNPMVersionPattern     = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$`)
+	clientIdentityWorkBuddyVersionRegex = regexp.MustCompile(`^(0|[1-9][0-9]*)(\.(0|[1-9][0-9]*)){2,3}$`)
+)
+
+func isClientIdentityNPMProfile(profile string) bool {
+	switch profile {
+	case ClientIdentityProfileCodexLegacy,
+		ClientIdentityProfileCodexCompatibility,
+		ClientIdentityProfileCodexCLI,
+		ClientIdentityProfileClaudeCode,
+		ClientIdentityProfileClaudeCLI:
+		return true
+	default:
+		return false
+	}
+}
+
+type clientIdentityNPMVersionParts struct {
+	prerelease    []string
+	buildMetadata []string
+}
+
+func parseClientIdentityNPMVersion(version string) clientIdentityNPMVersionParts {
+	version = strings.TrimSpace(version)
+	parsed := clientIdentityNPMVersionParts{}
+	if plus := strings.IndexByte(version, '+'); plus >= 0 {
+		parsed.buildMetadata = strings.Split(version[plus+1:], ".")
+		version = version[:plus]
+	}
+	if dash := strings.IndexByte(version, '-'); dash >= 0 {
+		parsed.prerelease = strings.Split(version[dash+1:], ".")
+	}
+	return parsed
+}
+
+func npmPlatformForPrerelease(prerelease []string) (string, bool) {
+	if len(prerelease) != 1 {
+		return "", false
+	}
+	switch strings.ToLower(prerelease[0]) {
+	case "win32-x64":
+		return ClientIdentityPlatformWindowsX64, true
+	case "darwin-x64":
+		return ClientIdentityPlatformMacOSX64, true
+	case "darwin-arm64":
+		return ClientIdentityPlatformMacOSArm64, true
+	case "linux-x64":
+		return ClientIdentityPlatformLinuxX64, true
+	case "linux-arm64":
+		return ClientIdentityPlatformLinuxArm64, true
+	default:
+		return "", false
+	}
+}
+
+func validateClientIdentityNPMVersionForPlatform(
+	profile string,
+	version string,
+	platform string,
+) error {
+	if !isClientIdentityNPMProfile(profile) || version == "" {
+		return nil
+	}
+
+	parsed := parseClientIdentityNPMVersion(version)
+	if len(parsed.prerelease) == 0 {
+		return nil
+	}
+
+	buildPlatform, isPlatformBuild := npmPlatformForPrerelease(parsed.prerelease)
+	if !isPlatformBuild {
+		return fmt.Errorf("prerelease client identity version is not allowed: %s", version)
+	}
+	if platform == "" {
+		return fmt.Errorf("platform build client identity version requires an explicit platform: %s", version)
+	}
+	if buildPlatform != platform {
+		return fmt.Errorf("client identity version platform %s does not match platform %s", buildPlatform, platform)
+	}
+	return nil
+}
+
+func validateClientIdentityVersion(profile, version string) error {
+	if version == "" {
+		return nil
+	}
+	if len(version) > 64 {
+		return fmt.Errorf("client identity version is too long")
+	}
+	if profile == ClientIdentityProfileCodeBuddy ||
+		profile == ClientIdentityProfileCodeBuddyCLI ||
+		profile == ClientIdentityProfileWorkBuddyDesktop {
+		if !clientIdentityWorkBuddyVersionRegex.MatchString(version) {
+			return fmt.Errorf("invalid WorkBuddy product version: %s", version)
+		}
+		return nil
+	}
+	if !clientIdentityNPMVersionPattern.MatchString(version) {
+		return fmt.Errorf("invalid client identity version: %s", version)
+	}
+	return nil
+}
+
+// ValidateClientIdentityVersion validates an explicitly selected version for a
+// profile without requiring a complete channel settings object.
+func ValidateClientIdentityVersion(profile, version string) error {
+	profile, err := NormalizeClientIdentityProfile(profile)
+	if err != nil {
+		return err
+	}
+	return validateClientIdentityVersion(profile, strings.TrimSpace(version))
+}
+
+// Normalize trims and fills the profile fields while preserving empty version
+// and platform values as the legacy defaults.
+func (c *ClientIdentityConfig) Normalize(channelType int) error {
+	if c == nil {
+		return nil
+	}
+	if !SupportsClientIdentityChannelType(channelType) {
+		if c.isEmpty() {
+			return nil
+		}
+		return fmt.Errorf("client identity is not supported for channel type %d", channelType)
+	}
+
+	defaults := DefaultClientIdentityConfig(channelType)
+	c.ClientType = strings.ToLower(strings.TrimSpace(c.ClientType))
+	c.Profile = strings.ToLower(strings.TrimSpace(c.Profile))
+	c.Version = strings.TrimSpace(c.Version)
+	if normalized, err := NormalizeClientIdentityPlatform(c.Platform); err != nil {
+		return err
+	} else {
+		c.Platform = normalized
+	}
+
+	if c.Profile == "" {
+		c.Profile = defaults.Profile
+	}
+	expectedClientType := clientIdentityClientTypeForProfile(c.Profile)
+	if expectedClientType == "" {
+		return fmt.Errorf("invalid client identity profile: %s", c.Profile)
+	}
+	if c.ClientType == "" {
+		if c.Profile == defaults.Profile {
+			c.ClientType = defaults.ClientType
+		} else {
+			c.ClientType = expectedClientType
+		}
+	}
+	if c.ClientType != expectedClientType {
+		return fmt.Errorf("client identity client_type %s does not match profile %s", c.ClientType, c.Profile)
+	}
+	if !clientIdentityProfileAllowedForChannel(c.Profile, channelType, defaults.Profile) {
+		return fmt.Errorf("client identity profile %s is not supported for channel type %d", c.Profile, channelType)
+	}
+	if c.Context1MEnabled && c.Profile != ClientIdentityProfileClaudeCode {
+		return fmt.Errorf("client identity context_1m_enabled requires claude_code profile")
+	}
+	if c.Profile == ClientIdentityProfileNone {
+		if c.Version != "" || c.Platform != "" || c.Source != nil {
+			return fmt.Errorf("client identity version, platform, and source require a client profile")
+		}
+	}
+	if err := validateClientIdentityVersion(c.Profile, c.Version); err != nil {
+		return err
+	}
+	if err := validateClientIdentityNPMVersionForPlatform(c.Profile, c.Version, c.Platform); err != nil {
+		return err
+	}
+	if c.Source != nil {
+		if c.Source.isEmpty() {
+			c.Source = nil
+		} else {
+			c.Source.Kind = strings.ToLower(strings.TrimSpace(c.Source.Kind))
+			c.Source.Package = strings.TrimSpace(c.Source.Package)
+			if normalized, err := NormalizeClientIdentityPlatform(c.Source.Platform); err != nil {
+				return fmt.Errorf("invalid client identity source platform: %w", err)
+			} else {
+				c.Source.Platform = normalized
+			}
+			if c.Source.CheckedAt < 0 {
+				return fmt.Errorf("client identity source checked_at cannot be negative")
+			}
+			if !isClientIdentitySourceKind(c.Source.Kind) {
+				return fmt.Errorf("invalid client identity source kind: %s", c.Source.Kind)
+			}
+			if c.Source.Kind == ClientIdentitySourceNPM || c.Source.Kind == ClientIdentitySourceWorkBuddy {
+				sourceKind, sourcePackage, err := ClientIdentitySourceForProfile(c.Profile)
+				if err != nil {
+					return err
+				}
+				if c.Source.Kind != sourceKind {
+					return fmt.Errorf("invalid client identity source kind: %s", c.Source.Kind)
+				}
+				if sourcePackage != "" && c.Source.Package != sourcePackage {
+					return fmt.Errorf("invalid client identity source package: %s", c.Source.Package)
+				}
+				if sourcePackage == "" && c.Source.Package != "" {
+					return fmt.Errorf("client identity source package is not allowed for %s", c.Profile)
+				}
+			}
+			if c.Source.Platform != "" && c.Platform != "" && c.Source.Platform != c.Platform {
+				return fmt.Errorf("client identity source platform does not match platform")
+			}
+		}
+	}
+	return nil
+}
+
+func clientIdentityProfileAllowedForChannel(profile string, channelType int, defaultProfile string) bool {
+	if channelType == ClientIdentityChannelTypeOpenAI || channelType == ClientIdentityChannelTypeAnthropic {
+		switch profile {
+		case ClientIdentityProfileNone,
+			ClientIdentityProfileCodexCLI,
+			ClientIdentityProfileClaudeCLI,
+			ClientIdentityProfileCodeBuddyCLI,
+			ClientIdentityProfileWorkBuddyDesktop:
+			return true
+		default:
+			return false
+		}
+	}
+	return profile == defaultProfile
+}
+
+func isClientIdentitySourceKind(kind string) bool {
+	switch kind {
+	case ClientIdentitySourceNPM,
+		ClientIdentitySourceWorkBuddy,
+		ClientIdentitySourceManual,
+		ClientIdentitySourceOfficial,
+		ClientIdentitySourceCommunity:
+		return true
+	default:
+		return false
+	}
+}
+
+// Validate checks the complete persisted contract without modifying the
+// caller's value.
+func (c ClientIdentityConfig) Validate(channelType int) error {
+	copy := c
+	if c.Source != nil {
+		sourceCopy := *c.Source
+		copy.Source = &sourceCopy
+	}
+	return copy.Normalize(channelType)
+}
+
+// ClientIdentitySourceForProfile returns the only official source allowed for
+// a profile. CodeBuddy deliberately resolves the WorkBuddy product endpoint.
+func ClientIdentitySourceForProfile(profile string) (kind string, name string, err error) {
+	profile, err = NormalizeClientIdentityProfile(profile)
+	if err != nil {
+		return "", "", err
+	}
+	switch profile {
+	case ClientIdentityProfileNone,
+		ClientIdentityProfileCodeBuddyCLI,
+		ClientIdentityProfileWorkBuddyDesktop:
+		return ClientIdentitySourceManual, "", nil
+	case ClientIdentityProfileCodexCLI:
+		return ClientIdentitySourceNPM, ClientIdentityNPMCodexPackage, nil
+	case ClientIdentityProfileClaudeCLI:
+		return ClientIdentitySourceNPM, ClientIdentityNPMClaudeCodePackage, nil
+	case ClientIdentityProfileCodexLegacy, ClientIdentityProfileCodexCompatibility:
+		return ClientIdentitySourceNPM, ClientIdentityNPMCodexPackage, nil
+	case ClientIdentityProfileClaudeCode:
+		return ClientIdentitySourceNPM, ClientIdentityNPMClaudeCodePackage, nil
+	case ClientIdentityProfileCodeBuddy:
+		return ClientIdentitySourceWorkBuddy, "", nil
+	default:
+		return "", "", fmt.Errorf("unsupported client identity profile: %s", profile)
+	}
+}
+
 // ValidateHTTPTransport validates save-time HTTP transport channel settings.
 func (s *ChannelSettings) ValidateHTTPTransport() error {
 	if s == nil {
@@ -92,6 +650,7 @@ const (
 )
 
 type ChannelOtherSettings struct {
+	ClientIdentity                        *ClientIdentityConfig `json:"client_identity,omitempty"`
 	AzureResponsesVersion                 string                `json:"azure_responses_version,omitempty"`
 	VertexKeyType                         VertexKeyType         `json:"vertex_key_type,omitempty"` // "json" or "api_key"
 	OpenRouterEnterprise                  *bool                 `json:"openrouter_enterprise,omitempty"`

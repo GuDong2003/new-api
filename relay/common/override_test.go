@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	common2 "github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/relaykit/types"
 
 	"github.com/QuantumNous/new-api/relaykit/dto"
@@ -2010,6 +2011,302 @@ func TestApplyParamOverrideWithRelayInfoMixedLegacyAndOperations(t *testing.T) {
 	}
 	if info.RuntimeHeadersOverride["originator"] != "Codex CLI" {
 		t.Fatalf("expected originator header to be passed, got: %v", info.RuntimeHeadersOverride["originator"])
+	}
+}
+
+func requireActiveClaudeCodeParamOverrideRejected(t *testing.T, paramOverride map[string]interface{}) {
+	t.Helper()
+	info := &RelayInfo{
+		ChannelMeta: &ChannelMeta{
+			ChannelType:   constant.ChannelTypeClaudeCode,
+			ParamOverride: paramOverride,
+		},
+	}
+
+	_, err := ApplyParamOverrideWithRelayInfo([]byte(`{}`), info)
+	require.Error(t, err)
+	var apiErr *types.NewAPIError
+	require.ErrorAs(t, err, &apiErr)
+	require.Equal(t, types.ErrorCodeChannelHeaderOverrideInvalid, apiErr.GetErrorCode())
+	require.False(t, info.UseRuntimeHeadersOverride)
+	require.Nil(t, info.RuntimeHeadersOverride)
+}
+
+func TestApplyParamOverrideWithRelayInfoActiveClaudeCodeRejectsHeaderOperations(t *testing.T) {
+	operationOverride := func(operation map[string]interface{}) map[string]interface{} {
+		return map[string]interface{}{
+			"operations": []interface{}{operation},
+		}
+	}
+	tests := []struct {
+		name     string
+		override map[string]interface{}
+	}{
+		{
+			name:     "copy header",
+			override: operationOverride(map[string]interface{}{"mode": "copy_header", "from": "X-Source", "to": "X-Target"}),
+		},
+		{
+			name:     "move header",
+			override: operationOverride(map[string]interface{}{"mode": "move_header", "from": "X-Source", "to": "X-Target"}),
+		},
+		{
+			name:     "pass headers",
+			override: operationOverride(map[string]interface{}{"mode": "pass_headers", "value": []interface{}{"X-Source"}}),
+		},
+		{
+			name:     "delete header",
+			override: operationOverride(map[string]interface{}{"mode": "delete_header", "path": "X-Source"}),
+		},
+		{
+			name:     "sync from header",
+			override: operationOverride(map[string]interface{}{"mode": "sync_fields", "from": "header:X-Source", "to": "json:target"}),
+		},
+		{
+			name:     "sync to header",
+			override: operationOverride(map[string]interface{}{"mode": "sync_fields", "from": "json:source", "to": "header:X-Target"}),
+		},
+		{
+			name:     "set header mapping",
+			override: operationOverride(map[string]interface{}{"mode": "set_header", "path": "X-Safe", "value": map[string]interface{}{"$append": "value"}}),
+		},
+		{
+			name:     "set header array",
+			override: operationOverride(map[string]interface{}{"mode": "set_header", "path": "X-Safe", "value": []interface{}{"value"}}),
+		},
+		{
+			name:     "set header nil",
+			override: operationOverride(map[string]interface{}{"mode": "set_header", "path": "X-Safe", "value": nil}),
+		},
+		{
+			name:     "set header empty string",
+			override: operationOverride(map[string]interface{}{"mode": "set_header", "path": "X-Safe", "value": ""}),
+		},
+		{
+			name:     "set header number",
+			override: operationOverride(map[string]interface{}{"mode": "set_header", "path": "X-Safe", "value": 1}),
+		},
+		{
+			name:     "set header boolean",
+			override: operationOverride(map[string]interface{}{"mode": "set_header", "path": "X-Safe", "value": true}),
+		},
+		{
+			name:     "set header client template",
+			override: operationOverride(map[string]interface{}{"mode": "set_header", "path": "X-Safe", "value": "{client_header:X-Source}"}),
+		},
+		{
+			name:     "set header api key template",
+			override: operationOverride(map[string]interface{}{"mode": "set_header", "path": "X-Safe", "value": "Bearer {api_key}"}),
+		},
+		{
+			name:     "set header conditional",
+			override: operationOverride(map[string]interface{}{"mode": "set_header", "path": "X-Safe", "value": "value", "conditions": map[string]interface{}{"model": "example"}}),
+		},
+		{
+			name:     "set header keep origin",
+			override: operationOverride(map[string]interface{}{"mode": "set_header", "path": "X-Safe", "value": "value", "keep_origin": true}),
+		},
+		{
+			name:     "set header metadata fields",
+			override: operationOverride(map[string]interface{}{"mode": "set_header", "path": "X-Safe", "value": "value", "from": "X-Source", "to": "X-Target"}),
+		},
+		{
+			name:     "set header invalid name",
+			override: operationOverride(map[string]interface{}{"mode": "set_header", "path": "X Invalid", "value": "value"}),
+		},
+		{
+			name:     "set header invalid value",
+			override: operationOverride(map[string]interface{}{"mode": "set_header", "path": "X-Safe", "value": "bad\r\nvalue"}),
+		},
+	}
+	for _, headerName := range []string{
+		"Authorization", "Proxy-Authorization", "Cookie", "X-Api-Key", "X-Goog-Api-Key", "User-Agent",
+		"Anthropic-Version", "Accept", "Content-Type", "X-App", "X-Claude-Code-Session-Id",
+		"X-Stainless-Lang", "Sec-Fetch-Mode", "Anthropic-Dangerous-Direct-Browser-Access", "Accept-Language",
+	} {
+		tests = append(tests, struct {
+			name     string
+			override map[string]interface{}
+		}{
+			name:     "set reserved header " + headerName,
+			override: operationOverride(map[string]interface{}{"mode": "set_header", "path": headerName, "value": "value"}),
+		})
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			requireActiveClaudeCodeParamOverrideRejected(t, test.override)
+		})
+	}
+}
+
+func TestApplyParamOverrideWithRelayInfoActiveClaudeCodeAllowsSafeOperations(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		path      string
+		value     string
+		resultKey string
+	}{
+		{name: "literal safe header", path: "X-Safe-Static", value: "static-value", resultKey: "x-safe-static"},
+		{name: "anthropic beta", path: "Anthropic-Beta", value: "interleaved-thinking-2025-05-14", resultKey: "anthropic-beta"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			info := &RelayInfo{
+				ChannelMeta: &ChannelMeta{
+					ChannelType: constant.ChannelTypeClaudeCode,
+					ParamOverride: map[string]interface{}{
+						"operations": []interface{}{
+							map[string]interface{}{
+								"mode":  "set_header",
+								"path":  test.path,
+								"value": test.value,
+							},
+						},
+					},
+				},
+			}
+
+			_, err := ApplyParamOverrideWithRelayInfo([]byte(`{}`), info)
+			require.NoError(t, err)
+			require.True(t, info.UseRuntimeHeadersOverride)
+			require.Equal(t, test.value, info.RuntimeHeadersOverride[test.resultKey])
+		})
+	}
+
+	info := &RelayInfo{
+		ChannelMeta: &ChannelMeta{
+			ChannelType: constant.ChannelTypeClaudeCode,
+			ParamOverride: map[string]interface{}{
+				"operations": []interface{}{
+					map[string]interface{}{"mode": "set", "path": "temperature", "value": 0.1},
+					map[string]interface{}{"mode": "sync_fields", "from": "json:source", "to": "json:target"},
+				},
+			},
+		},
+	}
+	out, err := ApplyParamOverrideWithRelayInfo([]byte(`{"source":"value"}`), info)
+	require.NoError(t, err)
+	assertJSONEqual(t, `{"source":"value","temperature":0.1,"target":"value"}`, string(out))
+}
+
+func TestApplyParamOverrideWithRelayInfoActiveClaudeCodeAllowsLegacyJSON(t *testing.T) {
+	tests := []struct {
+		name          string
+		paramOverride map[string]interface{}
+		wantJSON      string
+	}{
+		{
+			name:          "legacy only",
+			paramOverride: map[string]interface{}{"temperature": 0.2},
+			wantJSON:      `{"temperature":0.2}`,
+		},
+		{
+			name: "mixed legacy and body operation",
+			paramOverride: map[string]interface{}{
+				"temperature": 0.2,
+				"operations": []interface{}{
+					map[string]interface{}{"mode": "set", "path": "top_p", "value": 0.9},
+				},
+			},
+			wantJSON: `{"temperature":0.2,"top_p":0.9}`,
+		},
+		{
+			name:          "invalid operations falls back to legacy JSON",
+			paramOverride: map[string]interface{}{"temperature": 0.2, "operations": "legacy-value"},
+			wantJSON:      `{"temperature":0.2,"operations":"legacy-value"}`,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			info := &RelayInfo{
+				ChannelMeta: &ChannelMeta{
+					ChannelType:   constant.ChannelTypeClaudeCode,
+					ParamOverride: test.paramOverride,
+				},
+			}
+			out, err := ApplyParamOverrideWithRelayInfo([]byte(`{}`), info)
+			require.NoError(t, err)
+			assertJSONEqual(t, test.wantJSON, string(out))
+		})
+	}
+}
+
+func TestApplyParamOverrideWithRelayInfoHeaderOperationsRemainAvailableOutsideActiveClaudeCode(t *testing.T) {
+	tests := []struct {
+		name                          string
+		channelType                   int
+		isChannelTest                 bool
+		disableChannelTestClientStyle bool
+	}{
+		{
+			name:        "non Claude Code",
+			channelType: constant.ChannelTypeAnthropic,
+		},
+		{
+			name:                          "profile disabled channel test",
+			channelType:                   constant.ChannelTypeClaudeCode,
+			isChannelTest:                 true,
+			disableChannelTestClientStyle: true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			info := &RelayInfo{
+				IsChannelTest:                   test.isChannelTest,
+				DisableChannelTestClientProfile: test.disableChannelTestClientStyle,
+				RequestHeaders: map[string]string{
+					"X-Inbound-Header": "inbound-value",
+					"X-Passed-Header":  "passed-value",
+					"X-Sync-Header":    "sync-value",
+				},
+				ChannelMeta: &ChannelMeta{
+					ChannelType: test.channelType,
+					ParamOverride: map[string]interface{}{
+						"operations": []interface{}{
+							map[string]interface{}{
+								"mode": "copy_header",
+								"from": "X-Inbound-Header",
+								"to":   "X-Upstream-Header",
+							},
+							map[string]interface{}{
+								"mode":  "pass_headers",
+								"value": []interface{}{"X-Passed-Header"},
+							},
+							map[string]interface{}{
+								"mode": "move_header",
+								"from": "X-Static-Header",
+								"to":   "X-Moved-Header",
+							},
+							map[string]interface{}{
+								"mode": "delete_header",
+								"path": "X-Delete-Header",
+							},
+							map[string]interface{}{
+								"mode": "sync_fields",
+								"from": "header:X-Sync-Header",
+								"to":   "header:X-Sync-Target",
+							},
+						},
+					},
+					HeadersOverride: map[string]interface{}{
+						"X-Static-Header": "static-value",
+						"X-Delete-Header": "delete-value",
+					},
+				},
+			}
+
+			_, err := ApplyParamOverrideWithRelayInfo([]byte(`{}`), info)
+			require.NoError(t, err)
+			require.True(t, info.UseRuntimeHeadersOverride)
+			require.Equal(t, "inbound-value", info.RuntimeHeadersOverride["x-upstream-header"])
+			require.Equal(t, "passed-value", info.RuntimeHeadersOverride["x-passed-header"])
+			require.Equal(t, "static-value", info.RuntimeHeadersOverride["x-moved-header"])
+			require.Equal(t, "sync-value", info.RuntimeHeadersOverride["x-sync-target"])
+			require.NotContains(t, info.RuntimeHeadersOverride, "x-static-header")
+			require.NotContains(t, info.RuntimeHeadersOverride, "x-delete-header")
+		})
 	}
 }
 

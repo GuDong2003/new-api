@@ -195,6 +195,10 @@ func (a *Adaptor) SetupRequestHeader(c *gin.Context, req *http.Header, info *rel
 	} else if req.Get("Accept") == "" {
 		req.Set("Accept", "application/json")
 	}
+	// Channel 57 uses OAuth/account routing owned by this adapter. Only the
+	// explicit client identity version/platform may vary; credentials,
+	// Originator, and endpoint semantics stay fixed.
+	channel.ApplyCodexLegacyClientIdentity(*req, info.ChannelOtherSettings.ClientIdentity)
 
 	return nil
 }

@@ -986,6 +986,11 @@ func (channel *Channel) ValidateSettings() error {
 			return err
 		}
 	}
+	if channelOtherSettings.ClientIdentity != nil {
+		if err := channelOtherSettings.ClientIdentity.Validate(channel.Type); err != nil {
+			return fmt.Errorf("invalid client identity settings: %w", err)
+		}
+	}
 	if channel.Type == constant.ChannelTypeAdvancedCustom {
 		if channelOtherSettings.AdvancedCustom == nil {
 			return fmt.Errorf("advanced_custom is required")

@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/relayconvert/convmeta"
 	"github.com/QuantumNous/new-api/relaykit/types"
@@ -175,4 +176,19 @@ func TestInitChannelMetaRestoresRequestReasoningEffortForRetry(t *testing.T) {
 	info.SetReasoningEffort("low")
 	info.InitChannelMeta(ctx)
 	assert.Equal(t, "max", info.ReasoningEffort)
+}
+
+func TestInitChannelMetaEnablesCodeBuddyStreamOptions(t *testing.T) {
+	oldMode := gin.Mode()
+	gin.SetMode(gin.TestMode)
+	t.Cleanup(func() { gin.SetMode(oldMode) })
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Set(string(constant.ContextKeyChannelType), constant.ChannelTypeCodeBuddy)
+
+	info := &RelayInfo{}
+	info.InitChannelMeta(c)
+
+	require.NotNil(t, info.ChannelMeta)
+	assert.Equal(t, constant.APITypeOpenAI, info.ApiType)
+	assert.True(t, info.SupportStreamOptions)
 }

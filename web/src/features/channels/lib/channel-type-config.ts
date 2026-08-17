@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { CHANNEL_TYPES } from '../constants'
+import { CODE_BUDDY_BASE_URL_HELP, CHANNEL_TYPES } from '../constants'
 
 // ============================================================================
 // Channel Type Configuration
@@ -160,6 +160,36 @@ export const CHANNEL_TYPE_CONFIGS: Record<number, ChannelTypeConfig> = {
     icon: 'NewAPI',
     hints: {
       baseUrl: 'Base URL is required for this channel type',
+      key: 'Enter API key for this channel',
+      models: 'Models',
+    },
+  },
+  61: {
+    id: 61,
+    name: CHANNEL_TYPES[61],
+    icon: 'openai',
+    hints: {
+      baseUrl: 'Base URL is required for this channel type',
+      key: 'Enter API key for this channel',
+      models: 'Models',
+    },
+  },
+  62: {
+    id: 62,
+    name: CHANNEL_TYPES[62],
+    icon: 'anthropic',
+    hints: {
+      baseUrl: 'Base URL is required for this channel type',
+      key: 'Enter API key for this channel',
+      models: 'Models',
+    },
+  },
+  63: {
+    id: 63,
+    name: CHANNEL_TYPES[63],
+    icon: 'CodeBuddy',
+    hints: {
+      baseUrl: CODE_BUDDY_BASE_URL_HELP,
       key: 'Enter API key for this channel',
       models: 'Models',
     },

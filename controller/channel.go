@@ -198,11 +198,24 @@ func GetAllChannels(c *gin.Context) {
 
 func buildFetchModelsHeaders(channel *model.Channel, key string) (http.Header, error) {
 	var headers http.Header
+	otherSettings := channel.GetOtherSettings()
 	switch channel.Type {
 	case constant.ChannelTypeAnthropic:
 		headers = GetClaudeAuthHeader(key)
 	default:
 		headers = GetAuthHeader(key)
+	}
+	switch channel.Type {
+	case constant.ChannelTypeOpenAI, constant.ChannelTypeAnthropic:
+		relaychannel.ApplyLightweightClientIdentity(headers, otherSettings.ClientIdentity)
+	case constant.ChannelTypeCodex:
+		relaychannel.ApplyCodexLegacyClientIdentity(headers, otherSettings.ClientIdentity)
+	case constant.ChannelTypeCodexCompatibility:
+		relaychannel.ApplyCompatibilityHeadersWithClientIdentity(channel.Type, headers, key, false, "", otherSettings.ClientIdentity)
+	case constant.ChannelTypeClaudeCode:
+		relaychannel.ApplyClaudeCodeCompatibilityHeadersWithIdentity(headers, key, false, "", false, otherSettings.ClientIdentity)
+	case constant.ChannelTypeCodeBuddy:
+		relaychannel.ApplyCompatibilityHeadersWithClientIdentity(channel.Type, headers, key, false, "", otherSettings.ClientIdentity)
 	}
 
 	if err := applyFetchModelsHeaderOverrides(channel, key, headers); err != nil {
@@ -215,6 +228,7 @@ func applyFetchModelsHeaderOverrides(channel *model.Channel, key string, headers
 	info := &relaycommon.RelayInfo{
 		IsChannelTest: true,
 		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType:     channel.Type,
 			ApiKey:          key,
 			HeadersOverride: channel.GetHeaderOverride(),
 		},
@@ -223,9 +237,7 @@ func applyFetchModelsHeaderOverrides(channel *model.Channel, key string, headers
 	if err != nil {
 		return err
 	}
-	for name, value := range overrides {
-		headers.Set(name, value)
-	}
+	relaychannel.ApplyHeaderOverrideToHeaders(headers, overrides)
 
 	return nil
 }
@@ -488,8 +500,10 @@ func validateChannel(channel *model.Channel, isAdd bool) error {
 		return fmt.Errorf("渠道额外设置[channel setting] 格式错误：%s", err.Error())
 	}
 
-	if channel.Type == constant.ChannelTypeNewAPI && strings.TrimSpace(channel.GetBaseURL()) == "" {
-		return fmt.Errorf("New API channel base URL cannot be empty")
+	if (channel.Type == constant.ChannelTypeNewAPI ||
+		channel.Type == constant.ChannelTypeCodexCompatibility ||
+		channel.Type == constant.ChannelTypeClaudeCode) && strings.TrimSpace(channel.GetBaseURL()) == "" {
+		return fmt.Errorf("%s channel base URL cannot be empty", constant.GetChannelTypeName(channel.Type))
 	}
 
 	// 如果是添加操作，检查 channel 和 key 是否为空
@@ -1201,13 +1215,53 @@ func equalStringPtr(a, b *string) bool {
 }
 
 type fetchModelsRequest struct {
-	ChannelID      int     `json:"channel_id"`
-	BaseURL        *string `json:"base_url"`
-	Type           int     `json:"type"`
-	Key            string  `json:"key"`
-	AdvancedCustom *string `json:"advanced_custom"`
-	HeaderOverride *string `json:"header_override"`
-	Proxy          *string `json:"proxy"`
+	ChannelID      int                       `json:"channel_id"`
+	BaseURL        *string                   `json:"base_url"`
+	Type           int                       `json:"type"`
+	Key            string                    `json:"key"`
+	Settings       json.RawMessage           `json:"settings"`
+	ClientIdentity *dto.ClientIdentityConfig `json:"client_identity"`
+	AdvancedCustom *string                   `json:"advanced_custom"`
+	HeaderOverride *string                   `json:"header_override"`
+	Proxy          *string                   `json:"proxy"`
+}
+
+func applyFetchModelsOtherSettings(channel *model.Channel, rawSettings json.RawMessage, identity *dto.ClientIdentityConfig) error {
+	if len(rawSettings) == 0 && identity == nil {
+		return nil
+	}
+
+	settings := dto.ChannelOtherSettings{}
+	if len(rawSettings) > 0 && string(rawSettings) != "null" {
+		raw := rawSettings
+		var encodedSettings string
+		if err := common.Unmarshal(raw, &encodedSettings); err == nil {
+			raw = []byte(encodedSettings)
+		}
+		if strings.TrimSpace(string(raw)) != "" {
+			if err := common.UnmarshalJsonStr(string(raw), &settings); err != nil {
+				return fmt.Errorf("invalid channel settings: %w", err)
+			}
+		}
+	}
+	if identity != nil {
+		identityCopy := *identity
+		if identity.Source != nil {
+			sourceCopy := *identity.Source
+			identityCopy.Source = &sourceCopy
+		}
+		settings.ClientIdentity = &identityCopy
+	}
+	if settings.ClientIdentity != nil {
+		if err := settings.ClientIdentity.Normalize(channel.Type); err != nil {
+			return fmt.Errorf("invalid client identity settings: %w", err)
+		}
+	}
+	channel.SetOtherSettings(settings)
+	if err := channel.ValidateSettings(); err != nil {
+		return fmt.Errorf("invalid channel settings: %w", err)
+	}
+	return nil
 }
 
 func buildAdvancedCustomModelPreviewChannel(req fetchModelsRequest) (*model.Channel, error) {
@@ -1317,6 +1371,32 @@ func FetchModels(c *gin.Context) {
 			Type:    req.Type,
 			Key:     key,
 			BaseURL: &baseURL,
+		}
+		if req.HeaderOverride != nil {
+			rawHeaderOverride := strings.TrimSpace(*req.HeaderOverride)
+			if rawHeaderOverride != "" {
+				var headerOverride map[string]any
+				if err := common.UnmarshalJsonStr(rawHeaderOverride, &headerOverride); err != nil {
+					c.JSON(http.StatusOK, gin.H{
+						"success": false,
+						"message": fmt.Sprintf("header_override must be a JSON object: %s", err),
+					})
+					return
+				}
+			}
+			channel.HeaderOverride = &rawHeaderOverride
+		}
+		if req.Proxy != nil {
+			channelSettings := channel.GetSetting()
+			channelSettings.Proxy = strings.TrimSpace(*req.Proxy)
+			channel.SetSetting(channelSettings)
+		}
+		if err := applyFetchModelsOtherSettings(channel, req.Settings, req.ClientIdentity); err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": err.Error(),
+			})
+			return
 		}
 	}
 

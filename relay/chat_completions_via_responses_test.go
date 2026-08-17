@@ -29,6 +29,26 @@ func TestIsResponsesEventStreamContentType(t *testing.T) {
 	}
 }
 
+func TestShouldUseResponsesStream(t *testing.T) {
+	tests := []struct {
+		name         string
+		clientStream bool
+		contentType  string
+		want         bool
+	}{
+		{name: "client stream with headerless upstream", clientStream: true, contentType: "", want: true},
+		{name: "non-stream client with headerless upstream", clientStream: false, contentType: "", want: false},
+		{name: "non-stream client with SSE upstream", clientStream: false, contentType: "text/event-stream", want: true},
+		{name: "non-stream client with mixed case SSE upstream", clientStream: false, contentType: "Text/Event-Stream; charset=utf-8", want: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, shouldUseResponsesStream(tt.clientStream, tt.contentType))
+		})
+	}
+}
+
 func TestRecalcQuotaFromRatiosIgnoresInvalidMultipliers(t *testing.T) {
 	info := &relaycommon.RelayInfo{
 		PriceData: types.PriceData{

@@ -1,0 +1,463 @@
+package openai
+
+import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	relayconstant "github.com/QuantumNous/new-api/relay/constant"
+	"github.com/QuantumNous/new-api/relaykit/dto"
+	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+func TestCodexCompatibilityBuildsPiCompatibleResponsesRequest(t *testing.T) {
+	oldMode := gin.Mode()
+	gin.SetMode(gin.TestMode)
+	t.Cleanup(func() { gin.SetMode(oldMode) })
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	info := &relaycommon.RelayInfo{
+		IsStream: true,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType: constant.ChannelTypeCodexCompatibility,
+			ApiKey:      "test-key",
+		},
+	}
+	adaptor := &Adaptor{}
+	adaptor.Init(info)
+
+	headers := http.Header{}
+	require.NoError(t, adaptor.SetupRequestHeader(c, &headers, info))
+	assert.Equal(t, "Bearer test-key", headers.Get("Authorization"))
+	assert.Equal(t, "responses=experimental", headers.Get("OpenAI-Beta"))
+	assert.Equal(t, "codex_cli_rs", headers.Get("Originator"))
+	assert.Equal(t, "text/event-stream", headers.Get("Accept"))
+
+	maxOutputTokens := uint(4096)
+	converted, err := adaptor.ConvertOpenAIResponsesRequest(c, info, dto.OpenAIResponsesRequest{
+		Model:           "gpt-5-codex",
+		MaxOutputTokens: &maxOutputTokens,
+	})
+	require.NoError(t, err)
+	request, ok := converted.(dto.OpenAIResponsesRequest)
+	require.True(t, ok)
+	assert.Nil(t, request.MaxOutputTokens)
+	assert.JSONEq(t, `false`, string(request.Store))
+	assert.JSONEq(t, `"You are a helpful assistant."`, string(request.Instructions))
+	assert.JSONEq(t, `{"verbosity":"low"}`, string(request.Text))
+	assert.JSONEq(t, `["reasoning.encrypted_content"]`, string(request.Include))
+	assert.JSONEq(t, `"auto"`, string(request.ToolChoice))
+	assert.JSONEq(t, `true`, string(request.ParallelToolCalls))
+}
+
+func TestCodexCompatibilityInjectsChannelSystemPrompt(t *testing.T) {
+	oldMode := gin.Mode()
+	gin.SetMode(gin.TestMode)
+	t.Cleanup(func() { gin.SetMode(oldMode) })
+
+	buildInfo := func(systemPrompt string, override bool, clientInstructions string) *relaycommon.RelayInfo {
+		info := &relaycommon.RelayInfo{
+			IsStream: true,
+			ChannelMeta: &relaycommon.ChannelMeta{
+				ChannelType: constant.ChannelTypeCodexCompatibility,
+				ApiKey:      "test-key",
+			},
+		}
+		info.ChannelSetting.SystemPrompt = systemPrompt
+		info.ChannelSetting.SystemPromptOverride = override
+		_ = clientInstructions
+		return info
+	}
+
+	t.Run("empty instructions uses system prompt", func(t *testing.T) {
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+		info := buildInfo("custom system prompt", false, "")
+		converted, err := (&Adaptor{}).ConvertOpenAIResponsesRequest(c, info, dto.OpenAIResponsesRequest{Model: "gpt-5.6-sol"})
+		require.NoError(t, err)
+		request, ok := converted.(dto.OpenAIResponsesRequest)
+		require.True(t, ok)
+		assert.JSONEq(t, `"custom system prompt"`, string(request.Instructions))
+	})
+
+	t.Run("override appends to client instructions", func(t *testing.T) {
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+		info := buildInfo("custom system prompt", true, "")
+		converted, err := (&Adaptor{}).ConvertOpenAIResponsesRequest(c, info, dto.OpenAIResponsesRequest{
+			Model:        "gpt-5.6-sol",
+			Instructions: json.RawMessage(`"client instructions"`),
+		})
+		require.NoError(t, err)
+		request, ok := converted.(dto.OpenAIResponsesRequest)
+		require.True(t, ok)
+		assert.JSONEq(t, `"custom system prompt\nclient instructions"`, string(request.Instructions))
+	})
+
+	t.Run("no override keeps client instructions", func(t *testing.T) {
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+		info := buildInfo("custom system prompt", false, "")
+		converted, err := (&Adaptor{}).ConvertOpenAIResponsesRequest(c, info, dto.OpenAIResponsesRequest{
+			Model:        "gpt-5.6-sol",
+			Instructions: json.RawMessage(`"client instructions"`),
+		})
+		require.NoError(t, err)
+		request, ok := converted.(dto.OpenAIResponsesRequest)
+		require.True(t, ok)
+		assert.JSONEq(t, `"client instructions"`, string(request.Instructions))
+	})
+
+	t.Run("no system prompt falls back to default", func(t *testing.T) {
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+		info := buildInfo("", false, "")
+		converted, err := (&Adaptor{}).ConvertOpenAIResponsesRequest(c, info, dto.OpenAIResponsesRequest{Model: "gpt-5.6-sol"})
+		require.NoError(t, err)
+		request, ok := converted.(dto.OpenAIResponsesRequest)
+		require.True(t, ok)
+		assert.JSONEq(t, `"You are a helpful assistant."`, string(request.Instructions))
+	})
+}
+
+func TestCodexCompatibilityPassesThroughSessionHeaders(t *testing.T) {
+	oldMode := gin.Mode()
+	gin.SetMode(gin.TestMode)
+	t.Cleanup(func() { gin.SetMode(oldMode) })
+
+	clientHeaders := map[string]string{
+		"Session-Id":               "sess-abc",
+		"Thread-Id":                "thread-xyz",
+		"X-Codex-Turn-State":       "turn-token-123",
+		"X-Codex-Beta-Features":    "memgen,tools",
+		"X-Codex-Installation-Id":  "inst-456",
+		"X-Codex-Turn-Metadata":    "meta-1",
+		"X-Codex-Parent-Thread-Id": "parent-0",
+		"X-Codex-Window-Id":        "win-7",
+		"X-Openai-Subagent":        "true",
+	}
+
+	run := func(t *testing.T, present map[string]string) http.Header {
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+		for k, v := range present {
+			c.Request.Header.Set(k, v)
+		}
+		info := &relaycommon.RelayInfo{
+			IsStream: true,
+			ChannelMeta: &relaycommon.ChannelMeta{
+				ChannelType: constant.ChannelTypeCodexCompatibility,
+				ApiKey:      "test-key",
+			},
+		}
+		headers := http.Header{}
+		require.NoError(t, (&Adaptor{}).SetupRequestHeader(c, &headers, info))
+		return headers
+	}
+
+	t.Run("passes through all client session headers", func(t *testing.T) {
+		headers := run(t, clientHeaders)
+		for k, v := range clientHeaders {
+			assert.Equal(t, v, headers.Get(k), "header %s should be passed through", k)
+		}
+	})
+
+	t.Run("keeps fixed identity headers", func(t *testing.T) {
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+		// 客户端尝试伪造固定身份头
+		c.Request.Header.Set("OpenAI-Beta", "forged")
+		c.Request.Header.Set("Originator", "forged")
+		c.Request.Header.Set("Authorization", "Bearer forged")
+		info := &relaycommon.RelayInfo{
+			IsStream: true,
+			ChannelMeta: &relaycommon.ChannelMeta{
+				ChannelType: constant.ChannelTypeCodexCompatibility,
+				ApiKey:      "test-key",
+			},
+		}
+		headers := http.Header{}
+		require.NoError(t, (&Adaptor{}).SetupRequestHeader(c, &headers, info))
+		assert.Equal(t, "Bearer test-key", headers.Get("Authorization"))
+		assert.Equal(t, "responses=experimental", headers.Get("OpenAI-Beta"))
+		assert.Equal(t, "codex_cli_rs", headers.Get("Originator"))
+	})
+
+	t.Run("ignores absent headers", func(t *testing.T) {
+		headers := run(t, nil)
+		assert.Empty(t, headers.Get("session-id"))
+		assert.Empty(t, headers.Get("x-codex-turn-state"))
+	})
+}
+
+func TestCodeBuddyCompatibilityBuildsWorkBuddyRequest(t *testing.T) {
+	oldMode := gin.Mode()
+	gin.SetMode(gin.TestMode)
+	t.Cleanup(func() { gin.SetMode(oldMode) })
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	info := &relaycommon.RelayInfo{
+		IsStream: false,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType: constant.ChannelTypeCodeBuddy,
+			ApiKey:      "test-key",
+		},
+	}
+	adaptor := &Adaptor{}
+	adaptor.Init(info)
+
+	headers := http.Header{}
+	require.NoError(t, adaptor.SetupRequestHeader(c, &headers, info))
+	assert.Equal(t, "Bearer test-key", headers.Get("Authorization"))
+	assert.Equal(t, "test-key", headers.Get("X-API-Key"))
+	assert.Equal(t, "conversation", headers.Get("X-Agent-Purpose"))
+	assert.Equal(t, "1", headers.Get("X-CodeBuddy-Request"))
+	assert.Empty(t, headers.Get("X-API-Mock-WorkBuddy-Compatible"))
+	assert.Empty(t, headers.Get("X-Session-ID"))
+	assert.NotEmpty(t, headers.Get("X-User-Id"))
+	assert.NotEmpty(t, headers.Get("Acp-Connection-ID"))
+	assert.Equal(t, "6.25.0", headers.Get("X-Stainless-Package-Version"))
+
+	stream := false
+	temperature := 0.0
+	converted, err := adaptor.ConvertOpenAIRequest(c, info, &dto.GeneralOpenAIRequest{
+		Messages:    []dto.Message{{Role: "user", Content: "hello"}},
+		Stream:      &stream,
+		Temperature: &temperature,
+	})
+	require.NoError(t, err)
+	request, ok := converted.(*dto.GeneralOpenAIRequest)
+	require.True(t, ok)
+	require.Len(t, request.Messages, 2)
+	assert.Equal(t, "system", request.Messages[0].Role)
+	assert.NotEmpty(t, request.Messages[0].StringContent())
+	require.NotNil(t, request.Stream)
+	assert.False(t, *request.Stream)
+	require.NotNil(t, request.Temperature)
+	assert.Equal(t, 0.0, *request.Temperature)
+	assert.Equal(t, "low", request.ReasoningEffort)
+	require.NotNil(t, request.StreamOptions)
+	assert.True(t, request.StreamOptions.IncludeUsage)
+}
+
+func TestCodeBuddyCompatibilityReusesConversationIdentityFromPromptCacheKey(t *testing.T) {
+	oldMode := gin.Mode()
+	gin.SetMode(gin.TestMode)
+	t.Cleanup(func() { gin.SetMode(oldMode) })
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	request := &dto.OpenAIResponsesRequest{
+		Model:          "gpt-5.6-sol",
+		PromptCacheKey: json.RawMessage(`"session-123"`),
+	}
+	info := &relaycommon.RelayInfo{
+		Request: request,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType: constant.ChannelTypeCodeBuddy,
+			ApiKey:      "test-key",
+		},
+	}
+	adaptor := &Adaptor{}
+	adaptor.Init(info)
+
+	first := http.Header{}
+	second := http.Header{}
+	require.NoError(t, adaptor.SetupRequestHeader(c, &first, info))
+	require.NoError(t, adaptor.SetupRequestHeader(c, &second, info))
+
+	assert.NotEmpty(t, first.Get("X-Conversation-ID"))
+	assert.Equal(t, first.Get("X-Conversation-ID"), second.Get("X-Conversation-ID"))
+	assert.NotEqual(t, first.Get("X-Request-ID"), second.Get("X-Request-ID"))
+}
+
+func TestCodeBuddyResponsesConvertToWorkBuddyChatCompletions(t *testing.T) {
+	oldMode := gin.Mode()
+	gin.SetMode(gin.TestMode)
+	t.Cleanup(func() { gin.SetMode(oldMode) })
+
+	for _, isStream := range []bool{false, true} {
+		t.Run(map[bool]string{false: "non-stream", true: "stream"}[isStream], func(t *testing.T) {
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+			info := &relaycommon.RelayInfo{
+				IsStream:       isStream,
+				RelayMode:      relayconstant.RelayModeResponses,
+				RequestURLPath: "/v1/responses",
+				ChannelMeta: &relaycommon.ChannelMeta{
+					ChannelType:       constant.ChannelTypeCodeBuddy,
+					ChannelBaseUrl:    "https://proxy.example",
+					UpstreamModelName: "gpt-test",
+				},
+			}
+			adaptor := &Adaptor{}
+			adaptor.Init(info)
+
+			converted, err := adaptor.ConvertOpenAIResponsesRequest(c, info, dto.OpenAIResponsesRequest{
+				Model: "gpt-test",
+				Input: json.RawMessage(`"hello"`),
+			})
+			require.NoError(t, err)
+			request, ok := converted.(*dto.GeneralOpenAIRequest)
+			require.True(t, ok)
+			require.Len(t, request.Messages, 2)
+			assert.Equal(t, "system", request.Messages[0].Role)
+			assert.Equal(t, "hello", request.Messages[1].StringContent())
+			require.NotNil(t, request.Stream)
+			assert.Equal(t, isStream, *request.Stream)
+			if isStream {
+				require.NotNil(t, request.StreamOptions)
+				assert.True(t, request.StreamOptions.IncludeUsage)
+			} else {
+				assert.Nil(t, request.StreamOptions)
+			}
+
+			requestURL, err := adaptor.GetRequestURL(info)
+			require.NoError(t, err)
+			assert.Equal(t, "https://proxy.example/v1/chat/completions", requestURL)
+		})
+	}
+}
+
+func TestCodeBuddyResponsesEnforceUpstreamRequestRules(t *testing.T) {
+	oldMode := gin.Mode()
+	gin.SetMode(gin.TestMode)
+	t.Cleanup(func() { gin.SetMode(oldMode) })
+
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	info := &relaycommon.RelayInfo{
+		RelayMode: relayconstant.RelayModeResponses,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType: constant.ChannelTypeCodeBuddy,
+		},
+	}
+
+	converted, err := (&Adaptor{}).ConvertOpenAIResponsesRequest(c, info, dto.OpenAIResponsesRequest{
+		Model:        "gpt-5.6-sol",
+		Instructions: json.RawMessage(`"system says YOU ARE CODEX"`),
+		Input:        json.RawMessage(`[{"role":"user","content":[{"type":"input_text","text":"codex; you are the codex; openai codex; YOU ARE CODEX now"},{"type":"input_image","image_url":"https://example.invalid/image.png"}]}]`),
+	})
+	require.NoError(t, err)
+	request, ok := converted.(*dto.GeneralOpenAIRequest)
+	require.True(t, ok)
+
+	bodyBytes, err := common.Marshal(request)
+	require.NoError(t, err)
+	var body map[string]any
+	require.NoError(t, common.Unmarshal(bodyBytes, &body))
+	assert.NotContains(t, body, "instructions")
+
+	messages, ok := body["messages"].([]any)
+	require.True(t, ok)
+	// instructions 内容被合并进前缀 system（2 条：system + user），不再独立成条
+	require.Len(t, messages, 2)
+	firstMessage, ok := messages[0].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "system", firstMessage["role"])
+	firstContent, ok := firstMessage["content"].(string)
+	require.True(t, ok)
+	assert.True(t, strings.HasPrefix(firstContent, "This conversation is powered by "))
+	assert.Contains(t, firstContent, "system says")
+
+	userMessage, ok := messages[1].(map[string]any)
+	require.True(t, ok)
+	_, ok = userMessage["content"].([]any)
+	assert.True(t, ok, "the original array content must remain after the string marker")
+
+	bodyText := strings.ToLower(string(bodyBytes))
+	assert.NotContains(t, bodyText, "you are codex")
+	assert.Contains(t, bodyText, "you are a coding assistant")
+	assert.Contains(t, bodyText, "you are the codex")
+	assert.Contains(t, bodyText, "openai codex")
+}
+
+func TestCodeBuddyResponsesConvertChatResponsesBackToResponses(t *testing.T) {
+	oldMode := gin.Mode()
+	gin.SetMode(gin.TestMode)
+	t.Cleanup(func() { gin.SetMode(oldMode) })
+	oldTimeout := constant.StreamingTimeout
+	constant.StreamingTimeout = 30
+	t.Cleanup(func() { constant.StreamingTimeout = oldTimeout })
+
+	t.Run("non-stream", func(t *testing.T) {
+		body := `{"id":"chatcmpl_1","object":"chat.completion","created":1710000000,"model":"gpt-test","choices":[{"index":0,"message":{"role":"assistant","content":"hello"},"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":3,"total_tokens":5}}`
+		c, recorder, resp, info := newResponsesChatTestContext(t, body, false)
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+		info.RelayMode = relayconstant.RelayModeResponses
+		info.ChannelType = constant.ChannelTypeCodeBuddy
+
+		usage, err := (&Adaptor{}).DoResponse(c, resp, info)
+		require.Nil(t, err)
+		require.NotNil(t, usage)
+		assert.Contains(t, recorder.Body.String(), `"object":"response"`)
+		assert.Contains(t, recorder.Body.String(), `"text":"hello"`)
+	})
+
+	t.Run("stream", func(t *testing.T) {
+		body := strings.Join([]string{
+			`data: {"id":"chatcmpl_1","object":"chat.completion.chunk","created":1710000000,"model":"gpt-test","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}`,
+			`data: {"id":"chatcmpl_1","object":"chat.completion.chunk","created":1710000000,"model":"gpt-test","choices":[{"index":0,"delta":{"content":"hello"},"finish_reason":null}]}`,
+			`data: {"id":"chatcmpl_1","object":"chat.completion.chunk","created":1710000000,"model":"gpt-test","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+			`data: {"id":"chatcmpl_1","object":"chat.completion.chunk","created":1710000000,"model":"gpt-test","choices":[],"usage":{"prompt_tokens":2,"completion_tokens":3,"total_tokens":5}}`,
+			`data: [DONE]`,
+			``,
+		}, "\n")
+		c, recorder, resp, info := newResponsesChatTestContext(t, body, true)
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+		info.RelayMode = relayconstant.RelayModeResponses
+		info.ChannelType = constant.ChannelTypeCodeBuddy
+
+		usage, err := (&Adaptor{}).DoResponse(c, resp, info)
+		require.Nil(t, err)
+		require.NotNil(t, usage)
+		assert.Contains(t, recorder.Body.String(), `event: response.created`)
+		assert.Contains(t, recorder.Body.String(), `event: response.output_text.delta`)
+		assert.Contains(t, recorder.Body.String(), `event: response.completed`)
+	})
+}
+
+func TestCodexCompatibilityResolvesPiResponsesPath(t *testing.T) {
+	adaptor := &Adaptor{}
+	tests := []struct {
+		baseURL string
+		mode    int
+		wantURL string
+	}{
+		{baseURL: "https://proxy.example/backend-api", wantURL: "https://proxy.example/backend-api/codex/responses"},
+		{baseURL: "https://proxy.example/backend-api/codex", wantURL: "https://proxy.example/backend-api/codex/responses"},
+		{baseURL: "https://proxy.example/backend-api/codex/responses/", wantURL: "https://proxy.example/backend-api/codex/responses"},
+		// 纯 host / /v1 形态：拼标准 OpenAI Responses 端点
+		{baseURL: "https://proxy.example", mode: relayconstant.RelayModeResponses, wantURL: "https://proxy.example/v1/responses"},
+		{baseURL: "https://proxy.example", mode: relayconstant.RelayModeResponsesCompact, wantURL: "https://proxy.example/v1/responses/compact"},
+		{baseURL: "https://proxy.example/v1", mode: relayconstant.RelayModeResponses, wantURL: "https://proxy.example/v1/responses"},
+		{baseURL: "https://proxy.example/v1", mode: relayconstant.RelayModeResponsesCompact, wantURL: "https://proxy.example/v1/responses/compact"},
+		// 已含完整端点的形态
+		{baseURL: "https://proxy.example/v1/responses", mode: relayconstant.RelayModeResponsesCompact, wantURL: "https://proxy.example/v1/responses/compact"},
+		{baseURL: "https://proxy.example/codex/responses", mode: relayconstant.RelayModeResponses, wantURL: "https://proxy.example/codex/responses"},
+		{baseURL: "https://proxy.example/codex/responses", mode: relayconstant.RelayModeResponsesCompact, wantURL: "https://proxy.example/codex/responses/compact"},
+		{baseURL: "https://proxy.example/backend-api/codex/responses", mode: relayconstant.RelayModeResponsesCompact, wantURL: "https://proxy.example/backend-api/codex/responses/compact"},
+		{baseURL: "https://proxy.example/backend-api/codex/responses/compact", mode: relayconstant.RelayModeResponses, wantURL: "https://proxy.example/backend-api/codex/responses/compact"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.baseURL, func(t *testing.T) {
+			requestURL, err := adaptor.GetRequestURL(&relaycommon.RelayInfo{
+				RelayMode: test.mode,
+				ChannelMeta: &relaycommon.ChannelMeta{
+					ChannelType:    constant.ChannelTypeCodexCompatibility,
+					ChannelBaseUrl: test.baseURL,
+				},
+			})
+
+			require.NoError(t, err)
+			assert.Equal(t, test.wantURL, requestURL)
+		})
+	}
+}

@@ -187,6 +187,40 @@ func TestFetchOrdinaryOpenAIModelsKeepsExistingEmptyDataBehavior(t *testing.T) {
 	require.Empty(t, models)
 }
 
+func TestApplyFetchModelsOtherSettingsCarriesStandardClientIdentity(t *testing.T) {
+	rawSettings, err := common.Marshal(dto.ChannelOtherSettings{
+		ClientIdentity: &dto.ClientIdentityConfig{
+			ClientType: dto.ClientIdentityClientTypeCodex,
+			Profile:    dto.ClientIdentityProfileCodexCLI,
+			Version:    "0.147.0",
+			Platform:   dto.ClientIdentityPlatformLinuxX64,
+		},
+	})
+	require.NoError(t, err)
+
+	channel := &model.Channel{Type: constant.ChannelTypeOpenAI}
+	require.NoError(t, applyFetchModelsOtherSettings(channel, rawSettings, nil))
+
+	settings := channel.GetOtherSettings()
+	require.NotNil(t, settings.ClientIdentity)
+	assert.Equal(t, dto.ClientIdentityClientTypeCodex, settings.ClientIdentity.ClientType)
+	assert.Equal(t, dto.ClientIdentityProfileCodexCLI, settings.ClientIdentity.Profile)
+	assert.Equal(t, "0.147.0", settings.ClientIdentity.Version)
+	assert.Equal(t, dto.ClientIdentityPlatformLinuxX64, settings.ClientIdentity.Platform)
+}
+
+func TestApplyFetchModelsOtherSettingsRejectsStandardChannelProfileMismatch(t *testing.T) {
+	channel := &model.Channel{Type: constant.ChannelTypeAnthropic}
+	identity := &dto.ClientIdentityConfig{
+		ClientType: dto.ClientIdentityClientTypeCodeBuddy,
+		Profile:    dto.ClientIdentityProfileCodeBuddy,
+	}
+
+	err := applyFetchModelsOtherSettings(channel, nil, identity)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not supported")
+}
+
 func TestFetchModelsAdvancedCustomCreatePreview(t *testing.T) {
 	receivedAuthorization := make(chan string, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -406,6 +440,131 @@ func TestFetchNewAPIModelsUsesOpenAIContract(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Equal(t, []string{"gpt-5", "gpt-5-mini"}, models)
+}
+
+func TestBuildFetchModelsHeadersUsesCompatibilityIdentities(t *testing.T) {
+	tests := []struct {
+		name        string
+		channelType int
+		assertions  func(t *testing.T, headers http.Header)
+	}{
+		{
+			name:        "Codex",
+			channelType: constant.ChannelTypeCodexCompatibility,
+			assertions: func(t *testing.T, headers http.Header) {
+				assert.Equal(t, "Bearer test-key", headers.Get("Authorization"))
+				assert.Equal(t, "responses=experimental", headers.Get("OpenAI-Beta"))
+				assert.Equal(t, "codex_cli_rs", headers.Get("Originator"))
+				assert.Equal(t, "codex_cli_rs/0.146.0", headers.Get("User-Agent"))
+			},
+		},
+		{
+			name:        "Claude Code",
+			channelType: constant.ChannelTypeClaudeCode,
+			assertions: func(t *testing.T, headers http.Header) {
+				assert.Equal(t, "Bearer test-key", headers.Get("Authorization"))
+				assert.Empty(t, headers.Get("x-api-key"))
+				assert.Equal(t, "claude-cli/2.1.214 (external, cli)", headers.Get("User-Agent"))
+				assert.Equal(t, "cli", headers.Get("X-App"))
+				assert.Equal(t, "2023-06-01", headers.Get("Anthropic-Version"))
+				assert.Empty(t, headers.Get("X-Claude-Code-Session-Id"))
+			},
+		},
+		{
+			name:        "CodeBuddy",
+			channelType: constant.ChannelTypeCodeBuddy,
+			assertions: func(t *testing.T, headers http.Header) {
+				assert.Equal(t, "Bearer test-key", headers.Get("Authorization"))
+				assert.Equal(t, "test-key", headers.Get("X-API-Key"))
+				assert.Equal(t, "WorkBuddy/5.3.8 WorkBuddy/5.3.8 CLI/2.115.0", headers.Get("User-Agent"))
+				assert.Equal(t, "1", headers.Get("X-CodeBuddy-Request"))
+				assert.Empty(t, headers.Get("X-API-Mock-WorkBuddy-Compatible"))
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			headers, err := buildFetchModelsHeaders(&model.Channel{Type: test.channelType}, "test-key")
+
+			require.NoError(t, err)
+			test.assertions(t, headers)
+		})
+	}
+}
+
+func TestBuildFetchModelsHeadersAppliesStandardClientIdentityWithoutChangingChannelType(t *testing.T) {
+	tests := []struct {
+		name        string
+		channelType int
+		identity    *dto.ClientIdentityConfig
+		assertions  func(*testing.T, http.Header)
+	}{
+		{
+			name:        "standard OpenAI uses Codex CLI identity",
+			channelType: constant.ChannelTypeOpenAI,
+			identity: &dto.ClientIdentityConfig{
+				Profile:  dto.ClientIdentityProfileCodexCLI,
+				Version:  "1.2.3",
+				Platform: dto.ClientIdentityPlatformLinuxX64,
+			},
+			assertions: func(t *testing.T, headers http.Header) {
+				assert.Equal(t, "Bearer test-key", headers.Get("Authorization"))
+				assert.Equal(t, "codex_cli_rs/1.2.3 (linux-x64)", headers.Get("User-Agent"))
+			},
+		},
+		{
+			name:        "standard Anthropic uses Claude CLI identity",
+			channelType: constant.ChannelTypeAnthropic,
+			identity: &dto.ClientIdentityConfig{
+				Profile:  dto.ClientIdentityProfileClaudeCLI,
+				Version:  "2.1.224",
+				Platform: dto.ClientIdentityPlatformMacOSArm64,
+			},
+			assertions: func(t *testing.T, headers http.Header) {
+				assert.Equal(t, "test-key", headers.Get("X-Api-Key"))
+				assert.Equal(t, "2023-06-01", headers.Get("Anthropic-Version"))
+				assert.Equal(t, "claude-cli/2.1.224 (external, cli; macos-arm64)", headers.Get("User-Agent"))
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			channel := &model.Channel{Type: test.channelType}
+			channel.SetOtherSettings(dto.ChannelOtherSettings{ClientIdentity: test.identity})
+
+			headers, err := buildFetchModelsHeaders(channel, "test-key")
+			require.NoError(t, err)
+			test.assertions(t, headers)
+		})
+	}
+}
+
+func TestBuildFetchModelsHeadersAppliesHeaderOverrideLast(t *testing.T) {
+	safeOverrides := `{"Authorization":"override-auth","User-Agent":"override-agent","Anthropic-Version":"override-version","X-Safe-Static":"survives","Anthropic-Beta":"interleaved-thinking-2025-05-14"}`
+	headers, err := buildFetchModelsHeaders(&model.Channel{
+		Type:           constant.ChannelTypeClaudeCode,
+		HeaderOverride: &safeOverrides,
+	}, "test-key")
+	require.NoError(t, err)
+	assert.Equal(t, "override-auth", headers.Get("Authorization"))
+	assert.Equal(t, "override-agent", headers.Get("User-Agent"))
+	assert.Equal(t, "override-version", headers.Get("Anthropic-Version"))
+	assert.Equal(t, "application/json", headers.Get("Accept"))
+	assert.Equal(t, "application/json", headers.Get("Content-Type"))
+	assert.Equal(t, "survives", headers.Get("X-Safe-Static"))
+	assert.Equal(t, "interleaved-thinking-2025-05-14", headers.Get("Anthropic-Beta"))
+	assert.Empty(t, headers.Get("X-Api-Key"))
+	assert.Empty(t, headers.Get("X-Claude-Code-Session-Id"))
+
+	reservedOverride := `{"X-Api-Key":"override"}`
+	headers, err = buildFetchModelsHeaders(&model.Channel{
+		Type:           constant.ChannelTypeClaudeCode,
+		HeaderOverride: &reservedOverride,
+	}, "test-key")
+	require.NoError(t, err)
+	assert.Equal(t, "override", headers.Get("X-Api-Key"))
 }
 
 func TestNormalizeModelNames(t *testing.T) {

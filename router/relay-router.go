@@ -89,6 +89,11 @@ func SetRelayRouter(router *gin.Engine) {
 			controller.Relay(c, types.RelayFormatClaude)
 		})
 
+		// claude token counting (Claude Code budgeting)
+		httpRouter.POST("/messages/count_tokens", func(c *gin.Context) {
+			controller.Relay(c, types.RelayFormatClaude)
+		})
+
 		// chat related routes
 		httpRouter.POST("/completions", func(c *gin.Context) {
 			controller.Relay(c, types.RelayFormatOpenAI)

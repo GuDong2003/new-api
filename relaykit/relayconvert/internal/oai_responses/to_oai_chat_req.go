@@ -434,8 +434,24 @@ func RequestTextToChatResponseFormat(raw json.RawMessage) (*dto.ResponseFormat, 
 }
 
 func responsesImagePartToChatImageURL(part map[string]any) any {
+	detail, hasDetail := part["detail"]
 	if imageURL, ok := part["image_url"]; ok {
-		return imageURL
+		if imageURLMap, ok := imageURL.(map[string]any); ok {
+			imageURLCopy := make(map[string]any, len(imageURLMap)+1)
+			for key, value := range imageURLMap {
+				imageURLCopy[key] = value
+			}
+			if _, hasImageURLDetail := imageURLCopy["detail"]; !hasImageURLDetail && hasDetail {
+				imageURLCopy["detail"] = detail
+			}
+			return imageURLCopy
+		}
+
+		imageURLPayload := map[string]any{"url": imageURL}
+		if hasDetail {
+			imageURLPayload["detail"] = detail
+		}
+		return imageURLPayload
 	}
 	imageURL := map[string]any{}
 	for _, key := range []string{"url", "file_id", "detail"} {
