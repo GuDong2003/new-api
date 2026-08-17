@@ -70,6 +70,10 @@ export const ModelPerfBadge = memo(function ModelPerfBadge(
     ...Array(Math.max(0, 3 - statusRates.length)).fill(null),
     ...statusRates,
   ].slice(-3)
+  const statusBarItems = ['old', 'middle', 'recent'].map((id, position) => ({
+    id,
+    rate: statusBars[position],
+  }))
 
   return (
     <div
@@ -102,22 +106,25 @@ export const ModelPerfBadge = memo(function ModelPerfBadge(
           {t('Status short')}
         </div>
         <div className='flex h-4 items-center justify-end gap-0.5'>
-          {statusBars.map((rate, index) => (
+          {statusBarItems.map(({ id, rate }, index) => {
+            let rateClass = getSuccessRateDotClass(rate ?? 0)
+            if (rate == null) {
+              rateClass = 'bg-muted-foreground/15'
+              if (index === 0) rateClass = 'bg-muted-foreground/10'
+            }
+            return (
             <span
-              key={`${index}-${rate ?? 'empty'}`}
+              key={id}
               className={cn(
                 'w-1 rounded-full',
                 index === 0 && 'h-2',
                 index === 1 && 'h-2.5',
                 index === 2 && 'h-3',
-                rate == null
-                  ? index === 0
-                    ? 'bg-muted-foreground/10'
-                    : 'bg-muted-foreground/15'
-                  : getSuccessRateDotClass(rate)
+                rateClass
               )}
             />
-          ))}
+            )
+          })}
         </div>
       </div>
     </div>

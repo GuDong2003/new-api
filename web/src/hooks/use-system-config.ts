@@ -120,12 +120,17 @@ function preloadImage(
   onError: () => void
 ): () => void {
   const img = new Image()
+  // Keep the property handlers so the preloader can replace them during cleanup.
+  // oxlint-disable-next-line unicorn/prefer-add-event-listener
   img.onload = onLoad
+  // oxlint-disable-next-line unicorn/prefer-add-event-listener
   img.onerror = onError
   img.src = src
 
   return () => {
+    // oxlint-disable-next-line unicorn/prefer-add-event-listener
     img.onload = null
+    // oxlint-disable-next-line unicorn/prefer-add-event-listener
     img.onerror = null
   }
 }

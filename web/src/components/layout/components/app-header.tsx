@@ -25,7 +25,7 @@ import { useNotifications } from '@/hooks/use-notifications'
 import { useTopNavLinks } from '@/hooks/use-top-nav-links'
 
 import { defaultTopNavLinks } from '../config/top-nav.config'
-import { type TopNavLink } from '../types'
+import type { TopNavLink } from '../types'
 import { Header } from './header'
 import { SystemBrand } from './system-brand'
 import { TopNav } from './top-nav'
@@ -111,7 +111,6 @@ export function AppHeader({
   const notifications = useNotifications()
 
   return (
-    <>
       <Header>
         <SystemBrand variant='inline' />
 
@@ -145,6 +144,5 @@ export function AppHeader({
           </div>
         )}
       </Header>
-    </>
   )
 }

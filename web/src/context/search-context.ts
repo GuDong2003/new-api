@@ -16,16 +16,21 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useTranslation } from 'react-i18next'
+import { createContext, useContext } from 'react'
 
-export function SkipToMain() {
-  const { t } = useTranslation()
-  return (
-    <a
-      className="bg-primary text-primary-foreground hover:bg-primary/90 focus-visible:ring-ring fixed start-44 z-999 -translate-y-52 px-4 py-2 text-sm font-medium whitespace-nowrap opacity-95 shadow-sm transition focus:translate-y-3 focus:transform focus-visible:ring-1"
-      href='#content'
-    >
-      {t('Skip to Main')}
-    </a>
-  )
+type SearchContextType = {
+  open: boolean
+  setOpen: React.Dispatch<React.SetStateAction<boolean>>
+}
+
+export const SearchContext = createContext<SearchContextType | null>(null)
+
+export function useSearch() {
+  const searchContext = useContext(SearchContext)
+
+  if (!searchContext) {
+    throw new Error('useSearch has to be used within SearchProvider')
+  }
+
+  return searchContext
 }
