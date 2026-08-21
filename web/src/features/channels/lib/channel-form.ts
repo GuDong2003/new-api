@@ -436,6 +436,18 @@ export const channelFormSchema = z
     client_identity_source: z
       .enum(['manual', 'official', 'community', 'npm', 'workbuddy'])
       .optional(),
+    upstream_account_enabled: z.boolean().optional(),
+    upstream_account_name: z.string().optional(),
+    upstream_account_base_url: z.string().optional(),
+    upstream_account_site_type: z.string().optional(),
+    upstream_account_auth_type: z.enum(['token', 'cookie']).optional(),
+    upstream_account_credential: z.string().optional(),
+    upstream_account_auto_checkin: z.boolean().optional(),
+    upstream_account_auto_balance: z.boolean().optional(),
+    upstream_account_balance_interval: z.number().int().optional(),
+    upstream_account_external_checkin_url: z.string().optional(),
+    upstream_account_redeem_url: z.string().optional(),
+    upstream_account_open_redeem_with_checkin: z.boolean().optional(),
   })
   .superRefine((data, ctx) => {
     if (
@@ -540,6 +552,27 @@ export const channelFormSchema = z
       )
     }
 
+    if (
+      data.upstream_account_enabled === true &&
+      !data.upstream_account_base_url?.trim()
+    ) {
+      addRequiredIssue(
+        ctx,
+        'upstream_account_base_url',
+        'Upstream site URL is required when the upstream account is enabled'
+      )
+    }
+    if (
+      data.upstream_account_enabled === true &&
+      (data.upstream_account_balance_interval ?? 60) < 5
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['upstream_account_balance_interval'],
+        message: 'Balance refresh interval cannot be less than 5 minutes',
+      })
+    }
+
     const protocol = normalizeHttpProtocol(data.http_protocol)
     const shards = data.http2_connection_shards ?? 1
     if (shards < 1 || shards > MAX_HTTP2_CONNECTION_SHARDS) {
@@ -623,6 +656,18 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   client_identity_context_1m_enabled: false,
   client_identity_source: 'manual',
   advanced_custom: '',
+  upstream_account_enabled: false,
+  upstream_account_name: '',
+  upstream_account_base_url: '',
+  upstream_account_site_type: 'new_api',
+  upstream_account_auth_type: 'token',
+  upstream_account_credential: '',
+  upstream_account_auto_checkin: false,
+  upstream_account_auto_balance: true,
+  upstream_account_balance_interval: 60,
+  upstream_account_external_checkin_url: '',
+  upstream_account_redeem_url: '',
+  upstream_account_open_redeem_with_checkin: false,
 }
 
 // ============================================================================
@@ -833,6 +878,26 @@ export function transformChannelToFormDefaults(
     client_identity_context_1m_enabled: clientIdentityContext1MEnabled,
     client_identity_source: clientIdentitySource || 'manual',
     advanced_custom: advancedCustom,
+    upstream_account_enabled: Boolean(channel.upstream_account_config?.enabled),
+    upstream_account_name: channel.upstream_account_config?.name || '',
+    upstream_account_base_url: channel.upstream_account_config?.base_url || '',
+    upstream_account_site_type:
+      channel.upstream_account_config?.site_type || 'new_api',
+    upstream_account_auth_type:
+      channel.upstream_account_config?.auth_type || 'token',
+    upstream_account_credential: '',
+    upstream_account_auto_checkin:
+      channel.upstream_account_config?.auto_checkin || false,
+    upstream_account_auto_balance:
+      channel.upstream_account_config?.auto_balance ?? true,
+    upstream_account_balance_interval:
+      channel.upstream_account_config?.balance_interval || 60,
+    upstream_account_external_checkin_url:
+      channel.upstream_account_config?.external_checkin_url || '',
+    upstream_account_redeem_url:
+      channel.upstream_account_config?.redeem_url || '',
+    upstream_account_open_redeem_with_checkin:
+      channel.upstream_account_config?.open_redeem_with_checkin || false,
   }
 }
 
@@ -1059,6 +1124,34 @@ function normalizeBaseUrl(value: string | undefined): string {
     .replace(/\/+$/, '')
 }
 
+function buildUpstreamAccountConfigPayload(
+  formData: ChannelFormValues
+): NonNullable<Partial<Channel>['upstream_account_config']> {
+  const config: NonNullable<Partial<Channel>['upstream_account_config']> = {
+    enabled: formData.upstream_account_enabled === true,
+    name: formData.upstream_account_name?.trim() || '',
+    base_url: normalizeBaseUrl(formData.upstream_account_base_url),
+    site_type: formData.upstream_account_site_type || 'new_api',
+    auth_type: formData.upstream_account_auth_type || 'token',
+    auto_checkin: formData.upstream_account_auto_checkin === true,
+    auto_balance: formData.upstream_account_auto_balance !== false,
+    balance_interval: formData.upstream_account_balance_interval || 60,
+    external_checkin_url:
+      formData.upstream_account_external_checkin_url?.trim() || '',
+    redeem_url: formData.upstream_account_redeem_url?.trim() || '',
+    open_redeem_with_checkin:
+      formData.upstream_account_open_redeem_with_checkin === true,
+    notes: '',
+    tags: [],
+    user_id: 0,
+  }
+  const credential = formData.upstream_account_credential?.trim()
+  if (credential) {
+    config.credential = credential
+  }
+  return config
+}
+
 /**
  * Transform form data to API payload for creating channel
  */
@@ -1092,6 +1185,7 @@ export function transformFormDataToCreatePayload(formData: ChannelFormValues): {
     header_override: formData.header_override || null,
     settings: buildSettingsJSON(formData),
     other: formData.other || '',
+    upstream_account_config: buildUpstreamAccountConfigPayload(formData),
   }
 
   // Clean up empty strings to null for optional fields
@@ -1139,6 +1233,7 @@ export function transformFormDataToUpdatePayload(
     header_override: formData.header_override || null,
     settings: buildSettingsJSON(formData),
     other: formData.other || '',
+    upstream_account_config: buildUpstreamAccountConfigPayload(formData),
   }
 
   // Only include key if it was changed (not empty)

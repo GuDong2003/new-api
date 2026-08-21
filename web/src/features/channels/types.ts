@@ -18,6 +18,46 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { z } from 'zod'
 
+export const channelUpstreamAccountConfigSchema = z.object({
+  enabled: z.boolean(),
+  supports_checkin: z.boolean().optional(),
+  supports_balance: z.boolean().optional(),
+  external_only: z.boolean().optional(),
+  id: z.number().optional(),
+  credential: z.string().optional(),
+  name: z.string().optional(),
+  base_url: z.string().optional(),
+  site_type: z.string().optional(),
+  notes: z.string().optional(),
+  tags: z.array(z.string()).optional(),
+  external_checkin_url: z.string().optional(),
+  redeem_url: z.string().optional(),
+  open_redeem_with_checkin: z.boolean().optional(),
+  auth_type: z.enum(['token', 'cookie']).optional(),
+  user_id: z.number().optional(),
+  credential_configured: z.boolean().optional(),
+  auto_checkin: z.boolean().optional(),
+  auto_balance: z.boolean().optional(),
+  balance_interval: z.number().optional(),
+  balance: z.number().optional(),
+  balance_unit: z.string().optional(),
+  balance_updated_time: z.number().optional(),
+  balance_status: z
+    .enum(['unknown', 'healthy', 'failed', 'manual_required'])
+    .optional(),
+  last_checkin_time: z.number().optional(),
+  last_checkin_status: z
+    .enum(['unknown', 'healthy', 'failed', 'manual_required'])
+    .optional(),
+  last_checkin_message: z.string().optional(),
+})
+
+export type ChannelUpstreamAccountConfig = z.infer<
+  typeof channelUpstreamAccountConfigSchema
+> & {
+  credential?: string
+}
+
 // ============================================================================
 // Channel Schema & Types
 // ============================================================================
@@ -74,6 +114,7 @@ export const channelSchema = z.object({
       })
     )
     .optional(),
+  upstream_account_config: channelUpstreamAccountConfigSchema.optional(),
   models: z.string().default(''),
   group: z.string().default('default'),
   used_quota: z.number().default(0),

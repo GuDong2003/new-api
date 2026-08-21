@@ -21,6 +21,9 @@ import type { Row } from '@tanstack/react-table'
 import {
   MoreHorizontal,
   Boxes,
+  CalendarCheck,
+  CircleDollarSign,
+  ExternalLink,
   Pencil,
   PlugZap,
   Gauge,
@@ -58,8 +61,13 @@ import {
   hasPermission,
 } from '@/lib/admin-permissions'
 import { useAuthStore } from '@/stores/auth-store'
+import { toast } from 'sonner'
 
 import { MODEL_FETCHABLE_TYPES } from '../constants'
+import {
+  checkinUpstreamAccount,
+} from '../../upstream-accounts/api'
+import { updateChannelBalance } from '../api'
 import {
   channelsQueryKeys,
   handleDeleteChannel,
@@ -87,6 +95,9 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
   const [isTesting, setIsTesting] = useState(false)
   const [isTogglingStatus, setIsTogglingStatus] = useState(false)
+  const [upstreamOperation, setUpstreamOperation] = useState<
+    'checkin' | 'balance' | null
+  >(null)
 
   const isEnabled = isChannelEnabled(channel)
   const isMultiKey = isMultiKeyChannel(channel)
@@ -121,6 +132,49 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
   const handleQueryBalance = () => {
     setCurrentRow(channel)
     setOpen('balance-query')
+  }
+
+  const upstreamConfig = channel.upstream_account_config
+  const upstreamAccountId = upstreamConfig?.id
+  const hasUpstreamConfig = Boolean(upstreamConfig?.enabled && upstreamAccountId)
+
+  const handleUpstreamOperation = async (operation: 'checkin' | 'balance') => {
+    if (!upstreamAccountId || upstreamOperation) return
+    setUpstreamOperation(operation)
+    try {
+      if (operation === 'checkin') {
+        const result = await checkinUpstreamAccount(upstreamAccountId)
+        toast.success(result?.message || t('Check-in successful'))
+      } else {
+        const result = await updateChannelBalance(channel.id)
+        if (!result.success) {
+          throw new Error(result.message || t('Failed to update balance'))
+        }
+        toast.success(t('Balance updated successfully'))
+      }
+      await queryClient.invalidateQueries({ queryKey: channelsQueryKeys.lists() })
+      await queryClient.invalidateQueries({ queryKey: ['upstream-accounts'] })
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : t('Upstream operation failed')
+      )
+    } finally {
+      setUpstreamOperation(null)
+    }
+  }
+
+  const openExternal = (url?: string) => {
+    if (url) window.open(url, '_blank', 'noopener,noreferrer')
+  }
+
+  const handleExternalCheckin = () => {
+    openExternal(upstreamConfig?.external_checkin_url)
+    if (
+      upstreamConfig?.open_redeem_with_checkin &&
+      upstreamConfig.redeem_url
+    ) {
+      openExternal(upstreamConfig.redeem_url)
+    }
   }
 
   const handleFetchModels = () => {
@@ -225,6 +279,99 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
           </TooltipTrigger>
           <TooltipContent>{t('Test Channel Connection')}</TooltipContent>
         </Tooltip>
+      )}
+
+      {layout === 'card' && hasUpstreamConfig && (
+        <>
+          {upstreamConfig?.supports_checkin && (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant='ghost'
+                    size='icon-sm'
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      void handleUpstreamOperation('checkin')
+                    }}
+                    disabled={upstreamOperation !== null}
+                    aria-label={t('Check in')}
+                  />
+                }
+              >
+                {upstreamOperation === 'checkin' ? (
+                  <Loader2 className='size-4 animate-spin' />
+                ) : (
+                  <CalendarCheck className='size-4' />
+                )}
+              </TooltipTrigger>
+              <TooltipContent>{t('Check in')}</TooltipContent>
+            </Tooltip>
+          )}
+          {upstreamConfig?.supports_balance !== false && <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant='ghost'
+                  size='icon-sm'
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    void handleUpstreamOperation('balance')
+                  }}
+                  disabled={upstreamOperation !== null}
+                  aria-label={t('Update Balance')}
+                />
+              }
+            >
+              {upstreamOperation === 'balance' ? (
+                <Loader2 className='size-4 animate-spin' />
+              ) : (
+                <CircleDollarSign className='size-4' />
+              )}
+            </TooltipTrigger>
+            <TooltipContent>{t('Update Balance')}</TooltipContent>
+          </Tooltip>}
+          {upstreamConfig?.external_checkin_url && (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant='ghost'
+                    size='icon-sm'
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      handleExternalCheckin()
+                    }}
+                    aria-label={t('External check-in')}
+                  />
+                }
+              >
+                <ExternalLink className='size-4' />
+              </TooltipTrigger>
+              <TooltipContent>{t('External check-in')}</TooltipContent>
+            </Tooltip>
+          )}
+          {upstreamConfig?.redeem_url && (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant='ghost'
+                    size='icon-sm'
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      openExternal(upstreamConfig.redeem_url)
+                    }}
+                    aria-label={t('Recharge / redeem')}
+                  />
+                }
+              >
+                <CircleDollarSign className='size-4' />
+              </TooltipTrigger>
+              <TooltipContent>{t('Recharge / redeem')}</TooltipContent>
+            </Tooltip>
+          )}
+        </>
       )}
 
       <Tooltip>

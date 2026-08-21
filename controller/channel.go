@@ -722,6 +722,37 @@ func AddChannel(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	if config := addChannelRequest.Channel.UpstreamAccountConfig; config != nil && config.Enabled {
+		if len(channels) == 0 {
+			common.ApiError(c, fmt.Errorf("channel cannot be empty"))
+			return
+		}
+		if err := model.SyncChannelUpstreamAccountConfig(channels[0].Id, config); err != nil {
+			ids := make([]int, 0, len(channels))
+			for _, created := range channels {
+				if created.Id > 0 {
+					ids = append(ids, created.Id)
+				}
+			}
+			_, _ = model.BatchDeleteChannels(ids)
+			common.ApiError(c, err)
+			return
+		}
+		accounts, accountErr := model.GetUpstreamAccountsForChannel(channels[0].Id)
+		if accountErr != nil || len(accounts) == 0 {
+			if accountErr == nil {
+				accountErr = fmt.Errorf("upstream account binding was not created")
+			}
+			common.ApiError(c, accountErr)
+			return
+		}
+		for _, created := range channels[1:] {
+			if err := model.BindUpstreamAccountChannel(accounts[0].Id, created.Id); err != nil {
+				common.ApiError(c, err)
+				return
+			}
+		}
+	}
 	recordManageAudit(c, "channel.create", map[string]interface{}{
 		"name":  addChannelRequest.Channel.Name,
 		"type":  addChannelRequest.Channel.Type,
@@ -1108,6 +1139,16 @@ func UpdateChannel(c *gin.Context) {
 	if err != nil {
 		common.ApiError(c, err)
 		return
+	}
+	if config := channel.UpstreamAccountConfig; config != nil {
+		if err := model.SyncChannelUpstreamAccountConfig(channel.Id, config); err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		if saved, reloadErr := model.GetChannelById(channel.Id, true); reloadErr == nil {
+			channel.Channel = *saved
+			_ = model.HydrateChannelUpstreamBalances([]*model.Channel{&channel.Channel})
+		}
 	}
 	model.InitChannelCache()
 	if proxyChanged {

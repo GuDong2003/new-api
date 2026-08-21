@@ -75,6 +75,50 @@ func TestUpstreamAccountBalanceAndCheckinUseRealQuotaConversion(t *testing.T) {
 	assert.Len(t, logs, 3) // balance, check-in, post-check-in balance refresh
 }
 
+func TestUpstreamAccountBalanceAllowsNegativeQuota(t *testing.T) {
+	truncate(t)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		assert.Equal(t, "Bearer dashboard-token", request.Header.Get("Authorization"))
+		writer.Header().Set("Content-Type", "application/json")
+		switch request.URL.Path {
+		case "/api/status":
+			_ = json.NewEncoder(writer).Encode(map[string]any{
+				"success": true,
+				"data":    map[string]any{"quota_per_unit": 100},
+			})
+		case "/api/user/self":
+			_ = json.NewEncoder(writer).Encode(map[string]any{
+				"success": true,
+				"data":    map[string]any{"quota": -1234},
+			})
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+
+	account := &model.UpstreamAccount{
+		Name:            "negative balance upstream",
+		BaseURL:         server.URL,
+		SiteType:        model.UpstreamSiteTypeNewAPI,
+		AuthType:        model.UpstreamAuthTypeToken,
+		Credential:      "dashboard-token",
+		AutoBalance:     true,
+		BalanceInterval: 60,
+	}
+	require.NoError(t, model.CreateUpstreamAccount(account))
+
+	result, err := RefreshUpstreamAccountBalance(context.Background(), account, model.UpstreamTriggerManual)
+	require.NoError(t, err)
+	assert.InDelta(t, -12.34, result.Balance, 0.000001)
+	assert.Equal(t, model.UpstreamStatusHealthy, result.Status)
+
+	stored, err := model.GetUpstreamAccountById(account.Id)
+	require.NoError(t, err)
+	assert.InDelta(t, -12.34, stored.Balance, 0.000001)
+	assert.Equal(t, model.UpstreamStatusHealthy, stored.BalanceStatus)
+}
+
 func TestUpstreamAccountCredentialIsEncryptedAndNotSerialized(t *testing.T) {
 	truncate(t)
 	account := &model.UpstreamAccount{
@@ -95,6 +139,43 @@ func TestUpstreamAccountCredentialIsEncryptedAndNotSerialized(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotContains(t, string(encoded), "plain-secret")
 	assert.NotContains(t, string(encoded), "credential_ciphertext")
+}
+
+func TestChannelUpstreamConfigUsesTokenForBalanceWithoutAutoCheckin(t *testing.T) {
+	truncate(t)
+	channel := &model.Channel{
+		Id:   101,
+		Type: 1,
+		Name: "balance-only channel",
+		Key:  "channel-key",
+	}
+	require.NoError(t, model.DB.Create(channel).Error)
+
+	config := &model.ChannelUpstreamAccountConfig{
+		Enabled: true,
+		UpstreamAccount: model.UpstreamAccount{
+			BaseURL:         "https://upstream.example.com",
+			SiteType:        model.UpstreamSiteTypeNewAPI,
+			AuthType:        model.UpstreamAuthTypeToken,
+			Credential:      "balance-token",
+			AutoCheckin:     false,
+			AutoBalance:     true,
+			BalanceInterval: 60,
+		},
+	}
+	require.NoError(t, model.SyncChannelUpstreamAccountConfig(channel.Id, config))
+
+	accounts, err := model.GetUpstreamAccountsForChannel(channel.Id)
+	require.NoError(t, err)
+	require.Len(t, accounts, 1)
+	assert.False(t, accounts[0].AutoCheckin)
+	assert.True(t, accounts[0].AutoBalance)
+	var stored model.Channel
+	require.NoError(t, model.DB.First(&stored, channel.Id).Error)
+	assert.Equal(t, model.ChannelBalanceSourceUpstream, stored.BalanceSource)
+	credential, err := accounts[0].GetCredential()
+	require.NoError(t, err)
+	assert.Equal(t, "balance-token", credential)
 }
 
 func TestScheduledUpstreamCheckinRetriesAfterSixHoursAndStopsAtFourAttempts(t *testing.T) {

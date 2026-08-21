@@ -21,6 +21,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   ArrowRight,
   AlertCircle,
+  CalendarCheck2,
   Boxes,
   CheckCircle2,
   Circle,
@@ -136,6 +137,8 @@ import {
   getPrefillGroups,
   refreshCodexCredential,
 } from '../../api'
+import { listUpstreamSiteTypes } from '../../../upstream-accounts/api'
+import type { UpstreamSiteTypeOption } from '../../../upstream-accounts/types'
 import {
   ADD_MODE_OPTIONS,
   CLAUDE_FIELD_PASSTHROUGH_TYPES,
@@ -199,6 +202,7 @@ import {
   ChannelClientIdentitySection,
   ChannelEditorLoadingState,
   ChannelModelsSection,
+  ChannelUpstreamAccountSection,
 } from './sections'
 
 type ChannelMutateDrawerProps = {
@@ -253,12 +257,14 @@ const ADVANCED_SETTINGS_EXPANDED_KEY = 'channel-advanced-settings-expanded'
 const CHANNEL_EDITOR_SECTION_IDS = {
   identity: 'channel-section-identity',
   credentials: 'channel-section-credentials',
+  upstream: 'channel-section-upstream',
   models: 'channel-section-models',
   advanced: 'channel-section-advanced',
 } as const
 const CHANNEL_EDITOR_MAIN_SECTION_IDS = [
   CHANNEL_EDITOR_SECTION_IDS.identity,
   CHANNEL_EDITOR_SECTION_IDS.credentials,
+  CHANNEL_EDITOR_SECTION_IDS.upstream,
   CHANNEL_EDITOR_SECTION_IDS.models,
   CHANNEL_EDITOR_SECTION_IDS.advanced,
 ]
@@ -317,6 +323,18 @@ const SENSITIVE_FORM_FIELDS = [
   'client_identity_platform',
   'client_identity_context_1m_enabled',
   'client_identity_source',
+  'upstream_account_enabled',
+  'upstream_account_name',
+  'upstream_account_base_url',
+  'upstream_account_site_type',
+  'upstream_account_auth_type',
+  'upstream_account_credential',
+  'upstream_account_auto_checkin',
+  'upstream_account_auto_balance',
+  'upstream_account_balance_interval',
+  'upstream_account_external_checkin_url',
+  'upstream_account_redeem_url',
+  'upstream_account_open_redeem_with_checkin',
 ] satisfies (keyof ChannelFormValues)[]
 
 function readAdvancedSettingsPreference(): boolean {
@@ -704,6 +722,12 @@ export function ChannelMutateDrawer({
     queryFn: () => getPrefillGroups('model'),
   })
 
+  const { data: upstreamSiteTypes = [] } = useQuery<UpstreamSiteTypeOption[]>({
+    queryKey: ['upstream-account-site-types'],
+    queryFn: listUpstreamSiteTypes,
+    staleTime: 24 * 60 * 60 * 1000,
+  })
+
   const { copyToClipboard } = useCopyToClipboard()
 
   const {
@@ -798,6 +822,25 @@ export function ChannelMutateDrawer({
   const currentClientIdentityContext1MEnabled = form.watch(
     'client_identity_context_1m_enabled'
   )
+  const currentUpstreamAccountEnabled = form.watch('upstream_account_enabled')
+  const currentUpstreamAccountBaseURL = form.watch(
+    'upstream_account_base_url'
+  )
+  const currentUpstreamAccountCredential = form.watch(
+    'upstream_account_credential'
+  )
+
+  useEffect(() => {
+    if (
+      currentUpstreamAccountEnabled &&
+      !form.getValues('upstream_account_base_url')?.trim() &&
+      currentBaseUrl?.trim()
+    ) {
+      form.setValue('upstream_account_base_url', currentBaseUrl, {
+        shouldDirty: false,
+      })
+    }
+  }, [currentBaseUrl, currentUpstreamAccountEnabled, form])
   const shouldPreviewUnsavedModels =
     !isEditing ||
     (currentType === CHANNEL_TYPE_ADVANCED_CUSTOM && canEditSensitive)
@@ -992,6 +1035,12 @@ export function ChannelMutateDrawer({
     formErrors.aws_key_type ||
     formErrors.azure_responses_version
   )
+  const upstreamAccountHaveErrors = Boolean(
+    formErrors.upstream_account_base_url ||
+      formErrors.upstream_account_site_type ||
+      formErrors.upstream_account_auth_type ||
+      formErrors.upstream_account_balance_interval
+  )
   const modelsHaveErrors = Boolean(
     formErrors.models || formErrors.group || formErrors.model_mapping
   )
@@ -1033,6 +1082,16 @@ export function ChannelMutateDrawer({
   const credentialsStatus = getCompletionStatus(
     credentialsHaveErrors,
     credentialsComplete
+  )
+  const upstreamAccountConfigured = Boolean(
+    currentUpstreamAccountEnabled &&
+      currentUpstreamAccountBaseURL?.trim() &&
+      (currentUpstreamAccountCredential?.trim() ||
+        channelData?.data?.upstream_account_config?.credential_configured)
+  )
+  const upstreamAccountStatus = getCompletionStatus(
+    upstreamAccountHaveErrors,
+    upstreamAccountConfigured
   )
   const modelsStatus = getCompletionStatus(modelsHaveErrors, modelsComplete)
   const advancedStatus: ChannelEditorSectionStatus = advancedHaveErrors
@@ -1164,6 +1223,17 @@ export function ChannelMutateDrawer({
       statusLabel: getSectionStatusLabel(credentialsStatus, t),
       status: credentialsStatus,
       icon: <KeyRound className='h-4 w-4' aria-hidden='true' />,
+    },
+    {
+      id: CHANNEL_EDITOR_SECTION_IDS.upstream,
+      title: t('Automatic Check-in'),
+      description: upstreamAccountConfigured
+        ? t('Configured')
+        : t('Optional'),
+      statusLabel: getSectionStatusLabel(upstreamAccountStatus, t),
+      status: upstreamAccountStatus,
+      icon: <CalendarCheck2 className='h-4 w-4' aria-hidden='true' />,
+      configured: upstreamAccountConfigured,
     },
     {
       id: CHANNEL_EDITOR_SECTION_IDS.models,
@@ -1608,6 +1678,8 @@ export function ChannelMutateDrawer({
   // Handle successful submission
   const handleSuccess = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: channelsQueryKeys.lists() })
+    queryClient.invalidateQueries({ queryKey: ['upstream-accounts'] })
+    queryClient.invalidateQueries({ queryKey: ['upstream-account-channels'] })
     if (channelId) {
       queryClient.invalidateQueries({
         queryKey: channelsQueryKeys.detail(channelId),
@@ -1687,6 +1759,19 @@ export function ChannelMutateDrawer({
           type: 'manual',
           message: ERROR_MESSAGES.REQUIRED_KEY,
         })
+        return
+      }
+
+      if (
+        data.upstream_account_enabled === true &&
+        !isEditing &&
+        !data.upstream_account_credential?.trim()
+      ) {
+        form.setError('upstream_account_credential', {
+          type: 'manual',
+          message: t('Pass token is required for a new upstream account'),
+        })
+        setActiveEditorSectionId(CHANNEL_EDITOR_SECTION_IDS.upstream)
         return
       }
 
@@ -3304,6 +3389,336 @@ export function ChannelMutateDrawer({
                           </fieldset>
                         </div>
                       </ChannelApiAccessSection>
+                    </div>
+
+                    {/* ── Automatic Check-in ── */}
+                    <div
+                      id={CHANNEL_EDITOR_SECTION_IDS.upstream}
+                      className='scroll-mt-4'
+                    >
+                      <ChannelUpstreamAccountSection>
+                        <fieldset
+                          disabled={sensitiveLocked}
+                          className='space-y-4 disabled:opacity-60'
+                        >
+                          <FormField
+                            control={form.control}
+                            name='upstream_account_enabled'
+                            render={({ field }) => (
+                              <FormItem
+                                className={sideDrawerSwitchItemClassName()}
+                              >
+                                <div className='flex flex-col gap-0.5'>
+                                  <FormLabel>{t('Enable upstream account')}</FormLabel>
+                                  <FormDescription className='text-xs'>
+                                    {t(
+                                      'Save the pass token for balance queries; automatic check-in is controlled separately.'
+                                    )}
+                                  </FormDescription>
+                                </div>
+                                <FormControl>
+                                  <Switch
+                                    checked={field.value === true}
+                                    onCheckedChange={field.onChange}
+                                  />
+                                </FormControl>
+                              </FormItem>
+                            )}
+                          />
+
+                          {currentUpstreamAccountEnabled && (
+                            <div className='space-y-4'>
+                              <div className='grid gap-4 sm:grid-cols-2'>
+                                <FormField
+                                  control={form.control}
+                                  name='upstream_account_name'
+                                  render={({ field }) => (
+                                    <FormItem>
+                                      <FormLabel>{t('Account name')}</FormLabel>
+                                      <FormControl>
+                                        <Input
+                                          placeholder={t(
+                                            'Leave empty to use the channel name'
+                                          )}
+                                          {...field}
+                                        />
+                                      </FormControl>
+                                      <FormMessage />
+                                    </FormItem>
+                                  )}
+                                />
+                                <FormField
+                                  control={form.control}
+                                  name='upstream_account_base_url'
+                                  render={({ field }) => (
+                                    <FormItem>
+                                      <FormLabel>{t('Upstream site URL *')}</FormLabel>
+                                      <FormControl>
+                                        <Input
+                                          type='url'
+                                          placeholder={t(
+                                            'https://example.com'
+                                          )}
+                                          {...field}
+                                        />
+                                      </FormControl>
+                                      <FormDescription>
+                                        {t(
+                                          'Usually the same address as the channel site.'
+                                        )}
+                                      </FormDescription>
+                                      <FormMessage />
+                                    </FormItem>
+                                  )}
+                                />
+                              </div>
+
+                              <div className='grid gap-4 sm:grid-cols-2'>
+                                <FormField
+                                  control={form.control}
+                                  name='upstream_account_site_type'
+                                  render={({ field }) => (
+                                    <FormItem>
+                                      <FormLabel>{t('Site type')}</FormLabel>
+                                      <FormControl>
+                                        <Combobox
+                                          options={upstreamSiteTypes.map(
+                                            (option) => ({
+                                              value: option.value,
+                                              label: option.label,
+                                            })
+                                          )}
+                                          value={field.value || 'new_api'}
+                                          onValueChange={field.onChange}
+                                          placeholder={t('Select site type')}
+                                          searchPlaceholder={t(
+                                            'Search site type...'
+                                          )}
+                                          emptyText={t('No site type found.')}
+                                        />
+                                      </FormControl>
+                                      <FormMessage />
+                                    </FormItem>
+                                  )}
+                                />
+                                <FormField
+                                  control={form.control}
+                                  name='upstream_account_auth_type'
+                                  render={({ field }) => (
+                                    <FormItem>
+                                      <FormLabel>{t('Authentication')}</FormLabel>
+                                      <Select
+                                        value={field.value || 'token'}
+                                        onValueChange={field.onChange}
+                                      >
+                                        <FormControl>
+                                          <SelectTrigger>
+                                            <SelectValue />
+                                          </SelectTrigger>
+                                        </FormControl>
+                                        <SelectContent>
+                                          <SelectItem value='token'>
+                                            {t('Pass token')}
+                                          </SelectItem>
+                                          <SelectItem value='cookie'>
+                                            {t('Cookie')}
+                                          </SelectItem>
+                                        </SelectContent>
+                                      </Select>
+                                      <FormMessage />
+                                    </FormItem>
+                                  )}
+                                />
+                              </div>
+
+                              <FormField
+                                control={form.control}
+                                name='upstream_account_credential'
+                                render={({ field }) => (
+                                  <FormItem>
+                                    <FormLabel>{t('Pass token')}</FormLabel>
+                                    <FormControl>
+                                      <Input
+                                        type='password'
+                                        autoComplete='new-password'
+                                        placeholder={
+                                          channelData?.data
+                                            ?.upstream_account_config
+                                            ?.credential_configured
+                                            ? t(
+                                                'Already configured; leave empty to keep it'
+                                              )
+                                            : t('Enter pass token')
+                                        }
+                                        {...field}
+                                      />
+                                    </FormControl>
+                                    <FormDescription>
+                                      {t(
+                                        'The token is encrypted and is only used for upstream balance and check-in requests.'
+                                      )}
+                                    </FormDescription>
+                                    <FormMessage />
+                                  </FormItem>
+                                )}
+                              />
+
+                              <div className='grid gap-4 sm:grid-cols-2'>
+                                <FormField
+                                  control={form.control}
+                                  name='upstream_account_auto_checkin'
+                                  render={({ field }) => (
+                                    <FormItem
+                                      className={sideDrawerSwitchItemClassName()}
+                                    >
+                                      <div className='flex flex-col gap-0.5'>
+                                        <FormLabel>
+                                          {t('Automatic check-in')}
+                                        </FormLabel>
+                                        <FormDescription className='text-xs'>
+                                          {t(
+                                            'Run the scheduled check-in task for this account.'
+                                          )}
+                                        </FormDescription>
+                                      </div>
+                                      <FormControl>
+                                        <Switch
+                                          checked={field.value === true}
+                                          onCheckedChange={field.onChange}
+                                        />
+                                      </FormControl>
+                                    </FormItem>
+                                  )}
+                                />
+                                <FormField
+                                  control={form.control}
+                                  name='upstream_account_auto_balance'
+                                  render={({ field }) => (
+                                    <FormItem
+                                      className={sideDrawerSwitchItemClassName()}
+                                    >
+                                      <div className='flex flex-col gap-0.5'>
+                                        <FormLabel>
+                                          {t('Automatic balance refresh')}
+                                        </FormLabel>
+                                        <FormDescription className='text-xs'>
+                                          {t(
+                                            'Refresh the stored balance on the schedule.'
+                                          )}
+                                        </FormDescription>
+                                      </div>
+                                      <FormControl>
+                                        <Switch
+                                          checked={field.value !== false}
+                                          onCheckedChange={field.onChange}
+                                        />
+                                      </FormControl>
+                                    </FormItem>
+                                  )}
+                                />
+                              </div>
+
+                              <FormField
+                                control={form.control}
+                                name='upstream_account_balance_interval'
+                                render={({ field }) => (
+                                  <FormItem>
+                                    <FormLabel>
+                                      {t('Balance refresh interval (minutes)')}
+                                    </FormLabel>
+                                    <FormControl>
+                                      <Input
+                                        type='number'
+                                        min={5}
+                                        step={1}
+                                        {...field}
+                                        onChange={(event) =>
+                                          field.onChange(
+                                            Number(event.target.value)
+                                          )
+                                        }
+                                      />
+                                    </FormControl>
+                                    <FormDescription>
+                                      {t(
+                                        'This only affects scheduled refreshes; the channel card can refresh manually at any time.'
+                                      )}
+                                    </FormDescription>
+                                    <FormMessage />
+                                  </FormItem>
+                                )}
+                              />
+
+                              <div className='grid gap-4 sm:grid-cols-2'>
+                                <FormField
+                                  control={form.control}
+                                  name='upstream_account_external_checkin_url'
+                                  render={({ field }) => (
+                                    <FormItem>
+                                      <FormLabel>
+                                        {t('External check-in URL')}
+                                      </FormLabel>
+                                      <FormControl>
+                                        <Input
+                                          type='url'
+                                          placeholder={t(
+                                            'Optional external check-in page'
+                                          )}
+                                          {...field}
+                                        />
+                                      </FormControl>
+                                      <FormMessage />
+                                    </FormItem>
+                                  )}
+                                />
+                                <FormField
+                                  control={form.control}
+                                  name='upstream_account_redeem_url'
+                                  render={({ field }) => (
+                                    <FormItem>
+                                      <FormLabel>
+                                        {t('Recharge / redeem URL')}
+                                      </FormLabel>
+                                      <FormControl>
+                                        <Input
+                                          type='url'
+                                          placeholder={t(
+                                            'Optional recharge or redeem page'
+                                          )}
+                                          {...field}
+                                        />
+                                      </FormControl>
+                                      <FormMessage />
+                                    </FormItem>
+                                  )}
+                                />
+                              </div>
+
+                              <FormField
+                                control={form.control}
+                                name='upstream_account_open_redeem_with_checkin'
+                                render={({ field }) => (
+                                  <FormItem
+                                    className={sideDrawerSwitchItemClassName()}
+                                  >
+                                    <div className='flex flex-col gap-0.5'>
+                                      <FormLabel>
+                                        {t('Open recharge / redeem after check-in')}
+                                      </FormLabel>
+                                    </div>
+                                    <FormControl>
+                                      <Switch
+                                        checked={field.value === true}
+                                        onCheckedChange={field.onChange}
+                                      />
+                                    </FormControl>
+                                  </FormItem>
+                                )}
+                              />
+                            </div>
+                          )}
+                        </fieldset>
+                      </ChannelUpstreamAccountSection>
                     </div>
 
                     {/* ── Models & Groups ── */}

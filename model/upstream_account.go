@@ -201,6 +201,21 @@ type UpstreamAccount struct {
 	ChannelIds            []int    `json:"channel_ids" gorm:"-:all"`
 }
 
+// ChannelUpstreamAccountConfig is the non-channel portion of an upstream
+// account exposed through the channel editor.  It embeds the existing account
+// shape so the channel editor and the dedicated upstream-account page always
+// read and write the same encrypted credential record.
+//
+// Credential is write-only.  It is accepted on create/update, but remains
+// empty when this value is returned from a read API.
+type ChannelUpstreamAccountConfig struct {
+	Enabled         bool `json:"enabled"`
+	SupportsCheckin bool `json:"supports_checkin"`
+	SupportsBalance bool `json:"supports_balance"`
+	ExternalOnly    bool `json:"external_only"`
+	UpstreamAccount
+}
+
 type UpstreamAccountChannel struct {
 	Id        int   `json:"id"`
 	AccountId int   `json:"account_id" gorm:"uniqueIndex:idx_upstream_account_channel;index"`
@@ -677,6 +692,124 @@ func ReplaceUpstreamAccountChannels(accountId int, channelIds []int) error {
 	})
 }
 
+// BindUpstreamAccountChannel adds a single account/channel relationship while
+// preserving any other accounts manually bound to the channel.
+func BindUpstreamAccountChannel(accountId, channelId int) error {
+	if accountId <= 0 || channelId <= 0 {
+		return errors.New("account and channel are required")
+	}
+	return DB.Transaction(func(tx *gorm.DB) error {
+		var accountCount, channelCount int64
+		if err := tx.Model(&UpstreamAccount{}).Where("id = ?", accountId).Count(&accountCount).Error; err != nil {
+			return err
+		}
+		if accountCount == 0 {
+			return gorm.ErrRecordNotFound
+		}
+		if err := tx.Model(&Channel{}).Where("id = ?", channelId).Count(&channelCount).Error; err != nil {
+			return err
+		}
+		if channelCount == 0 {
+			return gorm.ErrRecordNotFound
+		}
+		link := &UpstreamAccountChannel{AccountId: accountId, ChannelId: channelId, CreatedAt: common.GetTimestamp()}
+		if err := tx.Where("account_id = ? AND channel_id = ?", accountId, channelId).
+			FirstOrCreate(link).Error; err != nil {
+			return err
+		}
+		return tx.Model(&Channel{}).Where("id = ?", channelId).
+			Update("balance_source", ChannelBalanceSourceUpstream).Error
+	})
+}
+
+// SyncChannelUpstreamAccountConfig creates or updates the account configured
+// from a channel editor and binds it to that channel.  The account remains a
+// normal UpstreamAccount, so the dedicated upstream-account page sees the
+// exact same credential, schedule, balance snapshot and operation logs.
+func SyncChannelUpstreamAccountConfig(channelId int, config *ChannelUpstreamAccountConfig) error {
+	if config == nil {
+		return nil
+	}
+	if !config.Enabled {
+		accounts, err := GetUpstreamAccountsForChannel(channelId)
+		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+		if len(accounts) == 0 {
+			return nil
+		}
+		return DB.Transaction(func(tx *gorm.DB) error {
+			if err := tx.Where("account_id = ? AND channel_id = ?", accounts[0].Id, channelId).
+				Delete(&UpstreamAccountChannel{}).Error; err != nil {
+				return err
+			}
+			var remaining int64
+			if err := tx.Model(&UpstreamAccountChannel{}).Where("channel_id = ?", channelId).Count(&remaining).Error; err != nil {
+				return err
+			}
+			if remaining == 0 {
+				return tx.Model(&Channel{}).Where("id = ?", channelId).
+					Update("balance_source", ChannelBalanceSourceChannel).Error
+			}
+			return nil
+		})
+	}
+
+	accounts, err := GetUpstreamAccountsForChannel(channelId)
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+	var account *UpstreamAccount
+	if len(accounts) > 0 {
+		account = accounts[0]
+	} else {
+		account = &UpstreamAccount{}
+	}
+
+	account.Name = strings.TrimSpace(config.Name)
+	if account.Name == "" {
+		var channel Channel
+		if err := DB.Select("name").First(&channel, channelId).Error; err != nil {
+			return err
+		}
+		account.Name = channel.Name + " 上游账号"
+	}
+	account.BaseURL = config.BaseURL
+	account.SiteType = config.SiteType
+	if account.Id == 0 || strings.TrimSpace(config.Notes) != "" {
+		account.Notes = strings.TrimSpace(config.Notes)
+	}
+	if account.Id == 0 || len(config.Tags) > 0 {
+		account.Tags = config.Tags
+	}
+	account.ExternalCheckinURL = config.ExternalCheckinURL
+	account.RedeemURL = config.RedeemURL
+	account.OpenRedeemWithCheckin = config.OpenRedeemWithCheckin
+	account.AuthType = config.AuthType
+	if account.Id == 0 || config.UserId > 0 {
+		account.UserId = config.UserId
+	}
+	account.AutoCheckin = config.AutoCheckin
+	account.AutoBalance = config.AutoBalance
+	account.BalanceInterval = config.BalanceInterval
+
+	if account.Id == 0 {
+		account.Credential = strings.TrimSpace(config.Credential)
+		if err := CreateUpstreamAccount(account); err != nil {
+			return err
+		}
+	} else {
+		account.Credential = strings.TrimSpace(config.Credential)
+		if err := UpdateUpstreamAccount(account); err != nil {
+			return err
+		}
+	}
+	if err := BindUpstreamAccountChannel(account.Id, channelId); err != nil {
+		return err
+	}
+	return nil
+}
+
 func UpdateChannelBalanceSource(channelId int, source string) error {
 	source = strings.ToLower(strings.TrimSpace(source))
 	if source != ChannelBalanceSourceChannel && source != ChannelBalanceSourceUpstream && source != ChannelBalanceSourceNone {
@@ -787,6 +920,7 @@ func HydrateChannelUpstreamBalances(channels []*Channel) error {
 		channel.UpstreamBalanceUpdatedTime = 0
 		channel.UpstreamBalanceStatus = ""
 		channel.UpstreamBalanceDetails = nil
+		channel.UpstreamAccountConfig = nil
 		items := byChannel[channelId]
 		if len(items) == 0 {
 			continue
@@ -805,6 +939,21 @@ func HydrateChannelUpstreamBalances(channels []*Channel) error {
 		channel.UpstreamBalanceUnit = summary.Unit
 		channel.UpstreamBalanceUpdatedTime = summary.UpdatedTime
 		channel.UpstreamBalanceStatus = summary.Status
+		// The first bound account is the account edited from the channel drawer.
+		// Additional accounts manually bound on the dedicated page remain part of
+		// the aggregate and are not overwritten by this view.
+		var account UpstreamAccount
+		if err := DB.First(&account, summary.AccountIds[0]).Error; err == nil {
+			hydrateUpstreamAccount(&account)
+			option, _ := upstreamSiteTypeOption(account.SiteType)
+			channel.UpstreamAccountConfig = &ChannelUpstreamAccountConfig{
+				Enabled:         true,
+				SupportsCheckin: option.SupportsCheckin,
+				SupportsBalance: option.SupportsBalance,
+				ExternalOnly:    option.ExternalOnly,
+				UpstreamAccount: account,
+			}
+		}
 	}
 	return nil
 }

@@ -405,9 +405,9 @@ func parseUpstreamBalance(ctx context.Context, account *model.UpstreamAccount, a
 			return upstreamBalanceSnapshot{}, errors.New("upstream response does not contain a supported balance field")
 		}
 	}
-	if snapshot.balance < 0 {
-		return upstreamBalanceSnapshot{}, errors.New("upstream balance is negative")
-	}
+	// A negative balance represents upstream arrears. Keep it as a valid
+	// snapshot so the dashboard shows the actual upstream state instead of
+	// retaining a stale previous balance and reporting a parse failure.
 	return snapshot, nil
 }
 
