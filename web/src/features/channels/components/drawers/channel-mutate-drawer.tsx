@@ -184,6 +184,10 @@ import {
   collectInvalidStatusCodeEntries,
   collectNewDisallowedStatusCodeRedirects,
 } from '../../lib/status-code-risk-guard'
+import {
+  formatLastCheckinTime,
+  getUpstreamAuthTypeLabel,
+} from '../../lib/upstream-account-display'
 import type { Channel } from '../../types'
 import { useChannels } from '../channels-provider'
 import { AdvancedCustomEditorDialog } from '../dialogs/advanced-custom-editor-dialog'
@@ -824,6 +828,25 @@ export function ChannelMutateDrawer({
   const currentUpstreamAccountEnabled = form.watch('upstream_account_enabled')
   const currentUpstreamAccountCredential = form.watch(
     'upstream_account_credential'
+  )
+  const currentUpstreamAccountAuthType = form.watch(
+    'upstream_account_auth_type'
+  )
+  const upstreamCredentialLabel = getUpstreamAuthTypeLabel(
+    currentUpstreamAccountAuthType,
+    t
+  )
+  let upstreamCredentialPlaceholder = t('Enter pass token')
+  if (currentUpstreamAccountAuthType === 'cookie') {
+    upstreamCredentialPlaceholder = t('Enter browser cookie')
+  }
+  if (channelData?.data?.upstream_account_config?.credential_configured) {
+    upstreamCredentialPlaceholder = t(
+      'Already configured; leave empty to keep it'
+    )
+  }
+  const lastUpstreamCheckinTime = formatLastCheckinTime(
+    channelData?.data?.upstream_account_config?.last_checkin_time
   )
   const shouldPreviewUnsavedModels =
     !isEditing ||
@@ -3454,7 +3477,12 @@ export function ChannelMutateDrawer({
                                       >
                                         <FormControl>
                                           <SelectTrigger>
-                                            <SelectValue />
+                                            <SelectValue>
+                                              {getUpstreamAuthTypeLabel(
+                                                field.value,
+                                                t
+                                              )}
+                                            </SelectValue>
                                           </SelectTrigger>
                                         </FormControl>
                                         <SelectContent>
@@ -3462,7 +3490,7 @@ export function ChannelMutateDrawer({
                                             {t('Pass token')}
                                           </SelectItem>
                                           <SelectItem value='cookie'>
-                                            {t('Cookie')}
+                                            {t('Browser Cookie')}
                                           </SelectItem>
                                         </SelectContent>
                                       </Select>
@@ -3477,19 +3505,15 @@ export function ChannelMutateDrawer({
                                 name='upstream_account_credential'
                                 render={({ field }) => (
                                   <FormItem>
-                                    <FormLabel>{t('Pass token')}</FormLabel>
+                                    <FormLabel>
+                                      {upstreamCredentialLabel}
+                                    </FormLabel>
                                     <FormControl>
                                       <Input
                                         type='password'
                                         autoComplete='new-password'
                                         placeholder={
-                                          channelData?.data
-                                            ?.upstream_account_config
-                                            ?.credential_configured
-                                            ? t(
-                                                'Already configured; leave empty to keep it'
-                                              )
-                                            : t('Enter pass token')
+                                          upstreamCredentialPlaceholder
                                         }
                                         {...field}
                                       />
@@ -3658,6 +3682,12 @@ export function ChannelMutateDrawer({
                                   </FormItem>
                                 )}
                               />
+                              {lastUpstreamCheckinTime && (
+                                <div className='text-muted-foreground flex justify-end text-xs'>
+                                  {t('Last check-in time')}:{' '}
+                                  {lastUpstreamCheckinTime}
+                                </div>
+                              )}
                             </div>
                           )}
                         </fieldset>

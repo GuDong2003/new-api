@@ -5600,6 +5600,10 @@
     "Versions are loaded from the official client source.": "Versions are loaded from the official client source.",
     "Windows x64": "Windows x64",
     "WorkBuddy": "WorkBuddy",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "Save the pass token for balance queries; automatic check-in is controlled separately.": "Save the pass token for balance queries; automatic check-in is controlled separately.",
+    "Browser Cookie": "Browser Cookie",
+    "Enter browser cookie": "Enter browser cookie",
+    "Last check-in time": "Last check-in time"
   }
 }

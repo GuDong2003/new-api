@@ -21,6 +21,10 @@ import {
   channelFormSchema,
   transformFormDataToCreatePayload,
 } from '../channel-form'
+import {
+  formatLastCheckinTime,
+  getUpstreamAuthTypeLabel,
+} from '../upstream-account-display'
 
 function upstreamForm(overrides: Record<string, unknown> = {}) {
   return {
@@ -68,5 +72,22 @@ describe('channel upstream account form', () => {
         )
       ).toBe(true)
     }
+  })
+
+  test('does not render a last check-in value when no check-in has occurred', () => {
+    expect(formatLastCheckinTime(undefined)).toBeNull()
+    expect(formatLastCheckinTime(0)).toBeNull()
+  })
+
+  test('formats the last check-in time when a record exists', () => {
+    expect(formatLastCheckinTime(1_704_067_200)).toContain('2024')
+  })
+
+  test('uses a translated label for the selected upstream authentication type', () => {
+    const translate = (key: string) =>
+      key === 'Browser Cookie' ? '浏览器 Cookie' : '通行令牌'
+
+    expect(getUpstreamAuthTypeLabel('cookie', translate)).toBe('浏览器 Cookie')
+    expect(getUpstreamAuthTypeLabel('token', translate)).toBe('通行令牌')
   })
 })

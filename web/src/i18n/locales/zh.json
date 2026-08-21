@@ -5618,6 +5618,10 @@
     "Versions are loaded from the official client source.": "版本来自官方客户端来源。",
     "Windows x64": "Windows x64",
     "WorkBuddy": "WorkBuddy",
-    "Zoom": "缩放"
+    "Zoom": "缩放",
+    "Save the pass token for balance queries; automatic check-in is controlled separately.": "保存通行令牌用于查询余额；自动签到可单独控制。",
+    "Browser Cookie": "浏览器 Cookie",
+    "Enter browser cookie": "输入浏览器 Cookie",
+    "Last check-in time": "最近签到时间"
   }
 }

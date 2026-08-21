@@ -5412,6 +5412,10 @@
     "Zero retention": "零數據保留",
     "Zhipu": "智譜",
     "Zhipu V4": "智譜 V4",
-    "Zoom": "縮放"
+    "Zoom": "縮放",
+    "Save the pass token for balance queries; automatic check-in is controlled separately.": "儲存通行令牌以查詢餘額；自動簽到可單獨控制。",
+    "Browser Cookie": "瀏覽器 Cookie",
+    "Enter browser cookie": "輸入瀏覽器 Cookie",
+    "Last check-in time": "最近簽到時間"
   }
 }

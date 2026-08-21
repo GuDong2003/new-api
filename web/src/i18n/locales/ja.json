@@ -5405,6 +5405,10 @@
     "Zero retention": "データ保持なし",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V 4",
-    "Zoom": "ズーム"
+    "Zoom": "ズーム",
+    "Save the pass token for balance queries; automatic check-in is controlled separately.": "残高照会用の通行トークンを保存します。自動チェックインは別途設定できます。",
+    "Browser Cookie": "ブラウザ Cookie",
+    "Enter browser cookie": "ブラウザ Cookie を入力",
+    "Last check-in time": "最終チェックイン時刻"
   }
 }

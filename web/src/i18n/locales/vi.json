@@ -5405,6 +5405,10 @@
     "Zero retention": "Không lưu dữ liệu",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "Save the pass token for balance queries; automatic check-in is controlled separately.": "Lưu token truy cập để truy vấn số dư; tự động điểm danh được điều khiển riêng.",
+    "Browser Cookie": "Cookie trình duyệt",
+    "Enter browser cookie": "Nhập Cookie trình duyệt",
+    "Last check-in time": "Thời gian điểm danh gần nhất"
   }
 }

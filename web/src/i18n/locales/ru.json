@@ -5405,6 +5405,10 @@
     "Zero retention": "Без хранения данных",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "Save the pass token for balance queries; automatic check-in is controlled separately.": "Сохраните токен доступа для запроса баланса; автоматическая отметка настраивается отдельно.",
+    "Browser Cookie": "Cookie браузера",
+    "Enter browser cookie": "Введите Cookie браузера",
+    "Last check-in time": "Время последней отметки"
   }
 }

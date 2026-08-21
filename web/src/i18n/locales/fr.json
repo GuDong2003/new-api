@@ -5405,6 +5405,10 @@
     "Zero retention": "Aucune rétention",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "Save the pass token for balance queries; automatic check-in is controlled separately.": "Enregistrez le jeton d'accès pour consulter le solde ; la connexion automatique se configure séparément.",
+    "Browser Cookie": "Cookie du navigateur",
+    "Enter browser cookie": "Saisissez le cookie du navigateur",
+    "Last check-in time": "Heure du dernier pointage"
   }
 }
