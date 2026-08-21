@@ -222,9 +222,9 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
 
   return (
     <div className='-ml-1.5 flex items-center gap-1'>
-      {layout === 'card' && hasUpstreamConfig && (
+      {layout === 'card' && (
         <>
-          {upstreamConfig?.supports_checkin && (
+          {hasUpstreamConfig && upstreamConfig?.supports_checkin && (
             <Tooltip>
               <TooltipTrigger
                 render={
