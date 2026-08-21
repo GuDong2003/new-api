@@ -36,9 +36,11 @@ import {
   Trash2,
   RefreshCw,
   Loader2,
+  Globe,
 } from 'lucide-react'
 import { useContext, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
 
 import { ConfirmDialog } from '@/components/confirm-dialog'
 import { Button } from '@/components/ui/button'
@@ -61,15 +63,12 @@ import {
   hasPermission,
 } from '@/lib/admin-permissions'
 import { useAuthStore } from '@/stores/auth-store'
-import { toast } from 'sonner'
 
+import { checkinUpstreamAccount } from '../../upstream-accounts/api'
 import { MODEL_FETCHABLE_TYPES } from '../constants'
 import {
-  checkinUpstreamAccount,
-} from '../../upstream-accounts/api'
-import { updateChannelBalance } from '../api'
-import {
   channelsQueryKeys,
+  getDefaultBaseUrl,
   handleDeleteChannel,
   handleTestChannel,
   handleToggleChannelStatus,
@@ -95,9 +94,9 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
   const [isTesting, setIsTesting] = useState(false)
   const [isTogglingStatus, setIsTogglingStatus] = useState(false)
-  const [upstreamOperation, setUpstreamOperation] = useState<
-    'checkin' | 'balance' | null
-  >(null)
+  const [upstreamOperation, setUpstreamOperation] = useState<'checkin' | null>(
+    null
+  )
 
   const isEnabled = isChannelEnabled(channel)
   const isMultiKey = isMultiKeyChannel(channel)
@@ -136,23 +135,19 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
 
   const upstreamConfig = channel.upstream_account_config
   const upstreamAccountId = upstreamConfig?.id
-  const hasUpstreamConfig = Boolean(upstreamConfig?.enabled && upstreamAccountId)
+  const hasUpstreamConfig = Boolean(
+    upstreamConfig?.enabled && upstreamAccountId
+  )
 
-  const handleUpstreamOperation = async (operation: 'checkin' | 'balance') => {
+  const handleUpstreamOperation = async () => {
     if (!upstreamAccountId || upstreamOperation) return
-    setUpstreamOperation(operation)
+    setUpstreamOperation('checkin')
     try {
-      if (operation === 'checkin') {
-        const result = await checkinUpstreamAccount(upstreamAccountId)
-        toast.success(result?.message || t('Check-in successful'))
-      } else {
-        const result = await updateChannelBalance(channel.id)
-        if (!result.success) {
-          throw new Error(result.message || t('Failed to update balance'))
-        }
-        toast.success(t('Balance updated successfully'))
-      }
-      await queryClient.invalidateQueries({ queryKey: channelsQueryKeys.lists() })
+      const result = await checkinUpstreamAccount(upstreamAccountId)
+      toast.success(result?.message || t('Check-in successful'))
+      await queryClient.invalidateQueries({
+        queryKey: channelsQueryKeys.lists(),
+      })
       await queryClient.invalidateQueries({ queryKey: ['upstream-accounts'] })
     } catch (error) {
       toast.error(
@@ -167,12 +162,18 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
     if (url) window.open(url, '_blank', 'noopener,noreferrer')
   }
 
+  const upstreamSiteUrl =
+    channel.base_url?.trim() ||
+    getDefaultBaseUrl(channel.type) ||
+    upstreamConfig?.base_url?.trim()
+
+  const handleOpenUpstreamSite = () => {
+    openExternal(upstreamSiteUrl)
+  }
+
   const handleExternalCheckin = () => {
     openExternal(upstreamConfig?.external_checkin_url)
-    if (
-      upstreamConfig?.open_redeem_with_checkin &&
-      upstreamConfig.redeem_url
-    ) {
+    if (upstreamConfig?.open_redeem_with_checkin && upstreamConfig.redeem_url) {
       openExternal(upstreamConfig.redeem_url)
     }
   }
@@ -292,7 +293,7 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
                     size='icon-sm'
                     onClick={(event) => {
                       event.stopPropagation()
-                      void handleUpstreamOperation('checkin')
+                      void handleUpstreamOperation()
                     }}
                     disabled={upstreamOperation !== null}
                     aria-label={t('Check in')}
@@ -308,29 +309,6 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
               <TooltipContent>{t('Check in')}</TooltipContent>
             </Tooltip>
           )}
-          {upstreamConfig?.supports_balance !== false && <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  variant='ghost'
-                  size='icon-sm'
-                  onClick={(event) => {
-                    event.stopPropagation()
-                    void handleUpstreamOperation('balance')
-                  }}
-                  disabled={upstreamOperation !== null}
-                  aria-label={t('Update Balance')}
-                />
-              }
-            >
-              {upstreamOperation === 'balance' ? (
-                <Loader2 className='size-4 animate-spin' />
-              ) : (
-                <CircleDollarSign className='size-4' />
-              )}
-            </TooltipTrigger>
-            <TooltipContent>{t('Update Balance')}</TooltipContent>
-          </Tooltip>}
           {upstreamConfig?.external_checkin_url && (
             <Tooltip>
               <TooltipTrigger
@@ -369,6 +347,26 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
                 <CircleDollarSign className='size-4' />
               </TooltipTrigger>
               <TooltipContent>{t('Recharge / redeem')}</TooltipContent>
+            </Tooltip>
+          )}
+          {upstreamSiteUrl && (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant='ghost'
+                    size='icon-sm'
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      handleOpenUpstreamSite()
+                    }}
+                    aria-label={t('Go to site')}
+                  />
+                }
+              >
+                <Globe className='size-4' />
+              </TooltipTrigger>
+              <TooltipContent>{t('Go to site')}</TooltipContent>
             </Tooltip>
           )}
         </>

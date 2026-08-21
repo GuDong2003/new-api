@@ -42,6 +42,7 @@ import {
   stringifyAdvancedCustomConfig,
   validateAdvancedCustomConfig,
 } from './advanced-custom'
+import { getDefaultBaseUrl } from './channel-type-config'
 
 export function supportsChannelKeyAppend(
   type: number,
@@ -437,8 +438,6 @@ export const channelFormSchema = z
       .enum(['manual', 'official', 'community', 'npm', 'workbuddy'])
       .optional(),
     upstream_account_enabled: z.boolean().optional(),
-    upstream_account_name: z.string().optional(),
-    upstream_account_base_url: z.string().optional(),
     upstream_account_site_type: z.string().optional(),
     upstream_account_auth_type: z.enum(['token', 'cookie']).optional(),
     upstream_account_credential: z.string().optional(),
@@ -554,12 +553,12 @@ export const channelFormSchema = z
 
     if (
       data.upstream_account_enabled === true &&
-      !data.upstream_account_base_url?.trim()
+      !getEffectiveChannelBaseUrl(data.type, data.base_url)
     ) {
       addRequiredIssue(
         ctx,
-        'upstream_account_base_url',
-        'Upstream site URL is required when the upstream account is enabled'
+        'base_url',
+        'Base URL is required for this channel type'
       )
     }
     if (
@@ -657,8 +656,6 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   client_identity_source: 'manual',
   advanced_custom: '',
   upstream_account_enabled: false,
-  upstream_account_name: '',
-  upstream_account_base_url: '',
   upstream_account_site_type: 'new_api',
   upstream_account_auth_type: 'token',
   upstream_account_credential: '',
@@ -879,8 +876,6 @@ export function transformChannelToFormDefaults(
     client_identity_source: clientIdentitySource || 'manual',
     advanced_custom: advancedCustom,
     upstream_account_enabled: Boolean(channel.upstream_account_config?.enabled),
-    upstream_account_name: channel.upstream_account_config?.name || '',
-    upstream_account_base_url: channel.upstream_account_config?.base_url || '',
     upstream_account_site_type:
       channel.upstream_account_config?.site_type || 'new_api',
     upstream_account_auth_type:
@@ -1124,13 +1119,20 @@ function normalizeBaseUrl(value: string | undefined): string {
     .replace(/\/+$/, '')
 }
 
+function getEffectiveChannelBaseUrl(
+  type: number,
+  baseUrl: string | undefined
+): string {
+  return normalizeBaseUrl(baseUrl) || getDefaultBaseUrl(type)
+}
+
 function buildUpstreamAccountConfigPayload(
   formData: ChannelFormValues
 ): NonNullable<Partial<Channel>['upstream_account_config']> {
   const config: NonNullable<Partial<Channel>['upstream_account_config']> = {
     enabled: formData.upstream_account_enabled === true,
-    name: formData.upstream_account_name?.trim() || '',
-    base_url: normalizeBaseUrl(formData.upstream_account_base_url),
+    name: formData.name.trim(),
+    base_url: getEffectiveChannelBaseUrl(formData.type, formData.base_url),
     site_type: formData.upstream_account_site_type || 'new_api',
     auth_type: formData.upstream_account_auth_type || 'token',
     auto_checkin: formData.upstream_account_auto_checkin === true,

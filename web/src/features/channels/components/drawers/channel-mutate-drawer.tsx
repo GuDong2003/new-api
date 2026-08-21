@@ -128,6 +128,8 @@ import { ROLE } from '@/lib/roles'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/auth-store'
 
+import { listUpstreamSiteTypes } from '../../../upstream-accounts/api'
+import type { UpstreamSiteTypeOption } from '../../../upstream-accounts/types'
 import {
   fetchModels,
   getAllModels,
@@ -137,8 +139,6 @@ import {
   getPrefillGroups,
   refreshCodexCredential,
 } from '../../api'
-import { listUpstreamSiteTypes } from '../../../upstream-accounts/api'
-import type { UpstreamSiteTypeOption } from '../../../upstream-accounts/types'
 import {
   ADD_MODE_OPTIONS,
   CLAUDE_FIELD_PASSTHROUGH_TYPES,
@@ -165,6 +165,7 @@ import {
   channelFormSchema,
   channelsQueryKeys,
   getAdvancedCustomStats,
+  getDefaultBaseUrl,
   transformChannelToFormDefaults,
   type ChannelFormValues,
   deduplicateKeys,
@@ -264,8 +265,8 @@ const CHANNEL_EDITOR_SECTION_IDS = {
 const CHANNEL_EDITOR_MAIN_SECTION_IDS = [
   CHANNEL_EDITOR_SECTION_IDS.identity,
   CHANNEL_EDITOR_SECTION_IDS.credentials,
-  CHANNEL_EDITOR_SECTION_IDS.upstream,
   CHANNEL_EDITOR_SECTION_IDS.models,
+  CHANNEL_EDITOR_SECTION_IDS.upstream,
   CHANNEL_EDITOR_SECTION_IDS.advanced,
 ]
 const ADVANCED_SETTINGS_SECTION_IDS = {
@@ -324,8 +325,6 @@ const SENSITIVE_FORM_FIELDS = [
   'client_identity_context_1m_enabled',
   'client_identity_source',
   'upstream_account_enabled',
-  'upstream_account_name',
-  'upstream_account_base_url',
   'upstream_account_site_type',
   'upstream_account_auth_type',
   'upstream_account_credential',
@@ -823,24 +822,9 @@ export function ChannelMutateDrawer({
     'client_identity_context_1m_enabled'
   )
   const currentUpstreamAccountEnabled = form.watch('upstream_account_enabled')
-  const currentUpstreamAccountBaseURL = form.watch(
-    'upstream_account_base_url'
-  )
   const currentUpstreamAccountCredential = form.watch(
     'upstream_account_credential'
   )
-
-  useEffect(() => {
-    if (
-      currentUpstreamAccountEnabled &&
-      !form.getValues('upstream_account_base_url')?.trim() &&
-      currentBaseUrl?.trim()
-    ) {
-      form.setValue('upstream_account_base_url', currentBaseUrl, {
-        shouldDirty: false,
-      })
-    }
-  }, [currentBaseUrl, currentUpstreamAccountEnabled, form])
   const shouldPreviewUnsavedModels =
     !isEditing ||
     (currentType === CHANNEL_TYPE_ADVANCED_CUSTOM && canEditSensitive)
@@ -1036,10 +1020,10 @@ export function ChannelMutateDrawer({
     formErrors.azure_responses_version
   )
   const upstreamAccountHaveErrors = Boolean(
-    formErrors.upstream_account_base_url ||
-      formErrors.upstream_account_site_type ||
-      formErrors.upstream_account_auth_type ||
-      formErrors.upstream_account_balance_interval
+    formErrors.base_url ||
+    formErrors.upstream_account_site_type ||
+    formErrors.upstream_account_auth_type ||
+    formErrors.upstream_account_balance_interval
   )
   const modelsHaveErrors = Boolean(
     formErrors.models || formErrors.group || formErrors.model_mapping
@@ -1085,9 +1069,9 @@ export function ChannelMutateDrawer({
   )
   const upstreamAccountConfigured = Boolean(
     currentUpstreamAccountEnabled &&
-      currentUpstreamAccountBaseURL?.trim() &&
-      (currentUpstreamAccountCredential?.trim() ||
-        channelData?.data?.upstream_account_config?.credential_configured)
+    (currentBaseUrl?.trim() || getDefaultBaseUrl(currentType)) &&
+    (currentUpstreamAccountCredential?.trim() ||
+      channelData?.data?.upstream_account_config?.credential_configured)
   )
   const upstreamAccountStatus = getCompletionStatus(
     upstreamAccountHaveErrors,
@@ -1225,23 +1209,21 @@ export function ChannelMutateDrawer({
       icon: <KeyRound className='h-4 w-4' aria-hidden='true' />,
     },
     {
-      id: CHANNEL_EDITOR_SECTION_IDS.upstream,
-      title: t('Automatic Check-in'),
-      description: upstreamAccountConfigured
-        ? t('Configured')
-        : t('Optional'),
-      statusLabel: getSectionStatusLabel(upstreamAccountStatus, t),
-      status: upstreamAccountStatus,
-      icon: <CalendarCheck2 className='h-4 w-4' aria-hidden='true' />,
-      configured: upstreamAccountConfigured,
-    },
-    {
       id: CHANNEL_EDITOR_SECTION_IDS.models,
       title: t('Models & Groups'),
       description: getSectionStatusLabel(modelsStatus, t),
       statusLabel: getSectionStatusLabel(modelsStatus, t),
       status: modelsStatus,
       icon: <Boxes className='h-4 w-4' aria-hidden='true' />,
+    },
+    {
+      id: CHANNEL_EDITOR_SECTION_IDS.upstream,
+      title: t('Automatic Check-in'),
+      description: upstreamAccountConfigured ? t('Configured') : t('Optional'),
+      statusLabel: getSectionStatusLabel(upstreamAccountStatus, t),
+      status: upstreamAccountStatus,
+      icon: <CalendarCheck2 className='h-4 w-4' aria-hidden='true' />,
+      configured: upstreamAccountConfigured,
     },
     {
       id: CHANNEL_EDITOR_SECTION_IDS.advanced,
@@ -2108,7 +2090,7 @@ export function ChannelMutateDrawer({
                     {/* ── Basic Information ── */}
                     <div
                       id={CHANNEL_EDITOR_SECTION_IDS.identity}
-                      className='scroll-mt-4'
+                      className='order-1 scroll-mt-4'
                     >
                       <ChannelBasicSection>
                         <div className='grid gap-4 sm:grid-cols-2'>
@@ -2249,7 +2231,7 @@ export function ChannelMutateDrawer({
                     {/* ── API Access ── */}
                     <div
                       id={CHANNEL_EDITOR_SECTION_IDS.credentials}
-                      className='scroll-mt-4'
+                      className='order-2 scroll-mt-4'
                     >
                       <ChannelApiAccessSection>
                         {CHANNEL_TYPE_WARNINGS[currentType] && (
@@ -3394,7 +3376,7 @@ export function ChannelMutateDrawer({
                     {/* ── Automatic Check-in ── */}
                     <div
                       id={CHANNEL_EDITOR_SECTION_IDS.upstream}
-                      className='scroll-mt-4'
+                      className='order-4 scroll-mt-4'
                     >
                       <ChannelUpstreamAccountSection>
                         <fieldset
@@ -3409,7 +3391,9 @@ export function ChannelMutateDrawer({
                                 className={sideDrawerSwitchItemClassName()}
                               >
                                 <div className='flex flex-col gap-0.5'>
-                                  <FormLabel>{t('Enable upstream account')}</FormLabel>
+                                  <FormLabel>
+                                    {t('Enable upstream account')}
+                                  </FormLabel>
                                   <FormDescription className='text-xs'>
                                     {t(
                                       'Save the pass token for balance queries; automatic check-in is controlled separately.'
@@ -3428,51 +3412,6 @@ export function ChannelMutateDrawer({
 
                           {currentUpstreamAccountEnabled && (
                             <div className='space-y-4'>
-                              <div className='grid gap-4 sm:grid-cols-2'>
-                                <FormField
-                                  control={form.control}
-                                  name='upstream_account_name'
-                                  render={({ field }) => (
-                                    <FormItem>
-                                      <FormLabel>{t('Account name')}</FormLabel>
-                                      <FormControl>
-                                        <Input
-                                          placeholder={t(
-                                            'Leave empty to use the channel name'
-                                          )}
-                                          {...field}
-                                        />
-                                      </FormControl>
-                                      <FormMessage />
-                                    </FormItem>
-                                  )}
-                                />
-                                <FormField
-                                  control={form.control}
-                                  name='upstream_account_base_url'
-                                  render={({ field }) => (
-                                    <FormItem>
-                                      <FormLabel>{t('Upstream site URL *')}</FormLabel>
-                                      <FormControl>
-                                        <Input
-                                          type='url'
-                                          placeholder={t(
-                                            'https://example.com'
-                                          )}
-                                          {...field}
-                                        />
-                                      </FormControl>
-                                      <FormDescription>
-                                        {t(
-                                          'Usually the same address as the channel site.'
-                                        )}
-                                      </FormDescription>
-                                      <FormMessage />
-                                    </FormItem>
-                                  )}
-                                />
-                              </div>
-
                               <div className='grid gap-4 sm:grid-cols-2'>
                                 <FormField
                                   control={form.control}
@@ -3506,7 +3445,9 @@ export function ChannelMutateDrawer({
                                   name='upstream_account_auth_type'
                                   render={({ field }) => (
                                     <FormItem>
-                                      <FormLabel>{t('Authentication')}</FormLabel>
+                                      <FormLabel>
+                                        {t('Authentication')}
+                                      </FormLabel>
                                       <Select
                                         value={field.value || 'token'}
                                         onValueChange={field.onChange}
@@ -3703,7 +3644,9 @@ export function ChannelMutateDrawer({
                                   >
                                     <div className='flex flex-col gap-0.5'>
                                       <FormLabel>
-                                        {t('Open recharge / redeem after check-in')}
+                                        {t(
+                                          'Open recharge / redeem after check-in'
+                                        )}
                                       </FormLabel>
                                     </div>
                                     <FormControl>
@@ -3724,7 +3667,7 @@ export function ChannelMutateDrawer({
                     {/* ── Models & Groups ── */}
                     <div
                       id={CHANNEL_EDITOR_SECTION_IDS.models}
-                      className='scroll-mt-4'
+                      className='order-3 scroll-mt-4'
                     >
                       <ChannelModelsSection>
                         <div className='space-y-5'>
@@ -4090,7 +4033,7 @@ export function ChannelMutateDrawer({
 
                     <div
                       id={CHANNEL_EDITOR_SECTION_IDS.advanced}
-                      className='scroll-mt-4'
+                      className='order-5 scroll-mt-4'
                     >
                       <ChannelAdvancedSection
                         open={advancedSettingsOpen}
