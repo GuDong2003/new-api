@@ -440,6 +440,7 @@ export const channelFormSchema = z
     upstream_account_enabled: z.boolean().optional(),
     upstream_account_site_type: z.string().optional(),
     upstream_account_auth_type: z.enum(['token', 'cookie']).optional(),
+    upstream_account_user_id: z.number().int().nonnegative().optional(),
     upstream_account_credential: z.string().optional(),
     upstream_account_auto_checkin: z.boolean().optional(),
     upstream_account_auto_balance: z.boolean().optional(),
@@ -658,6 +659,7 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   upstream_account_enabled: false,
   upstream_account_site_type: 'new_api',
   upstream_account_auth_type: 'token',
+  upstream_account_user_id: undefined,
   upstream_account_credential: '',
   upstream_account_auto_checkin: false,
   upstream_account_auto_balance: true,
@@ -880,6 +882,8 @@ export function transformChannelToFormDefaults(
       channel.upstream_account_config?.site_type || 'new_api',
     upstream_account_auth_type:
       channel.upstream_account_config?.auth_type || 'token',
+    upstream_account_user_id:
+      channel.upstream_account_config?.user_id || undefined,
     upstream_account_credential: '',
     upstream_account_auto_checkin:
       channel.upstream_account_config?.auto_checkin || false,
@@ -1135,6 +1139,7 @@ function buildUpstreamAccountConfigPayload(
     base_url: getEffectiveChannelBaseUrl(formData.type, formData.base_url),
     site_type: formData.upstream_account_site_type || 'new_api',
     auth_type: formData.upstream_account_auth_type || 'token',
+    user_id: formData.upstream_account_user_id ?? 0,
     auto_checkin: formData.upstream_account_auto_checkin === true,
     auto_balance: formData.upstream_account_auto_balance !== false,
     balance_interval: formData.upstream_account_balance_interval || 60,
@@ -1145,7 +1150,6 @@ function buildUpstreamAccountConfigPayload(
       formData.upstream_account_open_redeem_with_checkin === true,
     notes: '',
     tags: [],
-    user_id: 0,
   }
   const credential = formData.upstream_account_credential?.trim()
   if (credential) {

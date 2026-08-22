@@ -15,6 +15,19 @@ You should have received a copy of the GNU Affero General Public License
 along with this program. If not, see <https://www.gnu.org/licenses/>.
 */
 
+import type { ChannelUpstreamAccountConfig } from '../types'
+
+export function shouldShowChannelCheckinAction(
+  config: ChannelUpstreamAccountConfig | undefined
+): boolean {
+  return Boolean(
+    config?.enabled &&
+    config.id &&
+    config.supports_checkin &&
+    config.auto_checkin
+  )
+}
+
 export function formatLastCheckinTime(timestamp: unknown): string | null {
   const seconds = Number(timestamp)
   if (!Number.isFinite(seconds) || seconds <= 0) return null

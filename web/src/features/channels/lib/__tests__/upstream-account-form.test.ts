@@ -16,9 +16,11 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 */
 import { describe, expect, test } from 'vitest'
 
+import type { Channel } from '../../types'
 import {
   CHANNEL_FORM_DEFAULT_VALUES,
   channelFormSchema,
+  transformChannelToFormDefaults,
   transformFormDataToCreatePayload,
 } from '../channel-form'
 import {
@@ -47,6 +49,41 @@ describe('channel upstream account form', () => {
 
     expect(config?.name).toBe('渠道 A')
     expect(config?.base_url).toBe('https://upstream.example.com')
+  })
+
+  test('includes the configured upstream user ID in the payload', () => {
+    const result = transformFormDataToCreatePayload(
+      upstreamForm({ upstream_account_user_id: 226 })
+    )
+
+    expect(result.channel.upstream_account_config?.user_id).toBe(226)
+  })
+
+  test('submits zero when the upstream user ID is left empty', () => {
+    const result = transformFormDataToCreatePayload(
+      upstreamForm({ upstream_account_user_id: undefined })
+    )
+
+    expect(result.channel.upstream_account_config?.user_id).toBe(0)
+  })
+
+  test('restores the configured upstream user ID when editing a channel', () => {
+    const values = transformChannelToFormDefaults({
+      type: 8,
+      settings: '{}',
+      upstream_account_config: {
+        enabled: true,
+        user_id: 226,
+      },
+      channel_info: {
+        is_multi_key: false,
+        multi_key_size: 0,
+        multi_key_polling_index: 0,
+        multi_key_mode: 'random',
+      },
+    } as Channel)
+
+    expect(values.upstream_account_user_id).toBe(226)
   })
 
   test('uses the provider default Base URL when the channel leaves it blank', () => {

@@ -5409,6 +5409,8 @@
     "Save the pass token for balance queries; automatic check-in is controlled separately.": "Enregistrez le jeton d'accès pour consulter le solde ; la connexion automatique se configure séparément.",
     "Browser Cookie": "Cookie du navigateur",
     "Enter browser cookie": "Saisissez le cookie du navigateur",
-    "Last check-in time": "Heure du dernier pointage"
+    "Last check-in time": "Heure du dernier pointage",
+    "Enter upstream user ID": "Saisissez l’ID utilisateur en amont",
+    "Upstream user ID (optional)": "ID utilisateur en amont (facultatif)"
   }
 }

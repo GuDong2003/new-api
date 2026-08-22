@@ -5409,6 +5409,8 @@
     "Save the pass token for balance queries; automatic check-in is controlled separately.": "Сохраните токен доступа для запроса баланса; автоматическая отметка настраивается отдельно.",
     "Browser Cookie": "Cookie браузера",
     "Enter browser cookie": "Введите Cookie браузера",
-    "Last check-in time": "Время последней отметки"
+    "Last check-in time": "Время последней отметки",
+    "Enter upstream user ID": "Введите ID пользователя вышестоящего сервиса",
+    "Upstream user ID (optional)": "ID пользователя вышестоящего сервиса (необязательно)"
   }
 }

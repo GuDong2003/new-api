@@ -5416,6 +5416,8 @@
     "Save the pass token for balance queries; automatic check-in is controlled separately.": "儲存通行令牌以查詢餘額；自動簽到可單獨控制。",
     "Browser Cookie": "瀏覽器 Cookie",
     "Enter browser cookie": "輸入瀏覽器 Cookie",
-    "Last check-in time": "最近簽到時間"
+    "Last check-in time": "最近簽到時間",
+    "Enter upstream user ID": "請輸入上游用戶 ID",
+    "Upstream user ID (optional)": "上游用戶 ID（選填）"
   }
 }

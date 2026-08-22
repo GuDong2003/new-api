@@ -75,6 +75,7 @@ import {
   isChannelEnabled,
   isMultiKeyChannel,
 } from '../lib'
+import { shouldShowChannelCheckinAction } from '../lib/upstream-account-display'
 import { parseUpstreamUpdateMeta } from '../lib/upstream-update-utils'
 import type { Channel } from '../types'
 import { ChannelRowActionsLayoutContext } from './channel-row-actions-context'
@@ -135,9 +136,6 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
 
   const upstreamConfig = channel.upstream_account_config
   const upstreamAccountId = upstreamConfig?.id
-  const hasUpstreamConfig = Boolean(
-    upstreamConfig?.enabled && upstreamAccountId
-  )
 
   const handleUpstreamOperation = async () => {
     if (!upstreamAccountId || upstreamOperation) return
@@ -224,7 +222,7 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
     <div className='-ml-1.5 flex items-center gap-1'>
       {layout === 'card' && (
         <>
-          {hasUpstreamConfig && upstreamConfig?.supports_checkin && (
+          {shouldShowChannelCheckinAction(upstreamConfig) && (
             <Tooltip>
               <TooltipTrigger
                 render={

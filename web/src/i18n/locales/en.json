@@ -5604,6 +5604,8 @@
     "Save the pass token for balance queries; automatic check-in is controlled separately.": "Save the pass token for balance queries; automatic check-in is controlled separately.",
     "Browser Cookie": "Browser Cookie",
     "Enter browser cookie": "Enter browser cookie",
-    "Last check-in time": "Last check-in time"
+    "Last check-in time": "Last check-in time",
+    "Enter upstream user ID": "Enter upstream user ID",
+    "Upstream user ID (optional)": "Upstream user ID (optional)"
   }
 }

@@ -331,6 +331,7 @@ const SENSITIVE_FORM_FIELDS = [
   'upstream_account_enabled',
   'upstream_account_site_type',
   'upstream_account_auth_type',
+  'upstream_account_user_id',
   'upstream_account_credential',
   'upstream_account_auto_checkin',
   'upstream_account_auto_balance',
@@ -1046,6 +1047,7 @@ export function ChannelMutateDrawer({
     formErrors.base_url ||
     formErrors.upstream_account_site_type ||
     formErrors.upstream_account_auth_type ||
+    formErrors.upstream_account_user_id ||
     formErrors.upstream_account_balance_interval
   )
   const modelsHaveErrors = Boolean(
@@ -3435,7 +3437,7 @@ export function ChannelMutateDrawer({
 
                           {currentUpstreamAccountEnabled && (
                             <div className='space-y-4'>
-                              <div className='grid gap-4 sm:grid-cols-2'>
+                              <div className='grid gap-4 md:grid-cols-3'>
                                 <FormField
                                   control={form.control}
                                   name='upstream_account_site_type'
@@ -3494,6 +3496,38 @@ export function ChannelMutateDrawer({
                                           </SelectItem>
                                         </SelectContent>
                                       </Select>
+                                      <FormMessage />
+                                    </FormItem>
+                                  )}
+                                />
+                                <FormField
+                                  control={form.control}
+                                  name='upstream_account_user_id'
+                                  render={({ field }) => (
+                                    <FormItem>
+                                      <FormLabel>
+                                        {t('Upstream user ID (optional)')}
+                                      </FormLabel>
+                                      <FormControl>
+                                        <Input
+                                          type='number'
+                                          min={0}
+                                          step={1}
+                                          placeholder={t(
+                                            'Enter upstream user ID'
+                                          )}
+                                          {...field}
+                                          value={field.value ?? ''}
+                                          onChange={(event) => {
+                                            const value = event.target.value
+                                            field.onChange(
+                                              value === ''
+                                                ? undefined
+                                                : Number(value)
+                                            )
+                                          }}
+                                        />
+                                      </FormControl>
                                       <FormMessage />
                                     </FormItem>
                                   )}
