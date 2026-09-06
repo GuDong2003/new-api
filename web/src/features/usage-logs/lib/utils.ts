@@ -40,6 +40,8 @@ import type {
   GetTaskLogsParams,
 } from '../types'
 
+export { buildQueryParams } from './query-params'
+
 // ============================================================================
 // Type Checkers & Utilities
 // ============================================================================
@@ -90,8 +92,6 @@ export function getDefaultTimeRange(): { start: Date; end: Date } {
 function timestampToSeconds(ms: number): number {
   return Math.floor(ms / 1000)
 }
-
-export { buildQueryParams } from './query-params'
 
 /**
  * Build time range parameters with default values

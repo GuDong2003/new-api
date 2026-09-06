@@ -52,6 +52,16 @@ const channelActionConfig = (
   skipErrorHandler: true,
 })
 
+export type TaskPluginOption = { key: string; name: string; models: string[] }
+
+export async function getTaskPluginOptions(): Promise<TaskPluginOption[]> {
+  const response = await api.get<{
+    success: boolean
+    data: TaskPluginOption[]
+  }>('/api/task_plugin_options')
+  return response.data.data
+}
+
 export type CodexUsageResponse = {
   success: boolean
   message?: string

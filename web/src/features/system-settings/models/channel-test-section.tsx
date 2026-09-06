@@ -46,8 +46,13 @@ import { useResetForm } from '../hooks/use-reset-form'
 import { useUpdateOption } from '../hooks/use-update-option'
 import { safeNumberFieldProps } from '../utils/numeric-field'
 
-const channelTestModes = ['scheduled_all', 'passive_recovery'] as const
+const channelTestModes = [
+  'scheduled_all',
+  'auto_ban_only',
+  'passive_recovery',
+] as const
 type ChannelTestMode = (typeof channelTestModes)[number]
+const MAX_CHANNEL_TEST_CONCURRENCY = 32
 
 const channelTestSchema = z.object({
   AutomaticEnableChannelEnabled: z.boolean(),
@@ -60,6 +65,14 @@ const channelTestSchema = z.object({
       .number()
       .int()
       .min(1, 'Interval must be at least 1 minute'),
+    channel_test_concurrency: z.coerce
+      .number()
+      .int('Enter a positive integer')
+      .min(1, 'Channel test concurrency must be between 1 and 32')
+      .max(
+        MAX_CHANNEL_TEST_CONCURRENCY,
+        'Channel test concurrency must be between 1 and 32'
+      ),
     channel_test_mode: z.enum(channelTestModes),
   }),
 })
@@ -74,7 +87,8 @@ type FlatChannelTestDefaults = {
   'monitor_setting.channel_test_show_response_preview': boolean
   'monitor_setting.auto_test_channel_enabled': boolean
   'monitor_setting.auto_test_channel_minutes': number
-  'monitor_setting.channel_test_mode': ChannelTestMode | 'auto_ban_only'
+  'monitor_setting.channel_test_concurrency': number
+  'monitor_setting.channel_test_mode': ChannelTestMode
 }
 
 type ChannelTestSectionProps = {
@@ -82,7 +96,10 @@ type ChannelTestSectionProps = {
 }
 
 function normalizeChannelTestMode(value?: string): ChannelTestMode {
-  return value === 'passive_recovery' ? 'passive_recovery' : 'scheduled_all'
+  if (value === 'auto_ban_only' || value === 'passive_recovery') {
+    return value
+  }
+  return 'scheduled_all'
 }
 
 function normalizeMessage(value: string) {
@@ -105,6 +122,10 @@ function normalizeDefaults(
       defaults['monitor_setting.auto_test_channel_enabled'],
     'monitor_setting.auto_test_channel_minutes':
       defaults['monitor_setting.auto_test_channel_minutes'] ?? 10,
+    'monitor_setting.channel_test_concurrency': Math.min(
+      MAX_CHANNEL_TEST_CONCURRENCY,
+      Math.max(1, defaults['monitor_setting.channel_test_concurrency'] ?? 1)
+    ),
     'monitor_setting.channel_test_mode': normalizeChannelTestMode(
       defaults['monitor_setting.channel_test_mode']
     ),
@@ -127,6 +148,8 @@ function buildFormDefaults(
         normalized['monitor_setting.auto_test_channel_enabled'],
       auto_test_channel_minutes:
         normalized['monitor_setting.auto_test_channel_minutes'],
+      channel_test_concurrency:
+        normalized['monitor_setting.channel_test_concurrency'],
       channel_test_mode: normalized[
         'monitor_setting.channel_test_mode'
       ] as ChannelTestMode,
@@ -150,6 +173,8 @@ function normalizeFormValues(
       values.monitor_setting.auto_test_channel_enabled,
     'monitor_setting.auto_test_channel_minutes':
       values.monitor_setting.auto_test_channel_minutes,
+    'monitor_setting.channel_test_concurrency':
+      values.monitor_setting.channel_test_concurrency,
     'monitor_setting.channel_test_mode':
       values.monitor_setting.channel_test_mode,
   }
@@ -185,6 +210,27 @@ export function ChannelTestSection({ defaultValues }: ChannelTestSectionProps) {
   }, [defaultValues])
 
   const channelTestMode = form.watch('monitor_setting.channel_test_mode')
+
+  const channelTestModeLabel = (() => {
+    if (channelTestMode === 'passive_recovery') {
+      return t('Passive recovery only')
+    }
+    if (channelTestMode === 'auto_ban_only') {
+      return t('Actively check auto-disable-enabled channels')
+    }
+    return t('Scheduled full test')
+  })()
+  const channelTestModeDescription = (() => {
+    if (channelTestMode === 'passive_recovery') {
+      return t('Only recheck channels disabled after real request failures.')
+    }
+    if (channelTestMode === 'auto_ban_only') {
+      return t(
+        'Periodically checks only channels with auto-disable enabled, excluding manually disabled channels.'
+      )
+    }
+    return t('Check all channels that are not manually disabled.')
+  })()
 
   const onSubmit = async (values: ChannelTestFormValues) => {
     const normalized = normalizeFormValues(values)
@@ -327,9 +373,7 @@ export function ChannelTestSection({ defaultValues }: ChannelTestSectionProps) {
                       <FormControl>
                         <SelectTrigger>
                           <SelectValue>
-                            {field.value === 'passive_recovery'
-                              ? t('Passive recovery only')
-                              : t('Scheduled full test')}
+                            {channelTestModeLabel}
                           </SelectValue>
                         </SelectTrigger>
                       </FormControl>
@@ -338,6 +382,9 @@ export function ChannelTestSection({ defaultValues }: ChannelTestSectionProps) {
                           <SelectItem value='scheduled_all'>
                             {t('Scheduled full test')}
                           </SelectItem>
+                          <SelectItem value='auto_ban_only'>
+                            {t('Actively check auto-disable-enabled channels')}
+                          </SelectItem>
                           <SelectItem value='passive_recovery'>
                             {t('Passive recovery only')}
                           </SelectItem>
@@ -345,13 +392,31 @@ export function ChannelTestSection({ defaultValues }: ChannelTestSectionProps) {
                       </SelectContent>
                     </Select>
                     <FormDescription>
-                      {channelTestMode === 'passive_recovery'
-                        ? t(
-                            'Only recheck channels disabled after real request failures.'
-                          )
-                        : t(
-                            'Check all channels that are not manually disabled.'
-                          )}
+                      {channelTestModeDescription}
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name='monitor_setting.channel_test_concurrency'
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{t('Channel test concurrency')}</FormLabel>
+                    <FormControl>
+                      <Input
+                        type='number'
+                        min={1}
+                        max={MAX_CHANNEL_TEST_CONCURRENCY}
+                        step={1}
+                        {...safeNumberFieldProps(field)}
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      {t(
+                        'Maximum number of channels tested at the same time (1-32)'
+                      )}
                     </FormDescription>
                     <FormMessage />
                   </FormItem>

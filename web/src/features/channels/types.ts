@@ -327,6 +327,7 @@ export interface ChannelBalanceResponse {
   }>
   refresh_failed?: number
   refresh_errors?: string[]
+  raw_response?: string
 }
 
 export interface FetchModelsResponse {

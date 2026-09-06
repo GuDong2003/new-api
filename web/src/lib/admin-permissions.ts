@@ -26,6 +26,7 @@ export type AdminCapabilities = AdminPermissionMatrix
 export const ADMIN_PERMISSION_RESOURCES = {
   CHANNEL: 'channel',
   USER: 'user',
+  TASK_PLUGIN: 'task_plugin',
 } as const
 
 export const ADMIN_PERMISSION_ACTIONS = {
@@ -34,6 +35,7 @@ export const ADMIN_PERMISSION_ACTIONS = {
   WRITE: 'write',
   SENSITIVE_WRITE: 'sensitive_write',
   SECRET_VIEW: 'secret_view',
+  BIND: 'bind',
 } as const
 
 export const USER_PERMISSION_ACTIONS = {
