@@ -173,15 +173,20 @@ func ApplyChannelGroupFilter(query *gorm.DB, group string) *gorm.DB {
 	return query.Where(channelGroupFilterCondition(), channelGroupFilterPattern(group))
 }
 
-// Value implements driver.Valuer interface
+// Value implements driver.Valuer interface. Return a string rather than []byte
+// so PostgreSQL's simple protocol does not encode JSON as bytea.
 func (c ChannelInfo) Value() (driver.Value, error) {
-	return common.Marshal(&c)
+	b, err := common.Marshal(&c)
+	if err != nil {
+		return nil, err
+	}
+	return string(b), nil
 }
 
-// Scan implements sql.Scanner interface
+// Scan implements sql.Scanner interface and accepts both []byte and string,
+// as different database drivers return either representation for JSON.
 func (c *ChannelInfo) Scan(value interface{}) error {
-	bytesValue, _ := value.([]byte)
-	return common.Unmarshal(bytesValue, c)
+	return common.Unmarshal(jsonScanBytes(value), c)
 }
 
 func (channel *Channel) GetKeys() []string {
@@ -998,6 +1003,9 @@ func (channel *Channel) ValidateSettings() error {
 		if err := channelOtherSettings.ClientIdentity.Validate(channel.Type); err != nil {
 			return fmt.Errorf("invalid client identity settings: %w", err)
 		}
+	}
+	if err := channelOtherSettings.ValidateToolLossPolicy(); err != nil {
+		return err
 	}
 	if channel.Type == constant.ChannelTypeAdvancedCustom {
 		if channelOtherSettings.AdvancedCustom == nil {

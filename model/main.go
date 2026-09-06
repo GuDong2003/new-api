@@ -27,6 +27,19 @@ var commonFalseVal string
 var logKeyCol string
 var logGroupCol string
 
+// jsonScanBytes normalizes JSON column values returned as []byte or string by
+// different drivers and protocol modes.
+func jsonScanBytes(value interface{}) []byte {
+	switch v := value.(type) {
+	case []byte:
+		return v
+	case string:
+		return []byte(v)
+	default:
+		return nil
+	}
+}
+
 func initCol() {
 	// init common column names
 	if common.UsingMainDatabase(common.DatabaseTypePostgreSQL) {
@@ -141,7 +154,7 @@ func chooseDB(envName string, isLog bool) (*gorm.DB, common.DatabaseType, error)
 			db, err := gorm.Open(postgres.New(postgres.Config{
 				DSN:                  dsn,
 				PreferSimpleProtocol: true, // disables implicit prepared statement usage
-			}), newGormConfig(true))
+			}), newGormConfig(false))
 			return db, common.DatabaseTypePostgreSQL, err
 		}
 		if strings.HasPrefix(dsn, "local") {
@@ -185,6 +198,9 @@ func InitDB() (err error) {
 			if err := checkMySQLChineseSupport(DB); err != nil {
 				panic(err)
 			}
+		}
+		if err := ensureUserQuotaColumns(DB, common.MainDatabaseType()); err != nil {
+			return err
 		}
 		sqlDB, err := DB.DB()
 		if err != nil {
@@ -250,7 +266,59 @@ func InitLogDB() (err error) {
 	return err
 }
 
+var userQuotaColumns = []string{"quota", "used_quota", "aff_quota", "aff_history"}
+
+// ensureUserQuotaColumns rejects a legacy 32-bit wallet schema before any
+// migrations run. The 64-bit-only build intentionally does not auto-upgrade
+// an existing wallet; operators must migrate it explicitly before starting.
+func ensureUserQuotaColumns(db *gorm.DB, dbType common.DatabaseType) error {
+	if common.GetEnvOrDefaultBool("SKIP_64BIT_QUOTA_SCHEMA_CHECK", false) {
+		common.SysLog("SKIP_64BIT_QUOTA_SCHEMA_CHECK=true; skipping user quota schema check")
+		return nil
+	}
+	if db == nil || dbType == common.DatabaseTypeSQLite {
+		return nil
+	}
+	if !db.Migrator().HasTable(&User{}) {
+		return nil
+	}
+	columnTypes, err := db.Migrator().ColumnTypes(&User{})
+	if err != nil {
+		return fmt.Errorf("failed to inspect users schema: %w", err)
+	}
+	for _, expected := range userQuotaColumns {
+		for _, actual := range columnTypes {
+			if !strings.EqualFold(actual.Name(), expected) {
+				continue
+			}
+			dataType := actual.DatabaseTypeName()
+			if !is64BitIntegerType(dbType, dataType) {
+				return fmt.Errorf("users.%s uses %s; 32-bit is not supported", expected, dataType)
+			}
+		}
+	}
+	return nil
+}
+
+func is64BitIntegerType(dbType common.DatabaseType, dataType string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(dataType))
+	switch dbType {
+	case common.DatabaseTypeMySQL:
+		return normalized == "bigint" || normalized == "unsigned bigint" || normalized == "bigint unsigned"
+	case common.DatabaseTypePostgreSQL:
+		return normalized == "bigint" || normalized == "int8"
+	default:
+		return false
+	}
+}
+
 func migrateDB() error {
+	if err := migrateTokenKeyUniqueness(DB); err != nil {
+		return err
+	}
+	if err := migratePrefillGroupUniqueness(DB); err != nil {
+		return err
+	}
 	// Migrate price_amount column from float/double to decimal for existing tables
 	migrateSubscriptionPlanPriceAmount()
 	// Migrate model_limits column from varchar to text for existing tables
@@ -272,6 +340,7 @@ func migrateDB() error {
 		&ExternalIdentityClaim{},
 		&PasskeyCredential{},
 		&Option{},
+		&LoginEncryptionKey{},
 		&Redemption{},
 		&InviteCode{},
 		&InviteCodeUsage{},
@@ -281,6 +350,7 @@ func migrateDB() error {
 		&TopUp{},
 		&QuotaData{},
 		&Task{},
+		&TaskPlugin{},
 		&Model{},
 		&Vendor{},
 		&PrefillGroup{},
@@ -345,6 +415,7 @@ func migrateDBFast() error {
 		{&ExternalIdentityClaim{}, "ExternalIdentityClaim"},
 		{&PasskeyCredential{}, "PasskeyCredential"},
 		{&Option{}, "Option"},
+		{&LoginEncryptionKey{}, "LoginEncryptionKey"},
 		{&Redemption{}, "Redemption"},
 		{&InviteCode{}, "InviteCode"},
 		{&InviteCodeUsage{}, "InviteCodeUsage"},
@@ -354,6 +425,7 @@ func migrateDBFast() error {
 		{&TopUp{}, "TopUp"},
 		{&QuotaData{}, "QuotaData"},
 		{&Task{}, "Task"},
+		{&TaskPlugin{}, "TaskPlugin"},
 		{&Model{}, "Model"},
 		{&Vendor{}, "Vendor"},
 		{&PrefillGroup{}, "PrefillGroup"},

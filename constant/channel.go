@@ -61,6 +61,7 @@ const (
 	ChannelTypeCodexCompatibility = 61
 	ChannelTypeClaudeCode         = 62
 	ChannelTypeCodeBuddy          = 63
+	ChannelTypeTaskPlugin         = 64
 	ChannelTypeDummy              // this one is only for count, do not add any channel after this
 
 )
@@ -130,6 +131,14 @@ var ChannelBaseURLs = []string{
 	"",                                          //61
 	"",                                          //62
 	"",                                          //63
+	"",                                          //64
+}
+
+func GetChannelBaseURL(channelType int) string {
+	if channelType < 0 || channelType >= len(ChannelBaseURLs) {
+		return ""
+	}
+	return ChannelBaseURLs[channelType]
 }
 
 var ChannelTypeNames = map[int]string{
@@ -193,6 +202,7 @@ var ChannelTypeNames = map[int]string{
 	ChannelTypeCodexCompatibility: "Codex",
 	ChannelTypeClaudeCode:         "Claude Code",
 	ChannelTypeCodeBuddy:          "CodeBuddy",
+	ChannelTypeTaskPlugin:         "Task Plugin",
 }
 
 func GetChannelTypeName(channelType int) string {

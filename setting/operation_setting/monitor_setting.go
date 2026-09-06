@@ -17,6 +17,7 @@ type MonitorSetting struct {
 	ChannelTestMessage             string  `json:"channel_test_message"`
 	ChannelTestUseChannelStyle     bool    `json:"channel_test_use_channel_style"`
 	ChannelTestShowResponsePreview bool    `json:"channel_test_show_response_preview"`
+	ChannelTestConcurrency         int     `json:"channel_test_concurrency"`
 }
 
 const (
@@ -29,6 +30,10 @@ const (
 	ChannelTestMessageOptionKey             = "monitor_setting.channel_test_message"
 	ChannelTestUseChannelStyleOptionKey     = "monitor_setting.channel_test_use_channel_style"
 	ChannelTestShowResponsePreviewOptionKey = "monitor_setting.channel_test_show_response_preview"
+
+	ChannelTestConcurrencyOptionKey = "monitor_setting.channel_test_concurrency"
+	DefaultChannelTestConcurrency   = 1
+	MaxChannelTestConcurrency       = 32
 )
 
 // 默认配置
@@ -40,6 +45,7 @@ func defaultMonitorSetting() MonitorSetting {
 		ChannelTestMessage:             DefaultChannelTestMessage,
 		ChannelTestUseChannelStyle:     true,
 		ChannelTestShowResponsePreview: false,
+		ChannelTestConcurrency:         DefaultChannelTestConcurrency,
 	}
 }
 
@@ -76,6 +82,7 @@ func GetMonitorSetting() *MonitorSetting {
 	} else {
 		monitorSetting.ChannelTestMessage = message
 	}
+	monitorSetting.ChannelTestConcurrency = NormalizeChannelTestConcurrency(monitorSetting.ChannelTestConcurrency)
 	return &monitorSetting
 }
 
@@ -114,4 +121,22 @@ func ResolveChannelTestMessage(value string) (string, error) {
 func ValidateChannelTestMessage(value string) error {
 	_, err := NormalizeChannelTestMessage(value)
 	return err
+}
+
+func NormalizeChannelTestConcurrency(concurrency int) int {
+	if concurrency < 1 {
+		return DefaultChannelTestConcurrency
+	}
+	if concurrency > MaxChannelTestConcurrency {
+		return MaxChannelTestConcurrency
+	}
+	return concurrency
+}
+
+func ValidateChannelTestConcurrency(value string) error {
+	concurrency, err := strconv.Atoi(value)
+	if err != nil || concurrency < 1 || concurrency > MaxChannelTestConcurrency {
+		return fmt.Errorf("channel test concurrency must be between 1 and %d", MaxChannelTestConcurrency)
+	}
+	return nil
 }

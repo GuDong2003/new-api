@@ -32,6 +32,8 @@ export const CHANNEL_TYPE_CODE_BUDDY = 63
 export const CODE_BUDDY_BASE_URL_HELP =
   'Configure the WorkBuddy upstream root URL without /v1. New API adds /v1/chat/completions and applies the built-in WorkBuddy request profile.'
 
+export const CHANNEL_TYPE_TASK_PLUGIN = 64
+
 export const CHANNEL_TYPES = {
   0: 'Unknown',
   1: 'OpenAI',
@@ -93,10 +95,11 @@ export const CHANNEL_TYPES = {
   61: 'Codex',
   62: 'Claude Code',
   63: 'Code Buddy',
+  64: 'Task Plugin',
 } as const
 
 const CHANNEL_TYPE_DISPLAY_ORDER: number[] = [
-  1, 61, 63, 14, 62, 33, 24, 43, 3, 41, 48, 60, 58, 42, 34, 20, 4, 40, 27, 25,
+  1, 61, 63, 14, 62, 33, 24, 43, 3, 41, 48, 60, 58, 64, 42, 34, 20, 4, 40, 27, 25,
   17, 26, 15, 46, 23, 18, 45, 31, 35, 49, 19, 47, 37, 38, 39, 11, 8, 57, 59, 22,
   21, 44, 2, 5, 36, 50, 51, 52, 53, 54, 55, 56,
 ]
@@ -119,6 +122,17 @@ export const CHANNEL_TYPE_OPTIONS: { value: number; label: string }[] = (() => {
   }
   return ordered
 })()
+
+export function channelTypeOptionsForTaskPluginBind(
+  canBindTaskPlugin: boolean
+): { value: number; label: string }[] {
+  if (canBindTaskPlugin) {
+    return CHANNEL_TYPE_OPTIONS
+  }
+  return CHANNEL_TYPE_OPTIONS.filter(
+    (option) => option.value !== CHANNEL_TYPE_TASK_PLUGIN
+  )
+}
 
 // ============================================================================
 // Channel Status (label values are i18n keys; use t(config.label) in components)
