@@ -270,9 +270,7 @@ export function BalanceQueryDialog(props: BalanceQueryDialogProps) {
                 </IconBadge>
                 <span>{t('Current Balance')}</span>
               </div>
-              <div className='text-2xl font-bold'>
-                {displayedBalance}
-              </div>
+              <div className='text-2xl font-bold'>{displayedBalance}</div>
               <div className='text-muted-foreground mt-2 text-xs'>
                 {t('Last updated:')} {formatDate(displayedUpdatedTime)}
               </div>
@@ -284,9 +282,7 @@ export function BalanceQueryDialog(props: BalanceQueryDialogProps) {
                       key={item.account_id}
                       className='flex items-center justify-between gap-3'
                     >
-                      <span className='min-w-0 truncate'>
-                        {item.account_name}
-                      </span>
+                      <span className='min-w-0 truncate'>{item.account_name}</span>
                       <span className='shrink-0 font-medium'>
                         {formatBalance(item.balance, item.unit || 'QUOTA')}
                       </span>

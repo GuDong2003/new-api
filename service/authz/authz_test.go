@@ -106,15 +106,26 @@ func TestSetUserPermissionsStoresOnlyOverrides(t *testing.T) {
 
 	assert.True(t, Can(42, common.RoleAdminUser, ChannelSensitiveWrite))
 	assert.False(t, Can(42, common.RoleAdminUser, ChannelWrite))
-	permissions := ExplicitUserPermissions(42)
+	capabilities := ExplicitUserPermissions(42)
 	assert.Equal(t, map[string]bool{
 		ActionRead:           true,
 		ActionOperate:        true,
 		ActionWrite:          false,
 		ActionSensitiveWrite: true,
 		ActionSecretView:     false,
-	}, permissions[ResourceChannel])
-	assert.Equal(t, map[string]bool{ActionBind: false}, permissions[ResourceTaskPlugin])
+	}, capabilities[ResourceChannel])
+	assert.Equal(t, map[string]bool{ActionBind: false}, capabilities[ResourceTaskPlugin])
+	assert.Equal(t, map[string]bool{
+		UserActionRead:            true,
+		UserActionCreate:          false,
+		UserActionProfileWrite:    true,
+		UserActionStatusWrite:     true,
+		UserActionQuotaWrite:      true,
+		UserActionSecurityWrite:   false,
+		UserActionRoleWrite:       false,
+		UserActionDelete:          false,
+		UserActionPermissionWrite: false,
+	}, capabilities[ResourceUser])
 	assert.Equal(t, PermissionsMap{
 		ResourceChannel: {
 			ActionSensitiveWrite: true,
@@ -134,15 +145,26 @@ func TestSetUserPermissionsStoresOnlyOverrides(t *testing.T) {
 		ActionSecretView:     false,
 	}}))
 	assert.False(t, Can(42, common.RoleAdminUser, ChannelSensitiveWrite))
-	permissions = ExplicitUserPermissions(42)
+	capabilities = ExplicitUserPermissions(42)
 	assert.Equal(t, map[string]bool{
 		ActionRead:           true,
 		ActionOperate:        true,
 		ActionWrite:          true,
 		ActionSensitiveWrite: false,
 		ActionSecretView:     false,
-	}, permissions[ResourceChannel])
-	assert.Equal(t, map[string]bool{ActionBind: false}, permissions[ResourceTaskPlugin])
+	}, capabilities[ResourceChannel])
+	assert.Equal(t, map[string]bool{ActionBind: false}, capabilities[ResourceTaskPlugin])
+	assert.Equal(t, map[string]bool{
+		UserActionRead:            true,
+		UserActionCreate:          false,
+		UserActionProfileWrite:    true,
+		UserActionStatusWrite:     true,
+		UserActionQuotaWrite:      true,
+		UserActionSecurityWrite:   false,
+		UserActionRoleWrite:       false,
+		UserActionDelete:          false,
+		UserActionPermissionWrite: false,
+	}, capabilities[ResourceUser])
 	assert.Empty(t, ExplicitUserOverrides(42))
 }
 

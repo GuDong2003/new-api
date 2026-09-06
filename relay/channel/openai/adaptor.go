@@ -320,6 +320,9 @@ func (a *Adaptor) ConvertOpenAIRequest(c *gin.Context, info *relaycommon.RelayIn
 		info.ChannelType != constant.ChannelTypeCodeBuddy {
 		request.StreamOptions = nil
 	}
+	if info.ChannelType == constant.ChannelTypeCodeBuddy {
+		channel.ApplyCodeBuddyRequestProfile(request)
+	}
 	// Nested reasoning is an OpenRouter-compatible input dialect and needs
 	// projection even without a protocol conversion hop. Native top-level
 	// reasoning_effort stays untouched unless a modifier or conversion applies.
@@ -755,8 +758,9 @@ func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommo
 		originEffort, _ = reasoning.ParseOpenAIReasoningEffortFromModelSuffix(info.OriginModelName)
 	}
 	crossProtocol := info != nil && len(info.RequestConversionChain) > 1
-	compatibilityProfile := info != nil && (info.ChannelType == constant.ChannelTypeCodeBuddy || info.ChannelType == constant.ChannelTypeCodexCompatibility)
-	if (info == nil || info.ChannelType != constant.ChannelTypeOpenRouter) && !compatibilityProfile && !crossProtocol && effort == "" && originEffort == "" && request.ReasoningConversion == nil && info.ReasoningState() == nil {
+	hasReasoningState := info != nil && info.ReasoningState() != nil
+	isCompatibilityChannel := info != nil && (info.ChannelType == constant.ChannelTypeCodeBuddy || info.ChannelType == constant.ChannelTypeCodexCompatibility)
+	if (info == nil || info.ChannelType != constant.ChannelTypeOpenRouter) && !isCompatibilityChannel && !crossProtocol && effort == "" && originEffort == "" && request.ReasoningConversion == nil && !hasReasoningState {
 		if info != nil {
 			rawEffort := ""
 			if request.Reasoning != nil {

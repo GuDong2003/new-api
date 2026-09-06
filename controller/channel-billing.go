@@ -370,33 +370,6 @@ func updateChannelMoonshotBalance(channel *model.Channel) (float64, error) {
 	return availableBalanceUsd, nil
 }
 
-func updateChannelBalance(channel *model.Channel) (channelBalanceResult, error) {
-	if channel.BalanceSource == "" {
-		channel.BalanceSource = model.ChannelBalanceSourceChannel
-	}
-	switch channel.BalanceSource {
-	case model.ChannelBalanceSourceNone:
-		return channelBalanceResult{}, errors.New("该渠道已设置为不查询余额")
-	case model.ChannelBalanceSourceUpstream:
-		result, err := service.RefreshUpstreamChannelBalances(context.Background(), channel.Id, model.UpstreamTriggerManual)
-		if err != nil {
-			return channelBalanceResult{}, fmt.Errorf("获取绑定的上游站点账号失败: %w", err)
-		}
-		if result == nil || result.Summary == nil {
-			return channelBalanceResult{}, errors.New("未获取到上游账号余额")
-		}
-		if result.Summary.Unit == "MIXED" {
-			return channelBalanceResult{}, errors.New("绑定的上游账号余额单位不一致，无法合计")
-		}
-		return channelBalanceResult{Balance: result.Summary.Balance}, nil
-	}
-	if channel.Type == constant.ChannelTypeAdvancedCustom {
-		return fetchAdvancedCustomBalance(channel)
-	}
-	balance, err := updateStandardChannelBalance(channel)
-	return channelBalanceResult{Balance: balance}, err
-}
-
 func fetchAdvancedCustomBalance(channel *model.Channel) (channelBalanceResult, error) {
 	key := strings.TrimSpace(channel.Key)
 	info := &relaycommon.RelayInfo{
@@ -482,6 +455,33 @@ func fetchAdvancedCustomBalance(channel *model.Channel) (channelBalanceResult, e
 	return channelBalanceResult{RawResponse: string(formatted)}, nil
 }
 
+func updateChannelBalance(channel *model.Channel) (channelBalanceResult, error) {
+	if channel.BalanceSource == "" {
+		channel.BalanceSource = model.ChannelBalanceSourceChannel
+	}
+	if channel.BalanceSource == model.ChannelBalanceSourceNone {
+		return channelBalanceResult{}, errors.New("该渠道已设置为不查询余额")
+	}
+	if channel.BalanceSource == model.ChannelBalanceSourceUpstream {
+		result, err := service.RefreshUpstreamChannelBalances(context.Background(), channel.Id, model.UpstreamTriggerManual)
+		if err != nil {
+			return channelBalanceResult{}, fmt.Errorf("获取绑定的上游站点账号失败: %w", err)
+		}
+		if result == nil || result.Summary == nil {
+			return channelBalanceResult{}, errors.New("未获取到上游账号余额")
+		}
+		if result.Summary.Unit == "MIXED" {
+			return channelBalanceResult{}, errors.New("绑定的上游账号余额单位不一致，无法合计")
+		}
+		return channelBalanceResult{Balance: result.Summary.Balance}, nil
+	}
+	if channel.Type == constant.ChannelTypeAdvancedCustom {
+		return fetchAdvancedCustomBalance(channel)
+	}
+	balance, err := updateStandardChannelBalance(channel)
+	return channelBalanceResult{Balance: balance}, err
+}
+
 func updateStandardChannelBalance(channel *model.Channel) (float64, error) {
 	baseURL := constant.GetChannelBaseURL(channel.Type)
 	if channel.GetBaseURL() == "" {
@@ -558,10 +558,6 @@ func UpdateChannelBalance(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	if channel.Type == constant.ChannelTypeTaskPlugin {
-		c.JSON(http.StatusOK, gin.H{"success": false, "message": "Task Plugin channels do not support balance queries"})
-		return
-	}
 	if channel.BalanceSource == model.ChannelBalanceSourceUpstream {
 		refreshResult, refreshErr := service.RefreshUpstreamChannelBalances(c.Request.Context(), channel.Id, model.UpstreamTriggerManual)
 		if refreshErr != nil {
@@ -602,6 +598,10 @@ func UpdateChannelBalance(c *gin.Context) {
 		})
 		return
 	}
+	if channel.Type == constant.ChannelTypeTaskPlugin {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "Task Plugin channels do not support balance queries"})
+		return
+	}
 	if channel.ChannelInfo.IsMultiKey {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
@@ -621,11 +621,11 @@ func UpdateChannelBalance(c *gin.Context) {
 	if result.RawResponse == "" {
 		response["balance"] = result.Balance
 		response["currency"] = "USD"
-		response["balance_source"] = channel.BalanceSource
-		response["balance_updated_time"] = common.GetTimestamp()
 	} else {
 		response["raw_response"] = result.RawResponse
 	}
+	response["balance_source"] = channel.BalanceSource
+	response["balance_updated_time"] = common.GetTimestamp()
 	c.JSON(http.StatusOK, response)
 }
 

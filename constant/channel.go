@@ -61,10 +61,8 @@ const (
 	ChannelTypeCodexCompatibility = 61
 	ChannelTypeClaudeCode         = 62
 	ChannelTypeCodeBuddy          = 63
-	// The compatibility channel values above are persisted in this fork; keep
-	// them stable and place the upstream task-plugin type after them.
-	ChannelTypeTaskPlugin = 64
-	ChannelTypeDummy      = 65 // sentinel; keep after all channel values
+	ChannelTypeTaskPlugin         = 64
+	ChannelTypeDummy              // this one is only for count, do not add any channel after this
 
 )
 
@@ -134,7 +132,13 @@ var ChannelBaseURLs = []string{
 	"",                                          //62
 	"",                                          //63
 	"",                                          //64
-	"",                                          //65 (sentinel)
+}
+
+func GetChannelBaseURL(channelType int) string {
+	if channelType < 0 || channelType >= len(ChannelBaseURLs) {
+		return ""
+	}
+	return ChannelBaseURLs[channelType]
 }
 
 var ChannelTypeNames = map[int]string{
@@ -199,13 +203,6 @@ var ChannelTypeNames = map[int]string{
 	ChannelTypeClaudeCode:         "Claude Code",
 	ChannelTypeCodeBuddy:          "CodeBuddy",
 	ChannelTypeTaskPlugin:         "Task Plugin",
-}
-
-func GetChannelBaseURL(channelType int) string {
-	if channelType < 0 || channelType >= len(ChannelBaseURLs) {
-		return ""
-	}
-	return ChannelBaseURLs[channelType]
 }
 
 func GetChannelTypeName(channelType int) string {

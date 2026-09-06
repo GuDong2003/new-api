@@ -67,7 +67,7 @@ const channelTestSchema = z.object({
       .min(1, 'Interval must be at least 1 minute'),
     channel_test_concurrency: z.coerce
       .number()
-      .int('Enter a positive integer')
+      .int()
       .min(1, 'Channel test concurrency must be between 1 and 32')
       .max(
         MAX_CHANNEL_TEST_CONCURRENCY,
@@ -122,10 +122,8 @@ function normalizeDefaults(
       defaults['monitor_setting.auto_test_channel_enabled'],
     'monitor_setting.auto_test_channel_minutes':
       defaults['monitor_setting.auto_test_channel_minutes'] ?? 10,
-    'monitor_setting.channel_test_concurrency': Math.min(
-      MAX_CHANNEL_TEST_CONCURRENCY,
-      Math.max(1, defaults['monitor_setting.channel_test_concurrency'] ?? 1)
-    ),
+    'monitor_setting.channel_test_concurrency':
+      defaults['monitor_setting.channel_test_concurrency'] ?? 1,
     'monitor_setting.channel_test_mode': normalizeChannelTestMode(
       defaults['monitor_setting.channel_test_mode']
     ),
@@ -210,27 +208,27 @@ export function ChannelTestSection({ defaultValues }: ChannelTestSectionProps) {
   }, [defaultValues])
 
   const channelTestMode = form.watch('monitor_setting.channel_test_mode')
-
-  const channelTestModeLabel = (() => {
-    if (channelTestMode === 'passive_recovery') {
-      return t('Passive recovery only')
-    }
-    if (channelTestMode === 'auto_ban_only') {
-      return t('Actively check auto-disable-enabled channels')
-    }
-    return t('Scheduled full test')
-  })()
-  const channelTestModeDescription = (() => {
-    if (channelTestMode === 'passive_recovery') {
-      return t('Only recheck channels disabled after real request failures.')
-    }
-    if (channelTestMode === 'auto_ban_only') {
-      return t(
+  let channelTestModeLabel: string
+  let channelTestModeDescription: string
+  switch (channelTestMode) {
+    case 'auto_ban_only':
+      channelTestModeLabel = t('Actively check auto-disable-enabled channels')
+      channelTestModeDescription = t(
         'Periodically checks only channels with auto-disable enabled, excluding manually disabled channels.'
       )
-    }
-    return t('Check all channels that are not manually disabled.')
-  })()
+      break
+    case 'passive_recovery':
+      channelTestModeLabel = t('Passive recovery only')
+      channelTestModeDescription = t(
+        'Only recheck channels disabled after real request failures.'
+      )
+      break
+    default:
+      channelTestModeLabel = t('Scheduled full test')
+      channelTestModeDescription = t(
+        'Check all channels that are not manually disabled.'
+      )
+  }
 
   const onSubmit = async (values: ChannelTestFormValues) => {
     const normalized = normalizeFormValues(values)
@@ -372,9 +370,7 @@ export function ChannelTestSection({ defaultValues }: ChannelTestSectionProps) {
                     <Select value={field.value} onValueChange={field.onChange}>
                       <FormControl>
                         <SelectTrigger>
-                          <SelectValue>
-                            {channelTestModeLabel}
-                          </SelectValue>
+                          <SelectValue>{channelTestModeLabel}</SelectValue>
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent alignItemWithTrigger={false}>
@@ -391,9 +387,7 @@ export function ChannelTestSection({ defaultValues }: ChannelTestSectionProps) {
                         </SelectGroup>
                       </SelectContent>
                     </Select>
-                    <FormDescription>
-                      {channelTestModeDescription}
-                    </FormDescription>
+                    <FormDescription>{channelTestModeDescription}</FormDescription>
                     <FormMessage />
                   </FormItem>
                 )}

@@ -32,8 +32,6 @@ export const CHANNEL_TYPE_CODE_BUDDY = 63
 export const CODE_BUDDY_BASE_URL_HELP =
   'Configure the WorkBuddy upstream root URL without /v1. New API adds /v1/chat/completions and applies the built-in WorkBuddy request profile.'
 
-// Task plugins use a distinct ID because local compatibility profiles occupy
-// 61 (Codex), 62 (Claude Code), and 63 (Code Buddy).
 export const CHANNEL_TYPE_TASK_PLUGIN = 64
 
 export const CHANNEL_TYPES = {
@@ -101,9 +99,9 @@ export const CHANNEL_TYPES = {
 } as const
 
 const CHANNEL_TYPE_DISPLAY_ORDER: number[] = [
-  1, 61, 63, 14, 62, 33, 24, 43, 3, 41, 48, 60, 58, 64, 42, 34, 20, 4, 40, 27,
-  25, 17, 26, 15, 46, 23, 18, 45, 31, 35, 49, 19, 47, 37, 38, 39, 11, 8, 57,
-  59, 22, 21, 44, 2, 5, 36, 50, 51, 52, 53, 54, 55, 56,
+  1, 61, 63, 14, 62, 33, 24, 43, 3, 41, 48, 60, 58, 64, 42, 34, 20, 4, 40, 27, 25,
+  17, 26, 15, 46, 23, 18, 45, 31, 35, 49, 19, 47, 37, 38, 39, 11, 8, 57, 59, 22,
+  21, 44, 2, 5, 36, 50, 51, 52, 53, 54, 55, 56,
 ]
 
 export const CHANNEL_TYPE_OPTIONS: { value: number; label: string }[] = (() => {

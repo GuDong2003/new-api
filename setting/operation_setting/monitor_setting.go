@@ -30,9 +30,10 @@ const (
 	ChannelTestMessageOptionKey             = "monitor_setting.channel_test_message"
 	ChannelTestUseChannelStyleOptionKey     = "monitor_setting.channel_test_use_channel_style"
 	ChannelTestShowResponsePreviewOptionKey = "monitor_setting.channel_test_show_response_preview"
-	ChannelTestConcurrencyOptionKey         = "monitor_setting.channel_test_concurrency"
-	DefaultChannelTestConcurrency           = 1
-	MaxChannelTestConcurrency               = 32
+
+	ChannelTestConcurrencyOptionKey = "monitor_setting.channel_test_concurrency"
+	DefaultChannelTestConcurrency   = 1
+	MaxChannelTestConcurrency       = 32
 )
 
 // 默认配置
