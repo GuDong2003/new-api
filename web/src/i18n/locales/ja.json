@@ -5887,6 +5887,9 @@
     "Enter browser cookie": "ブラウザ Cookie を入力",
     "Last check-in time": "最終チェックイン時刻",
     "Enter upstream user ID": "上流ユーザー ID を入力",
-    "Upstream user ID (optional)": "上流ユーザー ID（任意）"
+    "Upstream user ID (optional)": "上流ユーザー ID（任意）",
+    "Test message for this run": "今回のテストメッセージ",
+    "Leave empty to use the global test message": "空欄の場合はグローバルテストメッセージを使用",
+    "Only applies to this dialog run. Leave empty to use the global test message.": "このダイアログでの今回のテストにのみ適用されます。空欄の場合はグローバルテストメッセージを使用します。"
   }
 }

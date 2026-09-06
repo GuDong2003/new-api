@@ -5887,6 +5887,9 @@
     "Enter browser cookie": "Saisissez le cookie du navigateur",
     "Last check-in time": "Heure du dernier pointage",
     "Enter upstream user ID": "Saisissez l’ID utilisateur en amont",
-    "Upstream user ID (optional)": "ID utilisateur en amont (facultatif)"
+    "Upstream user ID (optional)": "ID utilisateur en amont (facultatif)",
+    "Test message for this run": "Message de test pour cette exécution",
+    "Leave empty to use the global test message": "Laissez vide pour utiliser le message de test global",
+    "Only applies to this dialog run. Leave empty to use the global test message.": "S'applique uniquement à cette exécution de la boîte de dialogue. Laissez vide pour utiliser le message de test global."
   }
 }

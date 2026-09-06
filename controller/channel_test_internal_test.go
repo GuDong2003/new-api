@@ -560,3 +560,10 @@ func TestBuildTestRequestWithMessageUsesPromptForImageGeneration(t *testing.T) {
 	assert.Equal(t, "a red apple on a white background", imageRequest.Prompt)
 	assert.Equal(t, "1024x1024", imageRequest.Size)
 }
+
+func TestDetailedChannelTestRequestAcceptsOneRunMessage(t *testing.T) {
+	var request detailedChannelTestRequest
+	require.NoError(t, common.Unmarshal([]byte(`{"model":"gpt-5.6-sol","endpoint_type":"openai-response","stream":false,"message":"Reply with a short greeting."}`), &request))
+	require.NotNil(t, request.Message)
+	assert.Equal(t, "Reply with a short greeting.", *request.Message)
+}

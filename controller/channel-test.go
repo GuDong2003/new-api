@@ -1012,18 +1012,19 @@ func applyTestRequestMaxTokens(request dto.Request, maxTokens *uint) {
 }
 
 type detailedChannelTestRequest struct {
-	Model        string `json:"model"`
-	EndpointType string `json:"endpoint_type"`
-	Stream       bool   `json:"stream"`
+	Model        string  `json:"model"`
+	EndpointType string  `json:"endpoint_type"`
+	Stream       bool    `json:"stream"`
+	Message      *string `json:"message,omitempty"`
 }
 
 func TestChannel(c *gin.Context) {
 	testChannelHTTP(c, c.Query("model"), c.Query("endpoint_type"), parseChannelTestStream(c), "")
 }
 
-// TestChannelDetailed accepts a JSON body for model, endpoint and stream
-// selection. The request always uses the global test message from settings;
-// there is intentionally no per-run prompt override.
+// TestChannelDetailed accepts a JSON body for model, endpoint, stream, and an
+// optional one-run test message. An omitted or empty message falls back to the
+// global channel-test message from settings and is never persisted.
 func TestChannelDetailed(c *gin.Context) {
 	var request detailedChannelTestRequest
 	if c.Request != nil && c.Request.Body != nil {
@@ -1032,7 +1033,11 @@ func TestChannelDetailed(c *gin.Context) {
 			return
 		}
 	}
-	testChannelHTTP(c, request.Model, request.EndpointType, request.Stream, "")
+	message := ""
+	if request.Message != nil {
+		message = *request.Message
+	}
+	testChannelHTTP(c, request.Model, request.EndpointType, request.Stream, message)
 }
 
 func parseChannelTestStream(c *gin.Context) bool {

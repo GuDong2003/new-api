@@ -5887,6 +5887,9 @@
     "Enter browser cookie": "Введите Cookie браузера",
     "Last check-in time": "Время последней отметки",
     "Enter upstream user ID": "Введите ID пользователя вышестоящего сервиса",
-    "Upstream user ID (optional)": "ID пользователя вышестоящего сервиса (необязательно)"
+    "Upstream user ID (optional)": "ID пользователя вышестоящего сервиса (необязательно)",
+    "Test message for this run": "Тестовое сообщение для этого запуска",
+    "Leave empty to use the global test message": "Оставьте пустым, чтобы использовать глобальное тестовое сообщение",
+    "Only applies to this dialog run. Leave empty to use the global test message.": "Применяется только к этому запуску в диалоге. Оставьте пустым, чтобы использовать глобальное тестовое сообщение."
   }
 }

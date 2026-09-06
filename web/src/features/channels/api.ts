@@ -281,7 +281,8 @@ export async function testChannel(
 }
 
 /**
- * Test a channel with a JSON body. The server supplies the global test message.
+ * Test a channel with a JSON body. An optional message applies only to this
+ * request; the server falls back to the global test message when it is blank.
  */
 export async function testChannelDetailed(
   id: number,

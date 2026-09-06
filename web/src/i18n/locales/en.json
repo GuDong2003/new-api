@@ -5887,6 +5887,9 @@
     "Enter browser cookie": "Enter browser cookie",
     "Last check-in time": "Last check-in time",
     "Enter upstream user ID": "Enter upstream user ID",
-    "Upstream user ID (optional)": "Upstream user ID (optional)"
+    "Upstream user ID (optional)": "Upstream user ID (optional)",
+    "Test message for this run": "Test message for this run",
+    "Leave empty to use the global test message": "Leave empty to use the global test message",
+    "Only applies to this dialog run. Leave empty to use the global test message.": "Only applies to this dialog run. Leave empty to use the global test message."
   }
 }

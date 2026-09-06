@@ -42,7 +42,11 @@ import {
   updateChannelBalance,
 } from '../api'
 import { CHANNEL_STATUS, ERROR_MESSAGES, SUCCESS_MESSAGES } from '../constants'
-import type { ChannelTestResponse, CopyChannelParams } from '../types'
+import type {
+  ChannelTestResponse,
+  CopyChannelParams,
+  DetailedChannelTestRequest,
+} from '../types'
 
 // ============================================================================
 // Query Keys
@@ -353,10 +357,31 @@ export async function handleTestChannel(
   }
 }
 
+export type DetailedChannelTestPayloadInput = {
+  testModel: string
+  endpointType: string
+  stream: boolean
+  message?: string
+}
+
+export function buildDetailedChannelTestPayload(
+  options: DetailedChannelTestPayloadInput
+): DetailedChannelTestRequest {
+  const payload: DetailedChannelTestRequest = {
+    model: options.testModel,
+    endpoint_type: options.endpointType,
+    stream: options.stream,
+  }
+  if (options.message?.trim()) {
+    payload.message = options.message
+  }
+  return payload
+}
+
 /**
- * Run a detailed channel test using the JSON request contract. The message is
- * intentionally omitted from this action: the server always uses the global
- * channel-test message configured by an administrator.
+ * Run a detailed channel test using the JSON request contract. The optional
+ * message applies only to this request; the server falls back to the global
+ * channel-test message when it is blank.
  */
 export async function handleDetailedChannelTest(
   id: number,
@@ -365,6 +390,7 @@ export async function handleDetailedChannelTest(
     testModel: string
     endpointType: string
     stream: boolean
+    message?: string
     silent?: boolean
   },
   onTestComplete?: (
@@ -376,11 +402,7 @@ export async function handleDetailedChannelTest(
     responsePreviewTruncated?: boolean
   ) => void
 ): Promise<void> {
-  const payload = {
-    model: options.testModel,
-    endpoint_type: options.endpointType,
-    stream: options.stream,
-  }
+  const payload = buildDetailedChannelTestPayload(options)
 
   try {
     const response = await testChannelDetailed(id, payload)

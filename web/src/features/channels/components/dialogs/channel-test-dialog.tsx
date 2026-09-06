@@ -79,6 +79,7 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet'
 import { Switch } from '@/components/ui/switch'
+import { Textarea } from '@/components/ui/textarea'
 import {
   Tooltip,
   TooltipContent,
@@ -366,6 +367,7 @@ function ChannelTestDialogContent({
   > | null>(null)
   const [endpointType, setEndpointType] = useState('auto')
   const [isStreamTest, setIsStreamTest] = useState(false)
+  const [testMessage, setTestMessage] = useState('')
   const [searchTerm, setSearchTerm] = useState('')
   const [testResults, setTestResults] = useState<Record<string, TestResult>>({})
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({})
@@ -433,6 +435,7 @@ function ChannelTestDialogContent({
     batchStopRequestedRef.current = true
     setEndpointType('auto')
     setIsStreamTest(false)
+    setTestMessage('')
     setSearchTerm('')
     setTestResults({})
     setRowSelection({})
@@ -594,6 +597,7 @@ function ChannelTestDialogContent({
             testModel: model,
             endpointType: endpointType === 'auto' ? '' : endpointType,
             stream: effectiveStreamTest,
+            message: testMessage,
             silent,
           },
           (
@@ -645,6 +649,7 @@ function ChannelTestDialogContent({
       effectiveStreamTest,
       markModelTesting,
       refreshChannelLists,
+      testMessage,
       t,
       updateTestResult,
     ]
@@ -1092,6 +1097,25 @@ function ChannelTestDialogContent({
                 {t('Enable streaming mode for the test request.')}
               </p>
             </div>
+          </div>
+
+          <div className='grid gap-2'>
+            <Label htmlFor='channel-test-message'>
+              {t('Test message for this run')}
+            </Label>
+            <Textarea
+              id='channel-test-message'
+              value={testMessage}
+              onChange={(event) => setTestMessage(event.target.value)}
+              placeholder={t('Leave empty to use the global test message')}
+              maxLength={4096}
+              rows={3}
+            />
+            <p className='text-muted-foreground text-xs'>
+              {t(
+                'Only applies to this dialog run. Leave empty to use the global test message.'
+              )}
+            </p>
           </div>
 
           <div className='space-y-3 max-sm:has-[div[role="toolbar"]]:pb-16'>

@@ -5887,6 +5887,9 @@
     "Enter browser cookie": "Nhập Cookie trình duyệt",
     "Last check-in time": "Thời gian điểm danh gần nhất",
     "Enter upstream user ID": "Nhập ID người dùng thượng nguồn",
-    "Upstream user ID (optional)": "ID người dùng thượng nguồn (không bắt buộc)"
+    "Upstream user ID (optional)": "ID người dùng thượng nguồn (không bắt buộc)",
+    "Test message for this run": "Tin nhắn kiểm thử cho lần chạy này",
+    "Leave empty to use the global test message": "Để trống để dùng tin nhắn kiểm thử chung",
+    "Only applies to this dialog run. Leave empty to use the global test message.": "Chỉ áp dụng cho lần chạy trong hộp thoại này. Để trống để dùng tin nhắn kiểm thử chung."
   }
 }

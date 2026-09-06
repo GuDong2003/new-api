@@ -306,6 +306,7 @@ export interface DetailedChannelTestRequest {
   model: string
   endpoint_type: string
   stream: boolean
+  message?: string
 }
 
 export interface ChannelBalanceResponse {
