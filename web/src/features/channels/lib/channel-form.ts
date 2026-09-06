@@ -462,6 +462,7 @@ export const channelFormSchema = z
         CHANNEL_TYPE_CODEX,
         CHANNEL_TYPE_CLAUDE_CODE,
         CHANNEL_TYPE_CODE_BUDDY,
+        CHANNEL_TYPE_TASK_PLUGIN,
       ].includes(data.type) &&
       !data.base_url?.trim()
     ) {

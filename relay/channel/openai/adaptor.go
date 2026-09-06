@@ -332,6 +332,9 @@ func (a *Adaptor) ConvertOpenAIRequest(c *gin.Context, info *relaycommon.RelayIn
 	originEffort, _ := reasoning.ParseOpenAIReasoningEffortFromModelSuffix(info.OriginModelName)
 	renderReasoning := len(request.Reasoning) > 0 || len(info.RequestConversionChain) > 1 || request.ReasoningConversion != nil || info.ReasoningState() != nil ||
 		!preserveSuffix && (upstreamEffort != "" || originEffort != "")
+	if info.ChannelType == constant.ChannelTypeCodeBuddy {
+		channel.ApplyCodeBuddyRequestProfile(request)
+	}
 	if info.ChannelType != constant.ChannelTypeOpenRouter && !renderReasoning {
 		info.SetReasoningEffort(request.ReasoningEffort)
 	}

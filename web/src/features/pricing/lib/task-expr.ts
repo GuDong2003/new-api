@@ -21,12 +21,12 @@ import type {
   BillingUsageFieldSchema,
   BillingUsageSchema,
 } from '../types'
-
-export const TASK_TOKEN_PRICE_SCALE = 1_000_000
 import {
   parseTaskTiersFromExpr,
   splitBillingExprAndRequestRules,
 } from './billing-expr'
+
+export const TASK_TOKEN_PRICE_SCALE = 1_000_000
 
 export type TaskVisualCondition = {
   field: string

@@ -194,6 +194,16 @@ export const CHANNEL_TYPE_CONFIGS: Record<number, ChannelTypeConfig> = {
       models: 'Models',
     },
   },
+  64: {
+    id: 64,
+    name: CHANNEL_TYPES[64],
+    icon: 'openai',
+    hints: {
+      baseUrl: 'Base URL is required for this channel type',
+      key: 'Task plugin channels use the selected plugin binding',
+      models: 'Models declared by the task plugin',
+    },
+  },
 }
 
 /**

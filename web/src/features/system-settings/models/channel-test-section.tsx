@@ -230,6 +230,27 @@ export function ChannelTestSection({ defaultValues }: ChannelTestSectionProps) {
       )
   }
 
+  const channelTestModeLabel = (() => {
+    if (channelTestMode === 'passive_recovery') {
+      return t('Passive recovery only')
+    }
+    if (channelTestMode === 'auto_ban_only') {
+      return t('Actively check auto-disable-enabled channels')
+    }
+    return t('Scheduled full test')
+  })()
+  const channelTestModeDescription = (() => {
+    if (channelTestMode === 'passive_recovery') {
+      return t('Only recheck channels disabled after real request failures.')
+    }
+    if (channelTestMode === 'auto_ban_only') {
+      return t(
+        'Periodically checks only channels with auto-disable enabled, excluding manually disabled channels.'
+      )
+    }
+    return t('Check all channels that are not manually disabled.')
+  })()
+
   const onSubmit = async (values: ChannelTestFormValues) => {
     const normalized = normalizeFormValues(values)
     const updates = (
