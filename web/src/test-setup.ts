@@ -17,10 +17,16 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import '@testing-library/jest-dom/vitest'
-import { cleanup } from '@testing-library/react'
+import { cleanup, configure } from '@testing-library/react'
 import i18next from 'i18next'
 import { initReactI18next } from 'react-i18next'
 import { afterEach, beforeAll } from 'vitest'
+
+// findBy*/waitFor default to 1s, which a query plus a table render can exceed
+// on a loaded machine (CI runners, parallel files) while still being correct.
+// It stays well under the 20s test timeout, so a genuinely stuck query still
+// fails with the query's own error rather than an opaque test timeout.
+configure({ asyncUtilTimeout: 5000 })
 
 function createMemoryStorage(): Storage {
   const values = new Map<string, string>()
