@@ -22,8 +22,18 @@ type ParameterValue = PlaygroundConfig[keyof PlaygroundConfig]
 
 export type PlaygroundParameterKey = keyof ParameterEnabled
 
+/**
+ * Parameters rendered by the numeric slider/input machinery below. Reasoning
+ * effort shares the enable/persist registry but is a free-text value, so
+ * excluding it here keeps the numeric helpers from ever receiving it.
+ */
+export type PlaygroundNumericParameterKey = Exclude<
+  PlaygroundParameterKey,
+  'reasoning_effort'
+>
+
 export type PlaygroundParameterControl = {
-  key: PlaygroundParameterKey
+  key: PlaygroundNumericParameterKey
   labelKey: string
   descriptionKey: string
   valueType: 'slider' | 'number'
@@ -93,7 +103,7 @@ export const PLAYGROUND_PARAMETER_PANEL_SCROLL_CLASS =
   'max-h-[min(28rem,calc(100vh-10rem))] overflow-y-auto pr-1'
 
 export function normalizeParameterNumberValue(
-  key: PlaygroundParameterKey,
+  key: PlaygroundNumericParameterKey,
   value: string | number
 ): number | null {
   if (value === '') {
@@ -118,7 +128,7 @@ export function normalizeParameterNumberValue(
 }
 
 export function getParameterControlValueText(
-  key: PlaygroundParameterKey,
+  key: PlaygroundNumericParameterKey,
   value: ParameterValue
 ): string {
   if (key === 'seed' && value === null) {

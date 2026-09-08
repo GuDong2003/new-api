@@ -24,18 +24,25 @@ import { getFreshAuthHeaders } from '@/lib/api'
 import { API_ENDPOINTS, ERROR_MESSAGES } from '../constants'
 import {
   getStreamReadyStateError,
-  isStreamClosedReadyState,
   isStreamDoneMessage,
   parseStreamErrorDetails,
   parseStreamMessageUpdates,
 } from '../lib'
+import { StreamResponseError } from '../lib/streaming/stream-utils'
 import type { ChatCompletionRequest } from '../types'
+
+type StreamEvent = Event & {
+  data?: string
+  readyState?: number
+  responseCode?: number
+  headers?: Record<string, string[]>
+}
 
 interface StreamEventSource {
   readyState?: number
   addEventListener: (
     type: string,
-    listener: (event: Event & { data?: string; readyState?: number }) => void
+    listener: (event: StreamEvent) => void
   ) => void
   close: () => void
   stream: () => void
@@ -99,6 +106,7 @@ export function createStreamRequestController(
     source = nextSource
     runtime.setStreaming(true)
     let completed = false
+    let responseCode: number | undefined
 
     const isCurrent = () =>
       generation === requestGeneration && source === nextSource
@@ -109,6 +117,20 @@ export function createStreamRequestController(
       callbacks.onError(errorMessage, errorCode)
       closeActiveSource(nextSource)
     }
+
+    nextSource.addEventListener('open', (event) => {
+      if (!isCurrent() || completed) return
+      responseCode = event.responseCode
+      // A reverse proxy answering with an error page never produces SSE
+      // frames, so fail immediately instead of waiting for a parse error.
+      const servedHTML = event.headers?.['content-type']?.some((value) =>
+        value.includes('text/html')
+      )
+      if (servedHTML) {
+        const details = parseStreamErrorDetails('<html>', responseCode)
+        handleError(details.errorMessage, details.errorCode)
+      }
+    })
 
     nextSource.addEventListener('message', (event) => {
       if (!isCurrent() || completed) return
@@ -127,6 +149,10 @@ export function createStreamRequestController(
           callbacks.onUpdate(update.type, update.chunk)
         }
       } catch (error) {
+        if (error instanceof StreamResponseError) {
+          handleError(error.message, error.errorCode)
+          return
+        }
         // eslint-disable-next-line no-console
         console.error('Failed to parse SSE message:', error)
         handleError(ERROR_MESSAGES.PARSE_ERROR)
@@ -135,23 +161,27 @@ export function createStreamRequestController(
 
     nextSource.addEventListener('error', (event) => {
       if (!isCurrent() || completed) return
-      if (!isStreamClosedReadyState(nextSource.readyState)) {
-        // eslint-disable-next-line no-console
-        console.error('SSE Error:', event)
-        const { errorCode, errorMessage } = parseStreamErrorDetails(event.data)
-        handleError(errorMessage, errorCode)
-      }
+      const { errorCode, errorMessage } = parseStreamErrorDetails(
+        event.data,
+        event.responseCode ?? responseCode
+      )
+      handleError(errorMessage, errorCode)
     })
 
     nextSource.addEventListener('readystatechange', (event) => {
       if (!isCurrent() || completed) return
       const errorMessage = getStreamReadyStateError(
         event.readyState,
-        nextSource
+        responseCode
       )
 
       if (errorMessage) {
-        handleError(errorMessage)
+        handleError(
+          errorMessage,
+          responseCode && responseCode >= 400
+            ? `http_${responseCode}`
+            : undefined
+        )
       }
     })
 
@@ -196,6 +226,9 @@ export function useStreamRequest() {
           headers,
           method: 'POST',
           payload: JSON.stringify(payload),
+          // Attach listeners before the request goes out so the open event and
+          // any immediate failure are observed rather than raced.
+          start: false,
         }) as StreamEventSource,
       setStreaming: setIsStreaming,
     })

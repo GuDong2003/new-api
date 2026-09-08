@@ -33,6 +33,9 @@ export const playgroundConfigSchema = z.object({
   frequency_penalty: z.number().optional(),
   presence_penalty: z.number().optional(),
   seed: z.number().nullable().optional(),
+  // Bounded to the same length the input accepts so a tampered or stale
+  // localStorage entry cannot push an oversized value into the request.
+  reasoning_effort: z.string().max(64).optional(),
   stream: z.boolean().optional(),
 })
 
@@ -43,6 +46,7 @@ export const parameterEnabledSchema = z.object({
   frequency_penalty: z.boolean().optional(),
   presence_penalty: z.boolean().optional(),
   seed: z.boolean().optional(),
+  reasoning_effort: z.boolean().optional(),
 })
 
 const messageRoleSchema = z.enum(['user', 'assistant', 'system'])

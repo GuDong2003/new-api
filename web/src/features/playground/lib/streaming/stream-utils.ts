@@ -18,6 +18,10 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { ERROR_MESSAGES } from '../../constants'
 import type { ChatCompletionChunk } from '../../types'
+import {
+  parseAPIErrorDetails,
+  type RequestErrorDetails,
+} from './request-error-utils'
 
 const STREAM_DONE_MESSAGE = '[DONE]'
 const STREAM_CLOSED_READY_STATE = 2
@@ -29,43 +33,36 @@ export type StreamMessageUpdate = {
   chunk: string
 }
 
-type StreamErrorPayload = {
-  error?: {
-    code?: string
-    message?: string
+export type StreamErrorDetails = RequestErrorDetails
+
+/**
+ * Raised when a stream frame carries an upstream error instead of a delta, so
+ * the caller can surface the real message rather than a parse failure.
+ */
+export class StreamResponseError extends Error {
+  readonly errorCode?: string
+
+  constructor(details: StreamErrorDetails) {
+    super(details.errorMessage)
+    this.name = 'StreamResponseError'
+    this.errorCode = details.errorCode
   }
 }
 
-export type StreamErrorDetails = {
-  errorCode?: string
-  errorMessage: string
-}
-
-export function parseStreamErrorDetails(data?: string): StreamErrorDetails {
-  const fallbackMessage = data || ERROR_MESSAGES.API_REQUEST_ERROR
-
-  if (!data) {
-    return { errorMessage: fallbackMessage }
-  }
-
-  try {
-    const parsed = JSON.parse(data) as StreamErrorPayload
-
-    if (!parsed?.error) {
-      return { errorMessage: fallbackMessage }
-    }
-
-    return {
-      errorCode: parsed.error.code || undefined,
-      errorMessage: parsed.error.message || fallbackMessage,
-    }
-  } catch {
-    return { errorMessage: fallbackMessage }
-  }
+export function parseStreamErrorDetails(
+  data?: string,
+  status?: number
+): StreamErrorDetails {
+  return parseAPIErrorDetails(data, status)
 }
 
 export function parseStreamMessageUpdates(data: string): StreamMessageUpdate[] {
-  const chunk = JSON.parse(data) as ChatCompletionChunk
+  const chunk = JSON.parse(data) as ChatCompletionChunk & { error?: unknown }
+
+  if (chunk.error) {
+    throw new StreamResponseError(parseAPIErrorDetails(chunk))
+  }
+
   const delta = chunk.choices?.[0]?.delta
 
   if (!delta) {
@@ -93,20 +90,31 @@ export function isStreamClosedReadyState(readyState?: number): boolean {
   return readyState === STREAM_CLOSED_READY_STATE
 }
 
+/**
+ * Describe a closed stream. Reaching the closed state before `[DONE]` means the
+ * response was cut short, so a 2xx close is still reported as an interruption;
+ * callers ignore this once the stream has completed normally.
+ */
 export function getStreamReadyStateError(
   eventReadyState: number | undefined,
-  source: unknown
+  responseCode?: number
 ): string | null {
-  const status = (source as { status?: number }).status
-
-  if (
-    eventReadyState !== undefined &&
-    eventReadyState >= STREAM_CLOSED_READY_STATE &&
-    status !== undefined &&
-    status !== 200
-  ) {
-    return `HTTP ${status}: ${ERROR_MESSAGES.CONNECTION_CLOSED}`
+  if (!isStreamClosedReadyState(eventReadyState)) {
+    return null
   }
 
-  return null
+  if (
+    responseCode !== undefined &&
+    (responseCode < 200 || responseCode >= 300)
+  ) {
+    const { errorMessage } = parseAPIErrorDetails(undefined, responseCode)
+    // Statuses without a dedicated message keep the code visible, since the
+    // response body is gone by the time the stream closes.
+    if (errorMessage === ERROR_MESSAGES.API_REQUEST_ERROR) {
+      return `HTTP ${responseCode}: ${ERROR_MESSAGES.CONNECTION_CLOSED}`
+    }
+    return errorMessage
+  }
+
+  return ERROR_MESSAGES.INTERRUPTED
 }

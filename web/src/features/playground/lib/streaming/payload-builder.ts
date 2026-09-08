@@ -68,5 +68,11 @@ export function buildChatCompletionPayload(
     payload.seed = config.seed
   }
 
+  // Omit the field entirely unless it carries a value: models without a
+  // reasoning parameter reject an empty or unexpected reasoning_effort.
+  if (parameterEnabled.reasoning_effort && config.reasoning_effort.trim()) {
+    payload.reasoning_effort = config.reasoning_effort.trim()
+  }
+
   return payload
 }
