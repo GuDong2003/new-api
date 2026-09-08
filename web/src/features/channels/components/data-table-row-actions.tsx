@@ -220,94 +220,92 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
 
   return (
     <div className='-ml-1.5 flex items-center gap-1'>
-      {layout === 'card' && (
-        <>
-          {shouldShowChannelCheckinAction(upstreamConfig) && (
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    variant='ghost'
-                    size='icon-sm'
-                    onClick={(event) => {
-                      event.stopPropagation()
-                      void handleUpstreamOperation()
-                    }}
-                    disabled={upstreamOperation !== null}
-                    aria-label={t('Check in')}
-                  />
-                }
-              >
-                {upstreamOperation === 'checkin' ? (
-                  <Loader2 className='size-4 animate-spin' />
-                ) : (
-                  <CalendarCheck className='size-4' />
-                )}
-              </TooltipTrigger>
-              <TooltipContent>{t('Check in')}</TooltipContent>
-            </Tooltip>
-          )}
-          {upstreamConfig?.external_checkin_url && (
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    variant='ghost'
-                    size='icon-sm'
-                    onClick={(event) => {
-                      event.stopPropagation()
-                      handleExternalCheckin()
-                    }}
-                    aria-label={t('External check-in')}
-                  />
-                }
-              >
-                <ExternalLink className='size-4' />
-              </TooltipTrigger>
-              <TooltipContent>{t('External check-in')}</TooltipContent>
-            </Tooltip>
-          )}
-          {upstreamConfig?.redeem_url && (
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    variant='ghost'
-                    size='icon-sm'
-                    onClick={(event) => {
-                      event.stopPropagation()
-                      openExternal(upstreamConfig.redeem_url)
-                    }}
-                    aria-label={t('Recharge / redeem')}
-                  />
-                }
-              >
-                <CircleDollarSign className='size-4' />
-              </TooltipTrigger>
-              <TooltipContent>{t('Recharge / redeem')}</TooltipContent>
-            </Tooltip>
-          )}
-          {upstreamSiteUrl && (
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    variant='ghost'
-                    size='icon-sm'
-                    onClick={(event) => {
-                      event.stopPropagation()
-                      handleOpenUpstreamSite()
-                    }}
-                    aria-label={t('Go to site')}
-                  />
-                }
-              >
-                <Globe className='size-4' />
-              </TooltipTrigger>
-              <TooltipContent>{t('Go to site')}</TooltipContent>
-            </Tooltip>
-          )}
-        </>
+      {/* Upstream-account actions depend on the bound account, not on the
+          layout, so table and card view expose the same set. */}
+      {shouldShowChannelCheckinAction(upstreamConfig) && (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                variant='ghost'
+                size='icon-sm'
+                onClick={(event) => {
+                  event.stopPropagation()
+                  void handleUpstreamOperation()
+                }}
+                disabled={upstreamOperation !== null}
+                aria-label={t('Check in')}
+              />
+            }
+          >
+            {upstreamOperation === 'checkin' ? (
+              <Loader2 className='size-4 animate-spin' />
+            ) : (
+              <CalendarCheck className='size-4' />
+            )}
+          </TooltipTrigger>
+          <TooltipContent>{t('Check in')}</TooltipContent>
+        </Tooltip>
+      )}
+      {upstreamConfig?.external_checkin_url && (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                variant='ghost'
+                size='icon-sm'
+                onClick={(event) => {
+                  event.stopPropagation()
+                  handleExternalCheckin()
+                }}
+                aria-label={t('External check-in')}
+              />
+            }
+          >
+            <ExternalLink className='size-4' />
+          </TooltipTrigger>
+          <TooltipContent>{t('External check-in')}</TooltipContent>
+        </Tooltip>
+      )}
+      {upstreamConfig?.redeem_url && (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                variant='ghost'
+                size='icon-sm'
+                onClick={(event) => {
+                  event.stopPropagation()
+                  openExternal(upstreamConfig.redeem_url)
+                }}
+                aria-label={t('Recharge / redeem')}
+              />
+            }
+          >
+            <CircleDollarSign className='size-4' />
+          </TooltipTrigger>
+          <TooltipContent>{t('Recharge / redeem')}</TooltipContent>
+        </Tooltip>
+      )}
+      {upstreamSiteUrl && (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                variant='ghost'
+                size='icon-sm'
+                onClick={(event) => {
+                  event.stopPropagation()
+                  handleOpenUpstreamSite()
+                }}
+                aria-label={t('Go to site')}
+              />
+            }
+          >
+            <Globe className='size-4' />
+          </TooltipTrigger>
+          <TooltipContent>{t('Go to site')}</TooltipContent>
+        </Tooltip>
       )}
 
       {layout !== 'card' && (
