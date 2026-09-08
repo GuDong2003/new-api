@@ -1233,7 +1233,8 @@ export function useChannelsColumns(
       // Actions column
       {
         id: 'actions',
-        header: () => t('Actions'),
+        // Follows the right-aligned buttons below it.
+        header: () => <div className='text-right'>{t('Actions')}</div>,
         cell: ({ row }) => {
           // Check if this is a tag row (has children)
           const isTagRow = isTagAggregateRow(row.original)

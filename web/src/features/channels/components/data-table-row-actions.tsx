@@ -78,7 +78,10 @@ import {
 import { shouldShowChannelCheckinAction } from '../lib/upstream-account-display'
 import { parseUpstreamUpdateMeta } from '../lib/upstream-update-utils'
 import type { Channel } from '../types'
-import { ChannelRowActionsLayoutContext } from './channel-row-actions-context'
+import {
+  channelRowActionsClassName,
+  ChannelRowActionsLayoutContext,
+} from './channel-row-actions-context'
 import { useChannels } from './channels-provider'
 
 interface DataTableRowActionsProps {
@@ -219,7 +222,7 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
   }
 
   return (
-    <div className='-ml-1.5 flex items-center gap-1'>
+    <div className={channelRowActionsClassName(layout)}>
       {/* Upstream-account actions depend on the bound account, not on the
           layout, so table and card view expose the same set. */}
       {shouldShowChannelCheckinAction(upstreamConfig) && (

@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { useQueryClient } from '@tanstack/react-query'
 import type { Row } from '@tanstack/react-table'
 import { Power, PowerOff, Pencil, Edit } from 'lucide-react'
+import { useContext } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { DataTableRowActionMenu } from '@/components/data-table/core/row-action-menu'
@@ -36,6 +37,10 @@ import {
 
 import { handleEnableTagChannels, handleDisableTagChannels } from '../lib'
 import type { Channel } from '../types'
+import {
+  channelRowActionsClassName,
+  ChannelRowActionsLayoutContext,
+} from './channel-row-actions-context'
 import { useChannels } from './channels-provider'
 
 interface DataTableTagRowActionsProps {
@@ -44,6 +49,7 @@ interface DataTableTagRowActionsProps {
 
 export function DataTableTagRowActions({ row }: DataTableTagRowActionsProps) {
   const { t } = useTranslation()
+  const layout = useContext(ChannelRowActionsLayoutContext)
   const tag = row.original.tag
   const { setOpen, setCurrentTag } = useChannels()
   const queryClient = useQueryClient()
@@ -69,7 +75,7 @@ export function DataTableTagRowActions({ row }: DataTableTagRowActionsProps) {
   }
 
   return (
-    <div className='-ml-1.5 flex items-center gap-1'>
+    <div className={channelRowActionsClassName(layout)}>
       <Tooltip>
         <TooltipTrigger
           render={

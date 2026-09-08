@@ -26,3 +26,24 @@ export type ChannelRowActionsLayout = 'table' | 'card'
 
 export const ChannelRowActionsLayoutContext =
   createContext<ChannelRowActionsLayout>('table')
+
+/**
+ * Container classes for a row's action buttons.
+ *
+ * Table view puts them in a right-pinned column whose width follows the widest
+ * row, while only the upstream-account buttons are conditional. Aligning to the
+ * column's right edge therefore keeps the buttons every row has — edit, test,
+ * status and the overflow menu — in line down the column, and the negative
+ * margin pulls the last button's optical edge back to the cell padding.
+ *
+ * Card view sizes this group to its content, so it stays left-aligned and only
+ * needs its first button pulled back against the card header.
+ */
+export function channelRowActionsClassName(
+  layout: ChannelRowActionsLayout
+): string {
+  if (layout === 'card') {
+    return '-ml-1.5 flex items-center gap-1'
+  }
+  return '-mr-1.5 flex items-center justify-end gap-1'
+}

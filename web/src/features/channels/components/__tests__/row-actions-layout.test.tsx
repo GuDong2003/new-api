@@ -22,9 +22,14 @@ import { render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, test } from 'vitest'
 
 import type { Channel, ChannelUpstreamAccountConfig } from '../../types'
-import { ChannelRowActionsLayoutContext } from '../channel-row-actions-context'
+import {
+  channelRowActionsClassName,
+  ChannelRowActionsLayoutContext,
+  type ChannelRowActionsLayout,
+} from '../channel-row-actions-context'
 import { ChannelsProvider } from '../channels-provider'
 import { DataTableRowActions } from '../data-table-row-actions'
+import { DataTableTagRowActions } from '../data-table-tag-row-actions'
 
 const queryClients: QueryClient[] = []
 
@@ -70,7 +75,10 @@ function makeChannel(upstream?: ChannelUpstreamAccountConfig): Channel {
   }
 }
 
-function renderTableRowActions(channel: Channel): void {
+function renderRowActions(
+  channel: Channel,
+  layout: ChannelRowActionsLayout = 'table'
+): void {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
@@ -79,12 +87,44 @@ function renderTableRowActions(channel: Channel): void {
   render(
     <QueryClientProvider client={queryClient}>
       <ChannelsProvider>
-        <ChannelRowActionsLayoutContext.Provider value='table'>
+        <ChannelRowActionsLayoutContext.Provider value={layout}>
           <DataTableRowActions row={{ original: channel } as Row<Channel>} />
         </ChannelRowActionsLayoutContext.Provider>
       </ChannelsProvider>
     </QueryClientProvider>
   )
+}
+
+function renderTagRowActions(layout: ChannelRowActionsLayout): void {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
+  queryClients.push(queryClient)
+
+  render(
+    <QueryClientProvider client={queryClient}>
+      <ChannelsProvider>
+        <ChannelRowActionsLayoutContext.Provider value={layout}>
+          <DataTableTagRowActions
+            row={
+              { original: { ...makeChannel(), tag: 'group-a' } } as Row<
+                Channel & { tag?: string }
+              >
+            }
+          />
+        </ChannelRowActionsLayoutContext.Provider>
+      </ChannelsProvider>
+    </QueryClientProvider>
+  )
+}
+
+/** The flex container holding a row's action buttons. */
+function actionsContainer(buttonName: string): HTMLElement {
+  const container = screen.getByRole('button', {
+    name: buttonName,
+  }).parentElement
+  if (!container) throw new Error(`no container for the ${buttonName} button`)
+  return container
 }
 
 afterEach(() => {
@@ -94,9 +134,45 @@ afterEach(() => {
   queryClients.length = 0
 })
 
+describe('channel row actions alignment', () => {
+  test('aligns the buttons to the pinned column edge in table layout', () => {
+    // Rows carry a different number of upstream-account buttons, so aligning
+    // right is what keeps the buttons every row has in one vertical line.
+    expect(channelRowActionsClassName('table')).toContain('justify-end')
+  })
+
+  test('leaves the buttons at the start of the group in card layout', () => {
+    expect(channelRowActionsClassName('card')).not.toContain('justify-end')
+  })
+
+  test('applies the table alignment to a channel row', () => {
+    renderRowActions(makeChannel(boundUpstreamAccount))
+
+    expect(actionsContainer('Open menu')).toHaveClass('justify-end')
+  })
+
+  test('applies the table alignment to a tag row, so both row kinds line up', () => {
+    renderTagRowActions('table')
+
+    expect(actionsContainer('Edit Tag')).toHaveClass('justify-end')
+  })
+
+  test('does not right-align a channel row in card layout', () => {
+    renderRowActions(makeChannel(boundUpstreamAccount), 'card')
+
+    expect(actionsContainer('Open menu')).not.toHaveClass('justify-end')
+  })
+
+  test('does not right-align a tag row in card layout', () => {
+    renderTagRowActions('card')
+
+    expect(actionsContainer('Edit Tag')).not.toHaveClass('justify-end')
+  })
+})
+
 describe('channel row actions in table layout', () => {
   test('offers the upstream account actions when the channel is bound to an upstream account', () => {
-    renderTableRowActions(makeChannel(boundUpstreamAccount))
+    renderRowActions(makeChannel(boundUpstreamAccount))
 
     expect(screen.getByRole('button', { name: 'Check in' })).toBeInTheDocument()
     expect(
@@ -111,7 +187,7 @@ describe('channel row actions in table layout', () => {
   })
 
   test('omits the upstream account actions when no upstream account is bound', () => {
-    renderTableRowActions(makeChannel())
+    renderRowActions(makeChannel())
 
     expect(screen.queryByRole('button', { name: 'Check in' })).toBeNull()
     expect(
