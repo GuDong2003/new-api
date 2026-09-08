@@ -1758,12 +1758,10 @@ export function ParamOverrideEditorDialog(
             {t('Template')}
           </span>
           <Combobox
-options={[
-              ...templatePresetOptions.map((o) => ({
+options={templatePresetOptions.map((o) => ({
                 value: o.value,
                 label: t(o.label),
-              })),
-            ]}
+              }))}
 value={templatePresetKey}
 onValueChange={(v) =>
               setTemplatePresetKey(v || 'operations_default')
@@ -2142,12 +2140,10 @@ function RuleEditor(ruleEditorProps: RuleEditorProps) {
           <div className='space-y-1.5'>
             <label className='text-xs font-medium'>{t('Operation Type')}</label>
             <Combobox
-options={[
-                ...OPERATION_MODE_OPTIONS.map((o) => ({
+options={OPERATION_MODE_OPTIONS.map((o) => ({
                   value: o.value,
                   label: t(o.label),
-                })),
-              ]}
+                }))}
 value={mode}
 onValueChange={(nextMode) =>
                 nextMode !== null &&
@@ -2535,12 +2531,10 @@ function ConditionEditor(conditionEditorProps: ConditionEditorProps) {
                   {t('Match Mode')}
                 </label>
                 <Combobox
-options={[
-                    ...CONDITION_MODE_OPTIONS.map((o) => ({
+options={CONDITION_MODE_OPTIONS.map((o) => ({
                       value: o.value,
                       label: t(o.label),
-                    })),
-                  ]}
+                    }))}
 value={condition.mode}
 onValueChange={(v) =>
                     v !== null &&
@@ -3043,12 +3037,10 @@ function PruneObjectsEditor(pruneObjectsEditorProps: PruneObjectsEditorProps) {
                           {t('Match Mode')}
                         </label>
                         <Combobox
-options={[
-                            ...CONDITION_MODE_OPTIONS.map((o) => ({
+options={CONDITION_MODE_OPTIONS.map((o) => ({
                               value: o.value,
                               label: t(o.label),
-                            })),
-                          ]}
+                            }))}
 value={rule.mode}
 onValueChange={(v) =>
                             v !== null &&
