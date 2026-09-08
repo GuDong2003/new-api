@@ -27,9 +27,9 @@ var commonFalseVal string
 var logKeyCol string
 var logGroupCol string
 
-// jsonScanBytes normalizes JSON column values returned as []byte or string by
-// different drivers and protocol modes.
-func jsonScanBytes(value interface{}) []byte {
+// jsonScanBytes 归一化 json 列的驱动返回值:不同驱动/协议模式下同一列可能
+// 以 []byte 或 string 返回,静默丢弃 string 会导致字段被清零而不报错。
+func jsonScanBytes(value any) []byte {
 	switch v := value.(type) {
 	case []byte:
 		return v

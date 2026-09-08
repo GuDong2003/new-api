@@ -97,7 +97,7 @@ func Get2FAStatus(c *gin.Context) {
 		return
 	}
 
-	status := map[string]interface{}{
+	status := map[string]any{
 		"enabled": false,
 		"locked":  false,
 	}
