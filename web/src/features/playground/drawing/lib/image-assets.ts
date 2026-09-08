@@ -120,7 +120,12 @@ export async function imageAssetToFile(
     throw new Error('Each reference image must be smaller than 50 MB.')
   }
   const extension = blob.type.split('/')[1]
-  return new File([blob], `${asset.id}.${extension}`, { type: blob.type })
+  // Materialize the bytes before constructing the File. In some runtimes (notably
+  // Bun + jsdom), a Blob from another realm is stringified as "[object Blob]"
+  // when passed directly as a File part instead of being copied as binary data.
+  return new File([await blob.arrayBuffer()], `${asset.id}.${extension}`, {
+    type: blob.type,
+  })
 }
 
 export function downloadBlob(blob: Blob, filename: string): void {
