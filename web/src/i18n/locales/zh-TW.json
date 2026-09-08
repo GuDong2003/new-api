@@ -6653,6 +6653,22 @@
     "Only applies to this dialog run. Leave empty to use the global test message.": "僅對本次彈窗測試生效。留空則使用全域測試訊息。",
     "Zoom in": "放大",
     "Zoom level": "縮放比例",
-    "Zoom out": "縮小"
+    "Zoom out": "縮小",
+    "Image quality": "圖片品質",
+    "Image output format": "圖片輸出格式",
+    "Image response format": "圖片回應格式",
+    "Image background": "背景",
+    "Image moderation": "內容審核",
+    "Image input fidelity": "輸入保真度",
+    "Image model default": "模型預設",
+    "Image style": "圖片風格",
+    "Low": "低",
+    "Medium": "中",
+    "High": "高",
+    "High definition": "高畫質",
+    "Opaque": "不透明",
+    "Transparent": "透明",
+    "Vivid": "鮮豔",
+    "Natural": "自然"
   }
 }

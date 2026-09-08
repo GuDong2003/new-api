@@ -74,7 +74,7 @@ export function ImageParameterFields() {
     medium: 'Medium',
     high: 'High',
     standard: 'Standard',
-    hd: 'HD',
+    hd: 'High definition',
   }
   return (
     <>
@@ -96,7 +96,7 @@ export function ImageParameterFields() {
         </div>
         <ParameterSelect
           name='quality'
-          label='Quality'
+          label='Image quality'
           options={getImageQualities(settings.model).map((quality) => ({
             value: quality,
             label: qualityLabels[quality],
@@ -117,7 +117,7 @@ export function ImageParameterFields() {
         {family === 'gpt-image' && (
           <ParameterSelect
             name='outputFormat'
-            label='Output format'
+            label='Image output format'
             options={[
               { value: 'png', label: 'PNG' },
               { value: 'jpeg', label: 'JPEG' },
@@ -128,7 +128,7 @@ export function ImageParameterFields() {
         {family !== 'gpt-image' && (
           <ParameterSelect
             name='responseFormat'
-            label='Response format'
+            label='Image response format'
             options={[
               { value: 'b64_json', label: 'Base64' },
               { value: 'url', label: 'URL' },
@@ -159,7 +159,7 @@ export function ImageParameterFields() {
                 <div className='grid grid-cols-2 gap-3'>
                   <ParameterSelect
                     name='background'
-                    label='Background'
+                    label='Image background'
                     options={[
                       { value: 'auto', label: 'Auto' },
                       { value: 'opaque', label: 'Opaque' },
@@ -168,7 +168,7 @@ export function ImageParameterFields() {
                   />
                   <ParameterSelect
                     name='moderation'
-                    label='Moderation'
+                    label='Image moderation'
                     options={[
                       { value: 'auto', label: 'Auto' },
                       { value: 'low', label: 'Low' },
@@ -198,9 +198,9 @@ export function ImageParameterFields() {
                 {settings.mode === 'edit' && (
                   <ParameterSelect
                     name='inputFidelity'
-                    label='Input fidelity'
+                    label='Image input fidelity'
                     options={[
-                      { value: 'default', label: 'Model default' },
+                      { value: 'default', label: 'Image model default' },
                       { value: 'high', label: 'High' },
                       { value: 'low', label: 'Low' },
                     ]}
@@ -239,7 +239,7 @@ export function ImageParameterFields() {
             {family === 'dall-e-3' && (
               <ParameterSelect
                 name='style'
-                label='Style'
+                label='Image style'
                 options={[
                   { value: 'vivid', label: 'Vivid' },
                   { value: 'natural', label: 'Natural' },

@@ -71,8 +71,8 @@ export const ImageCanvasNode = memo(function ImageCanvasNode(
         maxWidth={10000}
         maxHeight={10000}
         onResizeStart={checkpoint}
-        lineClassName='!border-primary'
-        handleClassName='!bg-primary !border-background'
+        lineClassName='!border-primary/70'
+        handleClassName='!size-2 !rounded-sm !bg-background !border-primary'
       />
       <Handle
         type='target'
@@ -117,8 +117,6 @@ export const ImageCanvasNode = memo(function ImageCanvasNode(
       <article
         className={cn(
           'flex size-full min-h-0 flex-col overflow-hidden rounded-xl border bg-card shadow-sm',
-          props.selected &&
-            'ring-2 ring-primary ring-offset-2 ring-offset-background',
           reference && 'border-primary'
         )}
         aria-label={props.data.prompt || asset?.name || t('Image')}

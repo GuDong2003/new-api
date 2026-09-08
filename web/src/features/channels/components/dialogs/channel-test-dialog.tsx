@@ -16,84 +16,56 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import {
+  ArrowReloadHorizontalIcon,
+  Cancel01Icon,
+  Copy01Icon,
+  PlayIcon,
+  Search01Icon,
+  StopIcon,
+} from '@hugeicons/core-free-icons'
+import { HugeiconsIcon } from '@hugeicons/react'
 import { useQueryClient } from '@tanstack/react-query'
-import type {
-  ColumnDef,
-  RowSelectionState,
-  Table as TanStackTable,
-} from '@tanstack/react-table'
-import {
-  Check,
-  CheckCircle2,
-  Copy,
-  Gauge,
-  Info,
-  Loader2,
-  Settings,
-  Trash2,
-} from 'lucide-react'
-import {
-  type ChangeEvent,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react'
+import type { RowSelectionState } from '@tanstack/react-table'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
 import { ConfirmDialog } from '@/components/confirm-dialog'
-import {
-  DataTableBulkActions as BulkActionsToolbar,
-  DataTablePagination,
-  DataTableView,
-  useDataTable,
-} from '@/components/data-table'
-import { Dialog } from '@/components/dialog'
-import {
-  sideDrawerContentClassName,
-  sideDrawerFooterClassName,
-  sideDrawerFormClassName,
-  sideDrawerHeaderClassName,
-} from '@/components/drawer-layout'
-import { StatusBadge } from '@/components/status-badge'
 import { Button } from '@/components/ui/button'
-import { Checkbox } from '@/components/ui/checkbox'
-import { Combobox } from '@/components/ui/combobox'
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetFooter,
-  SheetHeader,
-  SheetTitle,
-} from '@/components/ui/sheet'
-import { Switch } from '@/components/ui/switch'
-import { Textarea } from '@/components/ui/textarea'
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from '@/components/ui/tooltip'
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
-import { useIsMobile } from '@/hooks/use-mobile'
 
 import { updateChannel } from '../../api'
-import { useChannelProbes } from '../../hooks/use-channel-probes'
 import {
-  channelsQueryKeys,
-  formatResponseTime,
-  handleDetailedChannelTest,
-} from '../../lib'
+  type ChannelProbeRunPatch,
+  useChannelProbes,
+} from '../../hooks/use-channel-probes'
+import { channelsQueryKeys } from '../../lib/channel-actions'
 import {
   CHANNEL_PROBES,
+  canDeleteProbeModel,
   getProbeConfigurationKey,
   getProbeEndpointHint,
   isProbeNotApplicable,
   type ChannelProbeId,
+  type ChannelProbeJob,
 } from '../../lib/channel-test'
 import type {
   Channel,
@@ -101,766 +73,270 @@ import type {
   SearchChannelsResponse,
 } from '../../types'
 import { useChannels } from '../channels-provider'
-import {
-  ChannelCapabilitiesCell,
-  ChannelProbeDetails,
-} from './channel-test-capabilities'
+import { ChannelTestControls } from './channel-test-controls'
+import { ChannelTestMatrix } from './channel-test-matrix'
+import { ChannelProbeDetails } from './channel-test-result'
 
 type ChannelTestDialogProps = {
   open: boolean
   onOpenChange: (open: boolean) => void
 }
 
-type ChannelTestDialogContentProps = ChannelTestDialogProps & {
-  currentRow: Channel
-}
-
-type ModelRow = {
-  model: string
-}
-
-type TestStatus = 'idle' | 'testing' | 'success' | 'error'
-
-type TestResult = {
-  status: TestStatus
-  responseTime?: number
-  completedAt?: number
-  error?: string
-  errorCode?: string
-  responsePreview?: string
-  responsePreviewTruncated?: boolean
-}
-
-type BatchProgress = {
-  total: number
-  completed: number
-  success: number
-  failed: number
-}
-
-type ChannelTestCachePatch = {
-  responseTime: number
-  testTime: number
-}
-
-type LatestChannelTestCachePatch = {
-  patch: ChannelTestCachePatch
-  completedAt: number
-}
-
-type ChannelListCache = GetChannelsResponse | SearchChannelsResponse
-
-function createChannelTestCachePatch(
-  responseTime?: number,
-  completedAt = Date.now()
-): ChannelTestCachePatch | undefined {
-  if (typeof responseTime !== 'number' || !Number.isFinite(responseTime)) {
-    return undefined
-  }
-
-  return {
-    responseTime,
-    testTime: Math.floor(completedAt / 1000),
-  }
-}
-
-function getLatestChannelTestCachePatch(
-  results: TestResult[]
-): ChannelTestCachePatch | undefined {
-  const latest = results.reduce<LatestChannelTestCachePatch | undefined>(
-    (latestPatch, result) => {
-      const completedAt = result.completedAt ?? 0
-      const patch = createChannelTestCachePatch(
-        result.responseTime,
-        completedAt
-      )
-      if (!patch) return latestPatch
-      if (!latestPatch || completedAt >= latestPatch.completedAt) {
-        return { patch, completedAt }
-      }
-      return latestPatch
-    },
-    undefined
-  )
-
-  return latest?.patch
-}
-
-const endpointTypeOptions: Array<{ value: string; label: string }> = [
-  { value: 'auto', label: 'Auto detect (default)' },
-  { value: 'openai', label: 'OpenAI (/v1/chat/completions)' },
-  { value: 'openai-response', label: 'OpenAI Responses (/v1/responses)' },
-  {
-    value: 'openai-response-compact',
-    label: 'OpenAI Response Compaction (/v1/responses/compact)',
-  },
-  { value: 'anthropic', label: 'Anthropic (/v1/messages)' },
-  {
-    value: 'gemini',
-    label: 'Gemini (/v1beta/models/{model}:generateContent)',
-  },
-  { value: 'jina-rerank', label: 'Jina Rerank (/v1/rerank)' },
-  {
-    value: 'image-generation',
-    label: 'Image Generation (/v1/images/generations)',
-  },
-  { value: 'embeddings', label: 'Embeddings (/v1/embeddings)' },
-]
-
-const STREAM_INCOMPATIBLE_ENDPOINTS = new Set([
-  'embeddings',
-  'image-generation',
-  'jina-rerank',
-  'openai-response-compact',
-])
-
-const MODEL_PRICE_ERROR_CODE = 'model_price_error'
-const FAILURE_SUMMARY_MAX_LENGTH = 96
-const BATCH_TEST_CONCURRENCY = 5
-const BATCH_TEST_DELAY_MS = 100
-const RESPONSE_PREVIEW_MAX_LENGTH = 800
-
-type FailureStatusDisplay = {
-  summary: string
-  details?: string
-}
-
-type FailureDetailsState = {
-  model: string
-  summary: string
-  details: string
-}
-
-function sleep(ms: number) {
-  return new Promise<void>((resolve) => window.setTimeout(resolve, ms))
-}
-
-function normalizeInlineError(errorText: string) {
-  return errorText.replaceAll(/\s+/g, ' ').trim()
-}
-
-function getFirstErrorLine(errorText: string) {
-  return errorText
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .find(Boolean)
-}
-
-function truncateFailureSummary(summary: string) {
-  if (summary.length <= FAILURE_SUMMARY_MAX_LENGTH) {
-    return summary
-  }
-
-  return `${summary.slice(0, FAILURE_SUMMARY_MAX_LENGTH).trimEnd()}...`
-}
-
-function formatResponsePreview(value: unknown): {
-  text?: string
-  truncated: boolean
-} {
-  if (value === undefined || value === null) {
-    return { truncated: false }
-  }
-
-  let text: string
-  if (typeof value === 'string') {
-    text = value
-  } else {
-    try {
-      text = JSON.stringify(value, null, 2)
-    } catch {
-      text = String(value)
-    }
-  }
-
-  if (!text) return { truncated: false }
-  if (text.length <= RESPONSE_PREVIEW_MAX_LENGTH) {
-    return { text, truncated: false }
-  }
-  return {
-    text: text.slice(0, RESPONSE_PREVIEW_MAX_LENGTH).trimEnd(),
-    truncated: true,
-  }
-}
-
-function getFailureStatusDisplay({
-  errorText,
-  fallbackSummary,
-  isModelPriceError,
-  modelPriceSummary,
-}: {
-  errorText?: string
-  fallbackSummary: string
-  isModelPriceError: boolean
-  modelPriceSummary: string
-}): FailureStatusDisplay {
-  const rawError = errorText?.trim()
-
-  if (!rawError) {
-    return { summary: fallbackSummary }
-  }
-
-  if (isModelPriceError) {
-    return {
-      summary: modelPriceSummary,
-      details: rawError === modelPriceSummary ? undefined : rawError,
-    }
-  }
-
-  const firstLine = getFirstErrorLine(rawError) ?? rawError
-  const summary = truncateFailureSummary(normalizeInlineError(firstLine))
-  const normalizedRawError = normalizeInlineError(rawError)
-
-  return {
-    summary,
-    details: summary === normalizedRawError ? undefined : rawError,
-  }
-}
-
-function getTestTableColumnClass(columnId: string) {
-  switch (columnId) {
-    case 'select':
-      return 'w-10 min-w-10'
-    case 'model':
-      return 'w-auto min-w-48 whitespace-nowrap'
-    case 'status':
-      return 'w-28 min-w-28 whitespace-nowrap'
-    case 'result':
-      return 'w-80 min-w-80 max-w-80 whitespace-normal'
-    case 'capabilities':
-      return 'w-52 min-w-52 whitespace-normal'
-    case 'actions':
-      return 'bg-popover w-px whitespace-nowrap'
-    default:
-      return undefined
-  }
-}
-
-export function ChannelTestDialog({
-  open,
-  onOpenChange,
-}: ChannelTestDialogProps) {
+export function ChannelTestDialog(props: ChannelTestDialogProps) {
   const { currentRow } = useChannels()
-
-  if (!currentRow) {
-    return null
-  }
-
+  // Each opening is a new session. The shared queue still accounts for in-flight
+  // requests from the previous opening, but no previous UI result is reused.
+  if (!props.open || !currentRow) return null
   return (
     <ChannelTestDialogContent
       key={currentRow.id}
-      open={open}
-      onOpenChange={onOpenChange}
-      currentRow={currentRow}
+      channel={currentRow}
+      onOpenChange={props.onOpenChange}
     />
   )
 }
 
-function ChannelTestDialogContent({
-  open,
-  onOpenChange,
-  currentRow,
-}: ChannelTestDialogContentProps) {
+function ChannelTestDialogContent(props: {
+  channel: Channel
+  onOpenChange: (open: boolean) => void
+}) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
-  const currentChannelId = currentRow.id
-  const batchStopRequestedRef = useRef(false)
-  const batchProgressToastIdRef = useRef<ReturnType<
-    typeof toast.loading
-  > | null>(null)
-  const [endpointType, setEndpointType] = useState('auto')
-  const [isStreamTest, setIsStreamTest] = useState(false)
-  const [testMessage, setTestMessage] = useState('')
-  const [searchTerm, setSearchTerm] = useState('')
-  const [testResults, setTestResults] = useState<Record<string, TestResult>>({})
-  const [rowSelection, setRowSelection] = useState<RowSelectionState>({})
-  const [testingModels, setTestingModels] = useState<Set<string>>(
-    () => new Set()
+  const { copyToClipboard } = useCopyToClipboard()
+  const [selectedProbes, setSelectedProbes] = useState<ChannelProbeId[]>(() =>
+    CHANNEL_PROBES.map((probe) => probe.id)
   )
-  const [isBatchTesting, setIsBatchTesting] = useState(false)
-  const [isBatchStopRequested, setIsBatchStopRequested] = useState(false)
-  const [batchProgress, setBatchProgress] = useState<BatchProgress | null>(null)
-  const [removedModels, setRemovedModels] = useState<Set<string>>(
-    () => new Set()
-  )
-  const [isDeleteFailedDialogOpen, setIsDeleteFailedDialogOpen] =
-    useState(false)
-  const [isDeletingFailed, setIsDeletingFailed] = useState(false)
-  const [failureDetails, setFailureDetails] =
-    useState<FailureDetailsState | null>(null)
-  const [probeDetails, setProbeDetails] = useState<{
+  const [endpoint, setEndpoint] = useState('auto')
+  const [endpointOverrides, setEndpointOverrides] = useState<
+    Record<string, string>
+  >({})
+  const [message, setMessage] = useState('')
+  const [search, setSearch] = useState('')
+  const [filter, setFilter] = useState('all')
+  const [selected, setSelected] = useState<RowSelectionState>({})
+  const [removed, setRemoved] = useState<Set<string>>(() => new Set())
+  const [deleting, setDeleting] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [detail, setDetail] = useState<{
     model: string
     probe: ChannelProbeId
   } | null>(null)
-  const probeDetailsTriggerRef = useRef<HTMLElement | null>(null)
-  const [pagination, setPagination] = useState({
-    pageIndex: 0,
-    pageSize: 30,
-  })
-  const endpointSelectItems = useMemo(
-    () =>
-      endpointTypeOptions.map((option) => ({
-        value: option.value,
-        label: t(option.label),
-      })),
-    [t]
-  )
-
-  const dismissBatchProgressToast = useCallback(() => {
-    if (batchProgressToastIdRef.current === null) return
-
-    toast.dismiss(batchProgressToastIdRef.current)
-    batchProgressToastIdRef.current = null
-  }, [])
-
-  useEffect(() => {
-    if (!batchProgress) {
-      dismissBatchProgressToast()
-      return
-    }
-
-    const title = isBatchStopRequested
-      ? t('Stopping batch test...')
-      : t('Batch testing models...')
-    const completedText = t('{{completed}}/{{total}} completed', {
-      completed: batchProgress.completed,
-      total: batchProgress.total,
-    })
-    const resultText = t('{{success}} succeeded, {{failed}} failed', {
-      success: batchProgress.success,
-      failed: batchProgress.failed,
-    })
-
-    batchProgressToastIdRef.current = toast.loading(title, {
-      id: batchProgressToastIdRef.current ?? undefined,
-      description: `${completedText} · ${resultText}`,
-    })
-  }, [batchProgress, dismissBatchProgressToast, isBatchStopRequested, t])
-
-  useEffect(() => dismissBatchProgressToast, [dismissBatchProgressToast])
-
-  const resetState = useCallback(() => {
-    batchStopRequestedRef.current = true
-    setEndpointType('auto')
-    setIsStreamTest(false)
-    setTestMessage('')
-    setSearchTerm('')
-    setTestResults({})
-    setRowSelection({})
-    setTestingModels(() => new Set())
-    setIsBatchTesting(false)
-    setIsBatchStopRequested(false)
-    setBatchProgress(null)
-    setRemovedModels(() => new Set())
-    setIsDeleteFailedDialogOpen(false)
-    setIsDeletingFailed(false)
-    setFailureDetails(null)
-    setPagination({ pageIndex: 0, pageSize: 30 })
-  }, [])
-
-  const streamDisabled = STREAM_INCOMPATIBLE_ENDPOINTS.has(endpointType)
-  const effectiveStreamTest = !streamDisabled && isStreamTest
-
-  const handleEndpointTypeChange = useCallback((value: string | null) => {
-    if (value === null) return
-
-    setEndpointType(value)
-    if (STREAM_INCOMPATIBLE_ENDPOINTS.has(value)) {
-      setIsStreamTest(false)
-    }
-  }, [])
-
-  const handleSearchTermChange = useCallback(
-    (event: ChangeEvent<HTMLInputElement>) => {
-      setSearchTerm(event.target.value)
-      setPagination((prev) =>
-        prev.pageIndex === 0 ? prev : { ...prev, pageIndex: 0 }
-      )
-    },
-    []
-  )
-
-  const modelsValue = currentRow.models
-  const defaultTestModel = currentRow.test_model?.trim()
-
-  const baseModels = useMemo(() => {
-    if (!modelsValue) return []
-    return modelsValue
-      .split(',')
-      .map((model) => model.trim())
-      .filter(Boolean)
-  }, [modelsValue])
-
-  const models = useMemo(
-    () => baseModels.filter((model) => !removedModels.has(model)),
-    [baseModels, removedModels]
-  )
-
-  const successModels = useMemo(
-    () => models.filter((model) => testResults[model]?.status === 'success'),
-    [models, testResults]
-  )
-
-  const failedModels = useMemo(
-    () => models.filter((model) => testResults[model]?.status === 'error'),
-    [models, testResults]
-  )
-
-  const filteredModels = useMemo(() => {
-    if (!searchTerm) return models
-    const keyword = searchTerm.toLowerCase()
-    return models.filter((model) => model.toLowerCase().includes(keyword))
-  }, [models, searchTerm])
-
-  const tableData = useMemo<ModelRow[]>(
-    () => filteredModels.map((model) => ({ model })),
-    [filteredModels]
-  )
-
-  const markModelTesting = useCallback((key: string, isTesting: boolean) => {
-    setTestingModels((prev) => {
-      const next = new Set(prev)
-      if (isTesting) {
-        next.add(key)
-      } else {
-        next.delete(key)
-      }
-      return next
-    })
-  }, [])
-
-  const updateTestResult = useCallback((key: string, result: TestResult) => {
-    setFailureDetails((current) => (current?.model === key ? null : current))
-    setTestResults((prev) => ({
-      ...prev,
-      [key]: result,
-    }))
-  }, [])
-
-  const updateChannelTestCache = useCallback(
-    (patch?: ChannelTestCachePatch) => {
-      if (!patch) return
-
-      queryClient.setQueriesData<ChannelListCache>(
-        { queryKey: channelsQueryKeys.lists() },
-        (oldData) => {
-          const data = oldData?.data
-          if (!oldData || !data?.items.length) return oldData
-
-          let changed = false
-          const nextItems = data.items.map((channel) => {
-            if (channel.id !== currentChannelId) return channel
-
-            changed = true
-            return {
-              ...channel,
-              response_time: patch.responseTime,
-              test_time: patch.testTime,
-            }
-          })
-
-          if (!changed) return oldData
-
-          return {
-            ...oldData,
-            data: {
-              ...data,
-              items: nextItems,
-            },
-          }
-        }
-      )
-    },
-    [currentChannelId, queryClient]
-  )
+  const detailTrigger = useRef<HTMLElement | null>(null)
 
   const refreshChannelLists = useCallback(
-    (patch?: ChannelTestCachePatch) => {
-      updateChannelTestCache(patch)
-      void queryClient
-        .invalidateQueries({ queryKey: channelsQueryKeys.lists() })
-        .then(() => updateChannelTestCache(patch))
-        .catch(() => undefined)
-    },
-    [queryClient, updateChannelTestCache]
-  )
-
-  const testSingleModel = useCallback(
-    async (
-      model: string,
-      silent = false,
-      refreshList = true
-    ): Promise<TestResult | undefined> => {
-      if (!currentRow) return
-
-      markModelTesting(model, true)
-      updateTestResult(model, { status: 'testing' })
-      let finalResult: TestResult | undefined
-
-      try {
-        await handleDetailedChannelTest(
-          currentRow.id,
-          {
-            channelName: currentRow.name,
-            testModel: model,
-            endpointType: endpointType === 'auto' ? '' : endpointType,
-            stream: effectiveStreamTest,
-            message: testMessage,
-            silent,
-          },
-          (
-            success,
-            responseTime,
-            error,
-            errorCode,
-            responsePreview,
-            responsePreviewTruncated
-          ) => {
-            const completedAt = Date.now()
-            const formattedPreview = formatResponsePreview(responsePreview)
-            finalResult = {
-              status: success ? 'success' : 'error',
-              responseTime,
-              completedAt,
-              error,
-              errorCode,
-              responsePreview: formattedPreview.text,
-              responsePreviewTruncated:
-                formattedPreview.truncated || responsePreviewTruncated,
-            }
-            updateTestResult(model, finalResult)
+    (patch?: ChannelProbeRunPatch) => {
+      if (patch) {
+        queryClient.setQueriesData<
+          GetChannelsResponse | SearchChannelsResponse
+        >({ queryKey: channelsQueryKeys.lists() }, (previous) => {
+          if (!previous?.data?.items) return previous
+          return {
+            ...previous,
+            data: {
+              ...previous.data,
+              items: previous.data.items.map((item) =>
+                item.id === props.channel.id
+                  ? {
+                      ...item,
+                      response_time: patch.responseTime,
+                      test_time: patch.testTime,
+                    }
+                  : item
+              ),
+            },
           }
-        )
-      } catch (error: unknown) {
-        finalResult = {
-          status: 'error',
-          completedAt: Date.now(),
-          error: error instanceof Error ? error.message : t('Test failed'),
-        }
-        updateTestResult(model, finalResult)
-      } finally {
-        markModelTesting(model, false)
-        if (refreshList) {
-          refreshChannelLists(
-            createChannelTestCachePatch(
-              finalResult?.responseTime,
-              finalResult?.completedAt
-            )
-          )
-        }
-      }
-      return finalResult
-    },
-    [
-      currentRow,
-      endpointType,
-      effectiveStreamTest,
-      markModelTesting,
-      refreshChannelLists,
-      testMessage,
-      t,
-      updateTestResult,
-    ]
-  )
-
-  const handleStopBatchTest = useCallback(() => {
-    if (!isBatchTesting || isBatchStopRequested) return
-
-    batchStopRequestedRef.current = true
-    setIsBatchStopRequested(true)
-  }, [isBatchStopRequested, isBatchTesting])
-
-  const handleBatchTest = useCallback(
-    async (modelsToTest: string[]) => {
-      const uniqueModels = [
-        ...new Set(modelsToTest.map((model) => model.trim()).filter(Boolean)),
-      ]
-      if (!uniqueModels.length) return
-
-      batchStopRequestedRef.current = false
-      setIsBatchTesting(true)
-      setIsBatchStopRequested(false)
-      setBatchProgress({
-        total: uniqueModels.length,
-        completed: 0,
-        success: 0,
-        failed: 0,
-      })
-
-      let resultPatch: ChannelTestCachePatch | undefined
-      const results: TestResult[] = []
-      let completedCount = 0
-      let successCount = 0
-      let failedCount = 0
-
-      try {
-        const createFallbackResult = (error?: unknown): TestResult => ({
-          status: 'error',
-          completedAt: Date.now(),
-          error: error instanceof Error ? error.message : t('Test failed'),
         })
+      }
+      void queryClient.invalidateQueries({
+        queryKey: channelsQueryKeys.lists(),
+      })
+    },
+    [props.channel.id, queryClient]
+  )
 
-        const recordBatchResult = (result: TestResult) => {
-          results.push(result)
-          completedCount += 1
-          if (result.status === 'success') {
-            successCount += 1
-          }
-          failedCount = completedCount - successCount
+  const probes = useChannelProbes(props.channel.id, refreshChannelLists)
+  const startProbes = probes.start
+  const busy = probes.isRunning || deleting
 
-          setBatchProgress({
-            total: uniqueModels.length,
-            completed: completedCount,
-            success: successCount,
-            failed: failedCount,
-          })
-        }
+  const models = useMemo(
+    () =>
+      [
+        ...new Set(
+          props.channel.models
+            .split(',')
+            .map((model) => model.trim())
+            .filter(Boolean)
+        ),
+      ].filter((model) => !removed.has(model)),
+    [props.channel.models, removed]
+  )
 
-        for (
-          let startIndex = 0;
-          startIndex < uniqueModels.length;
-          startIndex += BATCH_TEST_CONCURRENCY
+  const createJob = useCallback(
+    (model: string, probe: ChannelProbeId): ChannelProbeJob => {
+      const configuration = {
+        model,
+        probe,
+        endpoint: endpointOverrides[model] ?? endpoint,
+        message: message.trim(),
+      }
+      return {
+        ...configuration,
+        configurationKey: getProbeConfigurationKey(
+          props.channel,
+          configuration
+        ),
+      }
+    },
+    [endpoint, endpointOverrides, message, props.channel]
+  )
+
+  const configurationKey = useCallback(
+    (model: string, probe: ChannelProbeId) =>
+      createJob(model, probe).configurationKey,
+    [createJob]
+  )
+
+  const endpointForModel = useCallback(
+    (model: string) => {
+      for (const probe of CHANNEL_PROBES) {
+        const result = probes.results[model]?.[probe.id]
+        if (
+          result?.diagnostics &&
+          result.configurationKey === configurationKey(model, probe.id)
         ) {
-          if (batchStopRequestedRef.current) {
-            break
-          }
-
-          const batch = uniqueModels.slice(
-            startIndex,
-            startIndex + BATCH_TEST_CONCURRENCY
-          )
-          const batchPromises = batch.map(async (modelName) => {
-            try {
-              const result = await testSingleModel(modelName, true, false)
-              const finalResult = result ?? createFallbackResult()
-              if (!result) {
-                updateTestResult(modelName, finalResult)
-              }
-              recordBatchResult(finalResult)
-              return finalResult
-            } catch (error: unknown) {
-              const fallbackResult = createFallbackResult(error)
-              updateTestResult(modelName, fallbackResult)
-              recordBatchResult(fallbackResult)
-              return fallbackResult
-            }
-          })
-
-          await Promise.allSettled(batchPromises)
-
-          if (
-            batchStopRequestedRef.current ||
-            startIndex + BATCH_TEST_CONCURRENCY >= uniqueModels.length
-          ) {
-            break
-          }
-
-          await sleep(BATCH_TEST_DELAY_MS)
+          return result.diagnostics.endpoint_type
         }
-
-        resultPatch = getLatestChannelTestCachePatch(results)
-        const stopped =
-          batchStopRequestedRef.current && completedCount < uniqueModels.length
-
-        dismissBatchProgressToast()
-        if (stopped) {
-          toast.info(
-            t(
-              'Batch test stopped: {{completed}}/{{total}} completed, {{success}} succeeded, {{failed}} failed',
-              {
-                completed: completedCount,
-                total: uniqueModels.length,
-                success: successCount,
-                failed: failedCount,
-              }
-            )
-          )
-        } else if (failedCount > 0) {
-          toast.error(
-            t(
-              'Batch test completed: {{success}} succeeded, {{failed}} failed',
-              {
-                success: successCount,
-                failed: failedCount,
-              }
-            )
-          )
-        } else {
-          toast.success(
-            t('Batch test completed: {{count}} succeeded', {
-              count: successCount,
-            })
-          )
-        }
-      } finally {
-        batchStopRequestedRef.current = false
-        setIsBatchTesting(false)
-        setIsBatchStopRequested(false)
-        setBatchProgress(null)
-        setRowSelection({})
-        refreshChannelLists(resultPatch)
       }
+      return getProbeEndpointHint(
+        props.channel,
+        model,
+        endpointOverrides[model] ?? endpoint
+      )
     },
     [
-      dismissBatchProgressToast,
-      refreshChannelLists,
-      t,
-      testSingleModel,
-      updateTestResult,
+      configurationKey,
+      endpoint,
+      endpointOverrides,
+      probes.results,
+      props.channel,
     ]
   )
 
-  const handleSelectSuccessfulModels = useCallback(() => {
-    setRowSelection(() => {
-      const next: RowSelectionState = {}
-      for (const model of successModels) {
-        next[model] = true
-      }
-      return next
-    })
-  }, [successModels])
-
-  const handleDeleteFailedModels = useCallback(async () => {
-    const failed = models.filter(
-      (model) => testResults[model]?.status === 'error'
-    )
-    if (!failed.length) {
-      setIsDeleteFailedDialogOpen(false)
-      return
-    }
-
-    const failedSet = new Set(failed)
-    const remaining = models.filter((model) => !failedSet.has(model))
-
-    setIsDeletingFailed(true)
-    try {
-      const response = await updateChannel(currentRow.id, {
-        models: remaining.join(','),
-      })
-      if (response.success) {
-        setRemovedModels((prev) => {
-          const next = new Set(prev)
-          for (const model of failed) next.add(model)
-          return next
-        })
-        setTestResults((prev) => {
-          const next = { ...prev }
-          for (const model of failed) delete next[model]
-          return next
-        })
-        setRowSelection((prev) => {
-          const next = { ...prev }
-          for (const model of failed) delete next[model]
-          return next
-        })
-        toast.success(
-          t('Deleted {{count}} failed models', { count: failed.length })
+  const filteredModels = useMemo(
+    () =>
+      models.filter((model) => {
+        if (!model.toLowerCase().includes(search.trim().toLowerCase())) {
+          return false
+        }
+        if (filter === 'all') return true
+        const results = CHANNEL_PROBES.map(
+          (probe) => probes.results[model]?.[probe.id]
+        ).filter((result) => result !== undefined)
+        if (filter === 'stale') {
+          return results.some(
+            (result) =>
+              result.configurationKey !== configurationKey(model, result.probe)
+          )
+        }
+        const current = results.filter(
+          (result) =>
+            result.configurationKey === configurationKey(model, result.probe)
         )
-        refreshChannelLists()
-        setIsDeleteFailedDialogOpen(false)
-      } else {
+        if (filter === 'idle') return current.length === 0
+        return current.some((result) => result.status === filter)
+      }),
+    [configurationKey, filter, models, probes.results, search]
+  )
+
+  const selectedModels = models.filter((model) => selected[model])
+  const targetModels =
+    selectedModels.length > 0 ? selectedModels : filteredModels
+  const jobsForModels = useCallback(
+    (scope: string[]) =>
+      scope.flatMap((model) =>
+        selectedProbes
+          .filter(
+            (probe) => !isProbeNotApplicable(endpointForModel(model), probe)
+          )
+          .map((probe) => createJob(model, probe))
+      ),
+    [createJob, endpointForModel, selectedProbes]
+  )
+  const targetJobs = jobsForModels(targetModels)
+  const retryJobs = targetModels.flatMap((model) =>
+    selectedProbes
+      .filter((probe) => {
+        const result = probes.results[model]?.[probe]
+        return (
+          result?.status === 'failed' &&
+          result.configurationKey === configurationKey(model, probe) &&
+          !isProbeNotApplicable(endpointForModel(model), probe)
+        )
+      })
+      .map((probe) => createJob(model, probe))
+  )
+  const failedModels = models.filter((model) =>
+    canDeleteProbeModel(
+      probes.results[model],
+      endpointForModel(model),
+      (probe) => configurationKey(model, probe)
+    )
+  )
+  const successfulModels = models.filter((model) =>
+    CHANNEL_PROBES.filter(
+      (probe) =>
+        probe.testType === 'basic' &&
+        !isProbeNotApplicable(endpointForModel(model), probe.id)
+    ).every((probe) => {
+      const result = probes.results[model]?.[probe.id]
+      return (
+        result &&
+        (result.status === 'passed' || result.status === 'degraded') &&
+        result.configurationKey === configurationKey(model, probe.id)
+      )
+    })
+  )
+  const filterItems = [
+    { value: 'all', label: t('All results') },
+    { value: 'idle', label: t('Not tested') },
+    { value: 'passed', label: t('Passed') },
+    { value: 'failed', label: t('Failed') },
+    { value: 'degraded', label: t('Compatibility stream') },
+    { value: 'stale', label: t('Settings changed') },
+  ]
+
+  const runSingle = useCallback(
+    (model: string, probe: ChannelProbeId) => {
+      void startProbes([createJob(model, probe)])
+    },
+    [createJob, startProbes]
+  )
+
+  const deleteFailed = async () => {
+    if (busy || failedModels.length === 0) return
+    setDeleting(true)
+    try {
+      const failed = new Set(failedModels)
+      const response = await updateChannel(props.channel.id, {
+        models: models.filter((model) => !failed.has(model)).join(','),
+      })
+      if (!response.success) {
         toast.error(response.message || t('Failed to delete failed models'))
+        return
       }
+      setRemoved((previous) => new Set([...previous, ...failed]))
+      setSelected((previous) =>
+        Object.fromEntries(
+          Object.entries(previous).filter(([model]) => !failed.has(model))
+        )
+      )
+      setConfirmDelete(false)
+      toast.success(
+        t('Deleted {{count}} failed models', { count: failed.size })
+      )
+      void queryClient.invalidateQueries({
+        queryKey: channelsQueryKeys.lists(),
+      })
     } catch (error: unknown) {
       toast.error(
         error instanceof Error
@@ -868,784 +344,324 @@ function ChannelTestDialogContent({
           : t('Failed to delete failed models')
       )
     } finally {
-      setIsDeletingFailed(false)
+      setDeleting(false)
     }
-  }, [currentRow.id, models, refreshChannelLists, t, testResults])
+  }
 
-  const handleClose = useCallback(() => {
-    resetState()
-    onOpenChange(false)
-  }, [onOpenChange, resetState])
-
-  const handleDialogOpenChange = useCallback(
-    (nextOpen: boolean) => {
-      if (!nextOpen) {
-        handleClose()
-      }
-    },
-    [handleClose]
+  const detailResult = detail
+    ? probes.results[detail.model]?.[detail.probe]
+    : undefined
+  const detailStale = Boolean(
+    detail &&
+      detailResult &&
+      detailResult.configurationKey !==
+        configurationKey(detail.model, detail.probe)
   )
-
-  const isAnyTesting = testingModels.size > 0 || isBatchTesting
-  const isFilteringModels = searchTerm.trim().length > 0
-  const testAllButtonLabel = isFilteringModels
-    ? t('Test {{count}} matching models', { count: filteredModels.length })
-    : t('Test all {{count}} models', { count: filteredModels.length })
-
-  const probes = useChannelProbes(currentChannelId, refreshChannelLists)
-
-  const probeEndpointForModel = useCallback(
-    (model: string) => getProbeEndpointHint(currentRow, model, endpointType),
-    [currentRow, endpointType]
+  const progress = probes.progress
+  const finished = progress.completed + progress.cancelled
+  const summary = t(
+    '{{passed}} passed · {{failed}} failed · {{degraded}} compatibility',
+    {
+      passed: progress.passed,
+      failed: progress.failed,
+      degraded: progress.degraded,
+    }
   )
-
-  const probeConfigurationKey = useCallback(
-    (model: string, probe: ChannelProbeId) =>
-      getProbeConfigurationKey(currentRow, {
-        model,
-        probe,
-        endpoint: probeEndpointForModel(model),
-        message: testMessage,
-      }),
-    [currentRow, probeEndpointForModel, testMessage]
-  )
-
-  const runProbes = useCallback(
-    async (targets: Array<{ model: string; probe: ChannelProbeId }>) => {
-      const jobs = targets
-        .filter(
-          (target) =>
-            !isProbeNotApplicable(
-              probeEndpointForModel(target.model),
-              target.probe
-            )
-        )
-        .map((target) => ({
-          model: target.model,
-          probe: target.probe,
-          endpoint: probeEndpointForModel(target.model),
-          message: testMessage,
-          configurationKey: probeConfigurationKey(target.model, target.probe),
-        }))
-      if (jobs.length === 0) {
-        toast.info(t('These tests do not apply to the selected models.'))
-        return
-      }
-      await probes.start(jobs)
-    },
-    [probeConfigurationKey, probeEndpointForModel, probes, t, testMessage]
-  )
-
-  const openProbeDetails = useCallback(
-    (model: string, probe: ChannelProbeId, trigger: HTMLElement) => {
-      probeDetailsTriggerRef.current = trigger
-      setProbeDetails({ model, probe })
-    },
-    []
-  )
-
-  const columns = useMemo<ColumnDef<ModelRow>[]>(
-    () => [
-      {
-        id: 'select',
-        header: ({ table }) => (
-          <Checkbox
-            checked={table.getIsAllRowsSelected()}
-            indeterminate={
-              table.getIsSomeRowsSelected() && !table.getIsAllRowsSelected()
-            }
-            onCheckedChange={(value) => table.toggleAllRowsSelected(!!value)}
-            aria-label={t('Select all models')}
-          />
-        ),
-        cell: ({ row }) => (
-          <Checkbox
-            checked={row.getIsSelected()}
-            onCheckedChange={(value) => row.toggleSelected(!!value)}
-            aria-label={t('Select model {{model}}', {
-              model: row.original.model,
-            })}
-          />
-        ),
-        enableSorting: false,
-        enableHiding: false,
-        size: 40,
-      },
-      {
-        accessorKey: 'model',
-        header: t('Model'),
-        cell: ({ row }) => {
-          const model = row.original.model
-          const isDefault = defaultTestModel === model
-
-          return (
-            <div className='flex w-max items-center gap-2 whitespace-nowrap'>
-              <span className='font-medium whitespace-nowrap' title={model}>
-                {model}
-              </span>
-              {isDefault && (
-                <StatusBadge
-                  label={t('Default')}
-                  variant='info'
-                  size='sm'
-                  copyable={false}
-                />
-              )}
-            </div>
-          )
-        },
-      },
-      {
-        id: 'status',
-        header: t('Status'),
-        cell: ({ row }) => {
-          const model = row.original.model
-          const result = testResults[model]
-          return <TestStatusCell result={result} />
-        },
-        enableSorting: false,
-        size: 112,
-      },
-      {
-        id: 'result',
-        header: t('Result'),
-        cell: ({ row }) => {
-          const model = row.original.model
-          const result = testResults[model]
-          return (
-            <TestResultCell
-              result={result}
-              model={model}
-              onOpenDetails={setFailureDetails}
-            />
-          )
-        },
-        enableSorting: false,
-        size: 320,
-      },
-      {
-        id: 'capabilities',
-        header: t('Capabilities'),
-        cell: ({ row }) => {
-          const model = row.original.model
-          return (
-            <ChannelCapabilitiesCell
-              busy={probes.isRunning}
-              configurationKey={(probe) => probeConfigurationKey(model, probe)}
-              endpoint={probeEndpointForModel(model)}
-              model={model}
-              onDetails={(probe, trigger) =>
-                openProbeDetails(model, probe, trigger)
-              }
-              onRun={(probe) => void runProbes([{ model, probe }])}
-              results={probes.results[model]}
-            />
-          )
-        },
-        enableSorting: false,
-        size: 200,
-      },
-      {
-        id: 'actions',
-        header: t('Actions'),
-        cell: ({ row }) => {
-          const model = row.original.model
-          const isTestingModel = testingModels.has(model)
-
-          return (
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    variant='ghost'
-                    size='icon-sm'
-                    onClick={() => testSingleModel(model)}
-                    disabled={isTestingModel || isBatchTesting}
-                    aria-label={t('Test Connection')}
-                  />
-                }
-              >
-                {isTestingModel ? (
-                  <Loader2 className='size-4 animate-spin' />
-                ) : (
-                  <Gauge className='size-4' />
-                )}
-              </TooltipTrigger>
-              <TooltipContent>{t('Test Connection')}</TooltipContent>
-            </Tooltip>
-          )
-        },
-        enableSorting: false,
-      },
-    ],
-    [
-      defaultTestModel,
-      isBatchTesting,
-      openProbeDetails,
-      probeConfigurationKey,
-      probeEndpointForModel,
-      probes.isRunning,
-      probes.results,
-      runProbes,
-      t,
-      testResults,
-      testingModels,
-      testSingleModel,
-    ]
-  )
-
-  const { table } = useDataTable({
-    data: tableData,
-    columns,
-    rowSelection,
-    pagination,
-    enableRowSelection: true,
-    getRowId: (row) => row.model,
-    onRowSelectionChange: setRowSelection,
-    onPaginationChange: setPagination,
-    withFilteredRowModel: false,
-    withSortedRowModel: false,
-    withFacetedRowModel: false,
-  })
 
   return (
-    <>
-      <Dialog
-        open={open}
-        onOpenChange={handleDialogOpenChange}
-        title={
-          <span className='inline-flex max-w-full min-w-0 items-center gap-1.5'>
-            <span className='shrink-0'>{t('Test Channel Connection')}:</span>
-            <span className='min-w-0 truncate'>{currentRow.name}</span>
-          </span>
-        }
-        contentClassName='max-h-[90vh] overflow-hidden sm:max-w-4xl'
-        contentHeight='auto'
-        bodyClassName='space-y-4'
-        footer={
-          <Button variant='outline' onClick={handleClose}>
-            {t('Close')}
-          </Button>
-        }
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open) probes.close()
+        props.onOpenChange(open)
+      }}
+    >
+      <DialogContent
+        showCloseButton={false}
+        className='flex h-dvh max-h-dvh w-screen max-w-none flex-col gap-0 overflow-hidden rounded-none p-0 sm:max-w-none md:h-[min(860px,90dvh)] md:max-h-[90dvh] md:w-[calc(100vw-3rem)] md:max-w-[1280px] md:rounded-xl'
       >
-        <div className='max-h-[78vh] space-y-4 overflow-y-auto py-4 pr-1'>
-          <div className='grid gap-4 md:grid-cols-2'>
-            <div className='grid gap-2'>
-              <Label htmlFor='endpoint-type'>{t('Endpoint Type')}</Label>
-              <Combobox
-                options={endpointSelectItems}
-                value={endpointType}
-                onValueChange={handleEndpointTypeChange}
-                id='endpoint-type'
-                className='w-full min-w-0'
-                placeholder={t('Auto detect (default)')}
+        <DialogHeader className='shrink-0 px-4 pt-5 pr-14 pb-4 sm:px-6 sm:pr-16'>
+          <DialogTitle className='flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1 text-lg'>
+            <span>{t('Test Channel Connection')}</span>
+            <span className='text-muted-foreground' aria-hidden='true'>
+              ·
+            </span>
+            <span className='min-w-0 truncate'>{props.channel.name}</span>
+          </DialogTitle>
+          <DialogDescription>
+            {t(
+              'Compare model responses, streaming and tool calls in one place.'
+            )}
+          </DialogDescription>
+          <DialogClose
+            render={
+              <Button
+                variant='ghost'
+                size='icon-sm'
+                className='absolute top-4 right-4'
+                aria-label={t('Close')}
               />
-              <p className='text-muted-foreground text-xs'>
-                {t(
-                  'Override the endpoint used for testing. Leave empty to auto detect.'
-                )}
-              </p>
-            </div>
-            <div className='grid gap-2'>
-              <Label htmlFor='stream-toggle'>{t('Stream Mode')}</Label>
-              <div className='flex items-center gap-2'>
-                <Switch
-                  id='stream-toggle'
-                  checked={effectiveStreamTest}
-                  onCheckedChange={setIsStreamTest}
-                  disabled={streamDisabled}
-                />
-                <span className='text-sm'>
-                  {effectiveStreamTest ? t('Enabled') : t('Disabled')}
-                </span>
-              </div>
-              <p className='text-muted-foreground text-xs'>
-                {t('Enable streaming mode for the test request.')}
-              </p>
-            </div>
-          </div>
-
-          <div className='grid gap-2'>
-            <Label htmlFor='channel-test-message'>
-              {t('Test message for this run')}
-            </Label>
-            <Textarea
-              id='channel-test-message'
-              value={testMessage}
-              onChange={(event) => setTestMessage(event.target.value)}
-              placeholder={t('Leave empty to use the global test message')}
-              maxLength={4096}
-              rows={3}
+            }
+          >
+            <HugeiconsIcon icon={Cancel01Icon} aria-hidden='true' />
+          </DialogClose>
+        </DialogHeader>
+        <ChannelTestControls
+          selected={selectedProbes}
+          onSelectedChange={setSelectedProbes}
+          endpoint={endpoint}
+          onEndpointChange={setEndpoint}
+          message={message}
+          onMessageChange={setMessage}
+          disabled={busy}
+        />
+        <div className='flex shrink-0 flex-wrap items-center gap-2 px-4 py-3 sm:px-6'>
+          <div className='relative min-w-36 flex-1 sm:max-w-sm'>
+            <HugeiconsIcon
+              icon={Search01Icon}
+              className='text-muted-foreground pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2'
+              aria-hidden='true'
             />
-            <p className='text-muted-foreground text-xs'>
-              {t(
-                'Only applies to this dialog run. Leave empty to use the global test message.'
-              )}
-            </p>
-          </div>
-
-          <div className='space-y-3 max-sm:has-[div[role="toolbar"]]:pb-16'>
-            <div className='flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between'>
-              <div className='min-w-0 space-y-2'>
-                <p className='text-sm font-medium'>{t('Channel models')}</p>
-                <p className='text-muted-foreground text-xs'>
-                  {t('Select models to run batch tests.')}
-                </p>
-                <div className='flex flex-wrap items-center gap-2'>
-                  {isBatchTesting ? (
-                    <Button
-                      variant='outline'
-                      size='sm'
-                      onClick={handleStopBatchTest}
-                      disabled={isBatchStopRequested}
-                    >
-                      {isBatchStopRequested
-                        ? t('Stopping...')
-                        : t('Stop testing')}
-                    </Button>
-                  ) : (
-                    <>
-                      <Button
-                        size='sm'
-                        onClick={() => handleBatchTest(filteredModels)}
-                        disabled={isAnyTesting || filteredModels.length === 0}
-                      >
-                        {testAllButtonLabel}
-                      </Button>
-                      {successModels.length > 0 && (
-                        <Button
-                          variant='outline'
-                          size='sm'
-                          onClick={handleSelectSuccessfulModels}
-                        >
-                          <CheckCircle2 data-icon='inline-start' />
-                          {t('Select successful models ({{count}})', {
-                            count: successModels.length,
-                          })}
-                        </Button>
-                      )}
-                      {failedModels.length > 0 && (
-                        <Button
-                          variant='outline'
-                          size='sm'
-                          onClick={() => setIsDeleteFailedDialogOpen(true)}
-                        >
-                          <Trash2 data-icon='inline-start' />
-                          {t('Delete failed models ({{count}})', {
-                            count: failedModels.length,
-                          })}
-                        </Button>
-                      )}
-                    </>
-                  )}
-                </div>
-              </div>
-              <div className='flex flex-col gap-2 sm:flex-row sm:items-center'>
-                <Input
-                  placeholder={t('Filter models...')}
-                  value={searchTerm}
-                  onChange={handleSearchTermChange}
-                  className='sm:w-64'
-                />
-              </div>
-            </div>
-
-            <div className='space-y-3'>
-              <DataTableView
-                table={table}
-                containerClassName='rounded-md'
-                containerProps={{
-                  role: 'region',
-                  'aria-label': t('Channel models'),
-                }}
-                tableContainerClassName='max-h-90 overflow-auto **:data-[slot=table-container]:overflow-visible'
-                tableClassName='w-max min-w-full table-auto'
-                pinnedColumns={[
-                  {
-                    columnId: 'actions',
-                    side: 'right',
-                    cellClassName: 'bg-popover',
-                  },
-                ]}
-                colgroup={
-                  <colgroup>
-                    <col className='w-10 min-w-10' />
-                    <col className='w-auto' />
-                    <col className='w-28' />
-                    <col className='w-80' />
-                    <col className='w-px' />
-                  </colgroup>
-                }
-                getColumnClassName={(columnId) =>
-                  getTestTableColumnClass(columnId)
-                }
-                emptyContent={
-                  models.length
-                    ? t('No models matched your search.')
-                    : t('This channel has no configured models.')
-                }
-                emptyCellClassName='text-muted-foreground h-16 text-center text-sm'
-              />
-
-              <DataTablePagination table={table} />
-            </div>
-
-            <TestModelsBulkActions
-              onRunCapabilities={(selected) =>
-                void runProbes(
-                  selected.flatMap((model) =>
-                    CHANNEL_PROBES.map((probe) => ({ model, probe: probe.id }))
-                  )
-                )
-              }
-              probesBusy={probes.isRunning}
-              table={table}
+            <Input
+              className='pl-9'
+              aria-label={t('Filter models...')}
+              placeholder={t('Filter models...')}
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
             />
+          </div>
+          <Select
+            items={filterItems}
+            value={filter}
+            onValueChange={(value) => {
+              if (value) setFilter(value)
+            }}
+          >
+            <SelectTrigger
+              className='w-40 max-sm:w-32'
+              aria-label={t('Filter test results')}
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {filterItems.map((item) => (
+                <SelectItem key={item.value} value={item.value}>
+                  {item.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <div className='text-muted-foreground ml-auto flex items-center gap-2 text-xs'>
+            <span className='tabular-nums'>
+              {t('{{count}} models selected', { count: selectedModels.length })}
+            </span>
+            {selectedModels.length > 0 && (
+              <Button
+                variant='ghost'
+                size='icon-sm'
+                aria-label={t('Copy selected models')}
+                onClick={() => void copyToClipboard(selectedModels.join(','))}
+              >
+                <HugeiconsIcon icon={Copy01Icon} aria-hidden='true' />
+              </Button>
+            )}
+            {selectedModels.length > 0 && (
+              <Button variant='ghost' size='sm' onClick={() => setSelected({})}>
+                {t('Clear selection')}
+              </Button>
+            )}
           </div>
         </div>
-      </Dialog>
+        <ChannelTestMatrix
+          models={filteredModels}
+          results={probes.results}
+          selected={selected}
+          onSelectedChange={setSelected}
+          endpointOverrides={endpointOverrides}
+          onEndpointChange={(model, value) =>
+            setEndpointOverrides((previous) => {
+              const next = { ...previous }
+              if (value === 'inherit') delete next[model]
+              else next[model] = value
+              return next
+            })
+          }
+          endpointForModel={endpointForModel}
+          configurationKey={configurationKey}
+          busy={busy}
+          defaultModel={props.channel.test_model ?? undefined}
+          onRun={runSingle}
+          onDetails={(model, probe, trigger) => {
+            detailTrigger.current = trigger
+            setDetail({ model, probe })
+          }}
+          emptyText={
+            models.length === 0
+              ? t('This channel has no configured models.')
+              : t('No models matched your search.')
+          }
+        />
+        <DialogFooter className='bg-muted/25 mx-0 mb-0 shrink-0 flex-col gap-3 rounded-none px-4 pb-[calc(env(safe-area-inset-bottom,0px)+1rem)] sm:px-6'>
+          <div className='flex flex-wrap items-center gap-x-4 gap-y-2'>
+            <div
+              className='mr-auto min-w-0 flex-1 text-xs'
+              role='status'
+              aria-live='polite'
+            >
+              {progress.total > 0 ? (
+                <div className='flex flex-col gap-1.5'>
+                  <div className='flex flex-wrap items-center gap-x-3 gap-y-1'>
+                    <span className='font-medium tabular-nums'>
+                      {t('{{completed}}/{{total}} completed', {
+                        completed: progress.completed,
+                        total: progress.total,
+                      })}
+                    </span>
+                    <span className='text-muted-foreground'>{summary}</span>
+                    {progress.cancelled > 0 && (
+                      <span className='text-muted-foreground'>
+                        {t('{{count}} stopped', { count: progress.cancelled })}
+                      </span>
+                    )}
+                  </div>
+                  <progress
+                    aria-label={t('Test progress')}
+                    value={finished}
+                    max={progress.total}
+                    className='[&::-webkit-progress-bar]:bg-muted [&::-webkit-progress-value]:bg-primary [&::-moz-progress-bar]:bg-primary h-1 w-full overflow-hidden rounded-full'
+                  />
+                </div>
+              ) : (
+                <span className='text-muted-foreground'>
+                  {t('Select capabilities and models, then start testing.')}
+                </span>
+              )}
+            </div>
+            <span className='text-muted-foreground text-xs tabular-nums'>
+              {t('Estimated requests: {{count}}', { count: targetJobs.length })}
+            </span>
+          </div>
+          <div className='flex flex-wrap items-center justify-between gap-2'>
+            <div className='flex flex-wrap gap-1'>
+              {successfulModels.length > 0 && (
+                <Button
+                  variant='ghost'
+                  size='sm'
+                  disabled={busy}
+                  onClick={() =>
+                    setSelected(
+                      Object.fromEntries(
+                        successfulModels.map((model) => [model, true])
+                      )
+                    )
+                  }
+                >
+                  {t('Select successful models ({{count}})', {
+                    count: successfulModels.length,
+                  })}
+                </Button>
+              )}
+              {failedModels.length > 0 && (
+                <Button
+                  variant='ghost'
+                  size='sm'
+                  className='text-destructive'
+                  disabled={busy}
+                  onClick={() => setConfirmDelete(true)}
+                >
+                  {t('Delete failed models ({{count}})', {
+                    count: failedModels.length,
+                  })}
+                </Button>
+              )}
+            </div>
+            <div className='flex flex-wrap items-center justify-end gap-2 max-sm:w-full'>
+              {probes.isRunning ? (
+                <Button
+                  variant='outline'
+                  onClick={probes.stop}
+                  disabled={probes.isStopping}
+                >
+                  <HugeiconsIcon icon={StopIcon} aria-hidden='true' />
+                  {probes.isStopping
+                    ? t('Finishing active tests...')
+                    : t('Stop testing')}
+                </Button>
+              ) : (
+                <>
+                  {selectedModels.length > 0 && (
+                    <Button
+                      variant='ghost'
+                      size='sm'
+                      disabled={
+                        busy || jobsForModels(filteredModels).length === 0
+                      }
+                      onClick={() =>
+                        void probes.start(jobsForModels(filteredModels))
+                      }
+                    >
+                      {t('Test filtered models ({{count}})', {
+                        count: filteredModels.length,
+                      })}
+                    </Button>
+                  )}
+                  <Button
+                    variant='outline'
+                    disabled={busy || retryJobs.length === 0}
+                    onClick={() => void probes.start(retryJobs)}
+                  >
+                    <HugeiconsIcon
+                      icon={ArrowReloadHorizontalIcon}
+                      aria-hidden='true'
+                    />
+                    {t('Retest failures')}
+                  </Button>
+                  <Button
+                    disabled={busy || targetJobs.length === 0}
+                    onClick={() => void probes.start(targetJobs)}
+                  >
+                    <HugeiconsIcon icon={PlayIcon} aria-hidden='true' />
+                    {selectedModels.length > 0
+                      ? t('Test selected ({{count}})', {
+                          count: selectedModels.length,
+                        })
+                      : t('Start testing')}
+                  </Button>
+                </>
+              )}
+            </div>
+          </div>
+        </DialogFooter>
+      </DialogContent>
+      <ChannelProbeDetails
+        open={detail !== null}
+        onOpenChange={(open) => {
+          if (!open) setDetail(null)
+        }}
+        model={detail?.model ?? ''}
+        probe={detail?.probe ?? 'basic'}
+        result={detailResult}
+        stale={detailStale}
+        busy={busy}
+        onRetry={() => {
+          if (detail) runSingle(detail.model, detail.probe)
+        }}
+        returnFocus={detailTrigger}
+      />
       <ConfirmDialog
-        open={isDeleteFailedDialogOpen}
-        onOpenChange={setIsDeleteFailedDialogOpen}
+        open={confirmDelete}
+        onOpenChange={setConfirmDelete}
         title={t('Delete failed models')}
         desc={t(
-          'This removes {{count}} failed models from this channel. This action cannot be undone.',
+          'Delete {{count}} models whose applicable basic tests all failed? Tool failures and compatibility streams are excluded.',
           { count: failedModels.length }
         )}
-        destructive
-        isLoading={isDeletingFailed}
         confirmText={t('Delete')}
-        handleConfirm={handleDeleteFailedModels}
+        handleConfirm={() => void deleteFailed()}
+        destructive
+        isLoading={deleting}
+        disabled={busy || failedModels.length === 0}
       />
-      <FailureDetailsSheet
-        details={failureDetails}
-        onOpenChange={(sheetOpen) => {
-          if (!sheetOpen) {
-            setFailureDetails(null)
-          }
-        }}
-      />
-
-      {probeDetails && (
-        <ChannelProbeDetails
-          busy={probes.isRunning}
-          model={probeDetails.model}
-          onOpenChange={(sheetOpen) => {
-            if (!sheetOpen) setProbeDetails(null)
-          }}
-          onRetry={() =>
-            void runProbes([
-              { model: probeDetails.model, probe: probeDetails.probe },
-            ])
-          }
-          open
-          probe={probeDetails.probe}
-          result={probes.results[probeDetails.model]?.[probeDetails.probe]}
-          returnFocus={probeDetailsTriggerRef}
-          stale={Boolean(
-            probes.results[probeDetails.model]?.[probeDetails.probe] &&
-            probes.results[probeDetails.model]?.[probeDetails.probe]
-              ?.configurationKey !==
-              probeConfigurationKey(probeDetails.model, probeDetails.probe)
-          )}
-        />
-      )}
-    </>
-  )
-}
-
-function TestStatusCell({ result }: { result?: TestResult }) {
-  const { t } = useTranslation()
-
-  if (!result || result.status === 'idle') {
-    return (
-      <StatusBadge label={t('Not tested')} variant='neutral' copyable={false} />
-    )
-  }
-
-  if (result.status === 'testing') {
-    return (
-      <StatusBadge variant='info' copyable={false}>
-        <Loader2 className='size-3.5 shrink-0 animate-spin' />
-        <span className='min-w-0 truncate leading-normal'>
-          {t('Testing...')}
-        </span>
-      </StatusBadge>
-    )
-  }
-
-  if (result.status === 'success') {
-    return (
-      <StatusBadge label={t('Success')} variant='success' copyable={false} />
-    )
-  }
-
-  return <StatusBadge label={t('Failed')} variant='danger' copyable={false} />
-}
-
-function TestResultCell({
-  result,
-  model,
-  onOpenDetails,
-}: {
-  result?: TestResult
-  model: string
-  onOpenDetails: (details: FailureDetailsState) => void
-}) {
-  const { t } = useTranslation()
-
-  if (!result || result.status === 'idle') {
-    return <span className='text-muted-foreground text-sm'>-</span>
-  }
-
-  if (result.status === 'testing') {
-    return (
-      <div className='text-muted-foreground flex min-w-0 items-center gap-2 text-sm'>
-        <Loader2 className='size-4 shrink-0 animate-spin' />
-        <span className='truncate'>{t('Testing...')}</span>
-      </div>
-    )
-  }
-
-  if (result.status === 'success') {
-    return (
-      <div className='min-w-0 space-y-1.5'>
-        {typeof result.responseTime === 'number' ? (
-          <span className='text-muted-foreground text-sm'>
-            {formatResponseTime(result.responseTime, t)}
-          </span>
-        ) : (
-          <span className='text-muted-foreground text-sm'>-</span>
-        )}
-        <ResponsePreview result={result} />
-      </div>
-    )
-  }
-
-  return (
-    <FailureResultContent
-      result={result}
-      model={model}
-      onOpenDetails={onOpenDetails}
-    />
-  )
-}
-
-function ResponsePreview({ result }: { result: TestResult }) {
-  const { t } = useTranslation()
-  if (!result.responsePreview) return null
-
-  return (
-    <div className='bg-muted/20 min-w-0 rounded-md border border-dashed px-2 py-1.5'>
-      <p className='text-muted-foreground text-[11px] font-medium'>
-        {t('Response preview')}
-      </p>
-      <pre className='text-muted-foreground mt-1 max-h-20 overflow-auto text-[11px] leading-relaxed wrap-break-word whitespace-pre-wrap'>
-        {result.responsePreview}
-      </pre>
-      {result.responsePreviewTruncated && (
-        <p className='text-muted-foreground mt-1 text-[11px]'>
-          {t('Preview is truncated for safety.')}
-        </p>
-      )}
-    </div>
-  )
-}
-
-function FailureResultContent({
-  result,
-  model,
-  onOpenDetails,
-}: {
-  result: TestResult
-  model: string
-  onOpenDetails: (details: FailureDetailsState) => void
-}) {
-  const { t } = useTranslation()
-  const errorText = result.error?.trim()
-  const isModelPriceError = result.errorCode === MODEL_PRICE_ERROR_CODE
-  const modelPriceSummary = t(
-    'Model price is not configured. Please complete model pricing in settings.'
-  )
-  const { summary, details } = getFailureStatusDisplay({
-    errorText,
-    fallbackSummary: t('Test failed'),
-    isModelPriceError,
-    modelPriceSummary,
-  })
-
-  return (
-    <div className='min-w-0 space-y-1.5'>
-      <div className='flex min-w-0 items-center gap-2 text-xs whitespace-normal'>
-        <p className='text-muted-foreground line-clamp-2 min-w-0 flex-1 leading-snug wrap-break-word'>
-          {summary}
-        </p>
-        <div className='flex shrink-0 flex-wrap items-center justify-end gap-1.5'>
-          {isModelPriceError && (
-            <Button
-              variant='outline'
-              size='sm'
-              className='h-7 w-fit px-2 text-xs'
-              onClick={() =>
-                window.open('/system-settings/billing/model-pricing', '_blank')
-              }
-            >
-              <Settings className='mr-1 h-3 w-3 shrink-0' />
-              {t('Go to Settings')}
-            </Button>
-          )}
-          {details && (
-            <Button
-              variant='ghost'
-              size='sm'
-              className='h-7 w-fit px-2 text-xs'
-              aria-haspopup='dialog'
-              onClick={() => onOpenDetails({ model, summary, details })}
-            >
-              <Info className='mr-1 h-3 w-3 shrink-0' />
-              {t('Details')}
-            </Button>
-          )}
-        </div>
-      </div>
-      <ResponsePreview result={result} />
-    </div>
-  )
-}
-
-function FailureDetailsSheet({
-  details,
-  onOpenChange,
-}: {
-  details: FailureDetailsState | null
-  onOpenChange: (open: boolean) => void
-}) {
-  const { t } = useTranslation()
-  const isMobile = useIsMobile()
-  const { copiedText, copyToClipboard } = useCopyToClipboard({ notify: false })
-
-  return (
-    <Sheet open={Boolean(details)} onOpenChange={onOpenChange}>
-      <SheetContent
-        side={isMobile ? 'bottom' : 'right'}
-        className={
-          isMobile
-            ? sideDrawerContentClassName('h-auto max-h-[85dvh] rounded-t-xl')
-            : sideDrawerContentClassName('sm:max-w-lg')
-        }
-      >
-        {details && (
-          <>
-            <SheetHeader className={sideDrawerHeaderClassName('sm:px-5')}>
-              <SheetTitle className='pr-10'>{t('Details')}</SheetTitle>
-              <SheetDescription className='pr-10 wrap-break-word'>
-                {details.model}
-              </SheetDescription>
-            </SheetHeader>
-            <div className={sideDrawerFormClassName('gap-4 sm:px-5')}>
-              <section className='space-y-1'>
-                <div className='text-muted-foreground text-xs font-medium'>
-                  {t('Model')}
-                </div>
-                <p className='text-sm font-medium break-all'>{details.model}</p>
-              </section>
-              <section className='space-y-1'>
-                <div className='text-muted-foreground text-xs font-medium'>
-                  {t('Failed')}
-                </div>
-                <p className='text-muted-foreground text-sm leading-relaxed wrap-break-word'>
-                  {details.summary}
-                </p>
-              </section>
-              <section className='space-y-2'>
-                <div className='text-muted-foreground text-xs font-medium'>
-                  {t('Details')}
-                </div>
-                <pre className='bg-muted/30 text-muted-foreground m-0 max-w-full rounded-md border p-3 text-xs leading-relaxed wrap-break-word whitespace-pre-wrap'>
-                  {details.details}
-                </pre>
-              </section>
-            </div>
-            <SheetFooter className={sideDrawerFooterClassName('sm:px-5')}>
-              <Button
-                variant='outline'
-                className='w-full sm:w-auto'
-                onClick={() => copyToClipboard(details.details)}
-              >
-                {copiedText === details.details ? (
-                  <Check className='mr-2 h-4 w-4 text-green-600' />
-                ) : (
-                  <Copy className='mr-2 h-4 w-4' />
-                )}
-                {t('Copy')}
-              </Button>
-            </SheetFooter>
-          </>
-        )}
-      </SheetContent>
-    </Sheet>
-  )
-}
-
-function TestModelsBulkActions({
-  table,
-  probesBusy,
-  onRunCapabilities,
-}: {
-  table: TanStackTable<ModelRow>
-  probesBusy: boolean
-  onRunCapabilities: (models: string[]) => void
-}) {
-  const { t } = useTranslation()
-  const { copyToClipboard } = useCopyToClipboard()
-  const selectedRows = table.getFilteredSelectedRowModel().rows
-  const selectedModels = selectedRows.map((row) => row.original.model)
-
-  const handleCopySelected = useCallback(() => {
-    if (selectedModels.length === 0) return
-    void copyToClipboard(selectedModels.join(','))
-  }, [copyToClipboard, selectedModels])
-
-  return (
-    <BulkActionsToolbar table={table} entityName='model'>
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <Button
-              disabled={selectedModels.length === 0 || probesBusy}
-              onClick={() => onRunCapabilities(selectedModels)}
-              size='sm'
-            />
-          }
-        >
-          <Gauge data-icon='inline-start' />
-          {t('Run capability tests')}
-        </TooltipTrigger>
-        <TooltipContent>
-          <p>
-            {t(
-              'Run the non-streaming, streaming and tool-calling probes for each selected model.'
-            )}
-          </p>
-        </TooltipContent>
-      </Tooltip>
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <Button
-              size='sm'
-              onClick={handleCopySelected}
-              disabled={selectedModels.length === 0}
-            />
-          }
-        >
-          <Copy data-icon='inline-start' />
-          {t('Copy selected models')}
-        </TooltipTrigger>
-        <TooltipContent>
-          <p>{t('Copy selected models separated by commas (e.g. a,b)')}</p>
-        </TooltipContent>
-      </Tooltip>
-    </BulkActionsToolbar>
+    </Dialog>
   )
 }

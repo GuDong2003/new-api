@@ -6653,6 +6653,22 @@
     "Only applies to this dialog run. Leave empty to use the global test message.": "Chỉ áp dụng cho lần chạy trong hộp thoại này. Để trống để dùng tin nhắn kiểm thử chung.",
     "Zoom in": "Phóng to",
     "Zoom level": "Mức thu phóng",
-    "Zoom out": "Thu nhỏ"
+    "Zoom out": "Thu nhỏ",
+    "Image quality": "Chất lượng ảnh",
+    "Image output format": "Định dạng ảnh đầu ra",
+    "Image response format": "Định dạng phản hồi ảnh",
+    "Image background": "Nền ảnh",
+    "Image moderation": "Kiểm duyệt ảnh",
+    "Image input fidelity": "Độ trung thực ảnh đầu vào",
+    "Image model default": "Mặc định của mô hình",
+    "Image style": "Phong cách ảnh",
+    "Low": "Thấp",
+    "Medium": "Trung bình",
+    "High": "Cao",
+    "High definition": "Độ nét cao",
+    "Opaque": "Đục",
+    "Transparent": "Trong suốt",
+    "Vivid": "Sống động",
+    "Natural": "Tự nhiên"
   }
 }

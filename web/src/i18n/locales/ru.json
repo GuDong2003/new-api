@@ -6653,6 +6653,22 @@
     "Only applies to this dialog run. Leave empty to use the global test message.": "Применяется только к этому запуску в диалоге. Оставьте пустым, чтобы использовать глобальное тестовое сообщение.",
     "Zoom in": "Увеличить",
     "Zoom level": "Уровень масштаба",
-    "Zoom out": "Уменьшить"
+    "Zoom out": "Уменьшить",
+    "Image quality": "Качество изображения",
+    "Image output format": "Формат изображения на выходе",
+    "Image response format": "Формат ответа изображения",
+    "Image background": "Фон изображения",
+    "Image moderation": "Модерация изображения",
+    "Image input fidelity": "Точность входного изображения",
+    "Image model default": "Значение модели по умолчанию",
+    "Image style": "Стиль изображения",
+    "Low": "Низкое",
+    "Medium": "Среднее",
+    "High": "Высокое",
+    "High definition": "Высокая чёткость",
+    "Opaque": "Непрозрачный",
+    "Transparent": "Прозрачный",
+    "Vivid": "Яркий",
+    "Natural": "Естественный"
   }
 }

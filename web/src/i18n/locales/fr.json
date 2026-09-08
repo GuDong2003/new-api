@@ -6653,6 +6653,22 @@
     "Only applies to this dialog run. Leave empty to use the global test message.": "S'applique uniquement à cette exécution de la boîte de dialogue. Laissez vide pour utiliser le message de test global.",
     "Zoom in": "Zoom avant",
     "Zoom level": "Niveau de zoom",
-    "Zoom out": "Zoom arrière"
+    "Zoom out": "Zoom arrière",
+    "Image quality": "Qualité de l’image",
+    "Image output format": "Format de sortie de l’image",
+    "Image response format": "Format de réponse de l’image",
+    "Image background": "Arrière-plan de l’image",
+    "Image moderation": "Modération de l’image",
+    "Image input fidelity": "Fidélité de l’entrée image",
+    "Image model default": "Valeur par défaut du modèle",
+    "Image style": "Style de l’image",
+    "Low": "Faible",
+    "Medium": "Moyenne",
+    "High": "Élevée",
+    "High definition": "Haute définition",
+    "Opaque": "Opaque",
+    "Transparent": "Transparent",
+    "Vivid": "Vif",
+    "Natural": "Naturel"
   }
 }

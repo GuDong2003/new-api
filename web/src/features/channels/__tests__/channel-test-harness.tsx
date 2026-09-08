@@ -16,24 +16,22 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { createFileRoute, Outlet, redirect } from '@tanstack/react-router'
+import { useEffect, useState } from 'react'
 
-import { Main } from '@/components/layout'
-import { isSidebarModuleEnabled } from '@/lib/nav-modules'
+import { useChannels } from '../components/channels-provider'
+import { ChannelTestDialog } from '../components/dialogs/channel-test-dialog'
+import type { Channel } from '../types'
 
-export const Route = createFileRoute('/_authenticated/playground')({
-  beforeLoad: () => {
-    if (!isSidebarModuleEnabled('chat', 'playground')) {
-      throw redirect({ to: '/dashboard' })
-    }
-  },
-  component: PlaygroundLayout,
-})
-
-function PlaygroundLayout() {
+export function TestDialogHarness(props: { channel: Channel }) {
+  const { setCurrentRow } = useChannels()
+  const [open, setOpen] = useState(true)
+  useEffect(() => setCurrentRow(props.channel), [props.channel, setCurrentRow])
   return (
-    <Main className='p-0'>
-      <Outlet />
-    </Main>
+    <>
+      <button type='button' onClick={() => setOpen(true)}>
+        Open probe dialog
+      </button>
+      <ChannelTestDialog open={open} onOpenChange={setOpen} />
+    </>
   )
 }

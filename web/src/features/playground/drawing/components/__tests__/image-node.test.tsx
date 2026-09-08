@@ -56,6 +56,47 @@ function RetryImageCard() {
 }
 
 describe('Canvas image result', () => {
+  it('keeps selected nodes to one outline while retaining resize controls', () => {
+    useDrawingStore.getState().initialize(820)
+    const props: NodeProps<DrawingNode> = {
+      id: 'selected-image',
+      type: 'image',
+      draggable: true,
+      dragging: false,
+      selectable: true,
+      selected: true,
+      deletable: true,
+      isConnectable: false,
+      zIndex: 0,
+      positionAbsoluteX: 0,
+      positionAbsoluteY: 0,
+      data: {
+        prompt: 'A cup',
+        settings: DEFAULT_IMAGE_SETTINGS,
+        createdAt: 1,
+        status: 'complete',
+      },
+    }
+    render(
+      <ReactFlowProvider>
+        <ImageCanvasNode {...props} />
+      </ReactFlowProvider>
+    )
+
+    const article = screen.getByRole('article', { name: 'A cup' })
+    expect(article.className).not.toContain('ring-2')
+
+    const resizeControls = [
+      ...document.querySelectorAll('.react-flow__resize-control.handle'),
+    ]
+    expect(resizeControls.length).toBeGreaterThan(0)
+    expect(
+      resizeControls.every((control) =>
+        control.className.includes('bg-background')
+      )
+    ).toBe(true)
+  })
+
   it('exposes reference ports for completed images and disables them while the image is generating', () => {
     useDrawingStore.getState().initialize(820)
     const props: NodeProps<DrawingNode> = {

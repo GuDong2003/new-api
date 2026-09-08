@@ -6653,6 +6653,22 @@
     "Only applies to this dialog run. Leave empty to use the global test message.": "Only applies to this dialog run. Leave empty to use the global test message.",
     "Zoom in": "Zoom in",
     "Zoom level": "Zoom level",
-    "Zoom out": "Zoom out"
+    "Zoom out": "Zoom out",
+    "Image quality": "Image quality",
+    "Image output format": "Image output format",
+    "Image response format": "Image response format",
+    "Image background": "Image background",
+    "Image moderation": "Image moderation",
+    "Image input fidelity": "Image input fidelity",
+    "Image model default": "Image model default",
+    "Image style": "Image style",
+    "Low": "Low",
+    "Medium": "Medium",
+    "High": "High",
+    "High definition": "High definition",
+    "Opaque": "Opaque",
+    "Transparent": "Transparent",
+    "Vivid": "Vivid",
+    "Natural": "Natural"
   }
 }

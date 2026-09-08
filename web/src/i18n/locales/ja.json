@@ -6653,6 +6653,22 @@
     "Only applies to this dialog run. Leave empty to use the global test message.": "このダイアログでの今回のテストにのみ適用されます。空欄の場合はグローバルテストメッセージを使用します。",
     "Zoom in": "拡大",
     "Zoom level": "拡大率",
-    "Zoom out": "縮小"
+    "Zoom out": "縮小",
+    "Image quality": "画像品質",
+    "Image output format": "画像の出力形式",
+    "Image response format": "画像のレスポンス形式",
+    "Image background": "画像の背景",
+    "Image moderation": "画像のモデレーション",
+    "Image input fidelity": "画像入力の忠実度",
+    "Image model default": "モデルのデフォルト",
+    "Image style": "画像スタイル",
+    "Low": "低",
+    "Medium": "中",
+    "High": "高",
+    "High definition": "高精細",
+    "Opaque": "不透明",
+    "Transparent": "透明",
+    "Vivid": "鮮やか",
+    "Natural": "自然"
   }
 }
