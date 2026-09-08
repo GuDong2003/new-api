@@ -21,6 +21,7 @@ import {
   memo,
   useCallback,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -40,6 +41,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@/components/ui/collapsible'
+import { Combobox } from '@/components/ui/combobox'
 import { Field, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -53,6 +55,12 @@ import {
 } from '@/components/ui/select'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
+import {
+  formatPricingAmount,
+  USD_PRICING_CURRENCY,
+  type PricingCurrency,
+} from '@/features/model-pricing/currency'
+import { PricingAmountInput } from '@/features/model-pricing/pricing-amount-input'
 import {
   BILLING_EXTRA_VARS,
   COMMON_TIMEZONES,
@@ -101,7 +109,6 @@ import {
 } from '@/features/pricing/lib/tier-expr'
 import { cn } from '@/lib/utils'
 
-const PRICE_SUFFIX = '$/1M tokens'
 const CACHE_PRICE_VARS = BILLING_EXTRA_VARS.filter(
   (variable) => variable.group === 'cache'
 )
@@ -332,8 +339,9 @@ function formatTokenHint(n: number | string | null | undefined): string {
 
 function formatNumberDraft(value: number | string): string {
   if (value === '') return ''
-  if (typeof value === 'number')
-    {return Number.isFinite(value) ? String(value) : '0'}
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? String(value) : '0'
+  }
   return value
 }
 
@@ -437,9 +445,9 @@ function ConditionRow({ condition, onChange, onRemove }: ConditionRowProps) {
     <div className='flex items-center gap-2'>
       <Select
         items={CONDITION_INPUT_OPTIONS.map((option) => ({
-            value: option.value,
-            label: t(option.labelKey),
-          }))}
+          value: option.value,
+          label: t(option.labelKey),
+        }))}
         value={condition.var}
         onValueChange={(value) =>
           onChange({ ...condition, var: value as TierConditionInput['var'] })
@@ -510,21 +518,32 @@ function ConditionRow({ condition, onChange, onRemove }: ConditionRowProps) {
 // ---------------------------------------------------------------------------
 
 type PriceFieldProps = {
+  currency: PricingCurrency
   label: string
   hint?: string
   value: number
   onChange: (next: number) => void
 }
 
-function PriceField({ label, hint, value, onChange }: PriceFieldProps) {
+function PriceField({
+  label,
+  hint,
+  value,
+  onChange,
+  currency,
+}: PriceFieldProps) {
+  const id = useId()
   return (
     <div className='w-36 space-y-0.5'>
-      <Label className='text-muted-foreground text-xs'>{label}</Label>
-      <DraftNumberInput
-        min={0}
-        step={0.000001}
-        value={Number.isFinite(value) ? value : 0}
-        onValueChange={onChange}
+      <Label htmlFor={id} className='text-muted-foreground text-xs'>
+        {label}
+      </Label>
+      <PricingAmountInput
+        id={id}
+        currency={currency}
+        aria-label={label}
+        value={value}
+        onChange={(next) => onChange(Number(next))}
         className='h-8 w-full'
       />
       {hint && <p className='text-muted-foreground text-xs'>{hint}</p>}
@@ -537,6 +556,7 @@ function PriceField({ label, hint, value, onChange }: PriceFieldProps) {
 // ---------------------------------------------------------------------------
 
 type VisualTierCardProps = {
+  currency: PricingCurrency
   tier: VisualTier
   index: number
   total: number
@@ -546,6 +566,7 @@ type VisualTierCardProps = {
 }
 
 function VisualTierCard({
+  currency,
   tier,
   index,
   total,
@@ -605,6 +626,7 @@ function VisualTierCard({
 
     return (
       <PriceField
+        currency={currency}
         key={variable.key}
         label={t(variable.label)}
         value={value}
@@ -665,7 +687,8 @@ function VisualTierCard({
         ) : (
           tier.conditions.map((condition, conditionIndex) => (
             <ConditionRow
-              key={`${condition.var}-${condition.op}-${condition.value}`}
+              // eslint-disable-next-line react/no-array-index-key -- Parsed editor rows have no IDs; preserve input identity while their editable labels and values change.
+              key={conditionIndex}
               condition={condition}
               onChange={(next) => handleConditionChange(conditionIndex, next)}
               onRemove={() => handleConditionRemove(conditionIndex)}
@@ -678,13 +701,14 @@ function VisualTierCard({
         <div className='flex items-center justify-between gap-3'>
           <Label className='text-sm font-semibold'>{t('Token prices')}</Label>
           <span className='bg-muted text-muted-foreground rounded-md px-2 py-1 text-xs'>
-            {PRICE_SUFFIX}
+            {currency.symbol}/{t('1M token')}
           </span>
         </div>
 
         <div className='space-y-3'>
           <div className='flex flex-wrap gap-x-4 gap-y-2'>
             <PriceField
+              currency={currency}
               label={t('Input price')}
               value={inputUnitPrice}
               onChange={(value) =>
@@ -692,6 +716,7 @@ function VisualTierCard({
               }
             />
             <PriceField
+              currency={currency}
               label={t('Output price')}
               value={outputUnitPrice}
               onChange={(value) =>
@@ -768,11 +793,12 @@ function VisualTierCard({
 // ---------------------------------------------------------------------------
 
 type VisualEditorProps = {
+  currency: PricingCurrency
   visualConfig: VisualConfig | null
   onChange: (next: VisualConfig) => void
 }
 
-function VisualEditor({ visualConfig, onChange }: VisualEditorProps) {
+function VisualEditor({ visualConfig, onChange, currency }: VisualEditorProps) {
   const { t } = useTranslation()
   const config = useMemo(
     () => normalizeVisualConfig(visualConfig),
@@ -847,7 +873,9 @@ function VisualEditor({ visualConfig, onChange }: VisualEditorProps) {
       </p>
       {config.tiers.map((tier, index) => (
         <VisualTierCard
-          key={`${tier.label}-${JSON.stringify(tier.conditions)}`}
+          currency={currency}
+          // eslint-disable-next-line react/no-array-index-key -- Parsed editor rows have no IDs; preserve input identity while their editable labels and values change.
+          key={index}
           tier={tier}
           index={index}
           total={config.tiers.length}
@@ -966,11 +994,8 @@ function RuleConditionRow({
     }
   }
   let sourceLabel = t('Time')
-  if (condition.source === SOURCE_PARAM) {
-    sourceLabel = t('Body param')
-  } else if (condition.source === SOURCE_HEADER) {
-    sourceLabel = t('Header')
-  }
+  if (condition.source === SOURCE_PARAM) sourceLabel = t('Body param')
+  else if (condition.source === SOURCE_HEADER) sourceLabel = t('Header')
 
   const handleSourceChange = (source: string) => {
     if (source === SOURCE_TIME) {
@@ -991,9 +1016,9 @@ function RuleConditionRow({
     <>
       <Select
         items={TIME_FUNCS.map((fn) => ({
-            value: fn,
-            label: getTimeFuncLabel(fn),
-          }))}
+          value: fn,
+          label: getTimeFuncLabel(fn),
+        }))}
         value={timeCond.timeFunc}
         onValueChange={(value) =>
           onChange({ ...timeCond, timeFunc: value as TimeFunc })
@@ -1012,37 +1037,22 @@ function RuleConditionRow({
           </SelectGroup>
         </SelectContent>
       </Select>
-      <Select
-        items={COMMON_TIMEZONES.map((tz) => ({
-            value: tz.value,
-            label: tz.label,
-          }))}
+      <Combobox
+        options={COMMON_TIMEZONES.map((tz) => ({
+          value: tz.value,
+          label: tz.label,
+        }))}
         value={timeCond.timezone}
         onValueChange={(value) =>
           value !== null && onChange({ ...timeCond, timezone: value })
         }
-      >
-        <SelectTrigger className='w-56' size='sm'>
-          <SelectValue>
-            {COMMON_TIMEZONES.find((tz) => tz.value === timeCond.timezone)
-              ?.label ?? timeCond.timezone}
-          </SelectValue>
-        </SelectTrigger>
-        <SelectContent alignItemWithTrigger={false}>
-          <SelectGroup>
-            {COMMON_TIMEZONES.map((tz) => (
-              <SelectItem key={tz.value} value={tz.value}>
-                {tz.label}
-              </SelectItem>
-            ))}
-          </SelectGroup>
-        </SelectContent>
-      </Select>
+        className='w-56'
+      />
       <Select
         items={matchOptions.map((option) => ({
-            value: option.value,
-            label: getMatchLabel(option.value),
-          }))}
+          value: option.value,
+          label: getMatchLabel(option.value),
+        }))}
         value={timeCond.mode}
         onValueChange={(v) => v !== null && handleModeChange(v)}
       >
@@ -1104,9 +1114,9 @@ function RuleConditionRow({
       />
       <Select
         items={matchOptions.map((option) => ({
-            value: option.value,
-            label: getMatchLabel(option.value),
-          }))}
+          value: option.value,
+          label: getMatchLabel(option.value),
+        }))}
         value={phCond.mode}
         onValueChange={(v) => v !== null && handleModeChange(v)}
       >
@@ -1236,7 +1246,8 @@ function RuleGroupCard({
       <div className='space-y-2'>
         {group.conditions.map((condition, conditionIndex) => (
           <RuleConditionRow
-            key={JSON.stringify(condition)}
+            // eslint-disable-next-line react/no-array-index-key -- Parsed editor rows have no IDs; preserve input identity while their editable labels and values change.
+            key={conditionIndex}
             condition={condition}
             onChange={(next) => handleConditionChange(conditionIndex, next)}
             onRemove={() =>
@@ -1350,11 +1361,14 @@ function PresetSection({ applyPreset }: PresetSectionProps) {
 // ---------------------------------------------------------------------------
 
 type EstimatorProps = {
+  currency: PricingCurrency
   effectiveExpr: string
 }
 
-function CostEstimator({ effectiveExpr }: EstimatorProps) {
+function CostEstimator({ effectiveExpr, currency }: EstimatorProps) {
   const { t } = useTranslation()
+  const inputId = useId()
+  const outputId = useId()
   const [promptTokens, setPromptTokens] = useState(0)
   const [completionTokens, setCompletionTokens] = useState(0)
   const [extras, setExtras] = useState<ExtraTokenValues>({
@@ -1390,16 +1404,22 @@ function CostEstimator({ effectiveExpr }: EstimatorProps) {
       </div>
       <div className='grid grid-cols-2 gap-3'>
         <div className='space-y-1'>
-          <Label className='text-xs'>{t('Input tokens')}</Label>
+          <Label htmlFor={inputId} className='text-xs'>
+            {t('Input tokens')}
+          </Label>
           <DraftNumberInput
+            id={inputId}
             min={0}
             value={promptTokens}
             onValueChange={setPromptTokens}
           />
         </div>
         <div className='space-y-1'>
-          <Label className='text-xs'>{t('Output tokens')}</Label>
+          <Label htmlFor={outputId} className='text-xs'>
+            {t('Output tokens')}
+          </Label>
           <DraftNumberInput
+            id={outputId}
             min={0}
             value={completionTokens}
             onValueChange={setCompletionTokens}
@@ -1450,7 +1470,8 @@ function CostEstimator({ effectiveExpr }: EstimatorProps) {
         ) : (
           <div className='flex items-center gap-2'>
             <span className='font-medium'>
-              {t('Estimated quota cost')}: {result.cost.toLocaleString()}
+              {t('Estimated cost')}:{' '}
+              {formatPricingAmount(result.cost / 1_000_000, currency)}
             </span>
             {result.matchedTier && (
               <Badge variant='outline' className='text-xs'>
@@ -1557,7 +1578,7 @@ function LlmPromptHelper({ modelName }: LlmPromptHelperProps) {
 
   const prompt = useMemo(() => {
     if (modelName) {
-      return `${LLM_PROMPT_TEMPLATE  }\n\nCurrent model: ${modelName}`
+      return `${LLM_PROMPT_TEMPLATE}\n\nCurrent model: ${modelName}`
     }
     return LLM_PROMPT_TEMPLATE
   }, [modelName])
@@ -1617,6 +1638,7 @@ function LlmPromptHelper({ modelName }: LlmPromptHelperProps) {
 // ---------------------------------------------------------------------------
 
 export type TieredPricingEditorProps = {
+  currency?: PricingCurrency
   modelName?: string
   billingExpr: string
   requestRuleExpr: string
@@ -1627,6 +1649,7 @@ export type TieredPricingEditorProps = {
 type EditorMode = 'visual' | 'raw'
 
 export const TieredPricingEditor = memo(function TieredPricingEditor({
+  currency = USD_PRICING_CURRENCY,
   modelName,
   billingExpr: currentExpr,
   requestRuleExpr: currentRequestRuleExpr,
@@ -1634,7 +1657,9 @@ export const TieredPricingEditor = memo(function TieredPricingEditor({
   onRequestRuleExprChange,
 }: TieredPricingEditorProps) {
   const { t } = useTranslation()
-  const [editorMode, setEditorMode] = useState<EditorMode>('visual')
+  const [editorMode, setEditorMode] = useState<EditorMode>(() =>
+    currentExpr && !tryParseVisualConfig(currentExpr) ? 'raw' : 'visual'
+  )
   const [visualConfig, setVisualConfig] = useState<VisualConfig | null>(() =>
     tryParseVisualConfig(currentExpr)
   )
@@ -1795,11 +1820,17 @@ export const TieredPricingEditor = memo(function TieredPricingEditor({
         )}
       </div>
 
+      <p className='text-muted-foreground text-xs'>
+        {t(
+          'Raw expressions and presets use USD. Currency selection only converts visual price inputs and monetary previews.'
+        )}
+      </p>
       <PresetSection applyPreset={applyPreset} />
 
       <div className='bg-muted/30 space-y-3 rounded-md border p-3'>
         {editorMode === 'visual' ? (
           <VisualEditor
+            currency={currency}
             visualConfig={visualConfig}
             onChange={handleVisualChange}
           />
@@ -1832,7 +1863,8 @@ export const TieredPricingEditor = memo(function TieredPricingEditor({
               <>
                 {requestRuleGroups.map((group, groupIndex) => (
                   <RuleGroupCard
-                    key={`${group.multiplier}-${JSON.stringify(group.conditions)}`}
+                    // eslint-disable-next-line react/no-array-index-key -- Parsed editor rows have no IDs; preserve input identity while their editable labels and values change.
+                    key={groupIndex}
                     group={group}
                     index={groupIndex}
                     onChange={(next) => {
@@ -1867,7 +1899,7 @@ export const TieredPricingEditor = memo(function TieredPricingEditor({
         )}
       </div>
 
-      <CostEstimator effectiveExpr={effectiveExpr} />
+      <CostEstimator effectiveExpr={effectiveExpr} currency={currency} />
     </div>
   )
 })

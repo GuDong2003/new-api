@@ -57,7 +57,6 @@ import {
 } from '@/features/auth/lib/storage'
 import { isPendingOAuthRegistration } from '@/features/auth/types'
 import { useStatus } from '@/hooks/use-status'
-import { isAuthBundle } from '@/lib/api'
 import { getServerErrorMessageKey } from '@/lib/server-error-message'
 import { cn } from '@/lib/utils'
 
@@ -91,7 +90,7 @@ export function SignUpForm({
     setTurnstileToken,
     validateTurnstile,
   } = useTurnstile()
-  const { redirectToLogin, handleLoginSuccess } = useAuthRedirect()
+  const { redirectToLogin, handleLoginResult } = useAuthRedirect()
   const {
     isSending: isSendingCode,
     secondsLeft,
@@ -310,11 +309,7 @@ export function SignUpForm({
     setIsWeChatSubmitting(true)
     try {
       const res = await wechatLoginByCode(wechatCode)
-      if (res?.success && isAuthBundle(res.data)) {
-        await handleLoginSuccess(res.data)
-        toast.success(t('Signed in via WeChat'))
-        handleWeChatDialogChange(false)
-      } else if (res?.success && isPendingOAuthRegistration(res.data)) {
+      if (res?.success && isPendingOAuthRegistration(res.data)) {
         const registrationToken = res.data.registration_token
         handleWeChatDialogChange(false)
         const finishRegistration: InviteAction = async (inviteCode) => {
@@ -323,9 +318,10 @@ export function SignUpForm({
               registrationToken,
               inviteCode
             )
-            if (completion?.success && isAuthBundle(completion.data)) {
-              await handleLoginSuccess(completion.data)
-              toast.success(t('Signed in via WeChat'))
+            if (completion?.success) {
+              if (await handleLoginResult(completion.data)) {
+                toast.success(t('Signed in via WeChat'))
+              }
               return true
             }
             const messageKey = getServerErrorMessageKey(completion)
@@ -342,6 +338,11 @@ export function SignUpForm({
           }
         }
         requestInvitationCode(finishRegistration)
+      } else if (res?.success) {
+        handleWeChatDialogChange(false)
+        if (await handleLoginResult(res.data)) {
+          toast.success(t('Signed in via WeChat'))
+        }
       } else {
         if (getServerErrorMessageKey(res)) return
         toast.error(res?.message || t('Login failed'))
@@ -394,7 +395,7 @@ export function SignUpForm({
               <FormLabel>{t('Password')}</FormLabel>
               <FormControl>
                 <PasswordInput
-                  placeholder={t('Enter password (8-20 characters)')}
+                  placeholder={t('Enter password (8–128 characters)')}
                   {...field}
                 />
               </FormControl>

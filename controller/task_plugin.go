@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
-	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
@@ -181,9 +180,7 @@ func ListTaskPlugins(c *gin.Context) {
 			item.Active = row.Active
 			item.SourceHash = row.SourceHash
 			item.Remark = row.Remark
-			if !constant.TaskPluginOverrideEnabled {
-				item.RuntimeStatus = "disabled_fallback"
-			} else if message := runtimeErrors[key]; message != "" {
+			if message := runtimeErrors[key]; message != "" {
 				item.RuntimeStatus = "compile_failed"
 				item.RuntimeError = message
 			} else if runtimeMeta, ok := override[key]; ok {
@@ -192,6 +189,11 @@ func ListTaskPlugins(c *gin.Context) {
 				item.RuntimeStatus = "disabled_fallback"
 			} else {
 				item.RuntimeStatus = "not_registered"
+			}
+			// "disabled_fallback" promises that the built-in still serves. When
+			// the factory layer is suppressed as well, nothing serves this key.
+			if item.RuntimeStatus == "disabled_fallback" && hasFactory && setting.IsTaskPluginFactoryDisabled(key) {
+				item.RuntimeStatus = "disabled"
 			}
 		} else {
 			item.Source = "factory"
@@ -473,9 +475,12 @@ func SetTaskPluginStatus(c *gin.Context) {
 		common.ApiError(c, lookupErr)
 		return
 	}
-	// The disabled set suppresses only the factory fallback layer. An enabled
-	// override for the same key keeps serving and is toggled independently.
-	if taskPluginHasFactory(key) && !hasActiveOverride {
+	// Switching a key off must silence every layer that can serve it. The
+	// factory built-in goes into the disabled set even when an override row
+	// exists; otherwise the built-in would keep routing the same models (and
+	// blocking same-model uploads) right after the administrator disabled the
+	// plugin. Switching on reverses both layers.
+	if taskPluginHasFactory(key) {
 		keys := setting.GetTaskPluginDisabledFactoryKeys()
 		if *request.Enabled {
 			next := make([]string, 0, len(keys))
@@ -501,8 +506,10 @@ func SetTaskPluginStatus(c *gin.Context) {
 			common.ApiError(c, err)
 			return
 		}
-		common.ApiSuccess(c, gin.H{"plugin_enabled": *request.Enabled, "disabled_channels": disabledChannels})
-		return
+		if !hasActiveOverride {
+			common.ApiSuccess(c, gin.H{"plugin_enabled": *request.Enabled, "disabled_channels": disabledChannels})
+			return
+		}
 	}
 	if err := model.SetTaskPluginEnabled(key, *request.Enabled); err != nil {
 		common.ApiError(c, err)

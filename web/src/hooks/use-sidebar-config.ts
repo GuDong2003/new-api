@@ -47,17 +47,21 @@ const mergeWithDefaultSidebarModules = (
         return
       }
 
-      merged[sectionKey] = {
-        ...defaultSection,
-        ...existingSection,
-        order: getSidebarModuleOrder(existingSection, defaultSection.order),
-      }
+      const mergedSection = { ...defaultSection, ...existingSection }
       Object.keys(defaultSection).forEach((moduleKey) => {
         if (moduleKey === 'order') return
-        if (merged[sectionKey][moduleKey] === undefined) {
-          merged[sectionKey][moduleKey] = defaultSection[moduleKey]
+        if (mergedSection[moduleKey] === undefined) {
+          mergedSection[moduleKey] = defaultSection[moduleKey]
         }
       })
+      // Order is derived from the merged section: a legacy config only stores
+      // the modules it knew about, so ranking against its own sparse key set
+      // would drop every newer module (e.g. audit) out of the canonical order.
+      mergedSection.order = getSidebarModuleOrder(
+        { ...mergedSection, order: existingSection.order },
+        defaultSection.order
+      )
+      merged[sectionKey] = mergedSection
     }
   )
 
@@ -76,10 +80,12 @@ const URL_TO_CONFIG_MAP: Record<string, { section: string; module: string }> = {
   '/keys': { section: 'console', module: 'token' },
   '/usage-logs': { section: 'console', module: 'log' },
   '/usage-logs/common': { section: 'console', module: 'log' },
+  '/usage-logs/audit': { section: 'console', module: 'audit' },
   '/usage-logs/drawing': { section: 'console', module: 'midjourney' },
   '/usage-logs/task': { section: 'console', module: 'task' },
   '/wallet': { section: 'personal', module: 'topup' },
   '/profile': { section: 'personal', module: 'personal' },
+  '/security': { section: 'personal', module: 'security' },
   '/channels': { section: 'admin', module: 'channel' },
   '/queue': { section: 'admin', module: 'queue' },
   '/upstream-accounts': { section: 'admin', module: 'upstreamAccounts' },

@@ -22,6 +22,7 @@ import { useTranslation } from 'react-i18next'
 
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
+import { Combobox } from '@/components/ui/combobox'
 import { Field, FieldDescription, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -34,6 +35,12 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
+import {
+  formatPricingAmount,
+  USD_PRICING_CURRENCY,
+  type PricingCurrency,
+} from '@/features/model-pricing/currency'
+import { PricingAmountInput } from '@/features/model-pricing/pricing-amount-input'
 import {
   combineBillingExpr,
   splitBillingExprAndRequestRules,
@@ -66,6 +73,7 @@ import { formatPricingNumber } from './pricing-format'
 import { TaskPricingMatrix } from './task-pricing-matrix'
 
 type TaskUsagePricingEditorProps = {
+  currency?: PricingCurrency
   billingExpr: string
   requestRuleExpr: string
   usageSchema: BillingUsageSchema
@@ -77,6 +85,7 @@ type TaskUsagePricingEditorProps = {
 type EditorMode = 'visual' | 'raw'
 
 type TaskBillingPreviewProps = {
+  currency?: PricingCurrency
   config: TaskVisualConfig | null
   matchedRowLabel: string | null
   requestRuleExpr: string
@@ -91,13 +100,9 @@ function TaskBillingPreview(props: TaskBillingPreviewProps) {
   const { t } = useTranslation()
   const enumFields = getTaskEnumFields(props.usageSchema)
   const numberFields = getTaskNumberFields(props.usageSchema)
-    const result = props.config
-      ? evaluateTaskVisualConfig(
-          props.config,
-          props.sample,
-          props.usageSchema
-        )
-      : null
+  const result = props.config
+    ? evaluateTaskVisualConfig(props.config, props.sample, props.usageSchema)
+    : null
 
   if (!result) {
     return (
@@ -111,7 +116,7 @@ function TaskBillingPreview(props: TaskBillingPreviewProps) {
 
   const formulaParts = result.parts.map((part) => {
     if (part.kind === 'constant') {
-      return `$${formatPricingNumber(part.amount)}`
+      return formatPricingAmount(part.amount, props.currency)
     }
 
     const definition = props.usageSchema[part.field ?? '']
@@ -122,10 +127,13 @@ function TaskBillingPreview(props: TaskBillingPreviewProps) {
       definition?.unit === 'second'
         ? `${formatPricingNumber(part.quantity)}${quantityUnitLabel}`
         : `${formatPricingNumber(part.quantity)} ${quantityUnitLabel}`
-    return `${quantityLabel} × $${formatPricingNumber(part.unitPrice)}/${t(priceUnitKey)}`
+    return `${quantityLabel} × ${formatPricingAmount(part.unitPrice ?? 0, props.currency)}/${t(priceUnitKey)}`
   })
-  const formulaLeft = formulaParts.length > 0 ? formulaParts.join(' + ') : '$0'
-  const formula = `${formulaLeft} = $${formatPricingNumber(result.total)}`
+  const formulaLeft =
+    formulaParts.length > 0
+      ? formulaParts.join(' + ')
+      : formatPricingAmount(0, props.currency)
+  const formula = `${formulaLeft} = ${formatPricingAmount(result.total, props.currency)}`
 
   return (
     <div className='bg-muted/30 flex flex-col gap-3 rounded-md border p-3'>
@@ -141,8 +149,8 @@ function TaskBillingPreview(props: TaskBillingPreviewProps) {
       {props.usageExamples && props.usageExamples.length > 0 ? (
         <Field className='gap-1.5'>
           <FieldLabel>{t('Example spec')}</FieldLabel>
-          <Select
-            items={props.usageExamples.map((example) => ({
+          <Combobox
+            options={props.usageExamples.map((example) => ({
               value: example.label,
               label: example.label,
             }))}
@@ -159,20 +167,9 @@ function TaskBillingPreview(props: TaskBillingPreviewProps) {
               )
               if (example) props.onSampleReplace({ ...example.facts })
             }}
-          >
-            <SelectTrigger size='sm'>
-              <SelectValue placeholder={t('Example spec')} />
-            </SelectTrigger>
-            <SelectContent alignItemWithTrigger={false}>
-              <SelectGroup>
-                {props.usageExamples.map((example) => (
-                  <SelectItem key={example.label} value={example.label}>
-                    {example.label}
-                  </SelectItem>
-                ))}
-              </SelectGroup>
-            </SelectContent>
-          </Select>
+            className='w-full'
+            placeholder={t('Example spec')}
+          />
         </Field>
       ) : null}
       {enumFields.length + numberFields.length > 0 ? (
@@ -187,26 +184,14 @@ function TaskBillingPreview(props: TaskBillingPreviewProps) {
                 <FieldLabel>
                   <code>{field}</code>
                 </FieldLabel>
-                <Select
-                  items={items}
+                <Combobox
+                  options={items}
                   value={String(props.sample[field] ?? '')}
                   onValueChange={(value) =>
                     value !== null && props.onSampleChange(field, value)
                   }
-                >
-                  <SelectTrigger size='sm'>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent alignItemWithTrigger={false}>
-                    <SelectGroup>
-                      {items.map((item) => (
-                        <SelectItem key={item.value} value={item.value}>
-                          {item.label}
-                        </SelectItem>
-                      ))}
-                    </SelectGroup>
-                  </SelectContent>
-                </Select>
+                  className='w-full'
+                />
               </Field>
             )
           })}
@@ -428,7 +413,8 @@ export const TaskUsagePricingEditor = memo(function TaskUsagePricingEditor(
       <Alert>
         <AlertDescription className='text-xs'>
           {t(
-            'Task usage prices are USD per declared unit. Token fields use dollars per 1M tokens; the editor writes / 1000000 into the expression. Other units are not divided by one million.'
+            'Visual prices use {{currency}} per declared unit; token prices are per 1M tokens. Raw expressions always use USD, with token terms divided by 1000000.',
+            { currency: (props.currency ?? USD_PRICING_CURRENCY).label }
           )}
         </AlertDescription>
       </Alert>
@@ -444,6 +430,7 @@ export const TaskUsagePricingEditor = memo(function TaskUsagePricingEditor(
                   })}
                 </p>
                 <TaskPricingMatrix
+                  currency={props.currency}
                   rows={matrixRows}
                   usageSchema={props.usageSchema}
                   matchedRowIndex={matchedRowIndex}
@@ -480,8 +467,9 @@ export const TaskUsagePricingEditor = memo(function TaskUsagePricingEditor(
                               <code>{field}</code>
                             </FieldLabel>
                             <div className='flex items-center gap-2'>
-                              <Input
-                                type='number'
+                              <PricingAmountInput
+                                currency={props.currency}
+                                aria-label={field}
                                 min={0}
                                 step={0.000001}
                                 value={matrixRows[0].unitPrices[field] ?? 0}
@@ -490,8 +478,8 @@ export const TaskUsagePricingEditor = memo(function TaskUsagePricingEditor(
                                     event.currentTarget.select()
                                   }
                                 }}
-                                onChange={(event) => {
-                                  const value = Number(event.target.value)
+                                onChange={(usd) => {
+                                  const value = Number(usd)
                                   handleRowChange(0, {
                                     ...matrixRows[0],
                                     unitPrices: {
@@ -506,7 +494,14 @@ export const TaskUsagePricingEditor = memo(function TaskUsagePricingEditor(
                                 className='font-mono'
                               />
                               <span className='text-muted-foreground shrink-0 text-xs'>
-                                $/{t(getTaskUsagePriceUnitLabelKey(definition.unit))}
+                                {
+                                  (props.currency ?? USD_PRICING_CURRENCY)
+                                    .symbol
+                                }
+                                /
+                                {t(
+                                  getTaskUsagePriceUnitLabelKey(definition.unit)
+                                )}
                               </span>
                             </div>
                             {description ? (
@@ -518,8 +513,9 @@ export const TaskUsagePricingEditor = memo(function TaskUsagePricingEditor(
                       <Field className='gap-1.5'>
                         <FieldLabel>{t('Base charge')}</FieldLabel>
                         <div className='flex items-center gap-2'>
-                          <Input
-                            type='number'
+                          <PricingAmountInput
+                            currency={props.currency}
+                            aria-label={t('Base charge')}
                             min={0}
                             step={0.000001}
                             value={matrixRows[0].constant}
@@ -528,8 +524,8 @@ export const TaskUsagePricingEditor = memo(function TaskUsagePricingEditor(
                                 event.currentTarget.select()
                               }
                             }}
-                            onChange={(event) => {
-                              const value = Number(event.target.value)
+                            onChange={(usd) => {
+                              const value = Number(usd)
                               handleRowChange(0, {
                                 ...matrixRows[0],
                                 constant:
@@ -541,7 +537,8 @@ export const TaskUsagePricingEditor = memo(function TaskUsagePricingEditor(
                             className='font-mono'
                           />
                           <span className='text-muted-foreground shrink-0 text-xs'>
-                            $/{t('request')}
+                            {(props.currency ?? USD_PRICING_CURRENCY).symbol}/
+                            {t('request')}
                           </span>
                         </div>
                       </Field>
@@ -552,6 +549,7 @@ export const TaskUsagePricingEditor = memo(function TaskUsagePricingEditor(
             )}
 
             <TaskBillingPreview
+              currency={props.currency}
               config={previewConfig}
               matchedRowLabel={matchedRowLabel}
               requestRuleExpr={previewRequestRuleExpr}
@@ -614,6 +612,7 @@ export const TaskUsagePricingEditor = memo(function TaskUsagePricingEditor(
               spellCheck={false}
             />
             <TaskBillingPreview
+              currency={props.currency}
               config={previewConfig}
               matchedRowLabel={matchedRowLabel}
               requestRuleExpr={previewRequestRuleExpr}

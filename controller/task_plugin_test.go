@@ -248,7 +248,7 @@ func TestDisableFactoryPluginRespectsInUseGuard(t *testing.T) {
 	assert.True(t, ok)
 }
 
-func TestDisableFactoryOverrideRowKeepsEnabledFlagPath(t *testing.T) {
+func TestDisableFactoryOverrideRowSuppressesBothLayers(t *testing.T) {
 	setupTaskPluginFactoryDisableTest(t)
 	factorySource, err := plugins.Source("kling")
 	require.NoError(t, err)
@@ -267,20 +267,51 @@ func TestDisableFactoryOverrideRowKeepsEnabledFlagPath(t *testing.T) {
 
 	recorder := postTaskPluginStatus(t, "kling", "", `{"enabled":false}`)
 	assert.Contains(t, recorder.Body.String(), `"success":true`)
-	assert.Empty(t, setting.GetTaskPluginDisabledFactoryKeys())
-
+	assert.Equal(t, []string{"kling"}, setting.GetTaskPluginDisabledFactoryKeys())
 	row, err := model.GetTaskPluginVersion("kling", "")
 	require.NoError(t, err)
 	assert.False(t, row.Enabled)
-
 	item := listTaskPluginItem(t, "kling")
 	assert.Equal(t, "override_over_factory", item.Source)
 	assert.False(t, item.Enabled)
-	assert.Equal(t, "disabled_fallback", item.RuntimeStatus)
-	assert.True(t, taskPluginOptionsHasKey(t, "kling"))
+	assert.Equal(t, "disabled", item.RuntimeStatus)
+	assert.False(t, taskPluginOptionsHasKey(t, "kling"))
+	_, ok := jsplugin.DefaultRegistry.Get("kling")
+	assert.False(t, ok, "factory built-in must not keep serving after the plugin is switched off")
+
+	recorder = postTaskPluginStatus(t, "kling", "", `{"enabled":true}`)
+	assert.Contains(t, recorder.Body.String(), `"success":true`)
+	assert.Empty(t, setting.GetTaskPluginDisabledFactoryKeys())
+	row, err = model.GetTaskPluginVersion("kling", "")
+	require.NoError(t, err)
+	assert.True(t, row.Enabled)
 	got, ok := jsplugin.DefaultRegistry.Get("kling")
 	require.True(t, ok)
-	assert.Equal(t, factoryVersion, got.Meta.Version)
+	assert.Equal(t, loaded.Meta.Version, got.Meta.Version)
+	assert.Equal(t, "registered", listTaskPluginItem(t, "kling").RuntimeStatus)
+
+	// Regression: with every kling layer off, a plugin whose model differs from
+	// a built-in kling model only by case must upload without a routing conflict.
+	recorder = postTaskPluginStatus(t, "kling", "", `{"enabled":false}`)
+	require.Contains(t, recorder.Body.String(), `"success":true`)
+	cleanupTaskPluginControllerRuntime(t, "kling-shadow")
+	const shadowSource = `
+export const meta = {apiVersion: 1, key: "kling-shadow", name: "Shadow", version: "1.0.0", author: {name: "Test"}, models: ["KLING-V1"], fetchMode: "per_task"};
+export function buildSubmitRequest() { return {}; }
+export function parseSubmitResponse() { return {}; }
+export function buildQueryRequest() { return {}; }
+export function parseTaskResult() { return {}; }
+`
+	body, err := common.Marshal(map[string]any{"source": shadowSource})
+	require.NoError(t, err)
+	uploadRecorder := httptest.NewRecorder()
+	uploadContext, _ := gin.CreateTestContext(uploadRecorder)
+	uploadContext.Request = httptest.NewRequest(http.MethodPost, "/api/plugin/task", strings.NewReader(string(body)))
+	uploadContext.Request.Header.Set("Content-Type", "application/json")
+	UploadTaskPlugin(uploadContext)
+	assert.Contains(t, uploadRecorder.Body.String(), `"success":true`)
+	_, ok = jsplugin.DefaultRegistry.Get("kling-shadow")
+	assert.True(t, ok)
 }
 
 func TestListTaskPluginsIncludesFactoryWithoutDatabaseRows(t *testing.T) {
@@ -366,49 +397,6 @@ export function parseTaskResult() { return {}; }
 		return
 	}
 	t.Fatal("task plugin option not found")
-}
-
-func TestListTaskPluginsShowsDisabledFallbackWhenOverridesAreDisabled(t *testing.T) {
-	setupTaskPluginControllerTest(t)
-	factorySource, err := plugins.Source("kling")
-	require.NoError(t, err)
-	factoryVersion := klingFactoryVersion(t)
-	overrideSource := strings.Replace(factorySource, `version: "`+factoryVersion+`"`, `version: "`+factoryVersion+`-test-disabled-override"`, 1)
-	require.NotEqual(t, factorySource, overrideSource, "factory version marker must be found in kling source")
-	loaded, err := jsplugin.DefaultRegistry.Register(overrideSource, jsplugin.Options{})
-	require.NoError(t, err)
-	plugin := model.TaskPlugin{
-		Key: "kling", APIVersion: loaded.Meta.APIVersion, Version: loaded.Meta.Version,
-		Source: overrideSource, SourceHash: "test-hash", Enabled: true,
-	}
-	require.NoError(t, model.SaveTaskPlugin(&plugin))
-	originalEnabled := constant.TaskPluginOverrideEnabled
-	constant.TaskPluginOverrideEnabled = false
-	jsplugin.DefaultRegistry.SetOverrideEnabled(false)
-	t.Cleanup(func() {
-		constant.TaskPluginOverrideEnabled = originalEnabled
-		jsplugin.DefaultRegistry.SetOverrideEnabled(originalEnabled)
-		jsplugin.DefaultRegistry.Unregister("kling")
-	})
-
-	recorder := httptest.NewRecorder()
-	context, _ := gin.CreateTestContext(recorder)
-	context.Request = httptest.NewRequest(http.MethodGet, "/api/plugin/task", nil)
-	ListTaskPlugins(context)
-
-	var response struct {
-		Success bool                 `json:"success"`
-		Data    []taskPluginListItem `json:"data"`
-	}
-	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
-	require.True(t, response.Success)
-	for _, item := range response.Data {
-		if item.Meta.Key == "kling" {
-			assert.Equal(t, "disabled_fallback", item.RuntimeStatus)
-			return
-		}
-	}
-	t.Fatal("kling plugin not found")
 }
 
 func TestDeleteActiveOverrideFallsBackToFactoryAndDeletesRecord(t *testing.T) {
@@ -767,40 +755,6 @@ func TestSyncTaskPluginsCachesRejectedDesiredSourceWithoutLosingIncumbent(t *tes
 	require.True(t, ok)
 	assert.Equal(t, "2.0.0", active.Meta.Version)
 	assert.NotContains(t, jsplugin.DefaultRegistry.RoutingErrors(), pluginKey)
-}
-
-func TestSyncTaskPluginsPreservesLastCompiledOverrideWhileOverridesAreDisabled(t *testing.T) {
-	setupTaskPluginControllerTest(t)
-	key := "sync-disabled-override"
-	cleanupTaskPluginControllerRuntime(t, key)
-	v1Source := taskPluginControllerTestSource(key, "1.0.0")
-	require.NoError(t, model.SaveTaskPlugin(&model.TaskPlugin{
-		Key: key, APIVersion: 1, Version: "1.0.0", Source: v1Source, SourceHash: "disabled-v1", Enabled: true,
-	}))
-	require.NoError(t, syncTaskPluginsOnce())
-	jsplugin.DefaultRegistry.SetOverrideEnabled(false)
-	t.Cleanup(func() { jsplugin.DefaultRegistry.SetOverrideEnabled(true) })
-
-	disabledGeneration := jsplugin.DefaultRegistry.Generation()
-	require.NoError(t, syncTaskPluginsOnce())
-	assert.Same(t, disabledGeneration, jsplugin.DefaultRegistry.Generation())
-
-	require.NoError(t, model.SaveTaskPlugin(&model.TaskPlugin{
-		Key: key, APIVersion: 1, Version: "2.0.0",
-		Source: "export const meta = {", SourceHash: "disabled-v2", Enabled: true,
-	}))
-	require.NoError(t, model.ActivateTaskPlugin(key, "2.0.0"))
-	require.NoError(t, syncTaskPluginsOnce())
-	assert.Equal(t, "1.0.0", jsplugin.DefaultRegistry.OverridePlugins()[key].Meta.Version)
-	taskPluginSyncState.Lock()
-	assert.Equal(t, "disabled-v1", taskPluginSyncState.hashes[key])
-	assert.NotEmpty(t, taskPluginSyncState.errors[key])
-	taskPluginSyncState.Unlock()
-
-	jsplugin.DefaultRegistry.SetOverrideEnabled(true)
-	active, ok := jsplugin.DefaultRegistry.Get(key)
-	require.True(t, ok)
-	assert.Equal(t, "1.0.0", active.Meta.Version)
 }
 
 const dryRunPluginSource = `

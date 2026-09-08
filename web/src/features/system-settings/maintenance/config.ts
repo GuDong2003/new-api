@@ -63,10 +63,11 @@ export const SIDEBAR_MODULES_DEFAULT: SidebarModulesAdminConfig = {
   },
   console: {
     enabled: true,
-    order: ['detail', 'token', 'log', 'midjourney', 'task'],
+    order: ['detail', 'token', 'log', 'audit', 'midjourney', 'task'],
     detail: true,
     token: true,
     log: true,
+    audit: true,
     midjourney: true,
     task: true,
   },
@@ -75,6 +76,7 @@ export const SIDEBAR_MODULES_DEFAULT: SidebarModulesAdminConfig = {
     order: ['topup', 'personal'],
     topup: true,
     personal: true,
+    security: true,
   },
   admin: {
     enabled: true,
