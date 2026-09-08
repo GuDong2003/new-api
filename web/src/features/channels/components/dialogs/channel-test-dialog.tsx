@@ -16,7 +16,6 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Combobox } from '@/components/ui/combobox'
 import { useQueryClient } from '@tanstack/react-query'
 import type {
   ColumnDef,
@@ -61,9 +60,9 @@ import {
 import { StatusBadge } from '@/components/status-badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
+import { Combobox } from '@/components/ui/combobox'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-
 import {
   Sheet,
   SheetContent,
@@ -83,17 +82,29 @@ import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
 import { useIsMobile } from '@/hooks/use-mobile'
 
 import { updateChannel } from '../../api'
+import { useChannelProbes } from '../../hooks/use-channel-probes'
 import {
   channelsQueryKeys,
   formatResponseTime,
   handleDetailedChannelTest,
 } from '../../lib'
+import {
+  CHANNEL_PROBES,
+  getProbeConfigurationKey,
+  getProbeEndpointHint,
+  isProbeNotApplicable,
+  type ChannelProbeId,
+} from '../../lib/channel-test'
 import type {
   Channel,
   GetChannelsResponse,
   SearchChannelsResponse,
 } from '../../types'
 import { useChannels } from '../channels-provider'
+import {
+  ChannelCapabilitiesCell,
+  ChannelProbeDetails,
+} from './channel-test-capabilities'
 
 type ChannelTestDialogProps = {
   open: boolean
@@ -195,7 +206,6 @@ const endpointTypeOptions: Array<{ value: string; label: string }> = [
   },
   { value: 'embeddings', label: 'Embeddings (/v1/embeddings)' },
 ]
-
 
 const STREAM_INCOMPATIBLE_ENDPOINTS = new Set([
   'embeddings',
@@ -317,6 +327,8 @@ function getTestTableColumnClass(columnId: string) {
       return 'w-28 min-w-28 whitespace-nowrap'
     case 'result':
       return 'w-80 min-w-80 max-w-80 whitespace-normal'
+    case 'capabilities':
+      return 'w-52 min-w-52 whitespace-normal'
     case 'actions':
       return 'bg-popover w-px whitespace-nowrap'
     default:
@@ -376,6 +388,11 @@ function ChannelTestDialogContent({
   const [isDeletingFailed, setIsDeletingFailed] = useState(false)
   const [failureDetails, setFailureDetails] =
     useState<FailureDetailsState | null>(null)
+  const [probeDetails, setProbeDetails] = useState<{
+    model: string
+    probe: ChannelProbeId
+  } | null>(null)
+  const probeDetailsTriggerRef = useRef<HTMLElement | null>(null)
   const [pagination, setPagination] = useState({
     pageIndex: 0,
     pageSize: 30,
@@ -875,6 +892,58 @@ function ChannelTestDialogContent({
     ? t('Test {{count}} matching models', { count: filteredModels.length })
     : t('Test all {{count}} models', { count: filteredModels.length })
 
+  const probes = useChannelProbes(currentChannelId, refreshChannelLists)
+
+  const probeEndpointForModel = useCallback(
+    (model: string) => getProbeEndpointHint(currentRow, model, endpointType),
+    [currentRow, endpointType]
+  )
+
+  const probeConfigurationKey = useCallback(
+    (model: string, probe: ChannelProbeId) =>
+      getProbeConfigurationKey(currentRow, {
+        model,
+        probe,
+        endpoint: probeEndpointForModel(model),
+        message: testMessage,
+      }),
+    [currentRow, probeEndpointForModel, testMessage]
+  )
+
+  const runProbes = useCallback(
+    async (targets: Array<{ model: string; probe: ChannelProbeId }>) => {
+      const jobs = targets
+        .filter(
+          (target) =>
+            !isProbeNotApplicable(
+              probeEndpointForModel(target.model),
+              target.probe
+            )
+        )
+        .map((target) => ({
+          model: target.model,
+          probe: target.probe,
+          endpoint: probeEndpointForModel(target.model),
+          message: testMessage,
+          configurationKey: probeConfigurationKey(target.model, target.probe),
+        }))
+      if (jobs.length === 0) {
+        toast.info(t('These tests do not apply to the selected models.'))
+        return
+      }
+      await probes.start(jobs)
+    },
+    [probeConfigurationKey, probeEndpointForModel, probes, t, testMessage]
+  )
+
+  const openProbeDetails = useCallback(
+    (model: string, probe: ChannelProbeId, trigger: HTMLElement) => {
+      probeDetailsTriggerRef.current = trigger
+      setProbeDetails({ model, probe })
+    },
+    []
+  )
+
   const columns = useMemo<ColumnDef<ModelRow>[]>(
     () => [
       {
@@ -955,6 +1024,28 @@ function ChannelTestDialogContent({
         size: 320,
       },
       {
+        id: 'capabilities',
+        header: t('Capabilities'),
+        cell: ({ row }) => {
+          const model = row.original.model
+          return (
+            <ChannelCapabilitiesCell
+              busy={probes.isRunning}
+              configurationKey={(probe) => probeConfigurationKey(model, probe)}
+              endpoint={probeEndpointForModel(model)}
+              model={model}
+              onDetails={(probe, trigger) =>
+                openProbeDetails(model, probe, trigger)
+              }
+              onRun={(probe) => void runProbes([{ model, probe }])}
+              results={probes.results[model]}
+            />
+          )
+        },
+        enableSorting: false,
+        size: 200,
+      },
+      {
         id: 'actions',
         header: t('Actions'),
         cell: ({ row }) => {
@@ -990,6 +1081,12 @@ function ChannelTestDialogContent({
     [
       defaultTestModel,
       isBatchTesting,
+      openProbeDetails,
+      probeConfigurationKey,
+      probeEndpointForModel,
+      probes.isRunning,
+      probes.results,
+      runProbes,
       t,
       testResults,
       testingModels,
@@ -1036,13 +1133,13 @@ function ChannelTestDialogContent({
             <div className='grid gap-2'>
               <Label htmlFor='endpoint-type'>{t('Endpoint Type')}</Label>
               <Combobox
-options={endpointSelectItems}
-value={endpointType}
-onValueChange={handleEndpointTypeChange}
-id='endpoint-type'
-className='w-full min-w-0'
-placeholder={t('Auto detect (default)')}
-/>
+                options={endpointSelectItems}
+                value={endpointType}
+                onValueChange={handleEndpointTypeChange}
+                id='endpoint-type'
+                className='w-full min-w-0'
+                placeholder={t('Auto detect (default)')}
+              />
               <p className='text-muted-foreground text-xs'>
                 {t(
                   'Override the endpoint used for testing. Leave empty to auto detect.'
@@ -1193,7 +1290,17 @@ placeholder={t('Auto detect (default)')}
               <DataTablePagination table={table} />
             </div>
 
-            <TestModelsBulkActions table={table} />
+            <TestModelsBulkActions
+              onRunCapabilities={(selected) =>
+                void runProbes(
+                  selected.flatMap((model) =>
+                    CHANNEL_PROBES.map((probe) => ({ model, probe: probe.id }))
+                  )
+                )
+              }
+              probesBusy={probes.isRunning}
+              table={table}
+            />
           </div>
         </div>
       </Dialog>
@@ -1218,6 +1325,31 @@ placeholder={t('Auto detect (default)')}
           }
         }}
       />
+
+      {probeDetails && (
+        <ChannelProbeDetails
+          busy={probes.isRunning}
+          model={probeDetails.model}
+          onOpenChange={(sheetOpen) => {
+            if (!sheetOpen) setProbeDetails(null)
+          }}
+          onRetry={() =>
+            void runProbes([
+              { model: probeDetails.model, probe: probeDetails.probe },
+            ])
+          }
+          open
+          probe={probeDetails.probe}
+          result={probes.results[probeDetails.model]?.[probeDetails.probe]}
+          returnFocus={probeDetailsTriggerRef}
+          stale={Boolean(
+            probes.results[probeDetails.model]?.[probeDetails.probe] &&
+            probes.results[probeDetails.model]?.[probeDetails.probe]
+              ?.configurationKey !==
+              probeConfigurationKey(probeDetails.model, probeDetails.probe)
+          )}
+        />
+      )}
     </>
   )
 }
@@ -1455,7 +1587,15 @@ function FailureDetailsSheet({
   )
 }
 
-function TestModelsBulkActions({ table }: { table: TanStackTable<ModelRow> }) {
+function TestModelsBulkActions({
+  table,
+  probesBusy,
+  onRunCapabilities,
+}: {
+  table: TanStackTable<ModelRow>
+  probesBusy: boolean
+  onRunCapabilities: (models: string[]) => void
+}) {
   const { t } = useTranslation()
   const { copyToClipboard } = useCopyToClipboard()
   const selectedRows = table.getFilteredSelectedRowModel().rows
@@ -1468,6 +1608,27 @@ function TestModelsBulkActions({ table }: { table: TanStackTable<ModelRow> }) {
 
   return (
     <BulkActionsToolbar table={table} entityName='model'>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button
+              disabled={selectedModels.length === 0 || probesBusy}
+              onClick={() => onRunCapabilities(selectedModels)}
+              size='sm'
+            />
+          }
+        >
+          <Gauge data-icon='inline-start' />
+          {t('Run capability tests')}
+        </TooltipTrigger>
+        <TooltipContent>
+          <p>
+            {t(
+              'Run the non-streaming, streaming and tool-calling probes for each selected model.'
+            )}
+          </p>
+        </TooltipContent>
+      </Tooltip>
       <Tooltip>
         <TooltipTrigger
           render={

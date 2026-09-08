@@ -294,6 +294,8 @@ export interface ChannelTestResponse {
   time?: number
   response_preview?: string
   response_preview_truncated?: boolean
+  /** Present only for capability probes, which report a verdict per endpoint. */
+  diagnostics?: ChannelTestDiagnostics
   data?: {
     response_time?: number
     error?: string
@@ -302,11 +304,36 @@ export interface ChannelTestResponse {
   }
 }
 
+export type ChannelTestType = 'basic' | 'tool_call'
+
+/**
+ * Server verdict for one capability probe. Optional fields are absent when the
+ * probe could not measure them, which is distinct from a measured false.
+ */
+export interface ChannelTestDiagnostics {
+  status: 'passed' | 'failed' | 'degraded' | 'skipped'
+  reason: string
+  endpoint_type: string
+  test_type: ChannelTestType
+  endpoint_path?: string
+  detail?: string
+  requested_stream: boolean
+  upstream_stream?: boolean
+  duration_ms: number
+  first_response_ms?: number
+  event_count: number
+  tool_count: number
+  tool_name_valid?: boolean
+  tool_arguments_valid?: boolean
+}
+
 export interface DetailedChannelTestRequest {
   model: string
   endpoint_type: string
   stream: boolean
   message?: string
+  /** Requests a capability probe instead of the legacy pass/fail test. */
+  test_type?: ChannelTestType
 }
 
 export interface ChannelBalanceResponse {

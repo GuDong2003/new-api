@@ -44,6 +44,7 @@ import {
 import { CHANNEL_STATUS, ERROR_MESSAGES, SUCCESS_MESSAGES } from '../constants'
 import type {
   ChannelTestResponse,
+  ChannelTestType,
   CopyChannelParams,
   DetailedChannelTestRequest,
 } from '../types'
@@ -362,6 +363,7 @@ export type DetailedChannelTestPayloadInput = {
   endpointType: string
   stream: boolean
   message?: string
+  testType?: ChannelTestType
 }
 
 export function buildDetailedChannelTestPayload(
@@ -375,7 +377,21 @@ export function buildDetailedChannelTestPayload(
   if (options.message?.trim()) {
     payload.message = options.message
   }
+  if (options.testType) {
+    payload.test_type = options.testType
+  }
   return payload
+}
+
+/**
+ * Run one capability probe and return the server verdict. Unlike the legacy
+ * test this never toasts: the matrix renders each probe's own outcome.
+ */
+export async function runChannelProbe(
+  id: number,
+  options: DetailedChannelTestPayloadInput & { testType: ChannelTestType }
+): Promise<ChannelTestResponse> {
+  return testChannelDetailed(id, buildDetailedChannelTestPayload(options))
 }
 
 /**
