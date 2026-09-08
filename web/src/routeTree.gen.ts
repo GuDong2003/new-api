@@ -27,6 +27,7 @@ import { Route as errors404RouteImport } from './routes/(errors)/404'
 import { Route as errors500RouteImport } from './routes/(errors)/500'
 import { Route as errors503RouteImport } from './routes/(errors)/503'
 import { Route as AuthenticatedChat2linkRouteImport } from './routes/_authenticated/chat2link'
+import { Route as AuthenticatedPlaygroundRouteRouteImport } from './routes/_authenticated/playground/route'
 import { Route as AuthenticatedSystemSettingsRouteRouteImport } from './routes/_authenticated/system-settings/route'
 import { Route as AboutIndexRouteImport } from './routes/about/index'
 import { Route as OauthProviderRouteImport } from './routes/oauth/$provider'
@@ -44,6 +45,8 @@ import { Route as AuthenticatedKeysIndexRouteImport } from './routes/_authentica
 import { Route as AuthenticatedModelsIndexRouteImport } from './routes/_authenticated/models/index'
 import { Route as AuthenticatedModelsSectionRouteImport } from './routes/_authenticated/models/$section'
 import { Route as AuthenticatedPlaygroundIndexRouteImport } from './routes/_authenticated/playground/index'
+import { Route as AuthenticatedPlaygroundChatRouteImport } from './routes/_authenticated/playground/chat'
+import { Route as AuthenticatedPlaygroundDrawingRouteImport } from './routes/_authenticated/playground/drawing'
 import { Route as AuthenticatedProfileIndexRouteImport } from './routes/_authenticated/profile/index'
 import { Route as AuthenticatedQueueIndexRouteImport } from './routes/_authenticated/queue/index'
 import { Route as AuthenticatedRedemptionCodesIndexRouteImport } from './routes/_authenticated/redemption-codes/index'
@@ -51,8 +54,8 @@ import { Route as AuthenticatedSecurityIndexRouteImport } from './routes/_authen
 import { Route as AuthenticatedSubscriptionsIndexRouteImport } from './routes/_authenticated/subscriptions/index'
 import { Route as AuthenticatedSystemInfoIndexRouteImport } from './routes/_authenticated/system-info/index'
 import { Route as AuthenticatedSystemSettingsIndexRouteImport } from './routes/_authenticated/system-settings/index'
-import { Route as AuthenticatedUpstreamAccountsIndexRouteImport } from './routes/_authenticated/upstream-accounts/index'
 import { Route as AuthenticatedTaskPluginsIndexRouteImport } from './routes/_authenticated/task-plugins/index'
+import { Route as AuthenticatedUpstreamAccountsIndexRouteImport } from './routes/_authenticated/upstream-accounts/index'
 import { Route as AuthenticatedUsageLogsIndexRouteImport } from './routes/_authenticated/usage-logs/index'
 import { Route as AuthenticatedUsageLogsSectionRouteImport } from './routes/_authenticated/usage-logs/$section'
 import { Route as AuthenticatedUsageLogsAuditRouteImport } from './routes/_authenticated/usage-logs/audit'
@@ -162,6 +165,12 @@ const AuthenticatedChat2linkRoute = AuthenticatedChat2linkRouteImport.update({
   path: '/chat2link',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const AuthenticatedPlaygroundRouteRoute =
+  AuthenticatedPlaygroundRouteRouteImport.update({
+    id: '/playground',
+    path: '/playground',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedSystemSettingsRouteRoute =
   AuthenticatedSystemSettingsRouteRouteImport.update({
     id: '/system-settings',
@@ -252,9 +261,21 @@ const AuthenticatedModelsSectionRoute =
   } as any)
 const AuthenticatedPlaygroundIndexRoute =
   AuthenticatedPlaygroundIndexRouteImport.update({
-    id: '/playground/',
-    path: '/playground/',
-    getParentRoute: () => AuthenticatedRouteRoute,
+    id: '/',
+    path: '/',
+    getParentRoute: () => AuthenticatedPlaygroundRouteRoute,
+  } as any)
+const AuthenticatedPlaygroundChatRoute =
+  AuthenticatedPlaygroundChatRouteImport.update({
+    id: '/chat',
+    path: '/chat',
+    getParentRoute: () => AuthenticatedPlaygroundRouteRoute,
+  } as any)
+const AuthenticatedPlaygroundDrawingRoute =
+  AuthenticatedPlaygroundDrawingRouteImport.update({
+    id: '/drawing',
+    path: '/drawing',
+    getParentRoute: () => AuthenticatedPlaygroundRouteRoute,
   } as any)
 const AuthenticatedProfileIndexRoute =
   AuthenticatedProfileIndexRouteImport.update({
@@ -297,16 +318,16 @@ const AuthenticatedSystemSettingsIndexRoute =
     path: '/',
     getParentRoute: () => AuthenticatedSystemSettingsRouteRoute,
   } as any)
-const AuthenticatedUpstreamAccountsIndexRoute =
-  AuthenticatedUpstreamAccountsIndexRouteImport.update({
-    id: '/upstream-accounts/',
-    path: '/upstream-accounts/',
-    getParentRoute: () => AuthenticatedRouteRoute,
-  } as any)
 const AuthenticatedTaskPluginsIndexRoute =
   AuthenticatedTaskPluginsIndexRouteImport.update({
     id: '/task-plugins/',
     path: '/task-plugins/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedUpstreamAccountsIndexRoute =
+  AuthenticatedUpstreamAccountsIndexRouteImport.update({
+    id: '/upstream-accounts/',
+    path: '/upstream-accounts/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
 const AuthenticatedUsageLogsIndexRoute =
@@ -432,6 +453,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/privacy-policy': typeof PrivacyPolicyRoute
   '/user-agreement': typeof UserAgreementRoute
+  '/playground': typeof AuthenticatedPlaygroundRouteRouteWithChildren
   '/system-settings': typeof AuthenticatedSystemSettingsRouteRouteWithChildren
   '/forgot-password': typeof authForgotPasswordRoute
   '/oauth': typeof authOauthRoute
@@ -456,6 +478,8 @@ export interface FileRoutesByFullPath {
   '/dashboard/$section': typeof AuthenticatedDashboardSectionRoute
   '/errors/$error': typeof AuthenticatedErrorsErrorRoute
   '/models/$section': typeof AuthenticatedModelsSectionRoute
+  '/playground/chat': typeof AuthenticatedPlaygroundChatRoute
+  '/playground/drawing': typeof AuthenticatedPlaygroundDrawingRoute
   '/usage-logs/$section': typeof AuthenticatedUsageLogsSectionRoute
   '/usage-logs/audit': typeof AuthenticatedUsageLogsAuditRoute
   '/channels/': typeof AuthenticatedChannelsIndexRoute
@@ -471,8 +495,8 @@ export interface FileRoutesByFullPath {
   '/subscriptions/': typeof AuthenticatedSubscriptionsIndexRoute
   '/system-info/': typeof AuthenticatedSystemInfoIndexRoute
   '/system-settings/': typeof AuthenticatedSystemSettingsIndexRoute
-  '/upstream-accounts/': typeof AuthenticatedUpstreamAccountsIndexRoute
   '/task-plugins/': typeof AuthenticatedTaskPluginsIndexRoute
+  '/upstream-accounts/': typeof AuthenticatedUpstreamAccountsIndexRoute
   '/usage-logs/': typeof AuthenticatedUsageLogsIndexRoute
   '/users/': typeof AuthenticatedUsersIndexRoute
   '/wallet/': typeof AuthenticatedWalletIndexRoute
@@ -519,6 +543,8 @@ export interface FileRoutesByTo {
   '/dashboard/$section': typeof AuthenticatedDashboardSectionRoute
   '/errors/$error': typeof AuthenticatedErrorsErrorRoute
   '/models/$section': typeof AuthenticatedModelsSectionRoute
+  '/playground/chat': typeof AuthenticatedPlaygroundChatRoute
+  '/playground/drawing': typeof AuthenticatedPlaygroundDrawingRoute
   '/usage-logs/$section': typeof AuthenticatedUsageLogsSectionRoute
   '/usage-logs/audit': typeof AuthenticatedUsageLogsAuditRoute
   '/channels': typeof AuthenticatedChannelsIndexRoute
@@ -534,8 +560,8 @@ export interface FileRoutesByTo {
   '/subscriptions': typeof AuthenticatedSubscriptionsIndexRoute
   '/system-info': typeof AuthenticatedSystemInfoIndexRoute
   '/system-settings': typeof AuthenticatedSystemSettingsIndexRoute
-  '/upstream-accounts': typeof AuthenticatedUpstreamAccountsIndexRoute
   '/task-plugins': typeof AuthenticatedTaskPluginsIndexRoute
+  '/upstream-accounts': typeof AuthenticatedUpstreamAccountsIndexRoute
   '/usage-logs': typeof AuthenticatedUsageLogsIndexRoute
   '/users': typeof AuthenticatedUsersIndexRoute
   '/wallet': typeof AuthenticatedWalletIndexRoute
@@ -562,6 +588,7 @@ export interface FileRoutesById {
   '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
   '/privacy-policy': typeof PrivacyPolicyRoute
   '/user-agreement': typeof UserAgreementRoute
+  '/_authenticated/playground': typeof AuthenticatedPlaygroundRouteRouteWithChildren
   '/_authenticated/system-settings': typeof AuthenticatedSystemSettingsRouteRouteWithChildren
   '/(auth)/forgot-password': typeof authForgotPasswordRoute
   '/(auth)/oauth': typeof authOauthRoute
@@ -586,6 +613,8 @@ export interface FileRoutesById {
   '/_authenticated/dashboard/$section': typeof AuthenticatedDashboardSectionRoute
   '/_authenticated/errors/$error': typeof AuthenticatedErrorsErrorRoute
   '/_authenticated/models/$section': typeof AuthenticatedModelsSectionRoute
+  '/_authenticated/playground/chat': typeof AuthenticatedPlaygroundChatRoute
+  '/_authenticated/playground/drawing': typeof AuthenticatedPlaygroundDrawingRoute
   '/_authenticated/usage-logs/$section': typeof AuthenticatedUsageLogsSectionRoute
   '/_authenticated/usage-logs/audit': typeof AuthenticatedUsageLogsAuditRoute
   '/_authenticated/channels/': typeof AuthenticatedChannelsIndexRoute
@@ -601,8 +630,8 @@ export interface FileRoutesById {
   '/_authenticated/subscriptions/': typeof AuthenticatedSubscriptionsIndexRoute
   '/_authenticated/system-info/': typeof AuthenticatedSystemInfoIndexRoute
   '/_authenticated/system-settings/': typeof AuthenticatedSystemSettingsIndexRoute
-  '/_authenticated/upstream-accounts/': typeof AuthenticatedUpstreamAccountsIndexRoute
   '/_authenticated/task-plugins/': typeof AuthenticatedTaskPluginsIndexRoute
+  '/_authenticated/upstream-accounts/': typeof AuthenticatedUpstreamAccountsIndexRoute
   '/_authenticated/usage-logs/': typeof AuthenticatedUsageLogsIndexRoute
   '/_authenticated/users/': typeof AuthenticatedUsersIndexRoute
   '/_authenticated/wallet/': typeof AuthenticatedWalletIndexRoute
@@ -628,6 +657,7 @@ export interface FileRouteTypes {
     | '/'
     | '/privacy-policy'
     | '/user-agreement'
+    | '/playground'
     | '/system-settings'
     | '/forgot-password'
     | '/oauth'
@@ -652,6 +682,8 @@ export interface FileRouteTypes {
     | '/dashboard/$section'
     | '/errors/$error'
     | '/models/$section'
+    | '/playground/chat'
+    | '/playground/drawing'
     | '/usage-logs/$section'
     | '/usage-logs/audit'
     | '/channels/'
@@ -667,8 +699,8 @@ export interface FileRouteTypes {
     | '/subscriptions/'
     | '/system-info/'
     | '/system-settings/'
-    | '/upstream-accounts/'
     | '/task-plugins/'
+    | '/upstream-accounts/'
     | '/usage-logs/'
     | '/users/'
     | '/wallet/'
@@ -715,6 +747,8 @@ export interface FileRouteTypes {
     | '/dashboard/$section'
     | '/errors/$error'
     | '/models/$section'
+    | '/playground/chat'
+    | '/playground/drawing'
     | '/usage-logs/$section'
     | '/usage-logs/audit'
     | '/channels'
@@ -730,8 +764,8 @@ export interface FileRouteTypes {
     | '/subscriptions'
     | '/system-info'
     | '/system-settings'
-    | '/upstream-accounts'
     | '/task-plugins'
+    | '/upstream-accounts'
     | '/usage-logs'
     | '/users'
     | '/wallet'
@@ -757,6 +791,7 @@ export interface FileRouteTypes {
     | '/_authenticated'
     | '/privacy-policy'
     | '/user-agreement'
+    | '/_authenticated/playground'
     | '/_authenticated/system-settings'
     | '/(auth)/forgot-password'
     | '/(auth)/oauth'
@@ -781,6 +816,8 @@ export interface FileRouteTypes {
     | '/_authenticated/dashboard/$section'
     | '/_authenticated/errors/$error'
     | '/_authenticated/models/$section'
+    | '/_authenticated/playground/chat'
+    | '/_authenticated/playground/drawing'
     | '/_authenticated/usage-logs/$section'
     | '/_authenticated/usage-logs/audit'
     | '/_authenticated/channels/'
@@ -796,8 +833,8 @@ export interface FileRouteTypes {
     | '/_authenticated/subscriptions/'
     | '/_authenticated/system-info/'
     | '/_authenticated/system-settings/'
-    | '/_authenticated/upstream-accounts/'
     | '/_authenticated/task-plugins/'
+    | '/_authenticated/upstream-accounts/'
     | '/_authenticated/usage-logs/'
     | '/_authenticated/users/'
     | '/_authenticated/wallet/'
@@ -965,6 +1002,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedChat2linkRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/playground': {
+      id: '/_authenticated/playground'
+      path: '/playground'
+      fullPath: '/playground'
+      preLoaderRoute: typeof AuthenticatedPlaygroundRouteRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/system-settings': {
       id: '/_authenticated/system-settings'
       path: '/system-settings'
@@ -1079,10 +1123,24 @@ declare module '@tanstack/react-router' {
     }
     '/_authenticated/playground/': {
       id: '/_authenticated/playground/'
-      path: '/playground'
+      path: '/'
       fullPath: '/playground/'
       preLoaderRoute: typeof AuthenticatedPlaygroundIndexRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
+      parentRoute: typeof AuthenticatedPlaygroundRouteRoute
+    }
+    '/_authenticated/playground/chat': {
+      id: '/_authenticated/playground/chat'
+      path: '/chat'
+      fullPath: '/playground/chat'
+      preLoaderRoute: typeof AuthenticatedPlaygroundChatRouteImport
+      parentRoute: typeof AuthenticatedPlaygroundRouteRoute
+    }
+    '/_authenticated/playground/drawing': {
+      id: '/_authenticated/playground/drawing'
+      path: '/drawing'
+      fullPath: '/playground/drawing'
+      preLoaderRoute: typeof AuthenticatedPlaygroundDrawingRouteImport
+      parentRoute: typeof AuthenticatedPlaygroundRouteRoute
     }
     '/_authenticated/profile/': {
       id: '/_authenticated/profile/'
@@ -1133,18 +1191,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedSystemSettingsIndexRouteImport
       parentRoute: typeof AuthenticatedSystemSettingsRouteRoute
     }
-    '/_authenticated/upstream-accounts/': {
-      id: '/_authenticated/upstream-accounts/'
-      path: '/upstream-accounts'
-      fullPath: '/upstream-accounts/'
-      preLoaderRoute: typeof AuthenticatedUpstreamAccountsIndexRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
-    }
     '/_authenticated/task-plugins/': {
       id: '/_authenticated/task-plugins/'
       path: '/task-plugins'
       fullPath: '/task-plugins/'
       preLoaderRoute: typeof AuthenticatedTaskPluginsIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/upstream-accounts/': {
+      id: '/_authenticated/upstream-accounts/'
+      path: '/upstream-accounts'
+      fullPath: '/upstream-accounts/'
+      preLoaderRoute: typeof AuthenticatedUpstreamAccountsIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/usage-logs/': {
@@ -1316,6 +1374,24 @@ const authRouteRouteWithChildren = authRouteRoute._addFileChildren(
   authRouteRouteChildren,
 )
 
+interface AuthenticatedPlaygroundRouteRouteChildren {
+  AuthenticatedPlaygroundChatRoute: typeof AuthenticatedPlaygroundChatRoute
+  AuthenticatedPlaygroundDrawingRoute: typeof AuthenticatedPlaygroundDrawingRoute
+  AuthenticatedPlaygroundIndexRoute: typeof AuthenticatedPlaygroundIndexRoute
+}
+
+const AuthenticatedPlaygroundRouteRouteChildren: AuthenticatedPlaygroundRouteRouteChildren =
+  {
+    AuthenticatedPlaygroundChatRoute: AuthenticatedPlaygroundChatRoute,
+    AuthenticatedPlaygroundDrawingRoute: AuthenticatedPlaygroundDrawingRoute,
+    AuthenticatedPlaygroundIndexRoute: AuthenticatedPlaygroundIndexRoute,
+  }
+
+const AuthenticatedPlaygroundRouteRouteWithChildren =
+  AuthenticatedPlaygroundRouteRoute._addFileChildren(
+    AuthenticatedPlaygroundRouteRouteChildren,
+  )
+
 interface AuthenticatedSystemSettingsRouteRouteChildren {
   AuthenticatedSystemSettingsIndexRoute: typeof AuthenticatedSystemSettingsIndexRoute
   AuthenticatedSystemSettingsAuthSectionRoute: typeof AuthenticatedSystemSettingsAuthSectionRoute
@@ -1374,6 +1450,7 @@ const AuthenticatedSystemSettingsRouteRouteWithChildren =
   )
 
 interface AuthenticatedRouteRouteChildren {
+  AuthenticatedPlaygroundRouteRoute: typeof AuthenticatedPlaygroundRouteRouteWithChildren
   AuthenticatedSystemSettingsRouteRoute: typeof AuthenticatedSystemSettingsRouteRouteWithChildren
   AuthenticatedChat2linkRoute: typeof AuthenticatedChat2linkRoute
   AuthenticatedChatChatIdRoute: typeof AuthenticatedChatChatIdRoute
@@ -1387,21 +1464,22 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedInviteCodesIndexRoute: typeof AuthenticatedInviteCodesIndexRoute
   AuthenticatedKeysIndexRoute: typeof AuthenticatedKeysIndexRoute
   AuthenticatedModelsIndexRoute: typeof AuthenticatedModelsIndexRoute
-  AuthenticatedPlaygroundIndexRoute: typeof AuthenticatedPlaygroundIndexRoute
   AuthenticatedProfileIndexRoute: typeof AuthenticatedProfileIndexRoute
   AuthenticatedQueueIndexRoute: typeof AuthenticatedQueueIndexRoute
   AuthenticatedRedemptionCodesIndexRoute: typeof AuthenticatedRedemptionCodesIndexRoute
   AuthenticatedSecurityIndexRoute: typeof AuthenticatedSecurityIndexRoute
   AuthenticatedSubscriptionsIndexRoute: typeof AuthenticatedSubscriptionsIndexRoute
   AuthenticatedSystemInfoIndexRoute: typeof AuthenticatedSystemInfoIndexRoute
-  AuthenticatedUpstreamAccountsIndexRoute: typeof AuthenticatedUpstreamAccountsIndexRoute
   AuthenticatedTaskPluginsIndexRoute: typeof AuthenticatedTaskPluginsIndexRoute
+  AuthenticatedUpstreamAccountsIndexRoute: typeof AuthenticatedUpstreamAccountsIndexRoute
   AuthenticatedUsageLogsIndexRoute: typeof AuthenticatedUsageLogsIndexRoute
   AuthenticatedUsersIndexRoute: typeof AuthenticatedUsersIndexRoute
   AuthenticatedWalletIndexRoute: typeof AuthenticatedWalletIndexRoute
 }
 
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
+  AuthenticatedPlaygroundRouteRoute:
+    AuthenticatedPlaygroundRouteRouteWithChildren,
   AuthenticatedSystemSettingsRouteRoute:
     AuthenticatedSystemSettingsRouteRouteWithChildren,
   AuthenticatedChat2linkRoute: AuthenticatedChat2linkRoute,
@@ -1416,7 +1494,6 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedInviteCodesIndexRoute: AuthenticatedInviteCodesIndexRoute,
   AuthenticatedKeysIndexRoute: AuthenticatedKeysIndexRoute,
   AuthenticatedModelsIndexRoute: AuthenticatedModelsIndexRoute,
-  AuthenticatedPlaygroundIndexRoute: AuthenticatedPlaygroundIndexRoute,
   AuthenticatedProfileIndexRoute: AuthenticatedProfileIndexRoute,
   AuthenticatedQueueIndexRoute: AuthenticatedQueueIndexRoute,
   AuthenticatedRedemptionCodesIndexRoute:
@@ -1424,9 +1501,9 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedSecurityIndexRoute: AuthenticatedSecurityIndexRoute,
   AuthenticatedSubscriptionsIndexRoute: AuthenticatedSubscriptionsIndexRoute,
   AuthenticatedSystemInfoIndexRoute: AuthenticatedSystemInfoIndexRoute,
+  AuthenticatedTaskPluginsIndexRoute: AuthenticatedTaskPluginsIndexRoute,
   AuthenticatedUpstreamAccountsIndexRoute:
     AuthenticatedUpstreamAccountsIndexRoute,
-  AuthenticatedTaskPluginsIndexRoute: AuthenticatedTaskPluginsIndexRoute,
   AuthenticatedUsageLogsIndexRoute: AuthenticatedUsageLogsIndexRoute,
   AuthenticatedUsersIndexRoute: AuthenticatedUsersIndexRoute,
   AuthenticatedWalletIndexRoute: AuthenticatedWalletIndexRoute,

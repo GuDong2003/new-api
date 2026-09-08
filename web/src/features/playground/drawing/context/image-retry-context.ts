@@ -16,11 +16,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { createFileRoute, redirect } from '@tanstack/react-router'
+import { createContext } from 'react'
 
-export const Route = createFileRoute('/_authenticated/playground/')({
-  // The playground now has sub-pages; keep old links working.
-  beforeLoad: () => {
-    throw redirect({ to: '/playground/chat', replace: true })
-  },
-})
+export const ImageRetryContext = createContext<
+  ((nodeId: string) => boolean) | null
+>(null)

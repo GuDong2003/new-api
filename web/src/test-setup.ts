@@ -17,6 +17,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import '@testing-library/jest-dom/vitest'
+// jsdom has no IndexedDB, which the drawing canvas persists to.
+import 'fake-indexeddb/auto'
 import { cleanup, configure } from '@testing-library/react'
 import i18next from 'i18next'
 import { initReactI18next } from 'react-i18next'
@@ -79,6 +81,14 @@ Object.defineProperty(window, 'matchMedia', {
     removeEventListener: () => undefined,
     dispatchEvent: () => false,
   }),
+})
+
+// jsdom implements no layout, so it omits this hit-testing API entirely. Define
+// it as a miss so tests that drive pointer drags can stub it per case.
+Object.defineProperty(document, 'elementFromPoint', {
+  configurable: true,
+  writable: true,
+  value: (): Element | null => null,
 })
 
 window.requestAnimationFrame = (callback: FrameRequestCallback) =>
