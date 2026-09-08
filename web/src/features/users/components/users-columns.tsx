@@ -32,7 +32,9 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { getUserAvatarFallback, getUserAvatarStyle } from '@/lib/avatar'
+import { getCurrencyDisplay } from '@/lib/currency'
 import { formatQuota, formatTimestamp } from '@/lib/format'
+import { useSystemConfigStore } from '@/stores/system-config-store'
 
 import {
   USER_STATUS,
@@ -46,6 +48,9 @@ import { UserQuotaCell } from './user-quota-cell'
 
 export function useUsersColumns(): ColumnDef<User>[] {
   const { t } = useTranslation()
+  useSystemConfigStore((state) => state.config.currency)
+  const { meta: currency } = getCurrencyDisplay()
+  const quotaUnit = currency.kind === 'tokens' ? t('Tokens') : currency.symbol
   return [
     {
       id: 'select',
@@ -54,7 +59,7 @@ export function useUsersColumns(): ColumnDef<User>[] {
           checked={table.getIsAllPageRowsSelected()}
           indeterminate={table.getIsSomePageRowsSelected()}
           onCheckedChange={(value) => table.toggleAllPageRowsSelected(!!value)}
-          aria-label='Select all'
+          aria-label={t('Select all')}
           className='translate-y-[2px]'
         />
       ),
@@ -62,7 +67,7 @@ export function useUsersColumns(): ColumnDef<User>[] {
         <Checkbox
           checked={row.getIsSelected()}
           onCheckedChange={(value) => row.toggleSelected(!!value)}
-          aria-label='Select row'
+          aria-label={t('Select row')}
           className='translate-y-[2px]'
         />
       ),
@@ -162,7 +167,7 @@ export function useUsersColumns(): ColumnDef<User>[] {
             <TooltipTrigger render={<div className='-ml-1.5 cursor-help' />}>
               <StatusBadge
                 label={t(statusConfig.labelKey)}
-                variant={statusConfig.variant}
+                variant={isUserDeleted(user) ? 'neutral' : statusConfig.variant}
                 copyable={false}
               />
             </TooltipTrigger>
@@ -184,18 +189,18 @@ export function useUsersColumns(): ColumnDef<User>[] {
     {
       id: 'quota',
       accessorKey: 'quota',
-      header: t('Quota'),
+      header: `${t('Available Balance')} (${quotaUnit})`,
       cell: ({ row }) => {
         const user = row.original
-        return <UserQuotaCell used={user.used_quota} remaining={user.quota} />
+        return <UserQuotaCell remaining={user.quota} used={user.used_quota} />
       },
-      size: 300,
-      minSize: 260,
+      size: 180,
+      minSize: 160,
       meta: { mobileOrder: 40 },
     },
     {
       accessorKey: 'group',
-      header: t('Group'),
+      header: t('User Group'),
       cell: ({ row }) => {
         const group = row.getValue('group') as string
         return (
@@ -223,14 +228,7 @@ export function useUsersColumns(): ColumnDef<User>[] {
           return null
         }
 
-        return (
-          <div className='flex items-center gap-x-2'>
-            {roleConfig.icon && (
-              <roleConfig.icon size={16} className='text-muted-foreground' />
-            )}
-            <span className='text-sm'>{t(roleConfig.labelKey)}</span>
-          </div>
-        )
+        return <span className='text-sm'>{t(roleConfig.labelKey)}</span>
       },
       filterFn: (row, id, value) => {
         return value.includes(String(row.getValue(id)))
@@ -248,63 +246,25 @@ export function useUsersColumns(): ColumnDef<User>[] {
         const affHistoryQuota = user.aff_history_quota || 0
         const inviterId = user.inviter_id || 0
 
+        if (affCount === 0 && affHistoryQuota === 0 && inviterId === 0) {
+          return <span className='text-muted-foreground text-sm'>—</span>
+        }
+
         return (
-          <div className='flex max-w-full min-w-0 flex-wrap items-center gap-1 overflow-hidden'>
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <StatusBadge
-                    label={`${t('Invited')}: ${affCount}`}
-                    variant='neutral'
-                    copyable={false}
-                    className='cursor-help'
-                  />
-                }
-              />
-              <TooltipContent>
-                <p className='text-xs'>{t('Number of users invited')}</p>
-              </TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <StatusBadge
-                    label={`${t('Revenue')}: ${formatQuota(affHistoryQuota)}`}
-                    variant='neutral'
-                    copyable={false}
-                    className='cursor-help'
-                  />
-                }
-              />
-              <TooltipContent>
-                <p className='text-xs'>{t('Total invitation revenue')}</p>
-              </TooltipContent>
-            </Tooltip>
-            {inviterId > 0 && (
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <StatusBadge
-                      label={`${t('Inviter')}: ${inviterId}`}
-                      variant='neutral'
-                      copyable={false}
-                      className='cursor-help'
-                    />
-                  }
-                />
-                <TooltipContent>
-                  <p className='text-xs'>
-                    {t('Invited by user ID')} {inviterId}
-                  </p>
-                </TooltipContent>
-              </Tooltip>
+          <div className='min-w-0 space-y-1 text-xs'>
+            {(affCount > 0 || affHistoryQuota !== 0) && (
+              <LongText>
+                {t('Invited {{count}} users', { count: affCount })} ·{' '}
+                {t('Earnings')}:{' '}
+                <span className='tabular-nums'>
+                  {formatQuota(affHistoryQuota)}
+                </span>
+              </LongText>
             )}
-            {inviterId === 0 && (
-              <StatusBadge
-                label={t('No Inviter')}
-                variant='neutral'
-                copyable={false}
-              />
+            {inviterId > 0 && (
+              <LongText className='text-muted-foreground'>
+                {t('Inviter')} ID: {inviterId}
+              </LongText>
             )}
           </div>
         )
