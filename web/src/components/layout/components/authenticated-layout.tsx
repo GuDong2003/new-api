@@ -16,13 +16,18 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { useEffect, useRef } from 'react'
+
 import { AnimatedOutlet } from '@/components/page-transition'
 import { SkipToMain } from '@/components/skip-to-main'
 import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar'
 import { LayoutProvider } from '@/context/layout-provider'
 import { SearchProvider } from '@/context/search-provider'
+import { DrawingPersistence } from '@/features/playground/drawing/hooks/use-drawing-persistence'
+import { cancelImageGenerationJobs } from '@/features/playground/drawing/hooks/use-image-generation'
 import { getCookie } from '@/lib/cookies'
 import { cn } from '@/lib/utils'
+import { useAuthStore } from '@/stores/auth-store'
 
 import { AppHeader } from './app-header'
 import { AppSidebar } from './app-sidebar'
@@ -33,9 +38,27 @@ type AuthenticatedLayoutProps = {
 
 export function AuthenticatedLayout(props: AuthenticatedLayoutProps) {
   const defaultOpen = getCookie('sidebar_state') !== 'false'
+  const userId = useAuthStore((state) => state.auth.user?.id ?? null)
+  const sessionId = useAuthStore((state) => state.auth.session?.sid ?? null)
+  const previousIdentity = useRef<{
+    userId: number | null
+    sessionId: string | null
+  } | null>(null)
+
+  useEffect(() => {
+    const previous = previousIdentity.current
+    if (
+      previous &&
+      (previous.userId !== userId || previous.sessionId !== sessionId)
+    ) {
+      cancelImageGenerationJobs(previous.userId, previous.sessionId)
+    }
+    previousIdentity.current = { userId, sessionId }
+  }, [sessionId, userId])
 
   return (
     <LayoutProvider>
+      <DrawingPersistence userId={userId} />
       <SearchProvider>
         <SidebarProvider defaultOpen={defaultOpen} className='flex-col'>
           <SkipToMain />

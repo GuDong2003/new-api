@@ -6669,6 +6669,8 @@
     "Opaque": "Непрозрачный",
     "Transparent": "Прозрачный",
     "Vivid": "Яркий",
-    "Natural": "Естественный"
+    "Natural": "Естественный",
+    "Image generation failed.": "Не удалось создать изображение.",
+    "Unknown image generation error.": "Неизвестная ошибка генерации изображения."
   }
 }

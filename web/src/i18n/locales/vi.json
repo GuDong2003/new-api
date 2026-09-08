@@ -6669,6 +6669,8 @@
     "Opaque": "Đục",
     "Transparent": "Trong suốt",
     "Vivid": "Sống động",
-    "Natural": "Tự nhiên"
+    "Natural": "Tự nhiên",
+    "Image generation failed.": "Tạo ảnh thất bại.",
+    "Unknown image generation error.": "Lỗi tạo ảnh không xác định."
   }
 }

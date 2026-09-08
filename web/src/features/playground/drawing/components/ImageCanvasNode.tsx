@@ -180,7 +180,13 @@ export const ImageCanvasNode = memo(function ImageCanvasNode(
                   role='alert'
                   className='text-destructive max-w-full break-words'
                 >
-                  {t(props.data.error || 'Image generation failed.')}
+                  <span className='font-medium'>
+                    {t('Image generation failed.')}
+                  </span>
+                  {props.data.error &&
+                    props.data.error !== 'Image generation failed.' && (
+                      <span className='mt-1 block'>{t(props.data.error)}</span>
+                    )}
                 </p>
               )}
               {props.data.status === 'cancelled' && (

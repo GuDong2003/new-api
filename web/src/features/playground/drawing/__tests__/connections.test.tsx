@@ -25,6 +25,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { useDrawingStore } from '@/stores/drawing-store'
 
 import { DrawingWorkspace } from '../components/DrawingWorkspace'
+import { DrawingPersistence } from '../hooks/use-drawing-persistence'
 import { DEFAULT_IMAGE_SETTINGS } from '../lib/image-settings'
 import type { DrawingNode } from '../types'
 
@@ -45,6 +46,7 @@ async function renderReferenceCanvas(userId: number) {
   )
   render(
     <QueryClientProvider client={client}>
+      <DrawingPersistence userId={userId} />
       <ReactFlowProvider initialWidth={1000} initialHeight={600}>
         <DrawingWorkspace userId={userId} />
       </ReactFlowProvider>

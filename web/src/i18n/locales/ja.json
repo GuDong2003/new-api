@@ -6669,6 +6669,8 @@
     "Opaque": "不透明",
     "Transparent": "透明",
     "Vivid": "鮮やか",
-    "Natural": "自然"
+    "Natural": "自然",
+    "Image generation failed.": "画像の生成に失敗しました。",
+    "Unknown image generation error.": "不明な画像生成エラーです。"
   }
 }

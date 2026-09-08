@@ -16,11 +16,11 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useMutation } from '@tanstack/react-query'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useSyncExternalStore } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
+import { useAuthStore } from '@/stores/auth-store'
 import { useDrawingStore } from '@/stores/drawing-store'
 
 import { generateImages } from '../api'
@@ -35,155 +35,188 @@ type GenerationInput = {
   references: ImageAsset[]
   mask?: ImageAsset
   userId: number | null
+  sessionId: string | null
+}
+type Translate = (key: string) => string
+
+// Keep network jobs alive while authenticated routes are changing. The drawing
+// store owns the visible nodes; this module owns only the request lifecycle.
+const activeJobs = new Map<string, GenerationInput>()
+const jobListeners = new Set<() => void>()
+
+function subscribeToJobs(listener: () => void) {
+  jobListeners.add(listener)
+  return () => jobListeners.delete(listener)
+}
+
+function getPendingJobCount(userId: number | null, sessionId: string | null) {
+  let count = 0
+  for (const input of activeJobs.values()) {
+    if (input.userId === userId && input.sessionId === sessionId) count++
+  }
+  return count
+}
+
+function isCurrentJob(input: GenerationInput): boolean {
+  const currentUserId = useDrawingStore.getState().userId
+  const currentSessionId = useAuthStore.getState().auth.session?.sid ?? null
+  return currentUserId === input.userId && currentSessionId === input.sessionId
+}
+
+function notifyJobListeners() {
+  for (const listener of jobListeners) listener()
+}
+
+async function executeImageJob(
+  input: GenerationInput,
+  translate: Translate
+): Promise<void> {
+  try {
+    const result = await generateImages({
+      settings: input.settings,
+      references: input.references,
+      mask: input.mask,
+      signal: input.job.controller.signal,
+      onPartial: (image, index) => {
+        const state = useDrawingStore.getState()
+        const id = input.job.nodeIds[index]
+        if (
+          !isCurrentJob(input) ||
+          input.job.controller.signal.aborted ||
+          !id
+        ) {
+          return
+        }
+        const progress = state.nodes.find((node) => node.id === id)?.data
+          .progress
+        state.updateNodeData(
+          id,
+          {
+            progress: {
+              startedAt: progress?.startedAt ?? Date.now(),
+              phase: 'generating',
+              previewCount: (progress?.previewCount ?? 0) + 1,
+            },
+            asset: {
+              id,
+              src: image.src,
+              mimeType: image.mimeType,
+              name: input.settings.prompt.slice(0, 512),
+              width: 1024,
+              height: 1024,
+            },
+          },
+          input.job.id
+        )
+      },
+    })
+    const state = useDrawingStore.getState()
+    if (!isCurrentJob(input)) return
+    input.job.controller.signal.throwIfAborted()
+    for (const id of input.job.nodeIds) {
+      const progress = state.nodes.find((node) => node.id === id)?.data.progress
+      if (progress) {
+        state.updateNodeData(
+          id,
+          { progress: { ...progress, phase: 'decoding' } },
+          input.job.id
+        )
+      }
+    }
+    const assets = await Promise.allSettled(
+      result.images.map((image, index) =>
+        imageSourceToAsset(
+          image.src,
+          `${input.settings.model}-${index + 1}`,
+          image.mimeType,
+          input.job.controller.signal
+        )
+      )
+    )
+    if (!isCurrentJob(input)) return
+    input.job.controller.signal.throwIfAborted()
+    for (const [index, id] of input.job.nodeIds.entries()) {
+      const asset = assets[index]
+      if (!asset) {
+        useDrawingStore.getState().updateNodeData(
+          id,
+          {
+            status: 'error',
+            progress: undefined,
+            error: 'The server returned fewer images than requested.',
+          },
+          input.job.id
+        )
+        continue
+      }
+      if (asset.status === 'rejected') {
+        const error =
+          asset.reason instanceof Error
+            ? asset.reason.message.slice(0, 10000)
+            : 'The image could not be loaded.'
+        useDrawingStore
+          .getState()
+          .updateNodeData(
+            id,
+            { status: 'error', error, progress: undefined },
+            input.job.id
+          )
+        continue
+      }
+      useDrawingStore.getState().updateNodeData(
+        id,
+        {
+          asset: asset.value,
+          status: 'complete',
+          progress: undefined,
+          revisedPrompt: result.images[index].revisedPrompt?.slice(0, 64000),
+          usage: result.usage,
+        },
+        input.job.id
+      )
+    }
+  } catch (error) {
+    if (!isCurrentJob(input)) return
+    const cancelled = input.job.controller.signal.aborted
+    const message =
+      error instanceof Error
+        ? error.message.slice(0, 10000)
+        : 'Image generation failed.'
+    for (const id of input.job.nodeIds) {
+      useDrawingStore.getState().updateNodeData(
+        id,
+        {
+          status: cancelled ? 'cancelled' : 'error',
+          progress: undefined,
+          error: cancelled ? undefined : message,
+        },
+        input.job.id
+      )
+    }
+    if (!cancelled) toast.error(translate(message))
+  } finally {
+    activeJobs.delete(input.job.id)
+    notifyJobListeners()
+  }
+}
+
+function startImageJob(input: GenerationInput, translate: Translate) {
+  activeJobs.set(input.job.id, input)
+  notifyJobListeners()
+  void executeImageJob(input, translate)
 }
 
 export function useImageGeneration() {
   const { t } = useTranslation()
-  const jobs = useRef(new Map<string, ImageJob>())
-  const [pendingCount, setPendingCount] = useState(0)
-
-  const { mutate } = useMutation({
-    retry: false,
-    mutationFn: async (input: GenerationInput) => {
-      const result = await generateImages({
-        settings: input.settings,
-        references: input.references,
-        mask: input.mask,
-        signal: input.job.controller.signal,
-        onPartial: (image, index) => {
-          const state = useDrawingStore.getState()
-          const id = input.job.nodeIds[index]
-          if (
-            state.userId !== input.userId ||
-            input.job.controller.signal.aborted ||
-            !id
-          ) {
-            return
-          }
-          // A preview uses the target dimensions; final decoding resolves the actual size.
-          const progress = state.nodes.find((node) => node.id === id)?.data
-            .progress
-          state.updateNodeData(
-            id,
-            {
-              progress: {
-                startedAt: progress?.startedAt ?? Date.now(),
-                phase: 'generating',
-                previewCount: (progress?.previewCount ?? 0) + 1,
-              },
-              asset: {
-                id,
-                src: image.src,
-                mimeType: image.mimeType,
-                name: input.settings.prompt.slice(0, 512),
-                width: 1024,
-                height: 1024,
-              },
-            },
-            input.job.id
-          )
-        },
-      })
-      const state = useDrawingStore.getState()
-      if (state.userId !== input.userId) return
-      input.job.controller.signal.throwIfAborted()
-      for (const id of input.job.nodeIds) {
-        const progress = state.nodes.find((node) => node.id === id)?.data
-          .progress
-        if (progress) {
-          state.updateNodeData(
-            id,
-            { progress: { ...progress, phase: 'decoding' } },
-            input.job.id
-          )
-        }
-      }
-      const assets = await Promise.allSettled(
-        result.images.map((image, index) =>
-          imageSourceToAsset(
-            image.src,
-            `${input.settings.model}-${index + 1}`,
-            image.mimeType,
-            input.job.controller.signal
-          )
-        )
-      )
-      if (useDrawingStore.getState().userId !== input.userId) return
-      input.job.controller.signal.throwIfAborted()
-      for (const [index, id] of input.job.nodeIds.entries()) {
-        const asset = assets[index]
-        if (!asset) {
-          useDrawingStore.getState().updateNodeData(
-            id,
-            {
-              status: 'error',
-              progress: undefined,
-              error: 'The server returned fewer images than requested.',
-            },
-            input.job.id
-          )
-          continue
-        }
-        if (asset.status === 'rejected') {
-          const error =
-            asset.reason instanceof Error
-              ? asset.reason.message.slice(0, 10000)
-              : 'The image could not be loaded.'
-          useDrawingStore
-            .getState()
-            .updateNodeData(
-              id,
-              { status: 'error', error, progress: undefined },
-              input.job.id
-            )
-          continue
-        }
-        useDrawingStore.getState().updateNodeData(
-          id,
-          {
-            asset: asset.value,
-            status: 'complete',
-            progress: undefined,
-            revisedPrompt: result.images[index].revisedPrompt?.slice(0, 64000),
-            usage: result.usage,
-          },
-          input.job.id
-        )
-      }
-    },
-    onError: (error, input) => {
-      if (useDrawingStore.getState().userId !== input.userId) return
-      const cancelled = input.job.controller.signal.aborted
-      const message =
-        error instanceof Error
-          ? error.message.slice(0, 10000)
-          : 'Image generation failed.'
-      for (const id of input.job.nodeIds) {
-        useDrawingStore.getState().updateNodeData(
-          id,
-          {
-            status: cancelled ? 'cancelled' : 'error',
-            progress: undefined,
-            error: cancelled ? undefined : message,
-          },
-          input.job.id
-        )
-      }
-      if (!cancelled) toast.error(t(message))
-    },
-    onSettled: (_data, _error, input) => {
-      jobs.current.delete(input.job.id)
-      setPendingCount(jobs.current.size)
-    },
-  })
-
-  useEffect(() => {
-    const activeJobs = jobs.current
-    return () => {
-      for (const job of activeJobs.values()) job.controller.abort()
-      activeJobs.clear()
-    }
-  }, [])
+  const currentUserId = useDrawingStore((state) => state.userId)
+  const currentSessionId = useAuthStore(
+    (state) => state.auth.session?.sid ?? null
+  )
+  const pendingCount = useSyncExternalStore(
+    subscribeToJobs,
+    () => getPendingJobCount(currentUserId, currentSessionId),
+    () => getPendingJobCount(currentUserId, currentSessionId)
+  )
 
   const generate = (
     settings: ImageSettings,
@@ -261,11 +294,20 @@ export function useImageGeneration() {
           )
         : []
     state.addNodes(nodes, edges)
-    jobs.current.set(job.id, job)
-    setPendingCount(jobs.current.size)
-    mutate({ job, settings, references, mask, userId: state.userId })
+    startImageJob(
+      {
+        job,
+        settings,
+        references,
+        mask,
+        userId: state.userId,
+        sessionId: currentSessionId,
+      },
+      t
+    )
     return true
   }
+
   const retry = useCallback(
     (nodeId: string): boolean => {
       const state = useDrawingStore.getState()
@@ -318,23 +360,44 @@ export function useImageGeneration() {
         revisedPrompt: undefined,
         usage: undefined,
       })
-      jobs.current.set(job.id, job)
-      setPendingCount(jobs.current.size)
-      mutate({
-        job,
-        settings,
-        references,
-        mask: settings.mode === 'edit' ? node.data.mask : undefined,
-        userId: state.userId,
-      })
+      startImageJob(
+        {
+          job,
+          settings,
+          references,
+          mask: settings.mode === 'edit' ? node.data.mask : undefined,
+          userId: state.userId,
+          sessionId: currentSessionId,
+        },
+        t
+      )
       return true
     },
-    [mutate, t]
+    [currentSessionId, t]
   )
+
   const cancel = (jobId?: string) => {
-    for (const job of jobs.current.values()) {
-      if (!jobId || job.id === jobId) job.controller.abort()
+    for (const input of activeJobs.values()) {
+      if (
+        input.userId === currentUserId &&
+        input.sessionId === currentSessionId &&
+        (!jobId || input.job.id === jobId)
+      ) {
+        input.job.controller.abort()
+      }
     }
   }
+
   return { generate, retry, cancel, pendingCount }
+}
+
+export function cancelImageGenerationJobs(
+  userId: number | null,
+  sessionId: string | null
+) {
+  for (const input of activeJobs.values()) {
+    if (input.userId === userId && input.sessionId === sessionId) {
+      input.job.controller.abort()
+    }
+  }
 }

@@ -6669,6 +6669,8 @@
     "Opaque": "Opaque",
     "Transparent": "Transparent",
     "Vivid": "Vif",
-    "Natural": "Naturel"
+    "Natural": "Naturel",
+    "Image generation failed.": "Échec de la génération de l’image.",
+    "Unknown image generation error.": "Erreur inconnue lors de la génération."
   }
 }

@@ -18,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, renderHook, waitFor } from '@testing-library/react'
+import type { GenericAbortSignal } from 'axios'
 import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -25,7 +26,10 @@ import { api } from '@/lib/api'
 import { useDrawingStore } from '@/stores/drawing-store'
 
 import { DEFAULT_IMAGE_SETTINGS } from '../../lib/image-settings'
-import { useImageGeneration } from '../use-image-generation'
+import {
+  cancelImageGenerationJobs,
+  useImageGeneration,
+} from '../use-image-generation'
 
 const decoders: EventTarget[] = []
 beforeEach(() => {
@@ -133,6 +137,94 @@ describe('Image generation jobs', () => {
       phase: 'generating',
       previewCount: 0,
     })
+    act(() => hook.result.current.cancel())
+    hook.unmount()
+    client.clear()
+  })
+
+  it('continues a generation after the drawing page unmounts', async () => {
+    const client = new QueryClient()
+    const hook = renderHook(useImageGeneration, {
+      wrapper: (props: { children: ReactNode }) => (
+        <QueryClientProvider client={client}>
+          {props.children}
+        </QueryClientProvider>
+      ),
+    })
+
+    act(() =>
+      hook.result.current.generate(
+        {
+          ...DEFAULT_IMAGE_SETTINGS,
+          model: 'gpt-image-1',
+          prompt: 'A cup',
+        },
+        { x: 0, y: 0 }
+      )
+    )
+    const decoderIndex = decoders.length
+    await waitFor(() => expect(decoders.length).toBeGreaterThan(decoderIndex))
+    const imageId = useDrawingStore.getState().nodes[0].id
+
+    hook.unmount()
+    await act(async () => {
+      for (const decoder of decoders.slice(decoderIndex)) {
+        decoder.dispatchEvent(new Event('load'))
+      }
+    })
+
+    await waitFor(() =>
+      expect(useDrawingStore.getState().nodes[0].data.status).toBe('complete')
+    )
+    expect(useDrawingStore.getState().nodes[0].id).toBe(imageId)
+    client.clear()
+  })
+
+  it('does not expose or cancel a different user’s active generation', async () => {
+    const client = new QueryClient()
+    let signal: GenericAbortSignal | undefined
+    let rejectRequest: (reason?: unknown) => void = () => undefined
+    const request = new Promise<never>((_resolve, reject) => {
+      rejectRequest = reject
+    })
+    vi.mocked(api.post).mockImplementation((_url, _body, config) => {
+      signal = config?.signal
+      signal?.addEventListener?.(
+        'abort',
+        () => rejectRequest(new Error('cancelled')),
+        { once: true }
+      )
+      return request
+    })
+    const hook = renderHook(useImageGeneration, {
+      wrapper: (props: { children: ReactNode }) => (
+        <QueryClientProvider client={client}>
+          {props.children}
+        </QueryClientProvider>
+      ),
+    })
+    useDrawingStore.getState().initialize(813)
+    useDrawingStore.getState().hydrate(null)
+    act(() =>
+      hook.result.current.generate(
+        {
+          ...DEFAULT_IMAGE_SETTINGS,
+          model: 'gpt-image-1',
+          prompt: 'A cup',
+        },
+        { x: 0, y: 0 }
+      )
+    )
+    await waitFor(() => expect(signal).toBeDefined())
+
+    useDrawingStore.getState().initialize(814)
+    useDrawingStore.getState().hydrate(null)
+    await waitFor(() => expect(hook.result.current.pendingCount).toBe(0))
+    act(() => hook.result.current.cancel())
+    expect(signal?.aborted).toBe(false)
+
+    cancelImageGenerationJobs(813, null)
+    await waitFor(() => expect(signal?.aborted).toBe(true))
     hook.unmount()
     client.clear()
   })

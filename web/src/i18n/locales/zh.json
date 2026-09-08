@@ -6695,6 +6695,8 @@
     "Opaque": "不透明",
     "Transparent": "透明",
     "Vivid": "鲜艳",
-    "Natural": "自然"
+    "Natural": "自然",
+    "Image generation failed.": "图片生成失败。",
+    "Unknown image generation error.": "未知的图片生成错误。"
   }
 }

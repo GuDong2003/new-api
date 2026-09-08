@@ -24,6 +24,7 @@ import { describe, it, expect } from 'vitest'
 import { useDrawingStore } from '@/stores/drawing-store'
 
 import { DrawingWorkspace } from '../components/DrawingWorkspace'
+import { DrawingPersistence } from '../hooks/use-drawing-persistence'
 import { DEFAULT_IMAGE_SETTINGS } from '../lib/image-settings'
 
 function renderWorkspace(userId: number) {
@@ -40,6 +41,7 @@ function renderWorkspace(userId: number) {
   )
   const view = render(
     <QueryClientProvider client={client}>
+      <DrawingPersistence userId={userId} />
       <ReactFlowProvider>
         <DrawingWorkspace userId={userId} />
       </ReactFlowProvider>

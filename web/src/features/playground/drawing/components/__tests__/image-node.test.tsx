@@ -187,7 +187,7 @@ describe('Canvas image result', () => {
         </ReactFlowProvider>
       </QueryClientProvider>
     )
-    expect(screen.getByRole('alert').textContent).toBe(
+    expect(screen.getByRole('alert')).toHaveTextContent(
       'Image generation failed.'
     )
 
@@ -202,7 +202,7 @@ describe('Canvas image result', () => {
       rejectFirstRetry(new Error('Provider is unavailable'))
     )
     await waitFor(() =>
-      expect(screen.getByRole('alert').textContent).toBe(
+      expect(screen.getByRole('alert')).toHaveTextContent(
         'Provider is unavailable'
       )
     )
@@ -212,7 +212,7 @@ describe('Canvas image result', () => {
     expect(document.activeElement).toBe(retryButton)
     await user.keyboard('{Enter}')
     await waitFor(() =>
-      expect(screen.getByRole('alert').textContent).toBe(
+      expect(screen.getByRole('alert')).toHaveTextContent(
         'Provider is still unavailable'
       )
     )
@@ -225,6 +225,41 @@ describe('Canvas image result', () => {
     ])
     view.unmount()
     client.clear()
+  })
+
+  it('shows the failure heading together with the provider reason', () => {
+    useDrawingStore.getState().initialize(815)
+    useDrawingStore.getState().addNodes([
+      {
+        id: 'failed-image-with-reason',
+        type: 'image',
+        position: { x: 0, y: 0 },
+        data: {
+          prompt: 'A cup',
+          settings: {
+            ...DEFAULT_IMAGE_SETTINGS,
+            model: 'gpt-image-1',
+            prompt: 'A cup',
+          },
+          createdAt: 1,
+          status: 'error',
+          error: 'insufficient quota',
+        },
+      },
+    ])
+
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <ReactFlowProvider>
+          <RetryImageCard />
+        </ReactFlowProvider>
+      </QueryClientProvider>
+    )
+
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Image generation failed.'
+    )
+    expect(screen.getByRole('alert')).toHaveTextContent('insufficient quota')
   })
 
   it('shows the final image even if its earlier streaming preview failed to load', () => {

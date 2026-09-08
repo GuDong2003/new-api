@@ -64,7 +64,7 @@ import { useDrawingStore } from '@/stores/drawing-store'
 
 import { ImageRetryContext } from '../context/image-retry-context'
 import { useCanvasFiles } from '../hooks/use-canvas-files'
-import { useDrawingPersistence } from '../hooks/use-drawing-persistence'
+import { useDrawingPersistenceStatus } from '../hooks/use-drawing-persistence'
 import { useImageGeneration } from '../hooks/use-image-generation'
 import { useReferenceConnections } from '../hooks/use-reference-connections'
 import { imageFileToAsset } from '../lib/image-assets'
@@ -90,7 +90,7 @@ export function DrawingWorkspace(props: { userId: number }) {
   const { t } = useTranslation()
   const { resolvedTheme } = useTheme()
   const flow = useReactFlow<DrawingNode>()
-  const saveStatus = useDrawingPersistence(props.userId)
+  const saveStatus = useDrawingPersistenceStatus()
   const ready = useDrawingStore(
     (state) => state.ready && state.userId === props.userId
   )
