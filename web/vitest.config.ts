@@ -38,5 +38,10 @@ export default defineConfig({
     clearMocks: true,
     restoreMocks: true,
     include: ['src/**/*.{test,spec}.{ts,tsx}'],
+    // Drawer/table suites render enough to sit near the 5s default when the
+    // machine is loaded (CI runners, parallel files). A genuinely stuck test
+    // still fails, just later; a merely slow one stops being a coin flip.
+    testTimeout: 20000,
+    hookTimeout: 20000,
   },
 })
