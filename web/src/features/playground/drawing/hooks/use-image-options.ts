@@ -48,7 +48,9 @@ export function useImageOptions(userId: number) {
       .updateSettings({ group: groups.data[0].value, model: '' })
   }, [groups.data, group])
   useEffect(() => {
-    if (!models.data?.length || model) return
+    if (!models.isSuccess) return
+    const modelStillAvailable = models.data.some((item) => item.value === model)
+    if (modelStillAvailable) return
     const preferred = models.data.find((item) =>
       /gpt-image|dall-e|chatgpt-image/.test(item.value)
     )
@@ -57,7 +59,9 @@ export function useImageOptions(userId: number) {
       state.updateSettings(
         settingsForImageModel(state.settings, preferred.value)
       )
+    } else if (model) {
+      useDrawingStore.getState().updateSettings({ model: '' })
     }
-  }, [models.data, model])
+  }, [models.data, models.isSuccess, model])
   return { groups, models }
 }

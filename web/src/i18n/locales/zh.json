@@ -6739,6 +6739,7 @@
     "Sampler": "采样器",
     "Steps": "步数",
     "Width": "宽度",
-    "karras": "Karras"
+    "karras": "Karras",
+    "No image models are available in this group.": "此分组没有可用的图片模型。"
   }
 }

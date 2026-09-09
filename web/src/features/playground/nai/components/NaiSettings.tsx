@@ -21,12 +21,14 @@ import { useTranslation } from 'react-i18next'
 
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
+import { Combobox } from '@/components/ui/combobox'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { Separator } from '@/components/ui/separator'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
+import { filterNovelAIModels } from '@/lib/novelai-models'
 import { useNaiDrawingStore } from '@/stores/nai-drawing-store'
 
 import { getUserGroups, getUserModels } from '../../api'
@@ -66,7 +68,13 @@ export function NaiSettings(props: {
     queryFn: () => getUserModels(settings.group),
     enabled: Boolean(settings.group),
   })
-  const naiModels = useMemo(() => models.data || [], [models.data])
+  const naiModels = useMemo(
+    () =>
+      filterNovelAIModels(models.data?.map((model) => model.value) || []).map(
+        (model) => ({ label: model, value: model })
+      ),
+    [models.data]
+  )
 
   useEffect(() => {
     if (
@@ -79,9 +87,15 @@ export function NaiSettings(props: {
   }, [groups.data, settings.group, updateSettings])
 
   useEffect(() => {
-    if (settings.model || !naiModels.length) return
-    updateSettings({ model: naiModels[0].value })
-  }, [naiModels, settings.model, updateSettings])
+    if (!models.isSuccess) return
+    if (!naiModels.length) {
+      if (settings.model) updateSettings({ model: '' })
+      return
+    }
+    if (!naiModels.some((model) => model.value === settings.model)) {
+      updateSettings({ model: naiModels[0].value })
+    }
+  }, [models.isSuccess, naiModels, settings.model, updateSettings])
 
   const setNumber = (
     field: 'width' | 'height' | 'steps' | 'n',
@@ -139,19 +153,16 @@ export function NaiSettings(props: {
         </div>
         <div className='space-y-1.5'>
           <Label htmlFor='nai-model'>{t('Model')}</Label>
-          <Input
-            id='nai-model'
-            list='nai-models'
-            value={settings.model}
-            autoComplete='off'
+          <Combobox
+            options={naiModels}
+            value={settings.model || ''}
+            onValueChange={(value) => updateSettings({ model: value ?? '' })}
             placeholder={t('Select a NovelAI model.')}
-            onChange={(event) => updateSettings({ model: event.target.value })}
+            searchPlaceholder={t('Search models...')}
+            emptyText={t('No NovelAI models are available in this group.')}
+            className='w-full'
+            openOnFocus={false}
           />
-          <datalist id='nai-models'>
-            {naiModels.map((model) => (
-              <option key={model.value} value={model.value} />
-            ))}
-          </datalist>
           {!models.isPending && !naiModels.length && (
             <p className='text-muted-foreground text-xs'>
               {t('No NovelAI models are available in this group.')}

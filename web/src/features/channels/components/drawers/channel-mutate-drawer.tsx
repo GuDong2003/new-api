@@ -121,6 +121,7 @@ import {
   parseChannelConnectionInfo,
   type ChannelConnectionInfo,
 } from '@/lib/channel-connection-info'
+import { SUPPORTED_NOVELAI_MODELS } from '@/lib/novelai-models'
 import { ROLE } from '@/lib/roles'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/auth-store'
@@ -1531,6 +1532,9 @@ export function ChannelMutateDrawer({
       throw new Error(t("You don't have necessary permission"))
     }
     const type = form.getValues('type')
+    if (type === CHANNEL_TYPE_NOVELAI) {
+      return [...SUPPORTED_NOVELAI_MODELS]
+    }
     const editingAdvancedCustom =
       isEditing && type === CHANNEL_TYPE_ADVANCED_CUSTOM
     if (editingAdvancedCustom && channelId === null) {
@@ -2104,7 +2108,6 @@ export function ChannelMutateDrawer({
                                         )}
                                         emptyText={t('No channel type found.')}
                                         className='pl-10'
-                                        allowCustomValue
                                         openOnFocus={false}
                                       />
                                     </div>
@@ -5427,7 +5430,9 @@ export function ChannelMutateDrawer({
         redirectModels={redirectModelList}
         redirectSourceModels={redirectModelKeyList}
         customFetcher={
-          shouldPreviewUnsavedModels ? formPreviewFetcher : undefined
+          currentType === CHANNEL_TYPE_NOVELAI || shouldPreviewUnsavedModels
+            ? formPreviewFetcher
+            : undefined
         }
         channelName={
           shouldPreviewUnsavedModels ? currentName?.trim() : undefined

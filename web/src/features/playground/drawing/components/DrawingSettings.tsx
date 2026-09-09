@@ -25,7 +25,7 @@ import { useTranslation } from 'react-i18next'
 
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
+import { Combobox } from '@/components/ui/combobox'
 import { Label } from '@/components/ui/label'
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { Separator } from '@/components/ui/separator'
@@ -147,27 +147,24 @@ export function DrawingSettings(props: DrawingSettingsProps) {
           </div>
           <div className='space-y-1.5'>
             <Label htmlFor='drawing-model'>{t('Model')}</Label>
-            <Input
-              id='drawing-model'
-              list='drawing-models'
-              autoComplete='off'
+            <Combobox
+              options={models.data || []}
+              value={form.watch('model') || ''}
+              onValueChange={(model) => {
+                const selectedModel = model ?? ''
+                const next = settingsForImageModel(
+                  form.getValues(),
+                  selectedModel
+                )
+                form.reset(next)
+                updateSettings(next)
+              }}
               placeholder={t('Select an image model.')}
-              {...form.register('model', {
-                onChange: (event) => {
-                  const model = String(event.target.value)
-                  const next = settingsForImageModel(form.getValues(), model)
-                  form.setValue('quality', next.quality)
-                  form.setValue('size', next.size)
-                  form.setValue('n', next.n)
-                  form.setValue('mode', next.mode)
-                },
-              })}
+              searchPlaceholder={t('Search models...')}
+              emptyText={t('No image models are available in this group.')}
+              className='w-full'
+              openOnFocus={false}
             />
-            <datalist id='drawing-models'>
-              {models.data?.map((model) => (
-                <option key={model.value} value={model.value} />
-              ))}
-            </datalist>
             <p className='text-muted-foreground text-xs leading-relaxed'>
               {t('Choose an image model available in the selected group.')}
             </p>
