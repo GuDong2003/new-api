@@ -26,6 +26,7 @@ import { api } from '@/lib/api'
 import { useDrawingStore } from '@/stores/drawing-store'
 
 import { DEFAULT_IMAGE_SETTINGS } from '../../lib/image-settings'
+import type { DrawingNode } from '../../types'
 import {
   cancelImageGenerationJobs,
   useImageGeneration,
@@ -63,7 +64,131 @@ beforeEach(() => {
 })
 afterEach(() => vi.unstubAllGlobals())
 
+function generationReference(
+  id: string,
+  position: { x: number; y: number }
+): DrawingNode {
+  return {
+    id,
+    type: 'image',
+    position,
+    width: 280,
+    height: 330,
+    data: {
+      prompt: id,
+      settings: {
+        ...DEFAULT_IMAGE_SETTINGS,
+        model: 'gpt-image-1',
+        prompt: id,
+      },
+      status: 'complete',
+      createdAt: 1,
+      asset: {
+        id,
+        name: `${id}.png`,
+        src: 'data:image/png;base64,YWJj',
+        mimeType: 'image/png',
+        width: 512,
+        height: 512,
+      },
+    },
+  }
+}
+
 describe('Image generation jobs', () => {
+  it('places a generated image to the right of two selected references', async () => {
+    const referenceA = generationReference('reference-a', { x: 100, y: 100 })
+    const referenceB = generationReference('reference-b', { x: 100, y: 470 })
+    useDrawingStore.getState().addNodes([referenceA, referenceB])
+    useDrawingStore.getState().setReferences([referenceA.id, referenceB.id])
+
+    const client = new QueryClient()
+    const hook = renderHook(useImageGeneration, {
+      wrapper: (props: { children: ReactNode }) => (
+        <QueryClientProvider client={client}>
+          {props.children}
+        </QueryClientProvider>
+      ),
+    })
+
+    const decoderStart = decoders.length
+    act(() =>
+      hook.result.current.generate(
+        {
+          ...DEFAULT_IMAGE_SETTINGS,
+          model: 'gpt-image-1',
+          prompt: 'A combined image',
+          mode: 'edit',
+        },
+        { x: 20, y: 30 }
+      )
+    )
+
+    const generatedNode = useDrawingStore.getState().nodes.at(-1)
+    expect(generatedNode?.position).toEqual({
+      x: 420,
+      y: 285,
+    })
+    expect(generatedNode).toBeDefined()
+    expect(useDrawingStore.getState().edges).toHaveLength(2)
+    expect(
+      useDrawingStore
+        .getState()
+        .edges.every((edge) => edge.target === generatedNode?.id)
+    ).toBe(true)
+    await waitFor(() => expect(decoders.length).toBeGreaterThan(decoderStart))
+    await act(async () => {
+      for (const decoder of decoders.slice(decoderStart)) {
+        decoder.dispatchEvent(new Event('error'))
+      }
+    })
+    await waitFor(() => expect(hook.result.current.pendingCount).toBe(0))
+    hook.unmount()
+    client.clear()
+  })
+
+  it('keeps text-to-image batches at the requested anchor even when references are selected', async () => {
+    const reference = generationReference('reference-a', { x: 100, y: 100 })
+    useDrawingStore.getState().addNodes([reference])
+    useDrawingStore.getState().setReferences([reference.id])
+
+    const client = new QueryClient()
+    const hook = renderHook(useImageGeneration, {
+      wrapper: (props: { children: ReactNode }) => (
+        <QueryClientProvider client={client}>
+          {props.children}
+        </QueryClientProvider>
+      ),
+    })
+
+    const decoderStart = decoders.length
+    act(() =>
+      hook.result.current.generate(
+        {
+          ...DEFAULT_IMAGE_SETTINGS,
+          model: 'gpt-image-1',
+          prompt: 'A standalone image',
+          mode: 'generate',
+        },
+        { x: 700, y: 30 }
+      )
+    )
+
+    expect(useDrawingStore.getState().nodes.at(-1)?.position).toEqual({
+      x: 700,
+      y: 30,
+    })
+    await waitFor(() => expect(decoders.length).toBeGreaterThan(decoderStart))
+    await act(async () => {
+      for (const decoder of decoders.slice(decoderStart)) {
+        decoder.dispatchEvent(new Event('error'))
+      }
+    })
+    await waitFor(() => expect(hook.result.current.pendingCount).toBe(0))
+    hook.unmount()
+    client.clear()
+  })
+
   it('tracks streamed previews and decoding, then resets progress when retrying the failed attempt', async () => {
     const now = vi.spyOn(Date, 'now').mockReturnValue(100000)
     let stream: ReadableStreamDefaultController<Uint8Array>

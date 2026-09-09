@@ -177,6 +177,7 @@ describe('Retrying saved image generations', () => {
     await waitFor(() => expect(hook.result.current.pendingCount).toBe(0))
     expect(api.post).toHaveBeenCalledTimes(1)
     const originalResult = useDrawingStore.getState().nodes[1]
+    const originalPosition = originalResult.position
     expect(originalResult.data.status).toBe('error')
     const edges = useDrawingStore.getState().edges
     const alternate: DrawingNode = {
@@ -226,7 +227,7 @@ describe('Retrying saved image generations', () => {
     await waitFor(() => expect(hook.result.current.pendingCount).toBe(0))
     expect(useDrawingStore.getState().edges).toEqual(edges)
     expect(useDrawingStore.getState().nodes[1].position).toEqual(
-      failed.position
+      originalPosition
     )
     expect(useDrawingStore.getState().settings.prompt).toBe('Another scene')
     expect(useDrawingStore.getState().referenceIds).toEqual([alternate.id])

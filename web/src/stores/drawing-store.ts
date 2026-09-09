@@ -390,7 +390,7 @@ export const useDrawingStore = create<DrawingState>((set, get) => ({
   arrange: () => {
     get().checkpoint()
     set((state) => ({
-      nodes: arrangeImageNodes(state.nodes),
+      nodes: arrangeImageNodes(state.nodes, state.edges),
       revision: state.revision + 1,
     }))
   },

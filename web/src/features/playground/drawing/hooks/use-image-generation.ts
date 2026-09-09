@@ -24,6 +24,7 @@ import { useAuthStore } from '@/stores/auth-store'
 import { useDrawingStore } from '@/stores/drawing-store'
 
 import { generateImages } from '../api'
+import { positionGeneratedImageNodes } from '../lib/canvas-document'
 import { imageSourceToAsset } from '../lib/image-assets'
 import { validateImageSettings } from '../lib/image-settings'
 import type { DrawingNode, ImageAsset, ImageSettings } from '../types'
@@ -251,36 +252,34 @@ export function useImageGeneration() {
       controller: new AbortController(),
       nodeIds: [],
     }
-    const nodes: DrawingNode[] = Array.from(
-      { length: settings.n },
-      (_, index) => ({
-        id: crypto.randomUUID(),
-        type: 'image',
-        dragHandle: '.drawing-node-handle',
-        position: {
-          x: position.x + (index % 3) * 312,
-          y: position.y + Math.floor(index / 3) * 370,
+    const nodes: DrawingNode[] = Array.from({ length: settings.n }, () => ({
+      id: crypto.randomUUID(),
+      type: 'image',
+      dragHandle: '.drawing-node-handle',
+      position,
+      width: 280,
+      height: 330,
+      data: {
+        prompt: settings.prompt,
+        settings: { ...settings },
+        status: 'pending',
+        jobId: job.id,
+        createdAt: Date.now(),
+        progress: {
+          startedAt: Date.now(),
+          phase: 'generating',
+          previewCount: 0,
         },
-        width: 280,
-        height: 330,
-        data: {
-          prompt: settings.prompt,
-          settings: { ...settings },
-          status: 'pending',
-          jobId: job.id,
-          createdAt: Date.now(),
-          progress: {
-            startedAt: Date.now(),
-            phase: 'generating',
-            previewCount: 0,
-          },
-          referenceIds:
-            settings.mode === 'edit'
-              ? referenceNodes.map((node) => node.id)
-              : [],
-          mask: settings.mode === 'edit' ? mask : undefined,
-        },
-      })
+        referenceIds:
+          settings.mode === 'edit' ? referenceNodes.map((node) => node.id) : [],
+        mask: settings.mode === 'edit' ? mask : undefined,
+      },
+    }))
+    const positionedNodes = positionGeneratedImageNodes(
+      state.nodes,
+      nodes,
+      settings.mode === 'edit' ? referenceNodes : [],
+      position
     )
     job.nodeIds = nodes.map((node) => node.id)
     const edges =
@@ -293,7 +292,7 @@ export function useImageGeneration() {
             }))
           )
         : []
-    state.addNodes(nodes, edges)
+    state.addNodes(positionedNodes, edges)
     startImageJob(
       {
         job,

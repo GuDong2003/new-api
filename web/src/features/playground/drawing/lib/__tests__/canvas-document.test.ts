@@ -22,7 +22,9 @@ import { useDrawingStore } from '@/stores/drawing-store'
 
 import type { DrawingNode } from '../../types'
 import {
+  arrangeImageNodes,
   parseDrawingDocument,
+  positionGeneratedImageNodes,
   serializeDrawingDocument,
 } from '../canvas-document'
 import { loadDrawingDocument, saveDrawingDocument } from '../canvas-storage'
@@ -53,8 +55,309 @@ const image: DrawingNode = {
     },
   },
 }
+
+function canvasImage(
+  id: string,
+  position = { x: 0, y: 0 },
+  dimensions?: { width?: number; height?: number },
+  selected?: boolean
+): DrawingNode {
+  return {
+    ...image,
+    id,
+    position,
+    ...dimensions,
+    ...(selected === undefined ? {} : { selected }),
+  }
+}
+
 beforeEach(() => useDrawingStore.getState().initialize(802))
 describe('Canvas documents', () => {
+  it('arranges two reference images above one generated result', () => {
+    const referenceA = canvasImage('reference-a', { x: 900, y: 20 })
+    const referenceB = canvasImage('reference-b', { x: 120, y: 640 })
+    const result = canvasImage('generated-result', { x: -400, y: -300 })
+
+    const arranged = arrangeImageNodes(
+      [referenceA, referenceB, result],
+      [
+        {
+          id: 'reference-a-generated-result',
+          source: referenceA.id,
+          target: result.id,
+        },
+        {
+          id: 'reference-b-generated-result',
+          source: referenceB.id,
+          target: result.id,
+        },
+      ]
+    )
+
+    expect(arranged.map((node) => node.position)).toEqual([
+      { x: 0, y: 0 },
+      { x: 0, y: 370 },
+      { x: 320, y: 185 },
+    ])
+  })
+
+  it('places generated results to the right of references and centers them vertically', () => {
+    const referenceA = canvasImage('reference-a', { x: 100, y: 100 })
+    const referenceB = canvasImage('reference-b', { x: 100, y: 470 })
+    const generated = canvasImage('generated-result')
+
+    const positioned = positionGeneratedImageNodes(
+      [referenceA, referenceB],
+      [generated],
+      [referenceA, referenceB],
+      { x: 20, y: 30 }
+    )
+
+    expect(positioned[0].position).toEqual({ x: 420, y: 285 })
+  })
+
+  it('uses reference connections when arranging through the drawing store', () => {
+    const referenceA = canvasImage('reference-a', { x: 900, y: 20 })
+    const referenceB = canvasImage('reference-b', { x: 120, y: 640 })
+    const result = canvasImage('generated-result', { x: -400, y: -300 })
+    const store = useDrawingStore.getState()
+    const edges = [
+      {
+        id: 'reference-a-generated-result',
+        source: referenceA.id,
+        target: result.id,
+      },
+      {
+        id: 'reference-b-generated-result',
+        source: referenceB.id,
+        target: result.id,
+      },
+    ]
+    store.addNodes([referenceA, referenceB, result], edges)
+
+    store.arrange()
+
+    expect(useDrawingStore.getState().edges).toEqual(edges)
+    expect(
+      useDrawingStore.getState().nodes.map((node) => node.position)
+    ).toEqual([
+      { x: 0, y: 0 },
+      { x: 0, y: 370 },
+      { x: 320, y: 185 },
+    ])
+  })
+
+  it('uses an adaptive row for two generated results without references', () => {
+    const generatedA = canvasImage('generated-a')
+    const generatedB = canvasImage('generated-b')
+
+    const positioned = positionGeneratedImageNodes(
+      [],
+      [generatedA, generatedB],
+      [],
+      { x: 10, y: 20 }
+    )
+
+    expect(positioned.map((node) => node.position)).toEqual([
+      { x: 10, y: 20 },
+      { x: 330, y: 20 },
+    ])
+  })
+
+  it('keeps a one-to-two generation graph on separate adaptive layers', () => {
+    const source = canvasImage('source')
+    const generatedA = canvasImage('generated-a')
+    const generatedB = canvasImage('generated-b')
+
+    const arranged = arrangeImageNodes(
+      [source, generatedA, generatedB],
+      [
+        { id: 'source-generated-a', source: source.id, target: generatedA.id },
+        { id: 'source-generated-b', source: source.id, target: generatedB.id },
+      ]
+    )
+
+    expect(arranged.map((node) => node.position)).toEqual([
+      { x: 0, y: 0 },
+      { x: 320, y: 0 },
+      { x: 640, y: 0 },
+    ])
+  })
+
+  it('keeps a multi-step image chain flowing from left to right', () => {
+    const referenceA = canvasImage('reference-a')
+    const referenceB = canvasImage('reference-b')
+    const result = canvasImage('generated-result')
+    const refined = canvasImage('refined-result')
+
+    const arranged = arrangeImageNodes(
+      [referenceA, referenceB, result, refined],
+      [
+        { id: 'reference-a-result', source: referenceA.id, target: result.id },
+        { id: 'reference-b-result', source: referenceB.id, target: result.id },
+        { id: 'result-refined', source: result.id, target: refined.id },
+      ]
+    )
+
+    expect(arranged.map((node) => node.position)).toEqual([
+      { x: 0, y: 0 },
+      { x: 0, y: 370 },
+      { x: 320, y: 185 },
+      { x: 640, y: 185 },
+    ])
+  })
+
+  it('uses a compact grid for a larger generated batch', () => {
+    const generated = Array.from({ length: 4 }, (_, index) =>
+      canvasImage(`generated-${index}`)
+    )
+
+    const positioned = positionGeneratedImageNodes([], generated, [], {
+      x: 10,
+      y: 20,
+    })
+
+    expect(positioned.map((node) => node.position)).toEqual([
+      { x: 10, y: 20 },
+      { x: 330, y: 20 },
+      { x: 10, y: 390 },
+      { x: 330, y: 390 },
+    ])
+  })
+
+  it('moves a generated group past an occupied area instead of overlapping it', () => {
+    const reference = canvasImage('reference', { x: 100, y: 100 })
+    const occupied = canvasImage('occupied', { x: 420, y: 100 })
+    const generated = canvasImage('generated')
+
+    const positioned = positionGeneratedImageNodes(
+      [reference, occupied],
+      [generated],
+      [reference],
+      { x: 0, y: 0 }
+    )
+
+    expect(positioned[0].position).toEqual({ x: 740, y: 100 })
+  })
+
+  it('keeps moving a generated group until all occupied areas are clear', () => {
+    const reference = canvasImage('reference', { x: 100, y: 100 })
+    const occupiedA = canvasImage('occupied-a', { x: 420, y: 100 })
+    const occupiedB = canvasImage('occupied-b', { x: 740, y: 100 })
+    const generated = canvasImage('generated')
+
+    const positioned = positionGeneratedImageNodes(
+      [reference, occupiedA, occupiedB],
+      [generated],
+      [reference],
+      { x: 0, y: 0 }
+    )
+
+    expect(positioned[0].position).toEqual({ x: 1060, y: 100 })
+  })
+
+  it('uses actual node dimensions when centering a relationship layer', () => {
+    const referenceA = canvasImage(
+      'reference-a',
+      { x: 0, y: 0 },
+      {
+        width: 200,
+        height: 200,
+      }
+    )
+    const referenceB = canvasImage(
+      'reference-b',
+      { x: 0, y: 0 },
+      {
+        width: 300,
+        height: 400,
+      }
+    )
+    const result = canvasImage(
+      'generated-result',
+      { x: 0, y: 0 },
+      {
+        width: 250,
+        height: 100,
+      }
+    )
+
+    const arranged = arrangeImageNodes(
+      [referenceA, referenceB, result],
+      [
+        {
+          id: 'reference-a-generated-result',
+          source: referenceA.id,
+          target: result.id,
+        },
+        {
+          id: 'reference-b-generated-result',
+          source: referenceB.id,
+          target: result.id,
+        },
+      ]
+    )
+
+    expect(arranged.map((node) => node.position)).toEqual([
+      { x: 0, y: 0 },
+      { x: 0, y: 240 },
+      { x: 340, y: 270 },
+    ])
+  })
+
+  it('packs disconnected images into an adaptive grid', () => {
+    const arranged = arrangeImageNodes([
+      canvasImage('image-a'),
+      canvasImage('image-b'),
+      canvasImage('image-c'),
+    ])
+
+    expect(arranged.map((node) => node.position)).toEqual([
+      { x: 0, y: 0 },
+      { x: 376, y: 0 },
+      { x: 0, y: 426 },
+    ])
+  })
+
+  it('keeps unrelated nodes in place when arranging a selected connection group', () => {
+    const referenceA = canvasImage('reference-a', { x: 500, y: 200 })
+    const referenceB = canvasImage('reference-b', { x: 500, y: 570 })
+    const result = canvasImage(
+      'generated-result',
+      { x: 820, y: 385 },
+      undefined,
+      true
+    )
+    const unrelated = canvasImage('unrelated', { x: 1400, y: 900 })
+
+    const arranged = arrangeImageNodes(
+      [referenceA, referenceB, result, unrelated],
+      [
+        {
+          id: 'reference-a-generated-result',
+          source: referenceA.id,
+          target: result.id,
+        },
+        {
+          id: 'reference-b-generated-result',
+          source: referenceB.id,
+          target: result.id,
+        },
+      ]
+    )
+
+    expect(arranged.find((node) => node.id === unrelated.id)?.position).toEqual(
+      unrelated.position
+    )
+    const arrangedA = arranged.find((node) => node.id === referenceA.id)
+    const arrangedB = arranged.find((node) => node.id === referenceB.id)
+    const arrangedResult = arranged.find((node) => node.id === result.id)
+    expect(arrangedA?.position.x).toBe(arrangedB?.position.x)
+    expect(arrangedResult?.position.x).toBeGreaterThan(
+      arrangedA?.position.x ?? 0
+    )
+  })
+
   it('persists the canvas store as data and restores images only for their owner', async () => {
     useDrawingStore.getState().addNodes([image])
     await saveDrawingDocument(802, useDrawingStore.getState())
