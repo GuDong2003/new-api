@@ -17,11 +17,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useQuery } from '@tanstack/react-query'
-import { useEffect } from 'react'
+import { useEffect, useMemo } from 'react'
 
 import { useDrawingStore } from '@/stores/drawing-store'
 
 import { getUserGroups, getUserModels } from '../../api'
+import { filterImageModels } from '../lib/image-models'
 import { settingsForImageModel } from '../lib/image-settings'
 
 export function useImageOptions(userId: number) {
@@ -36,6 +37,10 @@ export function useImageOptions(userId: number) {
     queryFn: () => getUserModels(group),
     enabled: Boolean(group),
   })
+  const imageModels = useMemo(
+    () => filterImageModels(models.data || []),
+    [models.data]
+  )
   useEffect(() => {
     if (
       !groups.data?.length ||
@@ -49,11 +54,12 @@ export function useImageOptions(userId: number) {
   }, [groups.data, group])
   useEffect(() => {
     if (!models.isSuccess) return
-    const modelStillAvailable = models.data.some((item) => item.value === model)
+    const modelStillAvailable = imageModels.some((item) => item.value === model)
     if (modelStillAvailable) return
-    const preferred = models.data.find((item) =>
-      /gpt-image|dall-e|chatgpt-image/.test(item.value)
-    )
+    const preferred =
+      imageModels.find((item) =>
+        /gpt-image|dall-e|chatgpt-image/.test(item.value)
+      ) || imageModels[0]
     if (preferred) {
       const state = useDrawingStore.getState()
       state.updateSettings(
@@ -62,6 +68,6 @@ export function useImageOptions(userId: number) {
     } else if (model) {
       useDrawingStore.getState().updateSettings({ model: '' })
     }
-  }, [models.data, models.isSuccess, model])
-  return { groups, models }
+  }, [imageModels, models.isSuccess, model])
+  return { groups, models, imageModels }
 }

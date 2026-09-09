@@ -81,4 +81,47 @@ describe('Drawing settings and persistence', () => {
     hook.unmount()
     client.clear()
   })
+
+  it('exposes only supported image models and replaces a text model selection', async () => {
+    useDrawingStore.getState().initialize(813)
+    useDrawingStore.getState().hydrate(null)
+    useDrawingStore.getState().updateSettings({
+      model: 'gpt-5.6',
+      prompt: 'A cup',
+    })
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: Infinity } },
+    })
+    client.setQueryData(
+      ['drawing-groups', 813],
+      [{ value: 'default', label: 'default', ratio: 1 }]
+    )
+    client.setQueryData(
+      ['drawing-models', 813, 'default'],
+      [
+        { value: 'gpt-5.6', label: 'gpt-5.6' },
+        { value: 'imagen-4.0-generate-001', label: 'Imagen 4' },
+        { value: 'nai-diffusion-4-5-full', label: 'NAI' },
+      ]
+    )
+    const hook = renderHook(() => useImageOptions(813), {
+      wrapper: (props: { children: ReactNode }) => (
+        <QueryClientProvider client={client}>
+          {props.children}
+        </QueryClientProvider>
+      ),
+    })
+    await waitFor(() =>
+      expect(
+        hook.result.current.imageModels.map((model) => model.value)
+      ).toEqual(['imagen-4.0-generate-001'])
+    )
+    await waitFor(() =>
+      expect(useDrawingStore.getState().settings.model).toBe(
+        'imagen-4.0-generate-001'
+      )
+    )
+    hook.unmount()
+    client.clear()
+  })
 })

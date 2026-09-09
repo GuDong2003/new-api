@@ -60,7 +60,7 @@ export function DrawingSettings(props: DrawingSettingsProps) {
   const settings = useDrawingStore((state) => state.settings)
   const references = useDrawingStore((state) => state.referenceIds)
   const updateSettings = useDrawingStore((state) => state.updateSettings)
-  const { groups, models } = useImageOptions(props.userId)
+  const { groups, models, imageModels } = useImageOptions(props.userId)
   const form = useForm({
     defaultValues: settings,
     resolver: zodResolver(imageSettingsSchema),
@@ -116,7 +116,11 @@ export function DrawingSettings(props: DrawingSettingsProps) {
                 </NativeSelectOption>
                 <NativeSelectOption
                   value='edit'
-                  disabled={family === 'dall-e-3'}
+                  disabled={
+                    family === 'dall-e-3' ||
+                    family === 'imagen' ||
+                    family === 'seedream'
+                  }
                 >
                   {t('Image editing')}
                 </NativeSelectOption>
@@ -148,7 +152,7 @@ export function DrawingSettings(props: DrawingSettingsProps) {
           <div className='space-y-1.5'>
             <Label htmlFor='drawing-model'>{t('Model')}</Label>
             <Combobox
-              options={models.data || []}
+              options={imageModels}
               value={form.watch('model') || ''}
               onValueChange={(model) => {
                 const selectedModel = model ?? ''

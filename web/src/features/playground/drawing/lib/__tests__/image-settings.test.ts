@@ -21,6 +21,10 @@ import { describe, it, expect } from 'vitest'
 import {
   DEFAULT_IMAGE_SETTINGS,
   buildImagePayload,
+  getImageModelFamily,
+  getImageQualities,
+  getImageSizes,
+  settingsForImageModel,
   validateImageSettings,
 } from '../image-settings'
 
@@ -123,5 +127,27 @@ describe('OpenAI image parameters', () => {
     expect(
       validateImageSettings({ ...settings, size: '99999x99999' }, 0)
     ).not.toBeNull()
+  })
+
+  it('uses provider-specific image families and safe defaults', () => {
+    expect(getImageModelFamily('imagen-4.0-generate-001')).toBe('imagen')
+    expect(getImageModelFamily('black-forest-labs/flux-1.1-pro')).toBe('flux')
+    expect(getImageModelFamily('doubao-seedream-4-0-250828')).toBe('seedream')
+    expect(getImageSizes('imagen-4.0-generate-001')).toContain('1536x1024')
+    expect(getImageQualities('imagen-4.0-generate-001')).toEqual([
+      'standard',
+      'hd',
+    ])
+
+    const next = settingsForImageModel(
+      { ...settings, quality: 'auto', mode: 'edit' },
+      'imagen-4.0-generate-001'
+    )
+    expect(next.quality).toBe('standard')
+    expect(next.mode).toBe('generate')
+    expect(buildImagePayload(next)).not.toHaveProperty('background')
+    expect(validateImageSettings({ ...next, mode: 'edit' }, 1)).toBe(
+      'This image model does not support image editing.'
+    )
   })
 })

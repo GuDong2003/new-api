@@ -18,6 +18,20 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { z } from 'zod'
 
+import {
+  getImageModelFamily as classifyImageModelFamily,
+  type ImageModelFamily,
+} from './image-models'
+
+export type { ImageModelFamily } from './image-models'
+
+// Keep the historical GPT-compatible fallback for saved documents that were
+// created before the drawing model filter existed. New model selection uses
+// filterImageModels, so unsupported names never enter the selector.
+export function getImageModelFamily(model: string): ImageModelFamily {
+  return classifyImageModelFamily(model) ?? 'gpt-image'
+}
+
 export const imageSettingsSchema = z.object({
   mode: z.enum(['generate', 'edit']).default('generate'),
   group: z.string().trim().default('default'),
@@ -56,18 +70,16 @@ export function normalizeStoredImageSettings(
   return imageSettingsSchema.parse(normalized)
 }
 
-export function getImageModelFamily(
-  model: string
-): 'dall-e-2' | 'dall-e-3' | 'gpt-image' {
-  if (model === 'dall-e-2' || model === 'dall-e') return 'dall-e-2'
-  if (model === 'dall-e-3') return 'dall-e-3'
-  return 'gpt-image'
-}
-
 export function getImageSizes(model: string): string[] {
   const family = getImageModelFamily(model)
   if (family === 'dall-e-2') return ['256x256', '512x512', '1024x1024']
   if (family === 'dall-e-3') return ['1024x1024', '1792x1024', '1024x1792']
+  if (family === 'imagen') {
+    return ['1024x1024', '1536x1024', '1024x1536', '1792x1024', '1024x1792']
+  }
+  if (family === 'flux' || family === 'seedream') {
+    return ['1024x1024', '1536x1024', '1024x1536', '1792x1024', '1024x1792']
+  }
   return ['auto', '1024x1024', '1536x1024', '1024x1536']
 }
 
@@ -75,6 +87,8 @@ export function getImageQualities(model: string): string[] {
   const family = getImageModelFamily(model)
   if (family === 'dall-e-2') return ['standard']
   if (family === 'dall-e-3') return ['standard', 'hd']
+  if (family === 'imagen' || family === 'flux') return ['standard', 'hd']
+  if (family === 'seedream') return ['standard']
   return ['auto', 'low', 'medium', 'high']
 }
 
@@ -95,7 +109,7 @@ export function settingsForImageModel(
   ) {
     next.size = '1024x1024'
   }
-  if (family === 'dall-e-3') {
+  if (family === 'dall-e-3' || family === 'imagen' || family === 'seedream') {
     next.n = 1
     next.mode = 'generate'
   }
@@ -119,6 +133,9 @@ export function validateImageSettings(
   }
   if (settings.mode === 'edit') {
     if (family === 'dall-e-3') return 'DALL·E 3 does not support image editing.'
+    if (family === 'imagen' || family === 'seedream') {
+      return 'This image model does not support image editing.'
+    }
     if (referenceCount === 0) return 'Add a reference image before editing.'
     if (
       referenceCount > 16 ||
