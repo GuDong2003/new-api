@@ -28,13 +28,13 @@ func TestAdaptorBuildsNovelAIRequest(t *testing.T) {
 	info := &relaycommon.RelayInfo{
 		ChannelMeta: &relaycommon.ChannelMeta{
 			ChannelType:       constant.ChannelTypeNovelAI,
-			ChannelBaseUrl:    "https://nai.rinko.ai/native",
+			ChannelBaseUrl:    "https://example.invalid/native",
 			ApiKey:            "pst-test-token",
 			UpstreamModelName: "nai-diffusion-4-5-full",
 		},
 		RelayMode: relayconstant.RelayModeImagesGenerations,
 	}
-	require.Equal(t, "https://nai.rinko.ai/native/ai/generate-image", mustRequestURL(t, adaptor, info))
+	require.Equal(t, "https://example.invalid/native/ai/generate-image", mustRequestURL(t, adaptor, info))
 
 	request := &dto.ImageRequest{
 		Model:  "nai-diffusion-4-5-full",
@@ -66,6 +66,17 @@ func TestAdaptorBuildsNovelAIRequest(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, string(requestJSON), `"action":"generate"`)
 	assert.Contains(t, string(requestJSON), `"input":"a white fox"`)
+}
+
+func TestAdaptorRequiresExplicitBaseURL(t *testing.T) {
+	info := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType: constant.ChannelTypeNovelAI,
+		},
+	}
+	_, err := (&Adaptor{}).GetRequestURL(info)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "base URL is required")
 }
 
 func TestAdaptorConvertsNovelAIZipToImageResponse(t *testing.T) {

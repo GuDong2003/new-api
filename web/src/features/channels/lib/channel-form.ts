@@ -26,6 +26,7 @@ import {
   CHANNEL_TYPE_CODEX_LEGACY,
   CHANNEL_TYPE_CODEX,
   CHANNEL_TYPE_NEW_API,
+  CHANNEL_TYPE_NOVELAI,
   CHANNEL_TYPE_OPENAI,
   CHANNEL_TYPE_TASK_PLUGIN,
   CHANNEL_STATUS,
@@ -463,6 +464,7 @@ export const channelFormSchema = z
         CHANNEL_TYPE_CLAUDE_CODE,
         CHANNEL_TYPE_CODE_BUDDY,
         CHANNEL_TYPE_TASK_PLUGIN,
+        CHANNEL_TYPE_NOVELAI,
       ].includes(data.type) &&
       !data.base_url?.trim()
     ) {

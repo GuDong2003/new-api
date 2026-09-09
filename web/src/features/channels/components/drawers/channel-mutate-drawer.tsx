@@ -143,6 +143,7 @@ import {
   CHANNEL_TYPE_CLAUDE_CODE,
   CHANNEL_TYPE_CODE_BUDDY,
   CHANNEL_TYPE_CODEX,
+  CHANNEL_TYPE_NOVELAI,
   CHANNEL_STATUS_LABELS,
   CHANNEL_TYPE_OPTIONS,
   CHANNEL_TYPE_TASK_PLUGIN,
@@ -1045,6 +1046,7 @@ export function ChannelMutateDrawer({
     CHANNEL_TYPE_CODEX,
     CHANNEL_TYPE_CLAUDE_CODE,
     CHANNEL_TYPE_CODE_BUDDY,
+    CHANNEL_TYPE_NOVELAI,
   ].includes(currentType)
   const providerRequiresOther = [3, 18, 21, 39, 41, 49].includes(currentType)
   const identityComplete = Boolean(currentName?.trim() && currentType > 0)

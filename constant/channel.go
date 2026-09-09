@@ -133,7 +133,7 @@ var ChannelBaseURLs = []string{
 	"",                                          //62
 	"",                                          //63
 	"",                                          //64
-	"https://image.novelai.net",                 //65
+	"",                                          //65
 }
 
 func GetChannelBaseURL(channelType int) string {

@@ -16,7 +16,6 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
-	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/relay/channel"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
@@ -58,9 +57,6 @@ func (a *Adaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {
 		return "", errors.New("novelai adaptor: relay info is nil")
 	}
 	baseURL := strings.TrimRight(info.ChannelBaseUrl, "/")
-	if baseURL == "" {
-		baseURL = constant.GetChannelBaseURL(constant.ChannelTypeNovelAI)
-	}
 	if baseURL == "" {
 		return "", errors.New("novelai adaptor: base URL is required")
 	}
