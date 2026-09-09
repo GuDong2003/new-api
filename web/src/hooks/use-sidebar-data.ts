@@ -75,6 +75,11 @@ export function useSidebarData(): SidebarData {
                 url: '/playground/drawing',
                 icon: Image,
               },
+              {
+                title: t('NAI Canvas'),
+                url: '/playground/nai',
+                icon: Image,
+              },
             ],
           },
           {

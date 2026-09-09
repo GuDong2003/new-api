@@ -156,7 +156,7 @@ func TestCodeBuddyChannelUsesOpenAIChatCompletions(t *testing.T) {
 
 	require.True(t, ok)
 	assert.Equal(t, 63, constant.ChannelTypeCodeBuddy)
-	assert.Equal(t, constant.ChannelTypeCodeBuddy+1, constant.ChannelTypeDummy)
+	assert.Equal(t, constant.ChannelTypeNovelAI+1, constant.ChannelTypeDummy)
 	assert.Equal(t, "CodeBuddy", constant.GetChannelTypeName(constant.ChannelTypeCodeBuddy))
 	assert.Equal(t, constant.APITypeOpenAI, apiType)
 	require.IsType(t, &openai.Adaptor{}, relay.GetAdaptor(apiType))

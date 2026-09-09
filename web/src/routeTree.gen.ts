@@ -47,6 +47,7 @@ import { Route as AuthenticatedModelsSectionRouteImport } from './routes/_authen
 import { Route as AuthenticatedPlaygroundIndexRouteImport } from './routes/_authenticated/playground/index'
 import { Route as AuthenticatedPlaygroundChatRouteImport } from './routes/_authenticated/playground/chat'
 import { Route as AuthenticatedPlaygroundDrawingRouteImport } from './routes/_authenticated/playground/drawing'
+import { Route as AuthenticatedPlaygroundNaiRouteImport } from './routes/_authenticated/playground/nai'
 import { Route as AuthenticatedProfileIndexRouteImport } from './routes/_authenticated/profile/index'
 import { Route as AuthenticatedQueueIndexRouteImport } from './routes/_authenticated/queue/index'
 import { Route as AuthenticatedRedemptionCodesIndexRouteImport } from './routes/_authenticated/redemption-codes/index'
@@ -277,6 +278,12 @@ const AuthenticatedPlaygroundDrawingRoute =
     path: '/drawing',
     getParentRoute: () => AuthenticatedPlaygroundRouteRoute,
   } as any)
+const AuthenticatedPlaygroundNaiRoute =
+  AuthenticatedPlaygroundNaiRouteImport.update({
+    id: '/nai',
+    path: '/nai',
+    getParentRoute: () => AuthenticatedPlaygroundRouteRoute,
+  } as any)
 const AuthenticatedProfileIndexRoute =
   AuthenticatedProfileIndexRouteImport.update({
     id: '/profile/',
@@ -480,6 +487,7 @@ export interface FileRoutesByFullPath {
   '/models/$section': typeof AuthenticatedModelsSectionRoute
   '/playground/chat': typeof AuthenticatedPlaygroundChatRoute
   '/playground/drawing': typeof AuthenticatedPlaygroundDrawingRoute
+  '/playground/nai': typeof AuthenticatedPlaygroundNaiRoute
   '/usage-logs/$section': typeof AuthenticatedUsageLogsSectionRoute
   '/usage-logs/audit': typeof AuthenticatedUsageLogsAuditRoute
   '/channels/': typeof AuthenticatedChannelsIndexRoute
@@ -545,6 +553,7 @@ export interface FileRoutesByTo {
   '/models/$section': typeof AuthenticatedModelsSectionRoute
   '/playground/chat': typeof AuthenticatedPlaygroundChatRoute
   '/playground/drawing': typeof AuthenticatedPlaygroundDrawingRoute
+  '/playground/nai': typeof AuthenticatedPlaygroundNaiRoute
   '/usage-logs/$section': typeof AuthenticatedUsageLogsSectionRoute
   '/usage-logs/audit': typeof AuthenticatedUsageLogsAuditRoute
   '/channels': typeof AuthenticatedChannelsIndexRoute
@@ -615,6 +624,7 @@ export interface FileRoutesById {
   '/_authenticated/models/$section': typeof AuthenticatedModelsSectionRoute
   '/_authenticated/playground/chat': typeof AuthenticatedPlaygroundChatRoute
   '/_authenticated/playground/drawing': typeof AuthenticatedPlaygroundDrawingRoute
+  '/_authenticated/playground/nai': typeof AuthenticatedPlaygroundNaiRoute
   '/_authenticated/usage-logs/$section': typeof AuthenticatedUsageLogsSectionRoute
   '/_authenticated/usage-logs/audit': typeof AuthenticatedUsageLogsAuditRoute
   '/_authenticated/channels/': typeof AuthenticatedChannelsIndexRoute
@@ -684,6 +694,7 @@ export interface FileRouteTypes {
     | '/models/$section'
     | '/playground/chat'
     | '/playground/drawing'
+    | '/playground/nai'
     | '/usage-logs/$section'
     | '/usage-logs/audit'
     | '/channels/'
@@ -749,6 +760,7 @@ export interface FileRouteTypes {
     | '/models/$section'
     | '/playground/chat'
     | '/playground/drawing'
+    | '/playground/nai'
     | '/usage-logs/$section'
     | '/usage-logs/audit'
     | '/channels'
@@ -818,6 +830,7 @@ export interface FileRouteTypes {
     | '/_authenticated/models/$section'
     | '/_authenticated/playground/chat'
     | '/_authenticated/playground/drawing'
+    | '/_authenticated/playground/nai'
     | '/_authenticated/usage-logs/$section'
     | '/_authenticated/usage-logs/audit'
     | '/_authenticated/channels/'
@@ -1142,6 +1155,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedPlaygroundDrawingRouteImport
       parentRoute: typeof AuthenticatedPlaygroundRouteRoute
     }
+    '/_authenticated/playground/nai': {
+      id: '/_authenticated/playground/nai'
+      path: '/nai'
+      fullPath: '/playground/nai'
+      preLoaderRoute: typeof AuthenticatedPlaygroundNaiRouteImport
+      parentRoute: typeof AuthenticatedPlaygroundRouteRoute
+    }
     '/_authenticated/profile/': {
       id: '/_authenticated/profile/'
       path: '/profile'
@@ -1377,6 +1397,7 @@ const authRouteRouteWithChildren = authRouteRoute._addFileChildren(
 interface AuthenticatedPlaygroundRouteRouteChildren {
   AuthenticatedPlaygroundChatRoute: typeof AuthenticatedPlaygroundChatRoute
   AuthenticatedPlaygroundDrawingRoute: typeof AuthenticatedPlaygroundDrawingRoute
+  AuthenticatedPlaygroundNaiRoute: typeof AuthenticatedPlaygroundNaiRoute
   AuthenticatedPlaygroundIndexRoute: typeof AuthenticatedPlaygroundIndexRoute
 }
 
@@ -1384,6 +1405,7 @@ const AuthenticatedPlaygroundRouteRouteChildren: AuthenticatedPlaygroundRouteRou
   {
     AuthenticatedPlaygroundChatRoute: AuthenticatedPlaygroundChatRoute,
     AuthenticatedPlaygroundDrawingRoute: AuthenticatedPlaygroundDrawingRoute,
+    AuthenticatedPlaygroundNaiRoute: AuthenticatedPlaygroundNaiRoute,
     AuthenticatedPlaygroundIndexRoute: AuthenticatedPlaygroundIndexRoute,
   }
 

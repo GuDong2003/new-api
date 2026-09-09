@@ -786,6 +786,7 @@ export const STATIC_I18N_KEYS = [
   'Vendors',
   'Vendor management',
   'Vendor name and icon must not exceed 128 characters.',
+  'NovelAI',
   'Shown',
   'Not shown',
   // Channel test capability probes: reasons and status labels are looked up

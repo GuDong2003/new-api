@@ -204,6 +204,22 @@ export const CHANNEL_TYPE_CONFIGS: Record<number, ChannelTypeConfig> = {
       models: 'Models declared by the task plugin',
     },
   },
+  65: {
+    id: 65,
+    name: CHANNEL_TYPES[65],
+    icon: 'NovelAI',
+    defaultBaseUrl: 'https://image.novelai.net',
+    hints: {
+      baseUrl: 'NovelAI 原生 API 地址，例如 https://nai.rinko.ai/native',
+      key: 'NovelAI Persistent Token（pst-...）或 Access Token',
+      models:
+        'nai-diffusion-4-5-full,nai-diffusion-4-5-curated,nai-diffusion-4-full',
+      other: '此渠道使用 NovelAI 原生图片接口，仅支持图像生成。',
+    },
+    validation: {
+      keyMinLength: 10,
+    },
+  },
 }
 
 /**

@@ -97,6 +97,7 @@ func AppendRelayLogAdminInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo,
 func GenerateTextOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, modelRatio, groupRatio, completionRatio float64,
 	cacheTokens int, cacheRatio float64, modelPrice float64, userGroupRatio float64) *model.LogOther {
 	other := model.NewLogOther()
+	appendImageGenerationLogInfo(relayInfo, other)
 	other.SetPublic("model_ratio", modelRatio)
 	other.SetPublic("group_ratio", groupRatio)
 	other.SetPublic("completion_ratio", completionRatio)
@@ -126,6 +127,49 @@ func GenerateTextOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, m
 	appendParamOverrideInfo(relayInfo, other)
 	appendStreamStatus(relayInfo, other)
 	return other
+}
+
+func appendImageGenerationLogInfo(relayInfo *relaycommon.RelayInfo, other *model.LogOther) {
+	if relayInfo == nil || other == nil || relayInfo.RelayFormat != types.RelayFormatOpenAIImage {
+		return
+	}
+	engine := "openai"
+	if relayInfo.ChannelType == constant.ChannelTypeNovelAI {
+		engine = "nai"
+	}
+	other.SetPublic("generation_engine", engine)
+	if engine != "nai" {
+		return
+	}
+	request, ok := relayInfo.Request.(*dto.ImageRequest)
+	if !ok || request == nil {
+		return
+	}
+	raw, ok := request.Extra["nai"]
+	if !ok {
+		return
+	}
+	var native struct {
+		Parameters map[string]any `json:"parameters"`
+	}
+	if err := common.Unmarshal(raw, &native); err != nil || len(native.Parameters) == 0 {
+		return
+	}
+	const maxLoggedParameterCount = 16
+	allowed := []string{
+		"width", "height", "steps", "scale", "sampler", "noise_schedule",
+		"cfg_rescale", "seed", "n_samples", "qualityPresetId", "ucPresetId",
+		"sm", "sm_dyn", "dynamic_thresholding", "image_format",
+	}
+	parameters := make(map[string]any, maxLoggedParameterCount)
+	for _, key := range allowed {
+		if value, exists := native.Parameters[key]; exists {
+			parameters[key] = value
+		}
+	}
+	if len(parameters) > 0 {
+		other.SetPublic("nai_parameters", parameters)
+	}
 }
 
 func appendParamOverrideInfo(relayInfo *relaycommon.RelayInfo, other *model.LogOther) {

@@ -57,6 +57,7 @@ export function getChannelTypeIcon(type: number): string {
     61: 'OpenAI', // Codex
     63: 'CodeBuddy', // Code Buddy
     64: 'OpenAI', // Task Plugin
+    65: 'NovelAI', // NovelAI
     3: 'Azure', // Azure
 
     // Anthropic

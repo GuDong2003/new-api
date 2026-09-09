@@ -62,7 +62,8 @@ const (
 	ChannelTypeClaudeCode         = 62
 	ChannelTypeCodeBuddy          = 63
 	ChannelTypeTaskPlugin         = 64
-	ChannelTypeDummy              // this one is only for count, do not add any channel after this
+	ChannelTypeNovelAI            = 65
+	ChannelTypeDummy              = ChannelTypeNovelAI + 1 // this one is only for count, do not add any channel after this
 
 )
 
@@ -132,6 +133,7 @@ var ChannelBaseURLs = []string{
 	"",                                          //62
 	"",                                          //63
 	"",                                          //64
+	"https://image.novelai.net",                 //65
 }
 
 func GetChannelBaseURL(channelType int) string {
@@ -203,6 +205,7 @@ var ChannelTypeNames = map[int]string{
 	ChannelTypeClaudeCode:         "Claude Code",
 	ChannelTypeCodeBuddy:          "CodeBuddy",
 	ChannelTypeTaskPlugin:         "Task Plugin",
+	ChannelTypeNovelAI:            "NovelAI",
 }
 
 func GetChannelTypeName(channelType int) string {
