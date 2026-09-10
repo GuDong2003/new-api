@@ -172,8 +172,9 @@ function getSectionModuleOrder(
   sectionConfig: SidebarSectionConfig,
   order: string[] | undefined
 ) {
+  const effectiveConfig = order ? { ...sectionConfig, order } : sectionConfig
   return getSidebarModuleOrder(
-    sectionConfig,
+    effectiveConfig,
     order ?? SIDEBAR_MODULES_DEFAULT[sectionKey]?.order ?? []
   )
 }
