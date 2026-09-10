@@ -16,6 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { useRouterState } from '@tanstack/react-router'
 import { useEffect, useRef } from 'react'
 
 import { AnimatedOutlet } from '@/components/page-transition'
@@ -40,6 +41,11 @@ type AuthenticatedLayoutProps = {
 }
 
 export function AuthenticatedLayout(props: AuthenticatedLayoutProps) {
+  const isCanvas = useRouterState({
+    select: (state) =>
+      state.location.pathname === '/canvas' ||
+      state.location.pathname.startsWith('/canvas/'),
+  })
   const defaultOpen = getCookie('sidebar_state') !== 'false'
   const userId = useAuthStore((state) => state.auth.user?.id ?? null)
   const sessionId = useAuthStore((state) => state.auth.session?.sid ?? null)
@@ -68,9 +74,9 @@ export function AuthenticatedLayout(props: AuthenticatedLayoutProps) {
       <SearchProvider>
         <SidebarProvider defaultOpen={defaultOpen} className='flex-col'>
           <SkipToMain />
-          <AppHeader />
+          <AppHeader showSidebar={!isCanvas} />
           <div className='flex min-h-0 w-full flex-1'>
-            <AppSidebar />
+            {!isCanvas && <AppSidebar />}
             <SidebarInset
               className={cn(
                 '@container/content',

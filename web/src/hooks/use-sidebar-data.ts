@@ -26,7 +26,6 @@ import {
   FileText,
   FlaskConical,
   Flame,
-  Image,
   Key,
   LayoutDashboard,
   ListTodo,
@@ -65,23 +64,7 @@ export function useSidebarData(): SidebarData {
             title: t('Playground'),
             configKey: 'playground',
             icon: FlaskConical,
-            items: [
-              {
-                title: t('Chat'),
-                url: '/playground/chat',
-                icon: MessageSquare,
-              },
-              {
-                title: t('Drawing'),
-                url: '/playground/drawing',
-                icon: Image,
-              },
-              {
-                title: t('NAI Canvas'),
-                url: '/playground/nai',
-                icon: Image,
-              },
-            ],
+            url: '/playground/chat',
           },
           {
             title: t('Chat'),

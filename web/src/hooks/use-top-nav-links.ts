@@ -72,6 +72,15 @@ export function useTopNavLinks(): TopNavLink[] {
     links.push({ title: t('Console'), href: '/dashboard' })
   }
 
+  // Canvas is private regardless of its navigation visibility setting.
+  if (modules.canvas) {
+    links.push({
+      title: t('Infinite Canvas'),
+      href: '/canvas',
+      requiresAuth: !isAuthed,
+    })
+  }
+
   // Pricing
   const pricing = modules?.pricing
   if (pricing && typeof pricing === 'object' && pricing.enabled) {

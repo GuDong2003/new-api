@@ -16,10 +16,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { createFileRoute } from '@tanstack/react-router'
-
-import { Drawing } from '@/features/playground/drawing'
+import { createFileRoute, redirect } from '@tanstack/react-router'
 
 export const Route = createFileRoute('/_authenticated/playground/drawing')({
-  component: Drawing,
+  beforeLoad: () => {
+    throw redirect({ to: '/canvas/drawing', replace: true })
+  },
 })

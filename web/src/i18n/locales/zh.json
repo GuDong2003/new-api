@@ -1,5 +1,7 @@
 {
   "translation": {
+    "Infinite Canvas": "无限画布",
+    "Drawing, NAI Canvas and your private gallery. Sign-in is always required.": "绘图、NAI 画布与个人图库，始终需要登录后使用。",
     "Image details": "图片详情",
     "Created at": "创建时间",
     "Generation parameters": "生成参数",

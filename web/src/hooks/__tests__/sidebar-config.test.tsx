@@ -74,6 +74,14 @@ function sidebarFor(admin?: object, user?: object, canConfigure = true) {
 }
 
 describe('security sidebar visibility', () => {
+  it('keeps playground chat but moves image workspaces out of the console sidebar', () => {
+    const { result } = sidebarFor()
+    const playground = result.current
+      .find((group) => group.id === 'chat')
+      ?.items.find((item) => item.title === 'Playground')
+    expect(playground).toMatchObject({ url: '/playground/chat' })
+    expect(playground).not.toHaveProperty('items')
+  })
   it('renders chat and playground in the configured order', () => {
     const { result } = sidebarFor({
       chat: {

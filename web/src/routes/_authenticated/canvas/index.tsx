@@ -16,33 +16,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { SidebarTrigger } from '@/components/ui/sidebar'
-import { cn } from '@/lib/utils'
+import { createFileRoute, redirect } from '@tanstack/react-router'
 
-type HeaderProps = React.HTMLAttributes<HTMLElement> & {
-  showSidebarTrigger?: boolean
-}
-
-export function Header({
-  className,
-  children,
-  showSidebarTrigger = true,
-  ...props
-}: HeaderProps) {
-  return (
-    <header
-      className={cn(
-        'sticky top-0 z-40 h-[var(--app-header-height,3rem)] w-full shrink-0 bg-transparent',
-        className
-      )}
-      {...props}
-    >
-      <div className='flex h-full items-center gap-1.5 px-2 sm:gap-2 sm:px-3'>
-        {showSidebarTrigger && (
-          <SidebarTrigger variant='ghost' className='size-8' />
-        )}
-        {children}
-      </div>
-    </header>
-  )
-}
+export const Route = createFileRoute('/_authenticated/canvas/')({
+  beforeLoad: () => {
+    throw redirect({ to: '/canvas/drawing', replace: true })
+  },
+})

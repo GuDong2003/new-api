@@ -22,7 +22,13 @@ import { Main } from '@/components/layout'
 import { isSidebarModuleEnabled } from '@/lib/nav-modules'
 
 export const Route = createFileRoute('/_authenticated/playground')({
-  beforeLoad: () => {
+  beforeLoad: ({ location }) => {
+    // Image links must reach their compatibility redirects independently of
+    // the old chat module's visibility. The authenticated parent still guards both.
+    const pathname = location.pathname.replace(/\/$/, '')
+    if (pathname === '/playground/drawing' || pathname === '/playground/nai') {
+      return
+    }
     if (!isSidebarModuleEnabled('chat', 'playground')) {
       throw redirect({ to: '/dashboard' })
     }

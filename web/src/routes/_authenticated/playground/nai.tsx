@@ -14,10 +14,10 @@ GNU Affero General Public License for more details.
 You should have received a copy of the GNU Affero General Public License
 along with this program. If not, see <https://www.gnu.org/licenses/>.
 */
-import { createFileRoute } from '@tanstack/react-router'
-
-import { NaiDrawing } from '@/features/playground/nai/components/NaiDrawingWorkspace'
+import { createFileRoute, redirect } from '@tanstack/react-router'
 
 export const Route = createFileRoute('/_authenticated/playground/nai')({
-  component: NaiDrawing,
+  beforeLoad: () => {
+    throw redirect({ to: '/canvas/nai', replace: true })
+  },
 })
