@@ -20,13 +20,15 @@ import { useCallback, useSyncExternalStore } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
+import { safeGalleryParameters } from '@/features/gallery/lib/metadata'
+import { queueGallerySave } from '@/features/gallery/lib/save-queue'
 import { useAuthStore } from '@/stores/auth-store'
 import { useDrawingStore } from '@/stores/drawing-store'
 
 import { generateImages } from '../api'
 import { positionGeneratedImageNodes } from '../lib/canvas-document'
 import { imageSourceToAsset } from '../lib/image-assets'
-import { validateImageSettings } from '../lib/image-settings'
+import { buildImagePayload, validateImageSettings } from '../lib/image-settings'
 import type { DrawingNode, ImageAsset, ImageSettings } from '../types'
 
 type ImageJob = { id: string; controller: AbortController; nodeIds: string[] }
@@ -114,6 +116,23 @@ async function executeImageJob(
     const state = useDrawingStore.getState()
     if (!isCurrentJob(input)) return
     input.job.controller.signal.throwIfAborted()
+    // Save final provider results before browser decoding; gallery failures must
+    // never turn a successful generation into an error or delay the canvas.
+    for (const [index, image] of result.images.entries()) {
+      void queueGallerySave({
+        userId: input.userId,
+        sessionId: input.sessionId,
+        src: image.src,
+        metadata: {
+          source_id: `${input.job.id}:${index}`,
+          source: 'drawing',
+          model: input.settings.model,
+          prompt: input.settings.prompt,
+          negative_prompt: '',
+          parameters: safeGalleryParameters(buildImagePayload(input.settings)),
+        },
+      })
+    }
     for (const id of input.job.nodeIds) {
       const progress = state.nodes.find((node) => node.id === id)?.data.progress
       if (progress) {
@@ -300,7 +319,7 @@ export function useImageGeneration() {
         references,
         mask,
         userId: state.userId,
-        sessionId: currentSessionId,
+        sessionId: useAuthStore.getState().auth.session?.sid ?? null,
       },
       t
     )
@@ -366,13 +385,13 @@ export function useImageGeneration() {
           references,
           mask: settings.mode === 'edit' ? node.data.mask : undefined,
           userId: state.userId,
-          sessionId: currentSessionId,
+          sessionId: useAuthStore.getState().auth.session?.sid ?? null,
         },
         t
       )
       return true
     },
-    [currentSessionId, t]
+    [t]
   )
 
   const cancel = (jobId?: string) => {

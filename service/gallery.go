@@ -142,7 +142,7 @@ func SaveGalleryImage(ctx context.Context, user int, reader *multipart.Reader) (
 	parameters := map[string]any{}
 	for key, value := range metadata.Parameters {
 		switch key {
-		case "seed", "steps", "scale", "cfg_scale", "cfg_rescale", "width", "height", "n", "strength", "noise", "uncond_scale", "params_version", "n_samples", "ucPresetId", "tag_hint_qt":
+		case "seed", "steps", "scale", "cfg_scale", "cfg_rescale", "width", "height", "n", "strength", "noise", "uncond_scale", "params_version", "n_samples", "tag_hint_qt":
 			v, ok := value.(float64)
 			if !ok || v < -1e15 || v > 1e15 {
 				return nil, model.ErrGalleryInvalid
@@ -154,7 +154,7 @@ func SaveGalleryImage(ctx context.Context, user int, reader *multipart.Reader) (
 				return nil, model.ErrGalleryInvalid
 			}
 			parameters[key] = v
-		case "sampler", "noise_schedule", "quality", "size", "style", "response_format", "qualityPresetId", "image_format":
+		case "sampler", "noise_schedule", "quality", "size", "style", "response_format", "ucPresetId", "qualityPresetId", "image_format":
 			v, ok := value.(string)
 			if !ok || len(v) > 128 || strings.ContainsAny(v, "/\\:\x00\r\n") {
 				return nil, model.ErrGalleryInvalid

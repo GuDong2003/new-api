@@ -18,11 +18,13 @@ import { useCallback, useSyncExternalStore } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
+import { safeGalleryParameters } from '@/features/gallery/lib/metadata'
+import { queueGallerySave } from '@/features/gallery/lib/save-queue'
 import { useAuthStore } from '@/stores/auth-store'
 import { useNaiDrawingStore } from '@/stores/nai-drawing-store'
 
 import { generateNaiImages, getNaiGenerationError } from '../api'
-import { validateNaiSettings } from '../lib/nai-settings'
+import { buildNaiImagePayload, validateNaiSettings } from '../lib/nai-settings'
 import type { NaiCanvasNode, NaiSettings } from '../types'
 
 type NaiImageJob = {
@@ -74,6 +76,23 @@ async function executeJob(
     })
     if (!isCurrentJob(input)) return
     input.job.controller.signal.throwIfAborted()
+    const payload = buildNaiImagePayload(input.settings)
+    const nai = payload.nai as { parameters: Record<string, unknown> }
+    for (const [index, image] of result.images.entries()) {
+      void queueGallerySave({
+        userId: input.userId,
+        sessionId: input.sessionId,
+        src: image.src,
+        metadata: {
+          source_id: `${input.job.id}:${index}`,
+          source: 'nai',
+          model: input.settings.model,
+          prompt: input.settings.prompt,
+          negative_prompt: input.settings.negativePrompt,
+          parameters: safeGalleryParameters(nai.parameters),
+        },
+      })
+    }
     const state = useNaiDrawingStore.getState()
     input.job.nodeIds.forEach((id, index) => {
       const asset = result.images[index]
@@ -185,10 +204,18 @@ export function useNaiImageGeneration() {
       const nodes = createNodes(settings, job.id, state.nodes.length)
       job.nodeIds = nodes.map((node) => node.id)
       state.addNodes(nodes)
-      startJob({ job, settings, userId: state.userId, sessionId }, t)
+      startJob(
+        {
+          job,
+          settings,
+          userId: state.userId,
+          sessionId: useAuthStore.getState().auth.session?.sid ?? null,
+        },
+        t
+      )
       return true
     },
-    [sessionId, t]
+    [t]
   )
 
   const retry = useCallback(
@@ -213,10 +240,18 @@ export function useNaiImageGeneration() {
         asset: undefined,
         error: undefined,
       })
-      startJob({ job, settings, userId: state.userId, sessionId }, t)
+      startJob(
+        {
+          job,
+          settings,
+          userId: state.userId,
+          sessionId: useAuthStore.getState().auth.session?.sid ?? null,
+        },
+        t
+      )
       return true
     },
-    [sessionId, t]
+    [t]
   )
 
   const cancel = useCallback(() => {

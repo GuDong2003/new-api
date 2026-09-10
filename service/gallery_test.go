@@ -303,16 +303,17 @@ func TestGalleryParameterTypesAndSafeNAIMetadata(t *testing.T) {
 	galleryFixture(t, sqlite.Open(filepath.Join(t.TempDir(), "gallery.db")))
 	ctx := context.Background()
 	original := galleryPNG(t)
-	for _, parameters := range []string{`{"seed":true}`, `{"sm":"secret"}`, `{"width":[]}`, `{"sampler":"https://private.invalid"}`} {
+	for _, parameters := range []string{`{"seed":true}`, `{"sm":"secret"}`, `{"width":[]}`, `{"sampler":"https://private.invalid"}`, `{"ucPresetId":2}`} {
 		metadata := `{"source":"nai","source_id":"typed","model":"test","parameters":` + parameters + `}`
 		_, err := service.SaveGalleryImage(ctx, 1, galleryMultipart(t, metadata, []string{"file", string(original)}))
 		require.ErrorIs(t, err, model.ErrGalleryInvalid)
 	}
-	metadata := `{"source":"nai","source_id":"safe","model":"test","parameters":{"params_version":4,"n_samples":1,"ucPresetId":2,"qualityPresetId":"light","tag_hint_qt":3,"legacy":false,"image_format":"png","reference_image_multiple":["secret binary"],"api_key":"secret"}}`
+	metadata := `{"source":"nai","source_id":"safe","model":"test","parameters":{"params_version":4,"n_samples":1,"ucPresetId":"humanFocus","qualityPresetId":"light","tag_hint_qt":3,"legacy":false,"image_format":"png","reference_image_multiple":["secret binary"],"api_key":"secret"}}`
 	saved, err := service.SaveGalleryImage(ctx, 1, galleryMultipart(t, metadata, []string{"file", string(original)}))
 	require.NoError(t, err)
 	require.Equal(t, float64(4), saved.Parameters["params_version"])
 	require.Equal(t, "light", saved.Parameters["qualityPresetId"])
+	require.Equal(t, "humanFocus", saved.Parameters["ucPresetId"])
 	require.NotContains(t, saved.Parameters, "reference_image_multiple")
 }
 

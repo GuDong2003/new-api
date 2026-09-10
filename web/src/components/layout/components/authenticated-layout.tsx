@@ -23,6 +23,7 @@ import { SkipToMain } from '@/components/skip-to-main'
 import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar'
 import { LayoutProvider } from '@/context/layout-provider'
 import { SearchProvider } from '@/context/search-provider'
+import { cancelGallerySaves } from '@/features/gallery/lib/save-queue'
 import { DrawingPersistence } from '@/features/playground/drawing/hooks/use-drawing-persistence'
 import { cancelImageGenerationJobs } from '@/features/playground/drawing/hooks/use-image-generation'
 import { NaiDrawingPersistence } from '@/features/playground/nai/hooks/use-nai-drawing-persistence'
@@ -55,6 +56,7 @@ export function AuthenticatedLayout(props: AuthenticatedLayoutProps) {
     ) {
       cancelImageGenerationJobs(previous.userId, previous.sessionId)
       cancelNaiGenerationJobs(previous.userId, previous.sessionId)
+      cancelGallerySaves(previous.userId, previous.sessionId)
     }
     previousIdentity.current = { userId, sessionId }
   }, [sessionId, userId])

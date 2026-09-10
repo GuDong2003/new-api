@@ -19,6 +19,15 @@ For commercial licensing, please contact support@quantumnous.com
 // Static translation keys that don't get picked up by the t('...') regex.
 // These cover dynamic labels (e.g. constants, configs) that are passed into t at runtime.
 export const STATIC_I18N_KEYS = [
+  'Gallery storage',
+  'Gallery storage is disabled.',
+  'Gallery storage limit reached.',
+  'Gallery storage is unavailable.',
+  'The gallery image is invalid.',
+  'Gallery settings are invalid.',
+  'The gallery image could not be saved.',
+  'Gallery storage is full. This image was not saved to your gallery.',
+  'This image could not be saved to your gallery. Canvas generation is unaffected.',
   // Drawing size validation (translated at the form/request boundary).
   'Enter a valid width and height.',
   'Choose a size supported by this model.',
