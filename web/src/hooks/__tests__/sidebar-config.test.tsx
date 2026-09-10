@@ -74,6 +74,20 @@ function sidebarFor(admin?: object, user?: object, canConfigure = true) {
 }
 
 describe('security sidebar visibility', () => {
+  it('renders chat and playground in the configured order', () => {
+    const { result } = sidebarFor({
+      chat: {
+        enabled: true,
+        order: ['playground', 'chat'],
+        playground: true,
+        chat: true,
+      },
+    })
+    const items = result.current.find((group) => group.id === 'chat')?.items
+
+    expect(items?.map((item) => item.title)).toEqual(['Playground', 'Chat'])
+  })
+
   it('old configurations show Security & Access immediately after Profile and keep API Keys', () => {
     const { result } = sidebarFor(
       { personal: { enabled: true, personal: true, topup: true } },
@@ -117,6 +131,26 @@ describe('security sidebar visibility', () => {
         .flatMap((group) => group.items)
         .some((item) => item.title === 'Security & Access')
     ).toBe(true)
+  })
+})
+
+describe('admin sidebar module configuration', () => {
+  it('includes Task Plugins in the default admin module order', () => {
+    const config = parseSidebarModulesAdmin(undefined)
+
+    expect(config.admin.taskPlugins).toBe(true)
+    expect(config.admin.order).toContain('taskPlugins')
+  })
+
+  it('allows Task Plugins to be hidden through the admin module toggle', () => {
+    const { result } = sidebarFor({
+      admin: { enabled: true, taskPlugins: false },
+    })
+    const titles = result.current
+      .flatMap((group) => group.items)
+      .map((item) => item.title)
+
+    expect(titles).not.toContain('Task Plugins')
   })
 })
 

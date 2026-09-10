@@ -300,6 +300,10 @@ export function SidebarModulesSection({
         title: t('System Info'),
         description: t('System settings'),
       },
+      taskPlugins: {
+        title: t('Task Plugins'),
+        description: t('Manage installed task plugins and their platforms.'),
+      },
     },
   }
   const formDefaults = useMemo(() => config, [config])

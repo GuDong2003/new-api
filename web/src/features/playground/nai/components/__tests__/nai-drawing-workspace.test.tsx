@@ -95,9 +95,11 @@ describe('NAI drawing workspace', () => {
   it('shows guidance when the NAI canvas has no image nodes', () => {
     render(<NaiDrawing />)
 
-    expect(screen.getByText('Room for every idea')).toBeInTheDocument()
+    expect(screen.getByText('Start creating NAI images')).toBeInTheDocument()
     expect(
-      screen.getByText('Create and refine images on your canvas.')
+      screen.getByText(
+        'Generate images with NovelAI, then arrange and refine them on your canvas.'
+      )
     ).toBeInTheDocument()
     expect(
       screen.getByText(

@@ -323,10 +323,12 @@ function NaiDrawingWorkspace(props: { userId: number }) {
                     />
                   </EmptyMedia>
                   <EmptyTitle className='text-xl font-semibold tracking-tight'>
-                    {t('Room for every idea')}
+                    {t('Start creating NAI images')}
                   </EmptyTitle>
                   <EmptyDescription>
-                    {t('Create and refine images on your canvas.')}
+                    {t(
+                      'Generate images with NovelAI, then arrange and refine them on your canvas.'
+                    )}
                   </EmptyDescription>
                 </EmptyHeader>
                 {compact && (
