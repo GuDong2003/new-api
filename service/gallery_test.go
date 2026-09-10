@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/binary"
+	"hash/crc32"
 	"image"
 	"image/color"
 	"image/jpeg"
@@ -363,6 +365,32 @@ func TestGalleryOriginalFormatsThumbnailFallbackAndDeletionRetry(t *testing.T) {
 	usage, err = service.GetGalleryUsage(ctx, 2)
 	require.NoError(t, err)
 	require.Zero(t, usage.UsedBytes)
+}
+
+func TestGalleryRejectsFramedPNGWithUndecodablePixels(t *testing.T) {
+	galleryFixture(t, sqlite.Open(filepath.Join(t.TempDir(), "gallery.db")))
+	// The genuine tiny PNG contributes a valid IHDR and IEND. Replace its
+	// compressed pixels with an empty IDAT whose framing and CRC are valid.
+	original := galleryPNG(t)
+	malformed := append([]byte(nil), original[:33]...)
+	var emptyIDAT [12]byte
+	copy(emptyIDAT[4:8], "IDAT")
+	binary.BigEndian.PutUint32(emptyIDAT[8:], crc32.ChecksumIEEE([]byte("IDAT")))
+	malformed = append(malformed, emptyIDAT[:]...)
+	malformed = append(malformed, original[len(original)-12:]...)
+	config, _, err := image.DecodeConfig(bytes.NewReader(malformed))
+	require.NoError(t, err)
+	require.Equal(t, 16, config.Width)
+	_, _, err = image.Decode(bytes.NewReader(malformed))
+	require.Error(t, err)
+	_, err = gallerySave(t, 1, "drawing", "bad-pixels", malformed)
+	require.ErrorIs(t, err, model.ErrGalleryInvalid)
+	var count int64
+	require.NoError(t, model.DB.Model(&model.GalleryImage{}).Count(&count).Error)
+	require.Zero(t, count)
+	entries, err := os.ReadDir(os.Getenv("GALLERY_STORAGE_DIR"))
+	require.NoError(t, err)
+	require.Empty(t, entries)
 }
 
 func TestGalleryConcurrentAdmissionAndIdempotency(t *testing.T) {

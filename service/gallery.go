@@ -273,7 +273,10 @@ func SaveGalleryImage(ctx context.Context, user int, reader *multipart.Reader) (
 	if err != nil {
 		return nil, model.ErrGalleryInvalid
 	}
-	thumbnail := makeGalleryThumbnail(ctx, root, record)
+	thumbnail, err := makeGalleryThumbnail(ctx, root, record)
+	if err != nil {
+		return nil, err
+	}
 	record.StorageBytes = record.Bytes + int64(len(normalized))
 	if len(thumbnail) > 0 && int64(len(thumbnail)) <= budget-record.StorageBytes {
 		tw, e := newGalleryWriter(ctx, root, record.ID, "thumbnail", budget-record.StorageBytes)

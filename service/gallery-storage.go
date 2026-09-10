@@ -306,18 +306,24 @@ func (b *galleryThumbnailBuffer) Write(data []byte) (int, error) {
 	return b.Buffer.Write(data)
 }
 
-func makeGalleryThumbnail(ctx context.Context, root string, record *model.GalleryImage) []byte {
-	if ctx.Err() != nil || record.Bytes > 16<<20 || record.Width > 8192 || record.Height > 8192 || int64(record.Width)*int64(record.Height) > 16777216 {
-		return nil
+func makeGalleryThumbnail(ctx context.Context, root string, record *model.GalleryImage) ([]byte, error) {
+	if ctx.Err() != nil {
+		return nil, model.ErrGallerySave
+	}
+	if record.Bytes > 16<<20 || record.Width > 8192 || record.Height > 8192 || int64(record.Width)*int64(record.Height) > 16777216 {
+		return nil, nil
 	}
 	f, err := openGalleryFile(root, record.ID, "original")
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	defer f.Close()
 	decoded, _, err := image.Decode(f)
-	if err != nil || ctx.Err() != nil {
-		return nil
+	if err != nil {
+		return nil, model.ErrGalleryInvalid
+	}
+	if ctx.Err() != nil {
+		return nil, model.ErrGallerySave
 	}
 	width, height := record.Width, record.Height
 	if max(width, height) > 512 {
@@ -327,7 +333,7 @@ func makeGalleryThumbnail(ctx context.Context, root string, record *model.Galler
 	draw.ApproxBiLinear.Scale(scaled, scaled.Bounds(), decoded, decoded.Bounds(), draw.Src, nil)
 	var encoded galleryThumbnailBuffer
 	if jpeg.Encode(&encoded, scaled, &jpeg.Options{Quality: 80}) != nil {
-		return nil
+		return nil, nil
 	}
-	return encoded.Bytes()
+	return encoded.Bytes(), nil
 }
