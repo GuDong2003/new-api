@@ -99,6 +99,7 @@ const URL_TO_CONFIG_MAP: Record<string, { section: string; module: string }> = {
   '/redemption-codes': { section: 'admin', module: 'redemption' },
   '/invite-codes': { section: 'admin', module: 'invitation' },
   '/subscriptions': { section: 'admin', module: 'subscription' },
+  '/content-audit': { section: 'admin', module: 'contentAudit' },
   '/system-info': { section: 'admin', module: 'systemInfo' },
   '/task-plugins': { section: 'admin', module: 'taskPlugins' },
   '/system-settings': { section: 'admin', module: 'setting' },

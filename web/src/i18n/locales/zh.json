@@ -1410,6 +1410,8 @@
     "Content": "内容",
     "Content audit": "内容审计",
     "Content audit access ended. Sign in with a live root session to continue.": "内容审计访问已结束，请使用有效的 root 会话登录后继续。",
+    "Content audit request origin is not trusted. Check the trusted site URL.": "请求来源校验失败，请检查站点可信地址配置。",
+    "Review user requests, model replies and generated images.": "查看用户请求、模型回复和生成图片。",
     "Content audit controls": "内容审计控制",
     "Content audit details": "内容审计详情",
     "Content audit is separate from usage and security logs. It is best-effort, does not backfill earlier requests, and is not a billing record. Only live root dashboard sessions can read content.": "内容审计独立于用量日志和安全日志。采集不保证完整，不补录历史请求，也不作为计费依据。仅有效的 root 后台会话可以读取内容。",

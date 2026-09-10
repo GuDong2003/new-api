@@ -66,7 +66,7 @@ function ContentAuditSession(props: {
   const scope = useId()
   const queryKey = useMemo(() => ['content-audit', scope] as const, [scope])
   const requests = useRef(new Set<AbortController>())
-  const [denied, setDenied] = useState(false)
+  const [denied, setDenied] = useState<string | null>(null)
   const expiresAt = useAuthStore((s) => s.auth.session?.expires_at)
 
   useEffect(() => {
@@ -84,9 +84,11 @@ function ContentAuditSession(props: {
     }
   }, [client, queryKey, denied])
 
-  useContentAuditExpiry(expiresAt, () => setDenied(true))
+  useContentAuditExpiry(expiresAt, () =>
+    setDenied('CONTENT_AUDIT_SESSION_REQUIRED')
+  )
   useEffect(() => {
-    const clearOnPageHide = () => setDenied(true)
+    const clearOnPageHide = () => setDenied('CONTENT_AUDIT_SESSION_REQUIRED')
     window.addEventListener('pagehide', clearOnPageHide)
     return () => window.removeEventListener('pagehide', clearOnPageHide)
   }, [])
@@ -134,7 +136,7 @@ function ContentAuditSession(props: {
           error instanceof ContentAuditError &&
           error.accessDenied
         ) {
-          setDenied(true)
+          setDenied(error.code)
         }
         throw error
       } finally {
@@ -148,9 +150,15 @@ function ContentAuditSession(props: {
   if (denied) {
     return (
       <ErrorState
-        description={t(
-          'Content audit access ended. Sign in with a live root session to continue.'
-        )}
+        description={
+          denied === 'AUTH_ORIGIN_FORBIDDEN'
+            ? t(
+                'Content audit request origin is not trusted. Check the trusted site URL.'
+              )
+            : t(
+                'Content audit access ended. Sign in with a live root session to continue.'
+              )
+        }
       />
     )
   }

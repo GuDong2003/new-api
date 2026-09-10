@@ -296,6 +296,12 @@ export function SidebarModulesSection({
         title: t('Subscription Management'),
         description: t('Manage subscription plans and pricing.'),
       },
+      contentAudit: {
+        title: t('Content audit'),
+        description: t(
+          'Review user requests, model replies and generated images.'
+        ),
+      },
       systemInfo: {
         title: t('System Info'),
         description: t('System settings'),

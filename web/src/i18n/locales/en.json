@@ -1410,6 +1410,8 @@
     "Content": "Content",
     "Content audit": "Content audit",
     "Content audit access ended. Sign in with a live root session to continue.": "Content audit access ended. Sign in with a live root session to continue.",
+    "Content audit request origin is not trusted. Check the trusted site URL.": "Content audit request origin is not trusted. Check the trusted site URL.",
+    "Review user requests, model replies and generated images.": "Review user requests, model replies and generated images.",
     "Content audit controls": "Content audit controls",
     "Content audit details": "Content audit details",
     "Content audit is separate from usage and security logs. It is best-effort, does not backfill earlier requests, and is not a billing record. Only live root dashboard sessions can read content.": "Content audit is separate from usage and security logs. It is best-effort, does not backfill earlier requests, and is not a billing record. Only live root dashboard sessions can read content.",
