@@ -225,7 +225,9 @@ export function DrawingSettings(props: DrawingSettingsProps) {
             />
           )}
           <Separator />
-          <ImageParameterFields />
+          <ImageParameterFields
+            onSizeChange={(size) => updateSettings({ size })}
+          />
           {Object.keys(form.formState.errors).length > 0 && (
             <p role='alert' className='text-destructive text-xs'>
               {t(

@@ -1,5 +1,14 @@
 {
   "translation": {
+    "Image aspect ratio": "画面比例",
+    "Image resolution": "分辨率",
+    "Enter width": "输入宽度",
+    "Enter height": "输入高度",
+    "Enter a valid width and height.": "请输入有效的宽度和高度。",
+    "Choose a size supported by this model.": "请选择此模型支持的尺寸。",
+    "Size is chosen automatically by the model.": "由模型自动决定尺寸",
+    "Supported resolutions and aspect ratios depend on the selected model.": "支持的分辨率和比例以所选模型为准。",
+    "Custom dimensions must be multiples of 16, at most 4096 pixels per side, with a 1:3 to 3:1 aspect ratio.": "宽高须为 16 的倍数，每边不超过 4096 像素，比例介于 1:3 与 3:1 之间。",
     "Image {{index}}": "图片 {{index}}",
     "Audit images": "审计图片",
     "Image pages": "图片分页",
@@ -6523,7 +6532,6 @@
     "Use an age X25519 identity. Keep a copy outside the VPS; it is required for recovery.": "使用 age X25519 身份。请在 VPS 之外保留一份副本，恢复时需要它。",
     "Use as reference": "设为参考图",
     "Use authenticator code": "使用验证器代码",
-    "Use auto or WIDTHxHEIGHT. Custom resolutions require model support.": "填 auto 或 宽x高。自定义分辨率需要模型支持。",
     "Use backup code": "使用备用代码",
     "Use Bearer for all protocols": "所有协议统一使用 Bearer",
     "Use channel style": "使用渠道样式",

@@ -83,6 +83,52 @@ export function getImageSizes(model: string): string[] {
   return ['auto', '1024x1024', '1536x1024', '1024x1536']
 }
 
+export function supportsCustomImageSize(model: string): boolean {
+  return (
+    getImageModelFamily(model) === 'gpt-image' &&
+    !/^(gpt-image-1(?:[.-]|$)|chatgpt-image-latest$)/.test(model)
+  )
+}
+
+export const IMAGE_ASPECT_RATIOS = [
+  '1:1',
+  '2:3',
+  '3:2',
+  '3:4',
+  '4:3',
+  '9:16',
+  '16:9',
+] as const
+export const IMAGE_RESOLUTIONS = ['1K', '2K', '4K'] as const
+
+export type ImageAspectRatio = (typeof IMAGE_ASPECT_RATIOS)[number]
+export type ImageResolution = (typeof IMAGE_RESOLUTIONS)[number]
+
+export function getImagePresetSize(
+  aspectRatio: ImageAspectRatio,
+  resolution: ImageResolution
+): string {
+  const [width, height] = aspectRatio.split(':').map(Number)
+  const longestSide = Number.parseInt(resolution, 10) * 1024
+  const scale = longestSide / Math.max(width, height)
+  // Presets use the long edge; align the other edge to the request's 16px grid.
+  return `${Math.round((width * scale) / 16) * 16}x${Math.round((height * scale) / 16) * 16}`
+}
+
+export function getImageSizePreset(size: string): {
+  aspectRatio: ImageAspectRatio
+  resolution: ImageResolution
+} | null {
+  for (const resolution of IMAGE_RESOLUTIONS) {
+    for (const aspectRatio of IMAGE_ASPECT_RATIOS) {
+      if (getImagePresetSize(aspectRatio, resolution) === size) {
+        return { aspectRatio, resolution }
+      }
+    }
+  }
+  return null
+}
+
 export function getImageQualities(model: string): string[] {
   const family = getImageModelFamily(model)
   if (family === 'dall-e-2') return ['standard']
@@ -104,8 +150,7 @@ export function settingsForImageModel(
   }
   if (
     !getImageSizes(model).includes(next.size) &&
-    (family !== 'gpt-image' ||
-      /^(gpt-image-1(?:[.-]|$)|chatgpt-image-latest$)/.test(model))
+    !supportsCustomImageSize(model)
   ) {
     next.size = '1024x1024'
   }
@@ -157,7 +202,7 @@ export function validateImageSettings(
     settings.size !== 'auto' &&
     !/^[1-9]\d{1,4}x[1-9]\d{1,4}$/.test(settings.size)
   ) {
-    return 'Enter a size in WIDTHxHEIGHT format.'
+    return 'Enter a valid width and height.'
   }
   if (
     family === 'gpt-image' &&
@@ -172,10 +217,9 @@ export function validateImageSettings(
       height % 16 ||
       width / height < 1 / 3 ||
       width / height > 3 ||
-      width * height > 3840 * 2160 ||
-      Math.max(width, height) > 3840
+      Math.max(width, height) > 4096
     ) {
-      return 'Custom dimensions must be multiples of 16, within 3840 × 2160 pixels and a 1:3 to 3:1 aspect ratio.'
+      return 'Custom dimensions must be multiples of 16, at most 4096 pixels per side, with a 1:3 to 3:1 aspect ratio.'
     }
   }
   if (

@@ -24,6 +24,7 @@ import {
   getImageModelFamily,
   getImageQualities,
   getImageSizes,
+  normalizeStoredImageSettings,
   settingsForImageModel,
   validateImageSettings,
 } from '../image-settings'
@@ -128,6 +129,38 @@ describe('OpenAI image parameters', () => {
       validateImageSettings({ ...settings, size: '99999x99999' }, 0)
     ).not.toBeNull()
   })
+
+  it.each(['4096x4096', '4096x2304', '2304x4096'])(
+    'accepts and preserves a 4K request size of %s for custom-size models',
+    (size) => {
+      const next = { ...settings, model: 'gpt-image-2.5', size }
+      expect(validateImageSettings(next, 0)).toBeNull()
+      const restored = normalizeStoredImageSettings(next)
+      expect(buildImagePayload(restored).size).toBe(size)
+    }
+  )
+
+  it.each(['4097x4096', '8192x8192', '1024x128', '0x1024', 'x1024'])(
+    'rejects invalid custom dimensions %s',
+    (size) => {
+      expect(
+        validateImageSettings({ ...settings, model: 'gpt-image-2.5', size }, 0)
+      ).not.toBeNull()
+    }
+  )
+
+  it.each(['gpt-image-1', 'gpt-image-1.5', 'chatgpt-image-latest', 'dall-e-3'])(
+    'keeps fixed-size restrictions for %s',
+    (model) => {
+      const next = settingsForImageModel(settings, model)
+      expect(validateImageSettings({ ...next, size: '4096x4096' }, 0)).toBe(
+        'Choose a size supported by this model.'
+      )
+      expect(
+        settingsForImageModel({ ...next, size: '4096x4096' }, model).size
+      ).toBe('1024x1024')
+    }
+  )
 
   it('uses provider-specific image families and safe defaults', () => {
     expect(getImageModelFamily('imagen-4.0-generate-001')).toBe('imagen')

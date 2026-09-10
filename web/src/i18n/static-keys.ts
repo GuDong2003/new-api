@@ -19,6 +19,10 @@ For commercial licensing, please contact support@quantumnous.com
 // Static translation keys that don't get picked up by the t('...') regex.
 // These cover dynamic labels (e.g. constants, configs) that are passed into t at runtime.
 export const STATIC_I18N_KEYS = [
+  // Drawing size validation (translated at the form/request boundary).
+  'Enter a valid width and height.',
+  'Choose a size supported by this model.',
+  'Custom dimensions must be multiples of 16, at most 4096 pixels per side, with a 1:3 to 3:1 aspect ratio.',
   // Content audit form validation (messages translated by FormMessage).
   'Enter a whole number within the displayed limits.',
   'Enter a positive integer ID.',

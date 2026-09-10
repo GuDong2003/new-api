@@ -1,5 +1,14 @@
 {
   "translation": {
+    "Image aspect ratio": "Aspect ratio",
+    "Image resolution": "Resolution",
+    "Enter width": "Enter width",
+    "Enter height": "Enter height",
+    "Enter a valid width and height.": "Enter a valid width and height.",
+    "Choose a size supported by this model.": "Choose a size supported by this model.",
+    "Size is chosen automatically by the model.": "Size is chosen automatically by the model.",
+    "Supported resolutions and aspect ratios depend on the selected model.": "Supported resolutions and aspect ratios depend on the selected model.",
+    "Custom dimensions must be multiples of 16, at most 4096 pixels per side, with a 1:3 to 3:1 aspect ratio.": "Custom dimensions must be multiples of 16, at most 4096 pixels per side, with a 1:3 to 3:1 aspect ratio.",
     "Image {{index}}": "Image {{index}}",
     "Audit images": "Audit images",
     "Image pages": "Image pages",
@@ -6523,7 +6532,6 @@
     "Use an age X25519 identity. Keep a copy outside the VPS; it is required for recovery.": "Use an age X25519 identity. Keep a copy outside the VPS; it is required for recovery.",
     "Use as reference": "Use as reference",
     "Use authenticator code": "Use authenticator code",
-    "Use auto or WIDTHxHEIGHT. Custom resolutions require model support.": "Use auto or WIDTHxHEIGHT. Custom resolutions require model support.",
     "Use backup code": "Use backup code",
     "Use Bearer for all protocols": "Use Bearer for all protocols",
     "Use channel style": "Use channel style",
