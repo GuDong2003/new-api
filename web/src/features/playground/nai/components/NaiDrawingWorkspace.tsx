@@ -14,6 +14,8 @@ GNU Affero General Public License for more details.
 You should have received a copy of the GNU Affero General Public License
 along with this program. If not, see <https://www.gnu.org/licenses/>.
 */
+import { ImageAdd01Icon } from '@hugeicons/core-free-icons'
+import { HugeiconsIcon } from '@hugeicons/react'
 import {
   Background,
   BackgroundVariant,
@@ -29,6 +31,14 @@ import { useTranslation } from 'react-i18next'
 
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from '@/components/ui/empty'
 import {
   Sheet,
   SheetContent,
@@ -298,6 +308,46 @@ function NaiDrawingWorkspace(props: { userId: number }) {
               />
             )}
           </ReactFlow>
+          {nodes.length === 0 && (
+            <div className='pointer-events-none absolute inset-0 flex items-center justify-center p-6 pb-20'>
+              <Empty className='max-w-md flex-initial'>
+                <EmptyHeader>
+                  <EmptyMedia
+                    variant='icon'
+                    className='bg-background size-12 rounded-2xl border shadow-sm'
+                  >
+                    <HugeiconsIcon
+                      icon={ImageAdd01Icon}
+                      size={24}
+                      aria-hidden='true'
+                    />
+                  </EmptyMedia>
+                  <EmptyTitle className='text-xl font-semibold tracking-tight'>
+                    {t('Room for every idea')}
+                  </EmptyTitle>
+                  <EmptyDescription>
+                    {t('Create and refine images on your canvas.')}
+                  </EmptyDescription>
+                </EmptyHeader>
+                {compact && (
+                  <EmptyContent>
+                    <Button
+                      type='button'
+                      className='pointer-events-auto'
+                      onClick={() => setSettingsOpen(true)}
+                    >
+                      {t('Generate NAI images')}
+                    </Button>
+                  </EmptyContent>
+                )}
+                <p className='text-muted-foreground text-xs'>
+                  {t(
+                    'Scroll to zoom · Space + drag to pan · Shift + drag to select'
+                  )}
+                </p>
+              </Empty>
+            </div>
+          )}
         </div>
       </div>
       {compact && (
