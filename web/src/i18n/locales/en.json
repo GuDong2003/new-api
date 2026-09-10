@@ -3023,6 +3023,7 @@
     "Manage custom OAuth providers for user authentication": "Manage custom OAuth providers for user authentication",
     "Manage Keys": "Manage Keys",
     "Manage local models for:": "Manage local models for:",
+    "Manage installed task plugins and their platforms.": "Manage installed task plugins and their platforms.",
     "Manage metadata, pricing, and channel connections. Each section saves separately.": "Manage metadata, pricing, and channel connections. Each section saves separately.",
     "Manage multi-key status and configuration for this channel": "Manage multi-key status and configuration for this channel",
     "Manage Ollama Models": "Manage Ollama Models",

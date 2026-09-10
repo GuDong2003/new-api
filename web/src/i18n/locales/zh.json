@@ -3023,6 +3023,7 @@
     "Manage custom OAuth providers for user authentication": "管理用于用户认证的自定义 OAuth 提供商",
     "Manage Keys": "管理密钥",
     "Manage local models for:": "管理本地模型：",
+    "Manage installed task plugins and their platforms.": "管理已安装的任务插件和平台。",
     "Manage metadata, pricing, and channel connections. Each section saves separately.": "管理资料、定价及渠道关联，各分区分别保存。",
     "Manage multi-key status and configuration for this channel": "管理此渠道的多密钥状态和配置",
     "Manage Ollama Models": "管理 Ollama 模型",

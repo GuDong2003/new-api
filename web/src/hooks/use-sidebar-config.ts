@@ -100,6 +100,7 @@ const URL_TO_CONFIG_MAP: Record<string, { section: string; module: string }> = {
   '/invite-codes': { section: 'admin', module: 'invitation' },
   '/subscriptions': { section: 'admin', module: 'subscription' },
   '/system-info': { section: 'admin', module: 'systemInfo' },
+  '/task-plugins': { section: 'admin', module: 'taskPlugins' },
   '/system-settings': { section: 'admin', module: 'setting' },
   '/system-settings/site': { section: 'admin', module: 'setting' },
 }
@@ -250,6 +251,8 @@ function filterNavItems(
 }
 
 function getNavItemConfigKey(item: NavItem): string | null {
+  if (item.configKey) return item.configKey
+
   if ('type' in item && item.type === 'chat-presets') return 'chat'
 
   if ('url' in item && item.url) {

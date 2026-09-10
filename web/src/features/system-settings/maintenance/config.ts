@@ -90,6 +90,7 @@ export const SIDEBAR_MODULES_DEFAULT: SidebarModulesAdminConfig = {
       'invitation',
       'subscription',
       'systemInfo',
+      'taskPlugins',
       'setting',
     ],
     channel: true,
@@ -102,6 +103,7 @@ export const SIDEBAR_MODULES_DEFAULT: SidebarModulesAdminConfig = {
     setting: true,
     subscription: true,
     systemInfo: true,
+    taskPlugins: true,
   },
 }
 

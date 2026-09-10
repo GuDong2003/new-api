@@ -24,6 +24,8 @@ import type { TFunction } from 'i18next'
  */
 type BaseNavItem = {
   title: string
+  /** Stable key used by configurable sidebar ordering. */
+  configKey?: string
   badge?: string
   icon?: React.ElementType
   activeUrls?: (LinkProps['to'] | (string & {}))[]

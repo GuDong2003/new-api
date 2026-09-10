@@ -63,6 +63,7 @@ export function useSidebarData(): SidebarData {
         items: [
           {
             title: t('Playground'),
+            configKey: 'playground',
             icon: FlaskConical,
             items: [
               {
