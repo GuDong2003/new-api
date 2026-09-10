@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/ClickHouse/clickhouse-go/v2"
 	"github.com/QuantumNous/new-api/common"
@@ -72,6 +73,19 @@ func AccessTokenFingerprint(token string) string {
 // RecordAuditLog captures safe request metadata only; raw URLs, query strings,
 // credentials and response/request bodies must never enter this table.
 func RecordAuditLog(c *gin.Context, entry AuditLog) {
+	if err := RecordAuditLogDurable(c, entry); err != nil {
+		ctx := context.Background()
+		if c != nil && c.Request != nil {
+			ctx = c.Request.Context()
+		}
+		logger.LogError(ctx, "audit log write failed: "+err.Error())
+	}
+}
+
+// RecordAuditLogDurable has the same metadata and ClickHouse encoding contract
+// as RecordAuditLog, but returns the persistence result. Sensitive disclosures
+// must fail closed if this call fails; legacy callers remain best-effort.
+func RecordAuditLogDurable(c *gin.Context, entry AuditLog) error {
 	ctx := context.Background()
 	if c != nil && c.Request != nil {
 		ctx = c.Request.Context()
@@ -113,16 +127,17 @@ func RecordAuditLog(c *gin.Context, entry AuditLog) {
 		entry.UserAgent = string(ua[:512])
 	}
 	if LOG_DB == nil {
-		logger.LogError(ctx, fmt.Sprintf("audit log write failed (request_id=%s): log database unavailable", entry.RequestId))
-		return
+		return errors.New("audit log database unavailable")
 	}
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
 	var row any = &entry
 	if common.UsingLogDatabase(common.DatabaseTypeClickHouse) {
 		encoded, err := common.Marshal(entry.Other)
 		if err != nil {
-			logger.LogError(ctx, fmt.Sprintf("audit log write failed (request_id=%s): %v", entry.RequestId, err))
-			return
+			return err
 		}
+		ctx = clickhouse.Context(ctx, clickhouse.WithSettings(clickhouse.Settings{"async_insert": 0, "wait_for_async_insert": 1}))
 		// The ClickHouse GORM insert callback passes structs to the native
 		// driver without resolving their Valuer. Bind this column's JSON
 		// encoding while retaining AuditOther in the domain and API models.
@@ -131,9 +146,7 @@ func RecordAuditLog(c *gin.Context, entry AuditLog) {
 			EncodedOther string `gorm:"column:other;type:json"`
 		}{AuditLog: entry, EncodedOther: string(encoded)}
 	}
-	if err := LOG_DB.Table("audit_logs").Create(row).Error; err != nil {
-		logger.LogError(ctx, fmt.Sprintf("audit log write failed (request_id=%s): %v", entry.RequestId, err))
-	}
+	return LOG_DB.WithContext(ctx).Table("audit_logs").Create(row).Error
 }
 
 func GetAuditLogs(filter AuditLogFilter, start, limit, viewerRole int) ([]*AuditLog, int64, error) {

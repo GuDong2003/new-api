@@ -206,6 +206,21 @@ func SetApiRouter(router *gin.Engine) {
 		apiRouter.GET("/subscription/epay/notify", controller.SubscriptionEpayNotify)
 		apiRouter.GET("/subscription/epay/return", controller.SubscriptionEpayReturn)
 		apiRouter.POST("/subscription/epay/return", anonymousRequestBodyLimit, controller.SubscriptionEpayReturn)
+		contentAuditRoute := apiRouter.Group("/content-audit")
+		contentAuditRoute.Use(middleware.DisableCache(), middleware.RootAuth(), middleware.ContentAuditSessionAuth())
+		{
+			contentAuditRoute.GET("/settings", controller.GetContentAuditSettings)
+			contentAuditRoute.PUT("/settings", middleware.CriticalRateLimit(), controller.UpdateContentAuditSettings)
+			contentAuditRoute.POST("/initialize", middleware.CriticalRateLimit(), controller.InitializeContentAudit)
+			contentAuditRoute.GET("/status", controller.GetContentAuditStatus)
+			contentAuditRoute.GET("/records", controller.ListContentAudits)
+			contentAuditRoute.GET("/records/:id", controller.GetContentAuditDetail)
+			contentAuditRoute.GET("/records/:id/images", controller.GetContentAuditImagePage)
+			contentAuditRoute.GET("/records/:id/originals/:index", controller.GetContentAuditOriginal)
+			contentAuditRoute.GET("/records/:id/thumbnails/:index", controller.GetContentAuditThumbnail)
+			contentAuditRoute.DELETE("/records/:id", middleware.CriticalRateLimit(), controller.DeleteContentAudits)
+			contentAuditRoute.POST("/records/delete", middleware.CriticalRateLimit(), controller.DeleteContentAudits)
+		}
 		optionRoute := apiRouter.Group("/option")
 		optionRoute.Use(middleware.RootAuth())
 		{

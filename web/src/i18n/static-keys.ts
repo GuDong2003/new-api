@@ -19,6 +19,13 @@ For commercial licensing, please contact support@quantumnous.com
 // Static translation keys that don't get picked up by the t('...') regex.
 // These cover dynamic labels (e.g. constants, configs) that are passed into t at runtime.
 export const STATIC_I18N_KEYS = [
+  // Content audit form validation (messages translated by FormMessage).
+  'Enter a whole number within the displayed limits.',
+  'Enter a positive integer ID.',
+  'Choose a valid time range of at most 31 days.',
+  'Model filter must not exceed 128 bytes.',
+  'Request ID filter must not exceed 64 bytes.',
+  'HTTP status must be between 100 and 599.',
   'Account deletion',
   // Model management and metadata synchronization
   'No matching channels',

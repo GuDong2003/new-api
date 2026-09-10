@@ -93,6 +93,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 	defer func() {
 		if newAPIError != nil {
+			c.Set("content_audit_relay_error", true)
 			logger.LogError(c, fmt.Sprintf("relay error: %s", common.LocalLogPreview(newAPIError.Error())))
 			if relayFormat != types.RelayFormatOpenAIRealtime && c.Writer.Written() {
 				return

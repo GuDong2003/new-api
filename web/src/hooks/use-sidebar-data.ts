@@ -194,6 +194,12 @@ export function useSidebarData(): SidebarData {
             icon: CreditCard,
           },
           {
+            title: t('Content audit'),
+            url: '/content-audit',
+            icon: ClipboardList,
+            requiredRole: ROLE.SUPER_ADMIN,
+          },
+          {
             title: t('System Info'),
             url: '/system-info',
             icon: ServerCog,

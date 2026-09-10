@@ -214,6 +214,9 @@ func SyncOptions(frequency int) {
 }
 
 func validateOptionValue(key string, value string) error {
+	if strings.HasPrefix(strings.ToLower(strings.NewReplacer("_", "", "-", "", ".", "").Replace(key)), "contentaudit") {
+		return ErrContentAuditInvalid
+	}
 	if key == operation_setting.ToolPriceOptionKey {
 		return operation_setting.ValidateToolPricesJSON(value)
 	}

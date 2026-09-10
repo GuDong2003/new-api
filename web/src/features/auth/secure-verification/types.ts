@@ -16,6 +16,11 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import type {
+  ContentAuditDeleteRequest,
+  ContentAuditInitializeRequest,
+  ContentAuditSettingsUpdate,
+} from '@/features/content-audit/types'
 import type { AuthBundle } from '@/stores/auth-store'
 
 export type VerificationMethod =
@@ -38,8 +43,23 @@ export type SecurityProofScope =
   | 'account.password.set'
   | 'account.password.change'
   | 'account.delete'
+  | 'content_audit.initialize'
+  | 'content_audit.settings.update'
+  | 'content_audit.delete'
+
+export type ContentAuditOperation =
+  | {
+      scope: 'content_audit.initialize'
+      context: ContentAuditInitializeRequest
+    }
+  | {
+      scope: 'content_audit.settings.update'
+      context: ContentAuditSettingsUpdate
+    }
+  | { scope: 'content_audit.delete'; context: ContentAuditDeleteRequest }
 
 export type VerificationOperation =
+  | ContentAuditOperation
   | { scope: 'channel.key.read'; context: { channel_id: number } }
   | {
       scope: 'account.binding.bind'
@@ -49,7 +69,10 @@ export type VerificationOperation =
   | {
       scope: Exclude<
         SecurityProofScope,
-        'channel.key.read' | 'account.binding.bind' | 'account.binding.unbind'
+        | 'channel.key.read'
+        | 'account.binding.bind'
+        | 'account.binding.unbind'
+        | ContentAuditOperation['scope']
       >
       context?: Record<string, never>
     }

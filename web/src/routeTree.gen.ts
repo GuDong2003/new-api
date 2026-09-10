@@ -27,6 +27,7 @@ import { Route as errors404RouteImport } from './routes/(errors)/404'
 import { Route as errors500RouteImport } from './routes/(errors)/500'
 import { Route as errors503RouteImport } from './routes/(errors)/503'
 import { Route as AuthenticatedChat2linkRouteImport } from './routes/_authenticated/chat2link'
+import { Route as AuthenticatedContentAuditRouteRouteImport } from './routes/_authenticated/content-audit/route'
 import { Route as AuthenticatedPlaygroundRouteRouteImport } from './routes/_authenticated/playground/route'
 import { Route as AuthenticatedSystemSettingsRouteRouteImport } from './routes/_authenticated/system-settings/route'
 import { Route as AboutIndexRouteImport } from './routes/about/index'
@@ -37,6 +38,7 @@ import { Route as SetupIndexRouteImport } from './routes/setup/index'
 import { Route as authUserResetRouteImport } from './routes/(auth)/user/reset'
 import { Route as AuthenticatedChannelsIndexRouteImport } from './routes/_authenticated/channels/index'
 import { Route as AuthenticatedChatChatIdRouteImport } from './routes/_authenticated/chat/$chatId'
+import { Route as AuthenticatedContentAuditIdRouteImport } from './routes/_authenticated/content-audit/$id'
 import { Route as AuthenticatedDashboardIndexRouteImport } from './routes/_authenticated/dashboard/index'
 import { Route as AuthenticatedDashboardSectionRouteImport } from './routes/_authenticated/dashboard/$section'
 import { Route as AuthenticatedErrorsErrorRouteImport } from './routes/_authenticated/errors/$error'
@@ -166,6 +168,12 @@ const AuthenticatedChat2linkRoute = AuthenticatedChat2linkRouteImport.update({
   path: '/chat2link',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const AuthenticatedContentAuditRouteRoute =
+  AuthenticatedContentAuditRouteRouteImport.update({
+    id: '/content-audit',
+    path: '/content-audit',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedPlaygroundRouteRoute =
   AuthenticatedPlaygroundRouteRouteImport.update({
     id: '/playground',
@@ -219,6 +227,12 @@ const AuthenticatedChatChatIdRoute = AuthenticatedChatChatIdRouteImport.update({
   path: '/chat/$chatId',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const AuthenticatedContentAuditIdRoute =
+  AuthenticatedContentAuditIdRouteImport.update({
+    id: '/$id',
+    path: '/$id',
+    getParentRoute: () => AuthenticatedContentAuditRouteRoute,
+  } as any)
 const AuthenticatedDashboardIndexRoute =
   AuthenticatedDashboardIndexRouteImport.update({
     id: '/dashboard/',
@@ -460,6 +474,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/privacy-policy': typeof PrivacyPolicyRoute
   '/user-agreement': typeof UserAgreementRoute
+  '/content-audit': typeof AuthenticatedContentAuditRouteRouteWithChildren
   '/playground': typeof AuthenticatedPlaygroundRouteRouteWithChildren
   '/system-settings': typeof AuthenticatedSystemSettingsRouteRouteWithChildren
   '/forgot-password': typeof authForgotPasswordRoute
@@ -482,6 +497,7 @@ export interface FileRoutesByFullPath {
   '/setup/': typeof SetupIndexRoute
   '/user/reset': typeof authUserResetRoute
   '/chat/$chatId': typeof AuthenticatedChatChatIdRoute
+  '/content-audit/$id': typeof AuthenticatedContentAuditIdRoute
   '/dashboard/$section': typeof AuthenticatedDashboardSectionRoute
   '/errors/$error': typeof AuthenticatedErrorsErrorRoute
   '/models/$section': typeof AuthenticatedModelsSectionRoute
@@ -528,6 +544,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/privacy-policy': typeof PrivacyPolicyRoute
   '/user-agreement': typeof UserAgreementRoute
+  '/content-audit': typeof AuthenticatedContentAuditRouteRouteWithChildren
   '/forgot-password': typeof authForgotPasswordRoute
   '/oauth': typeof authOauthRoute
   '/otp': typeof authOtpRoute
@@ -548,6 +565,7 @@ export interface FileRoutesByTo {
   '/setup': typeof SetupIndexRoute
   '/user/reset': typeof authUserResetRoute
   '/chat/$chatId': typeof AuthenticatedChatChatIdRoute
+  '/content-audit/$id': typeof AuthenticatedContentAuditIdRoute
   '/dashboard/$section': typeof AuthenticatedDashboardSectionRoute
   '/errors/$error': typeof AuthenticatedErrorsErrorRoute
   '/models/$section': typeof AuthenticatedModelsSectionRoute
@@ -597,6 +615,7 @@ export interface FileRoutesById {
   '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
   '/privacy-policy': typeof PrivacyPolicyRoute
   '/user-agreement': typeof UserAgreementRoute
+  '/_authenticated/content-audit': typeof AuthenticatedContentAuditRouteRouteWithChildren
   '/_authenticated/playground': typeof AuthenticatedPlaygroundRouteRouteWithChildren
   '/_authenticated/system-settings': typeof AuthenticatedSystemSettingsRouteRouteWithChildren
   '/(auth)/forgot-password': typeof authForgotPasswordRoute
@@ -619,6 +638,7 @@ export interface FileRoutesById {
   '/setup/': typeof SetupIndexRoute
   '/(auth)/user/reset': typeof authUserResetRoute
   '/_authenticated/chat/$chatId': typeof AuthenticatedChatChatIdRoute
+  '/_authenticated/content-audit/$id': typeof AuthenticatedContentAuditIdRoute
   '/_authenticated/dashboard/$section': typeof AuthenticatedDashboardSectionRoute
   '/_authenticated/errors/$error': typeof AuthenticatedErrorsErrorRoute
   '/_authenticated/models/$section': typeof AuthenticatedModelsSectionRoute
@@ -667,6 +687,7 @@ export interface FileRouteTypes {
     | '/'
     | '/privacy-policy'
     | '/user-agreement'
+    | '/content-audit'
     | '/playground'
     | '/system-settings'
     | '/forgot-password'
@@ -689,6 +710,7 @@ export interface FileRouteTypes {
     | '/setup/'
     | '/user/reset'
     | '/chat/$chatId'
+    | '/content-audit/$id'
     | '/dashboard/$section'
     | '/errors/$error'
     | '/models/$section'
@@ -735,6 +757,7 @@ export interface FileRouteTypes {
     | '/'
     | '/privacy-policy'
     | '/user-agreement'
+    | '/content-audit'
     | '/forgot-password'
     | '/oauth'
     | '/otp'
@@ -755,6 +778,7 @@ export interface FileRouteTypes {
     | '/setup'
     | '/user/reset'
     | '/chat/$chatId'
+    | '/content-audit/$id'
     | '/dashboard/$section'
     | '/errors/$error'
     | '/models/$section'
@@ -803,6 +827,7 @@ export interface FileRouteTypes {
     | '/_authenticated'
     | '/privacy-policy'
     | '/user-agreement'
+    | '/_authenticated/content-audit'
     | '/_authenticated/playground'
     | '/_authenticated/system-settings'
     | '/(auth)/forgot-password'
@@ -825,6 +850,7 @@ export interface FileRouteTypes {
     | '/setup/'
     | '/(auth)/user/reset'
     | '/_authenticated/chat/$chatId'
+    | '/_authenticated/content-audit/$id'
     | '/_authenticated/dashboard/$section'
     | '/_authenticated/errors/$error'
     | '/_authenticated/models/$section'
@@ -1015,6 +1041,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedChat2linkRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/content-audit': {
+      id: '/_authenticated/content-audit'
+      path: '/content-audit'
+      fullPath: '/content-audit'
+      preLoaderRoute: typeof AuthenticatedContentAuditRouteRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/playground': {
       id: '/_authenticated/playground'
       path: '/playground'
@@ -1084,6 +1117,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/chat/$chatId'
       preLoaderRoute: typeof AuthenticatedChatChatIdRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/content-audit/$id': {
+      id: '/_authenticated/content-audit/$id'
+      path: '/$id'
+      fullPath: '/content-audit/$id'
+      preLoaderRoute: typeof AuthenticatedContentAuditIdRouteImport
+      parentRoute: typeof AuthenticatedContentAuditRouteRoute
     }
     '/_authenticated/dashboard/': {
       id: '/_authenticated/dashboard/'
@@ -1394,6 +1434,20 @@ const authRouteRouteWithChildren = authRouteRoute._addFileChildren(
   authRouteRouteChildren,
 )
 
+interface AuthenticatedContentAuditRouteRouteChildren {
+  AuthenticatedContentAuditIdRoute: typeof AuthenticatedContentAuditIdRoute
+}
+
+const AuthenticatedContentAuditRouteRouteChildren: AuthenticatedContentAuditRouteRouteChildren =
+  {
+    AuthenticatedContentAuditIdRoute: AuthenticatedContentAuditIdRoute,
+  }
+
+const AuthenticatedContentAuditRouteRouteWithChildren =
+  AuthenticatedContentAuditRouteRoute._addFileChildren(
+    AuthenticatedContentAuditRouteRouteChildren,
+  )
+
 interface AuthenticatedPlaygroundRouteRouteChildren {
   AuthenticatedPlaygroundChatRoute: typeof AuthenticatedPlaygroundChatRoute
   AuthenticatedPlaygroundDrawingRoute: typeof AuthenticatedPlaygroundDrawingRoute
@@ -1472,6 +1526,7 @@ const AuthenticatedSystemSettingsRouteRouteWithChildren =
   )
 
 interface AuthenticatedRouteRouteChildren {
+  AuthenticatedContentAuditRouteRoute: typeof AuthenticatedContentAuditRouteRouteWithChildren
   AuthenticatedPlaygroundRouteRoute: typeof AuthenticatedPlaygroundRouteRouteWithChildren
   AuthenticatedSystemSettingsRouteRoute: typeof AuthenticatedSystemSettingsRouteRouteWithChildren
   AuthenticatedChat2linkRoute: typeof AuthenticatedChat2linkRoute
@@ -1500,6 +1555,8 @@ interface AuthenticatedRouteRouteChildren {
 }
 
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
+  AuthenticatedContentAuditRouteRoute:
+    AuthenticatedContentAuditRouteRouteWithChildren,
   AuthenticatedPlaygroundRouteRoute:
     AuthenticatedPlaygroundRouteRouteWithChildren,
   AuthenticatedSystemSettingsRouteRoute:

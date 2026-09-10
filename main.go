@@ -135,6 +135,7 @@ func main() {
 
 	// Report this process as a system instance so the System Info page can show
 	// all currently alive nodes in multi-instance deployments.
+	service.StartContentAudit()
 	service.StartSystemInstanceReporter()
 
 	// Wire task polling adaptor factory (breaks service -> relay import cycle).
@@ -228,6 +229,7 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	sig := <-quit
 	common.SysLog(fmt.Sprintf("received signal: %v, shutting down...", sig))
+	service.StopContentAuditAdmission()
 
 	// SSE streams may run for minutes; give them time to finish before forced exit
 	shutdownTimeout := time.Duration(common.GetEnvOrDefault("SHUTDOWN_TIMEOUT_SECONDS", 120)) * time.Second
@@ -236,6 +238,11 @@ func main() {
 	if err := srv.Shutdown(ctx); err != nil {
 		common.SysError(fmt.Sprintf("server forced to shutdown: %v", err))
 	}
+	auditShutdown, auditCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	if err := service.StopContentAudit(auditShutdown); err != nil {
+		common.SysError("content audit shutdown incomplete; outstanding reservations retained")
+	}
+	auditCancel()
 	// 内存中的看板数据保存入库，避免重启丢失未落库数据 (issue #5679)
 	if common.DataExportEnabled {
 		model.SaveQuotaDataCache()
