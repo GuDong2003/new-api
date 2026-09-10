@@ -136,6 +136,7 @@ func main() {
 	// Report this process as a system instance so the System Info page can show
 	// all currently alive nodes in multi-instance deployments.
 	service.StartContentAudit()
+	service.StartGallery()
 	service.StartSystemInstanceReporter()
 
 	// Wire task polling adaptor factory (breaks service -> relay import cycle).
@@ -243,6 +244,7 @@ func main() {
 		common.SysError("content audit shutdown incomplete; outstanding reservations retained")
 	}
 	auditCancel()
+	service.StopGallery()
 	// 内存中的看板数据保存入库，避免重启丢失未落库数据 (issue #5679)
 	if common.DataExportEnabled {
 		model.SaveQuotaDataCache()

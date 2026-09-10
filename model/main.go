@@ -398,6 +398,9 @@ func migrateDB() error {
 			return err
 		}
 	}
+	if err := MigrateGallery(DB); err != nil {
+		return err
+	}
 	return MigrateContentAudit(DB)
 }
 
@@ -492,6 +495,9 @@ func migrateDBFast() error {
 		}
 	}
 	if err := MigrateContentAudit(DB); err != nil {
+		return err
+	}
+	if err := MigrateGallery(DB); err != nil {
 		return err
 	}
 	common.SysLog("database migrated")

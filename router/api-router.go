@@ -206,6 +206,17 @@ func SetApiRouter(router *gin.Engine) {
 		apiRouter.GET("/subscription/epay/notify", controller.SubscriptionEpayNotify)
 		apiRouter.GET("/subscription/epay/return", controller.SubscriptionEpayReturn)
 		apiRouter.POST("/subscription/epay/return", anonymousRequestBodyLimit, controller.SubscriptionEpayReturn)
+		galleryRoute := apiRouter.Group("/gallery")
+		galleryRoute.Use(middleware.DisableCache(), middleware.UserAuth())
+		{
+			galleryRoute.GET("/usage", controller.GetGalleryUsage)
+			galleryRoute.GET("/images", controller.ListGalleryImages)
+			galleryRoute.POST("/images", controller.SaveGalleryImage)
+			galleryRoute.GET("/images/:id/file", controller.GetGalleryFile)
+			galleryRoute.DELETE("/images/:id", controller.DeleteGalleryImage)
+			galleryRoute.GET("/settings", middleware.RootAuth(), controller.GetGallerySettings)
+			galleryRoute.PUT("/settings", middleware.RootAuth(), controller.UpdateGallerySettings)
+		}
 		contentAuditRoute := apiRouter.Group("/content-audit")
 		contentAuditRoute.Use(middleware.DisableCache(), middleware.RootAuth(), middleware.ContentAuditSessionAuth())
 		{
