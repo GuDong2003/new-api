@@ -60,3 +60,97 @@ export type GalleryPage = {
   page: number
   page_size: number
 }
+
+export type CanvasKind = 'drawing' | 'nai'
+export type CanvasAssetRole = 'generated' | 'reference' | 'mask'
+export type CanvasAssetRef = {
+  id: string
+  name: string
+  width: number
+  height: number
+  mimeType: string
+}
+export type CanvasRemoteAsset = {
+  id: string
+  role: CanvasAssetRole
+  node_id: string
+  sha256: string
+  bytes: number
+  width: number
+  height: number
+  mime_type: string
+  has_thumbnail: boolean
+}
+export type CanvasRecord = {
+  id: string
+  kind: CanvasKind
+  name: string
+  revision: number
+  state: 'ready' | 'deleted' | 'expired'
+  updated_at: number
+  expires_at: number
+  document: Record<string, unknown> | null
+  removed_asset_ids: string[]
+  assets: CanvasRemoteAsset[]
+  asset_id_map: Record<string, string>
+}
+export type CanvasSummary = Omit<
+  CanvasRecord,
+  'document' | 'assets' | 'asset_id_map' | 'removed_asset_ids'
+> & { cover_asset_ids: string[] }
+export type CanvasSaveMetadata = {
+  id: string
+  kind: CanvasKind
+  name: string
+  base_revision: number
+  mutation_id: string
+  document: Record<string, unknown>
+  explicit_save?: boolean
+  assets: {
+    id: string
+    role: CanvasAssetRole
+    node_id: string
+    bytes: number
+    sha256: string
+  }[]
+}
+export type CanvasBinary = {
+  id: string
+  blob: Blob
+  role: CanvasAssetRole
+  nodeId: string
+  sha256: string
+}
+export type LocalCanvas = {
+  id: string
+  userId: number
+  kind: CanvasKind
+  name: string
+  document: Record<string, unknown>
+  revision: number
+  cloudRevision: number
+  localSavedAt: number
+  cloudSavedRevision: number
+  expiresAt: number
+  status: 'local' | 'pending' | 'synced' | 'full' | 'conflict' | 'error'
+  needsExplicitSave: boolean
+  removedAssetIds: string[]
+  deleted: boolean
+}
+export type CanvasUserState = {
+  lastOpened: Partial<Record<CanvasKind, string>>
+  cloudPause: {
+    reason: string
+    requiredBytes: number
+    requiredImages: number
+    lastQuotaCheck: number
+    notified: boolean
+  } | null
+  pendingCanvasRemovals: { canvasId: string; revision: number }[]
+  pendingAssetRemovals: {
+    canvasId: string
+    assetId: string
+    revision: number
+  }[]
+  migratedKinds: Partial<Record<CanvasKind, string>>
+}
