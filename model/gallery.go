@@ -36,6 +36,10 @@ type GalleryImage struct {
 	UserID         int            `json:"-" gorm:"uniqueIndex:idx_gallery_owner_source,priority:1;index"`
 	SourceID       string         `json:"source_id" gorm:"type:varchar(191);uniqueIndex:idx_gallery_owner_source,priority:2"`
 	Source         string         `json:"source" gorm:"type:varchar(16)"`
+	CanvasID       string         `json:"canvas_id" gorm:"type:varchar(36);index"`
+	NodeID         string         `json:"node_id" gorm:"type:varchar(128)"`
+	Role           string         `json:"role" gorm:"type:varchar(16)"`
+	SHA256         string         `json:"-" gorm:"type:varchar(64)"`
 	Model          string         `json:"model" gorm:"type:varchar(255)"`
 	Prompt         string         `json:"prompt" gorm:"type:text"`
 	NegativePrompt string         `json:"negative_prompt" gorm:"type:text"`
@@ -63,7 +67,7 @@ func (i *GalleryImage) AfterFind(_ *gorm.DB) error {
 // Gallery metadata lives exclusively in the primary database. This migration
 // is also exported for fresh/released-schema database matrix verification.
 func MigrateGallery(db *gorm.DB) error {
-	if err := db.AutoMigrate(&GallerySettings{}, &GalleryImage{}); err != nil {
+	if err := db.AutoMigrate(&GallerySettings{}, &GalleryImage{}, &GalleryCanvas{}, &GalleryRemoval{}); err != nil {
 		return err
 	}
 	defaults := GallerySettings{ID: 1, Enabled: true, RetentionDays: 7, UserMaxImages: 100, UserMaxBytes: 209715200, TotalMaxBytes: 536870912}
@@ -92,11 +96,24 @@ func GalleryTotals(ctx context.Context, user int) (count, userBytes, totalBytes 
 		Count int64
 		Bytes int64
 	}
-	err = DB.WithContext(ctx).Model(&GalleryImage{}).Where("user_id = ?", user).Select("COUNT(*) AS count, COALESCE(SUM(storage_bytes), 0) AS bytes").Scan(&totals).Error
+	// Include pending physical deletion in byte usage, and treat legacy NULL
+	// roles as originals. Masks are auxiliary bytes, not additional originals.
+	err = DB.WithContext(ctx).Model(&GalleryImage{}).Where("user_id = ?", user).Select("COALESCE(SUM(CASE WHEN role = 'mask' THEN 0 ELSE 1 END), 0) AS count, COALESCE(SUM(storage_bytes), 0) AS bytes").Scan(&totals).Error
 	if err != nil {
 		return
 	}
 	count, userBytes = totals.Count, totals.Bytes
 	err = DB.WithContext(ctx).Model(&GalleryImage{}).Select("COALESCE(SUM(storage_bytes), 0)").Scan(&totalBytes).Error
+	if err != nil {
+		return
+	}
+	var documentBytes int64
+	err = DB.WithContext(ctx).Model(&GalleryCanvas{}).Where("user_id = ?", user).Select("COALESCE(SUM(storage_bytes), 0)").Scan(&documentBytes).Error
+	if err != nil {
+		return
+	}
+	userBytes += documentBytes
+	err = DB.WithContext(ctx).Model(&GalleryCanvas{}).Select("COALESCE(SUM(storage_bytes), 0)").Scan(&documentBytes).Error
+	totalBytes += documentBytes
 	return
 }

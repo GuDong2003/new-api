@@ -11,6 +11,7 @@ import (
 	"image/jpeg"
 	"image/png"
 	"io"
+	"math"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -27,11 +28,13 @@ import (
 	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
+	"gorm.io/gorm/schema"
 )
 
 func galleryFixture(t *testing.T, dialect gorm.Dialector) {
@@ -43,9 +46,284 @@ func galleryFixture(t *testing.T, dialect gorm.Dialector) {
 	t.Setenv("GALLERY_STORAGE_DIR", t.TempDir())
 	require.NoError(t, model.MigrateGallery(db))
 	require.NoError(t, db.Where("1 = 1").Delete(&model.GalleryImage{}).Error)
+	require.NoError(t, db.Where("1 = 1").Delete(&model.GalleryCanvas{}).Error)
+	require.NoError(t, db.Where("1 = 1").Delete(&model.GalleryRemoval{}).Error)
 	require.NoError(t, db.Where("1 = 1").Delete(&model.GallerySettings{}).Error)
 	require.NoError(t, model.MigrateGallery(db))
 	t.Cleanup(func() { model.DB = old; sqlDB, _ := db.DB(); _ = sqlDB.Close() })
+}
+
+func galleryCanvasDocument(t *testing.T, kind string) map[string]any {
+	t.Helper()
+	var doc map[string]any
+	input := `{"version":1,"nodes":[],"edges":[],"referenceIds":[],"mask":null,"viewport":{"x":0,"y":0,"zoom":1},"settings":{"model":"gpt-image-1","size":"auto","n":1}}`
+	if kind == "nai" {
+		input = `{"version":1,"nodes":[],"viewport":{"x":0,"y":0,"zoom":1},"settings":{"model":"nai-diffusion-4-full","negativePrompt":"blur","width":1024,"height":1024,"steps":30,"scale":6.5,"sampler":"k_dpmpp_2m","noiseSchedule":"exponential","cfgRescale":0.25,"seed":4294967295,"n":2,"qualityToggle":true,"qualityTier":"light","ucPreset":"humanFocus","smea":true,"smeaDyn":true,"decrisp":true}}`
+	}
+	require.NoError(t, common.UnmarshalJsonStr(input, &doc))
+	return doc
+}
+
+func galleryCanvasDrawingReferences(t *testing.T) map[string]any {
+	t.Helper()
+	var doc map[string]any
+	require.NoError(t, common.UnmarshalJsonStr(`{
+		"version":1,"viewport":{"x":0,"y":0,"zoom":1},
+		"settings":{"mode":"edit","model":"gpt-image-1","prompt":"a white fox","size":"auto","n":1,"outputCompression":0,"stream":false},
+		"nodes":[
+			{"id":"reference-node","type":"image","position":{"x":-20,"y":10},"width":280,"height":330,"data":{"asset":{"id":"11111111-1111-4111-8111-111111111111","name":"fox.png","width":16,"height":8,"mimeType":"image/png"},"prompt":"fox","settings":{},"status":"complete","createdAt":100}},
+			{"id":"result-node","type":"image","position":{"x":400,"y":20},"data":{"asset":{"id":"11111111-1111-4111-8111-111111111111","name":"fox.png","width":16,"height":8,"mimeType":"image/png"},"prompt":"a white fox","revisedPrompt":"a snowy fox","settings":{"mode":"edit"},"status":"complete","createdAt":101,"referenceIds":["reference-node"],"mask":{"id":"22222222-2222-4222-8222-222222222222","name":"mask.png","width":16,"height":8,"mimeType":"image/png"}}}
+		],
+		"edges":[{"id":"reference-edge","source":"reference-node","target":"result-node"}],
+		"referenceIds":["reference-node"],
+		"mask":{"referenceId":"reference-node","asset":{"id":"22222222-2222-4222-8222-222222222222","name":"mask.png","width":16,"height":8,"mimeType":"image/png"}}
+	}`, &doc))
+	return doc
+}
+
+func TestGalleryCanvasDocumentContentAndSanitization(t *testing.T) {
+	for _, kind := range []string{"drawing", "nai"} {
+		t.Run(kind, func(t *testing.T) {
+			doc := galleryCanvasDocument(t, kind)
+			first, err := service.NormalizeGalleryCanvasDocument(kind, doc)
+			require.NoError(t, err)
+			require.Len(t, first.ContentHash, 64)
+			require.Empty(t, first.Assets)
+			raw, err := common.Marshal(first.Document)
+			require.NoError(t, err)
+			require.EqualValues(t, len(raw), first.Bytes)
+			doc["viewport"] = map[string]any{"x": float64(20), "y": float64(10), "zoom": float64(2)}
+			doc["api_key"] = "must not persist"
+			settings := doc["settings"].(map[string]any)
+			settings["headers"] = map[string]any{"Authorization": "Bearer secret"}
+			settings["unknown"] = "must not persist"
+			second, err := service.NormalizeGalleryCanvasDocument(kind, doc)
+			require.NoError(t, err)
+			require.Equal(t, first.ContentHash, second.ContentHash)
+			require.NotContains(t, second.Document, "api_key")
+			require.NotContains(t, second.Document["settings"], "headers")
+			require.NotContains(t, second.Document["settings"], "unknown")
+			require.Equal(t, float64(0), first.Document["viewport"].(map[string]any)["x"])
+			settings["prompt"] = "actual new content"
+			third, err := service.NormalizeGalleryCanvasDocument(kind, doc)
+			require.NoError(t, err)
+			require.NotEqual(t, first.ContentHash, third.ContentHash)
+		})
+	}
+}
+
+func TestGalleryCanvasDocumentPreservesEditorRelationsAndSettings(t *testing.T) {
+	doc := galleryCanvasDrawingReferences(t)
+	info, err := service.NormalizeGalleryCanvasDocument("drawing", doc)
+	require.NoError(t, err)
+	require.Equal(t, []service.GalleryCanvasAssetRef{
+		{ID: "11111111-1111-4111-8111-111111111111", Name: "fox.png", Width: 16, Height: 8, MIMEType: "image/png"},
+		{ID: "22222222-2222-4222-8222-222222222222", Name: "mask.png", Width: 16, Height: 8, MIMEType: "image/png"},
+	}, info.Assets)
+	require.Equal(t, doc["edges"], info.Document["edges"])
+	require.Equal(t, doc["mask"], info.Document["mask"])
+	require.Equal(t, doc["referenceIds"], info.Document["referenceIds"])
+	data := info.Document["nodes"].([]any)[1].(map[string]any)["data"].(map[string]any)
+	require.Equal(t, []any{"reference-node"}, data["referenceIds"])
+	require.Equal(t, "a snowy fox", data["revisedPrompt"])
+	require.Equal(t, float64(0), info.Document["settings"].(map[string]any)["outputCompression"])
+	doc["nodes"].([]any)[1].(map[string]any)["data"].(map[string]any)["jobId"] = "runtime-job"
+	doc["nodes"].([]any)[1].(map[string]any)["data"].(map[string]any)["progress"] = float64(50)
+	retry, err := service.NormalizeGalleryCanvasDocument("drawing", doc)
+	require.NoError(t, err)
+	require.Equal(t, info.ContentHash, retry.ContentHash)
+	data = retry.Document["nodes"].([]any)[1].(map[string]any)["data"].(map[string]any)
+	require.NotContains(t, data, "jobId")
+	require.NotContains(t, data, "progress")
+	nai := galleryCanvasDocument(t, "nai")
+	naiInfo, err := service.NormalizeGalleryCanvasDocument("nai", nai)
+	require.NoError(t, err)
+	for key, value := range nai["settings"].(map[string]any) {
+		require.Equal(t, value, naiInfo.Document["settings"].(map[string]any)[key], key)
+	}
+}
+
+func TestGalleryCanvasDocumentRejectsMalformedContent(t *testing.T) {
+	for name, mutate := range map[string]func(map[string]any){
+		"wrong version":        func(d map[string]any) { d["version"] = float64(2) },
+		"string version":       func(d map[string]any) { d["version"] = "1" },
+		"missing nodes":        func(d map[string]any) { delete(d, "nodes") },
+		"null nodes":           func(d map[string]any) { d["nodes"] = nil },
+		"duplicate node":       func(d map[string]any) { d["nodes"] = append(d["nodes"].([]any), d["nodes"].([]any)[0]) },
+		"dangling edge":        func(d map[string]any) { d["edges"].([]any)[0].(map[string]any)["source"] = "missing" },
+		"dangling reference":   func(d map[string]any) { d["referenceIds"] = []any{"missing"} },
+		"wrong mask reference": func(d map[string]any) { d["mask"].(map[string]any)["referenceId"] = "result-node" },
+		"wrong mask size":      func(d map[string]any) { d["mask"].(map[string]any)["asset"].(map[string]any)["width"] = float64(17) },
+		"infinite viewport":    func(d map[string]any) { d["viewport"].(map[string]any)["x"] = math.Inf(1) },
+		"invalid zoom":         func(d map[string]any) { d["viewport"].(map[string]any)["zoom"] = float64(0) },
+		"fractional n":         func(d map[string]any) { d["settings"].(map[string]any)["n"] = 1.5 },
+		"bad enum":             func(d map[string]any) { d["settings"].(map[string]any)["mode"] = "unknown" },
+		"too many nodes":       func(d map[string]any) { d["nodes"] = make([]any, 501) },
+		"too many edges":       func(d map[string]any) { d["edges"] = make([]any, 8001) },
+		"too many references":  func(d map[string]any) { d["referenceIds"] = make([]any, 17) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			doc := galleryCanvasDrawingReferences(t)
+			mutate(doc)
+			_, err := service.NormalizeGalleryCanvasDocument("drawing", doc)
+			require.ErrorIs(t, err, model.ErrGalleryInvalid)
+		})
+	}
+	for name, mutate := range map[string]func(map[string]any){
+		"embedded src":            func(d map[string]any) { d["asset"].(map[string]any)["src"] = "data:image/png;base64,secret" },
+		"non UUID":                func(d map[string]any) { d["asset"].(map[string]any)["id"] = "legacy-task-id" },
+		"unsafe MIME":             func(d map[string]any) { d["asset"].(map[string]any)["mimeType"] = "image/svg+xml" },
+		"fractional dimension":    func(d map[string]any) { d["asset"].(map[string]any)["width"] = 1.5 },
+		"conflicting descriptor":  func(d map[string]any) { d["asset"].(map[string]any)["name"] = "different.png" },
+		"dangling node reference": func(d map[string]any) { d["referenceIds"] = []any{"missing"} },
+		"node mask mismatch":      func(d map[string]any) { d["mask"].(map[string]any)["height"] = float64(9) },
+		"invalid status":          func(d map[string]any) { d["status"] = "running" },
+		"NaN created time":        func(d map[string]any) { d["createdAt"] = math.NaN() },
+	} {
+		t.Run(name, func(t *testing.T) {
+			doc := galleryCanvasDrawingReferences(t)
+			mutate(doc["nodes"].([]any)[1].(map[string]any)["data"].(map[string]any))
+			_, err := service.NormalizeGalleryCanvasDocument("drawing", doc)
+			require.ErrorIs(t, err, model.ErrGalleryInvalid)
+		})
+	}
+	_, err := service.NormalizeGalleryCanvasDocument("unknown", galleryCanvasDocument(t, "drawing"))
+	require.ErrorIs(t, err, model.ErrGalleryInvalid)
+}
+
+func TestGalleryCanvasDocumentNAINodeAndUsage(t *testing.T) {
+	doc := galleryCanvasDocument(t, "nai")
+	var node map[string]any
+	require.NoError(t, common.UnmarshalJsonStr(`{"id":"nai-node","type":"nai-image","position":{"x":12,"y":-24},"data":{"asset":{"id":"33333333-3333-4333-8333-333333333333","name":"novel.jpg","width":1024,"height":1024,"mimeType":"image/jpeg"},"prompt":"a fox","settings":{"seed":0,"scale":0,"cfgRescale":0},"status":"complete","createdAt":123,"usage":{"input_tokens":12,"output_tokens":34,"total_tokens":46,"input_tokens_details":{"text_tokens":2,"image_tokens":10,"Authorization":"secret"},"api_key":"secret"}}}`, &node))
+	doc["nodes"] = []any{node}
+	info, err := service.NormalizeGalleryCanvasDocument("nai", doc)
+	require.NoError(t, err)
+	assert.Equal(t, []service.GalleryCanvasAssetRef{{ID: "33333333-3333-4333-8333-333333333333", Name: "novel.jpg", Width: 1024, Height: 1024, MIMEType: "image/jpeg"}}, info.Assets)
+	data := info.Document["nodes"].([]any)[0].(map[string]any)["data"].(map[string]any)
+	assert.Equal(t, map[string]any{"input_tokens": float64(12), "output_tokens": float64(34), "total_tokens": float64(46), "input_tokens_details": map[string]any{"text_tokens": float64(2), "image_tokens": float64(10)}}, data["usage"])
+	assert.Equal(t, float64(0), data["settings"].(map[string]any)["seed"])
+	assert.Equal(t, float64(0), data["settings"].(map[string]any)["scale"])
+	assert.NotContains(t, info.Document, "referenceIds")
+	_, err = service.NormalizeGalleryCanvasDocument("drawing", doc)
+	require.ErrorIs(t, err, model.ErrGalleryInvalid)
+	node["data"].(map[string]any)["usage"].(map[string]any)["input_tokens"] = "secret-not-a-number"
+	_, err = service.NormalizeGalleryCanvasDocument("nai", doc)
+	require.ErrorIs(t, err, model.ErrGalleryInvalid)
+}
+
+func TestGalleryCanvasDocumentSettingsBoundaries(t *testing.T) {
+	for _, tc := range []struct {
+		kind, key string
+		value     any
+	}{
+		{"nai", "seed", float64(4294967296)},
+		{"nai", "width", float64(2049)},
+		{"nai", "steps", float64(51)},
+		{"nai", "scale", float64(-1)},
+		{"nai", "cfgRescale", 1.1},
+		{"nai", "n", float64(9)},
+		{"nai", "sampler", "unsupported"},
+		{"nai", "qualityToggle", "false"},
+		{"drawing", "n", float64(11)},
+		{"drawing", "outputCompression", float64(-1)},
+		{"drawing", "partialImages", float64(4)},
+		{"drawing", "prompt", strings.Repeat("🦊", 16001)},
+	} {
+		t.Run(tc.kind+"/"+tc.key, func(t *testing.T) {
+			doc := galleryCanvasDocument(t, tc.kind)
+			doc["settings"].(map[string]any)[tc.key] = tc.value
+			_, err := service.NormalizeGalleryCanvasDocument(tc.kind, doc)
+			require.ErrorIs(t, err, model.ErrGalleryInvalid)
+		})
+	}
+	doc := galleryCanvasDocument(t, "drawing")
+	var settings map[string]any
+	require.NoError(t, common.UnmarshalJsonStr(`{"mode":"edit","group":"custom","model":"dall-e-3","prompt":"fox","size":"1792x1024","quality":"hd","n":10,"background":"opaque","outputFormat":"webp","outputCompression":0,"moderation":"low","responseFormat":"url","style":"natural","inputFidelity":"high","stream":true,"partialImages":3,"user":"artist"}`, &settings))
+	doc["settings"] = settings
+	info, err := service.NormalizeGalleryCanvasDocument("drawing", doc)
+	require.NoError(t, err)
+	assert.Equal(t, settings, info.Document["settings"])
+	// Persistence mirrors the schema; generation-time model compatibility is
+	// enforced by the editor/request layer, not by saving a historical document.
+}
+
+func TestGalleryCanvasMigrationAndTotals(t *testing.T) {
+	galleryFixture(t, sqlite.Open(filepath.Join(t.TempDir(), "gallery.db")))
+	ctx := context.Background()
+	legacy := model.GalleryImage{ID: "legacy", UserID: 1, SourceID: "old-job", State: "ready", StorageBytes: 100, ExpiresAt: 12345, ParametersJSON: `{"seed":42}`}
+	require.NoError(t, model.DB.Create(&legacy).Error)
+	settings := model.GallerySettings{Enabled: false, RetentionDays: 23, UserMaxImages: 234, UserMaxBytes: 3000000, TotalMaxBytes: 9000000}
+	require.NoError(t, model.WriteGallerySettings(ctx, settings))
+	for range 2 {
+		require.NoError(t, model.MigrateGallery(model.DB))
+	}
+	var restored model.GalleryImage
+	require.NoError(t, model.DB.First(&restored, "id = ?", "legacy").Error)
+	require.Equal(t, int64(12345), restored.ExpiresAt)
+	require.Equal(t, float64(42), restored.Parameters["seed"])
+	stored, err := model.ReadGallerySettings(ctx)
+	require.NoError(t, err)
+	settings.ID = 1
+	require.Equal(t, settings, *stored)
+	for _, image := range []model.GalleryImage{
+		{ID: "ref", UserID: 1, SourceID: "ref", Role: "reference", StorageBytes: 200},
+		{ID: "mask", UserID: 1, SourceID: "mask", Role: "mask", StorageBytes: 30, State: "deleting"},
+		{ID: "other", UserID: 2, SourceID: "other", Role: "generated", StorageBytes: 400},
+	} {
+		require.NoError(t, model.DB.Create(&image).Error)
+	}
+	canvas := model.GalleryCanvas{ID: "canvas", UserID: 1, Kind: "drawing", Name: "foxes", Revision: 3, State: "ready", MutationID: "mutation", DocumentJSON: `{"version":1}`, RemovedAssetIDsJSON: `["removed-asset"]`, ContentHash: "hash", StorageBytes: 50, UpdatedAt: 123, ExpiresAt: 456}
+	require.NoError(t, model.DB.Create(&canvas).Error)
+	require.NoError(t, model.DB.Create(&model.GalleryCanvas{ID: "other-canvas", UserID: 2, StorageBytes: 60}).Error)
+	removal := model.GalleryRemoval{UserID: 1, CanvasID: "canvas", AssetID: "removed-asset", Revision: 3, Reason: "deleted", CreatedAt: 123}
+	require.NoError(t, model.DB.Create(&removal).Error)
+	for range 2 {
+		require.NoError(t, model.MigrateGallery(model.DB))
+	}
+	var loaded model.GalleryCanvas
+	require.NoError(t, model.DB.First(&loaded, "id = ?", "canvas").Error)
+	require.Equal(t, map[string]any{"version": float64(1)}, loaded.Document)
+	require.Equal(t, canvas.MutationID, loaded.MutationID)
+	require.Equal(t, canvas.ExpiresAt, loaded.ExpiresAt)
+	assert.Equal(t, []string{"removed-asset"}, loaded.RemovedAssetIDs)
+	count, userBytes, totalBytes, err := model.GalleryTotals(ctx, 1)
+	require.NoError(t, err)
+	require.EqualValues(t, 2, count)
+	require.EqualValues(t, 380, userBytes)
+	require.EqualValues(t, 840, totalBytes)
+	var removals []model.GalleryRemoval
+	require.NoError(t, model.DB.Where("user_id = ? AND canvas_id = ?", 1, "canvas").Find(&removals).Error)
+	require.Len(t, removals, 1)
+	require.Equal(t, "removed-asset", removals[0].AssetID)
+	for _, state := range []string{"deleted", "expired"} {
+		require.NoError(t, model.DB.Model(&model.GalleryCanvas{}).Where("id = ?", "canvas").Update("state", state).Error)
+		require.NoError(t, model.DB.First(&loaded, "id = ?", "canvas").Error)
+		assert.Nil(t, loaded.Document)
+		assert.Equal(t, state, loaded.State)
+		assert.Equal(t, []string{"removed-asset"}, loaded.RemovedAssetIDs)
+	}
+}
+
+func TestGalleryCanvasDocumentStorageType(t *testing.T) {
+	canvasSchema, err := schema.Parse(&model.GalleryCanvas{}, &sync.Map{}, schema.NamingStrategy{})
+	require.NoError(t, err)
+	for _, tc := range []struct {
+		name    string
+		dialect gorm.Dialector
+		want    string
+	}{
+		{"mysql", mysql.Open(""), "longtext"},
+		{"postgres", postgres.Open(""), "text"},
+		{"sqlite", sqlite.Open(":memory:"), "text"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, name := range []string{"DocumentJSON", "RemovedAssetIDsJSON"} {
+				field := canvasSchema.LookUpField(name)
+				require.NotNil(t, field)
+				assert.Equal(t, tc.want, tc.dialect.DataTypeOf(field), name)
+			}
+		})
+	}
 }
 
 func galleryPNG(t *testing.T) []byte {
@@ -146,6 +424,30 @@ func TestGalleryDatabaseMatrix(t *testing.T) {
 			require.NoError(t, err)
 			require.EqualValues(t, 1, usage.UsedImages)
 			require.NoError(t, service.DeleteGalleryImage(ctx, 2, other.ID))
+			// A supported document can exceed MySQL TEXT's 64 KiB capacity.
+			// Verify full content survives storage and repeated startup migration
+			// on every configured real engine, not just generated DDL types.
+			document := galleryCanvasDrawingReferences(t)
+			document["settings"].(map[string]any)["prompt"] = strings.Repeat("x", 32000)
+			for _, node := range document["nodes"].([]any) {
+				node.(map[string]any)["data"].(map[string]any)["prompt"] = strings.Repeat("y", 32000)
+			}
+			info, err := service.NormalizeGalleryCanvasDocument("drawing", document)
+			require.NoError(t, err)
+			raw, err := common.Marshal(info.Document)
+			require.NoError(t, err)
+			require.Greater(t, len(raw), 65535)
+			canvas := model.GalleryCanvas{ID: "large-document", UserID: 1, Kind: "drawing", State: "ready", DocumentVersion: 1, DocumentJSON: string(raw), StorageBytes: info.Bytes, ContentHash: info.ContentHash, Revision: 1, UpdatedAt: 123, ExpiresAt: 456}
+			require.NoError(t, model.DB.Create(&canvas).Error)
+			for range 2 {
+				require.NoError(t, model.MigrateGallery(model.DB))
+			}
+			var restored model.GalleryCanvas
+			require.NoError(t, model.DB.First(&restored, "id = ?", canvas.ID).Error)
+			assert.Equal(t, string(raw), restored.DocumentJSON)
+			assert.Equal(t, info.Document, restored.Document)
+			assert.Equal(t, int64(123), restored.UpdatedAt)
+			assert.Equal(t, int64(456), restored.ExpiresAt)
 		})
 	}
 }
