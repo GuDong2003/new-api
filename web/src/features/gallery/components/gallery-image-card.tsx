@@ -27,14 +27,25 @@ export function GalleryImageCard(props: {
   identity: GalleryIdentity
   onPreview: () => void
   onDelete: () => void
+  onOpenCanvas?: () => void
 }) {
   const { t } = useTranslation()
   const file = useGalleryFile(
     props.identity,
     props.image.id,
     true,
-    props.image.has_thumbnail
+    props.image.has_thumbnail && !props.image.localBlob
   )
+  const original = useGalleryFile(
+    props.identity,
+    props.image.id,
+    false,
+    Boolean(props.image.localBlob) ||
+      !props.image.has_thumbnail ||
+      file.isError,
+    { blob: props.image.localBlob, only: props.image.localOnly }
+  )
+  const imageUrl = file.url ?? original.url
   return (
     <article className='flex min-w-0 flex-col gap-3'>
       <Button
@@ -43,9 +54,9 @@ export function GalleryImageCard(props: {
         onClick={props.onPreview}
         aria-label={t('Preview original')}
       >
-        {file.url ? (
+        {imageUrl ? (
           <img
-            src={file.url}
+            src={imageUrl}
             alt={props.image.prompt}
             loading='lazy'
             className='aspect-square w-full rounded-md object-contain'
@@ -68,10 +79,21 @@ export function GalleryImageCard(props: {
         <p className='text-muted-foreground'>
           {props.image.source === 'nai' ? t('NAI Canvas') : t('Drawing')}
         </p>
+        {props.onOpenCanvas ? (
+          <Button
+            variant='link'
+            className='h-auto justify-start p-0 text-xs'
+            onClick={props.onOpenCanvas}
+          >
+            {t('Open source canvas')}
+          </Button>
+        ) : null}
         <p className='text-muted-foreground text-xs'>
-          {t('Expires: {{date}}', {
-            date: new Date(props.image.expires_at * 1000).toLocaleString(),
-          })}
+          {props.image.localOnly || !props.image.expires_at
+            ? t('Local draft')
+            : t('Expires: {{date}}', {
+                date: new Date(props.image.expires_at * 1000).toLocaleString(),
+              })}
         </p>
       </div>
       <Button variant='outline' onClick={props.onDelete}>

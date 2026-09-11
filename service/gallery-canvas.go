@@ -325,7 +325,7 @@ func SaveGalleryCanvas(ctx context.Context, user int, reader *multipart.Reader) 
 	}
 	budget = min(budget, free-max(0, next.StorageBytes-previous.StorageBytes+existingMetadataDelta))
 	if budget < 0 {
-		return nil, model.ErrGalleryUnavailable
+		return nil, model.ErrGalleryCapacity
 	}
 	staged := []*model.GalleryImage{}
 	published := false

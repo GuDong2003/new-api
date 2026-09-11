@@ -17,17 +17,41 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { ReactFlowProvider } from '@xyflow/react'
+import { useTranslation } from 'react-i18next'
 
+import { Alert, AlertDescription } from '@/components/ui/alert'
+import { useCanvasRoute } from '@/features/gallery/hooks/use-canvas-route'
 import { useAuthStore } from '@/stores/auth-store'
 
 import { DrawingWorkspace } from './components/DrawingWorkspace'
 
-export function Drawing() {
+export function Drawing(
+  props: { canvasId?: string; focusAssetId?: string } = {}
+) {
   const userId = useAuthStore((state) => state.auth.user?.id)
   if (!userId) return null
   return (
     <ReactFlowProvider key={userId}>
-      <DrawingWorkspace userId={userId} />
+      <DrawingEntry userId={userId} {...props} />
     </ReactFlowProvider>
+  )
+}
+
+function DrawingEntry(props: {
+  userId: number
+  canvasId?: string
+  focusAssetId?: string
+}) {
+  const { t } = useTranslation()
+  const error = useCanvasRoute('drawing', props.canvasId, props.focusAssetId)
+  return (
+    <>
+      {error ? (
+        <Alert variant='destructive'>
+          <AlertDescription>{t(error)}</AlertDescription>
+        </Alert>
+      ) : null}
+      <DrawingWorkspace userId={props.userId} />
+    </>
   )
 }

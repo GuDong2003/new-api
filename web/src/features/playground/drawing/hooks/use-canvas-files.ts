@@ -17,16 +17,18 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useReactFlow } from '@xyflow/react'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
+import {
+  captureCanvasTarget,
+  assertCanvasTarget,
+} from '@/features/gallery/components/canvas-node-deletion'
+import { exportCanvasProject } from '@/features/gallery/lib/canvas-projects'
 import { useDrawingStore } from '@/stores/drawing-store'
 
-import {
-  parseDrawingDocument,
-  serializeDrawingDocument,
-} from '../lib/canvas-document'
+import { parseDrawingDocument } from '../lib/canvas-document'
 import { downloadBlob, imageFileToAsset } from '../lib/image-assets'
 import type { DrawingDocument, DrawingNode, ImageAsset } from '../types'
 
@@ -34,6 +36,9 @@ export function useCanvasFiles() {
   const { t } = useTranslation()
   const flow = useReactFlow<DrawingNode>()
   const [busy, setBusy] = useState(false)
+  const pendingImportTarget = useRef<ReturnType<
+    typeof captureCanvasTarget
+  > | null>(null)
   const [pendingImport, setPendingImport] = useState<DrawingDocument | null>(
     null
   )
@@ -44,7 +49,7 @@ export function useCanvasFiles() {
     asReferences = false
   ) => {
     if (!files.length) return
-    const userId = useDrawingStore.getState().userId
+    const target = captureCanvasTarget('drawing')
     if (useDrawingStore.getState().nodes.length + files.length > 500) {
       toast.error(
         t(
@@ -57,7 +62,7 @@ export function useCanvasFiles() {
     try {
       const assets: ImageAsset[] = []
       for (const file of files) assets.push(await imageFileToAsset(file))
-      if (useDrawingStore.getState().userId !== userId) return
+      assertCanvasTarget('drawing', target)
       const state = useDrawingStore.getState()
       const nodes: DrawingNode[] = assets.map((asset, index) => ({
         id: crypto.randomUUID(),
@@ -87,7 +92,12 @@ export function useCanvasFiles() {
         state.updateSettings({ mode: 'edit' })
       }
       requestAnimationFrame(() => {
-        void flow.fitView({ nodes, padding: 0.3, maxZoom: 1 })
+        try {
+          assertCanvasTarget('drawing', target)
+          void flow.fitView({ nodes, padding: 0.3, maxZoom: 1 })
+        } catch {
+          /* The selected canvas changed during layout. */
+        }
       })
     } catch (error) {
       toast.error(
@@ -103,12 +113,15 @@ export function useCanvasFiles() {
   }
 
   const importCanvas = async (file: File) => {
+    const target = captureCanvasTarget('drawing')
     setBusy(true)
     try {
       if (file.size > 200 * 1024 * 1024) {
         throw new Error('Canvas files must be smaller than 200 MB.')
       }
       const document = parseDrawingDocument(JSON.parse(await file.text()))
+      assertCanvasTarget('drawing', target)
+      pendingImportTarget.current = target
       setPendingImport(document)
     } catch (error) {
       toast.error(
@@ -123,11 +136,11 @@ export function useCanvasFiles() {
     }
   }
 
-  const exportCanvas = () => {
+  const exportCanvas = async () => {
     try {
-      const document = serializeDrawingDocument(useDrawingStore.getState())
+      const target = captureCanvasTarget('drawing')
       downloadBlob(
-        new Blob([JSON.stringify(document)], { type: 'application/json' }),
+        await exportCanvasProject(target.identity, 'drawing'),
         `new-api-canvas-${new Date().toISOString().slice(0, 10)}.json`
       )
     } catch {
@@ -140,6 +153,7 @@ export function useCanvasFiles() {
     exportCanvas,
     busy,
     pendingImport,
+    pendingImportTarget,
     setPendingImport,
   }
 }

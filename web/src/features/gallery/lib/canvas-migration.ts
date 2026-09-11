@@ -31,13 +31,11 @@ import {
 /** Read old stores without deleting or rewriting them. Call on editor entry. */
 export async function migrateLegacyCanvases(
   userId: number,
-  context: CanvasCodecContext = {}
+  context: CanvasCodecContext = {},
+  kinds: readonly CanvasKind[] = ['drawing', 'nai']
 ): Promise<LocalCanvas[]> {
   const migrated: LocalCanvas[] = []
-  for (const kind of [
-    'drawing',
-    'nai',
-  ] as const satisfies readonly CanvasKind[]) {
+  for (const kind of kinds) {
     context.signal?.throwIfAborted()
     const state = await readCanvasUserState(userId)
     const migratedId = state.migratedKinds[kind]

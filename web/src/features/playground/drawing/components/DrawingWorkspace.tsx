@@ -30,17 +30,8 @@ import { useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
+import { ConfirmDialog } from '@/components/confirm-dialog'
 import { Alert, AlertDescription } from '@/components/ui/alert'
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
 import {
   Empty,
@@ -59,6 +50,14 @@ import {
 } from '@/components/ui/sheet'
 import { Spinner } from '@/components/ui/spinner'
 import { useTheme } from '@/context/theme-provider'
+import { CanvasEditorHeader } from '@/features/gallery/components/canvas-editor-header'
+import {
+  CanvasNodeDeletionContext,
+  useCanvasNodeDeletion,
+  deleteCanvasNodes,
+  captureCanvasTarget,
+  assertCanvasTarget,
+} from '@/features/gallery/components/canvas-node-deletion'
 import { useMediaQuery } from '@/hooks/use-media-query'
 import { useDrawingStore } from '@/stores/drawing-store'
 
@@ -90,6 +89,7 @@ export function DrawingWorkspace(props: { userId: number }) {
   const { t } = useTranslation()
   const { resolvedTheme } = useTheme()
   const flow = useReactFlow<DrawingNode>()
+  const deletion = useCanvasNodeDeletion('drawing')
   const saveStatus = useDrawingPersistenceStatus()
   const ready = useDrawingStore(
     (state) => state.ready && state.userId === props.userId
@@ -133,6 +133,11 @@ export function DrawingWorkspace(props: { userId: number }) {
   const [tool, setTool] = useState<'select' | 'hand'>('select')
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [clearOpen, setClearOpen] = useState(false)
+  const clearTarget = useRef<ReturnType<typeof captureCanvasTarget> | null>(
+    null
+  )
+  const [replacing, setReplacing] = useState(false)
+  const [replaceError, setReplaceError] = useState<string | null>(null)
   const [maskEditorOpen, setMaskEditorOpen] = useState(false)
   const maskState = useDrawingStore((state) => state.mask)
   const setMaskState = useDrawingStore((state) => state.setMask)
@@ -171,8 +176,13 @@ export function DrawingWorkspace(props: { userId: number }) {
       onClearMask={() => setMaskState(null)}
       onDrawMask={() => setMaskEditorOpen(true)}
       onMaskUpload={async (file) => {
+        const target = captureCanvasTarget('drawing')
         try {
           const asset = await imageFileToAsset(file)
+          assertCanvasTarget('drawing', target)
+          if (useDrawingStore.getState().referenceIds[0] !== referenceId) {
+            throw new Error('The canvas changed. Please try again.')
+          }
           if (
             !reference ||
             asset.mimeType !== 'image/png' ||
@@ -200,6 +210,20 @@ export function DrawingWorkspace(props: { userId: number }) {
     />
   )
 
+  if (!ready && saveStatus === 'error') {
+    return (
+      <section className='flex min-h-0 flex-1 flex-col'>
+        <CanvasEditorHeader kind='drawing' />
+        <Alert variant='destructive'>
+          <AlertDescription>
+            {t(
+              'Canvas storage is unavailable. Export your canvas to keep a copy.'
+            )}
+          </AlertDescription>
+        </Alert>
+      </section>
+    )
+  }
   if (!ready) {
     return (
       <div
@@ -216,6 +240,7 @@ export function DrawingWorkspace(props: { userId: number }) {
       className='flex min-h-0 flex-1 flex-col overflow-hidden'
       aria-label={t('Drawing playground')}
     >
+      <CanvasEditorHeader kind='drawing' />
       <CanvasToolbar
         tool={tool}
         onToolChange={(nextTool) => {
@@ -232,7 +257,11 @@ export function DrawingWorkspace(props: { userId: number }) {
           void files.importCanvas(file)
         }}
         onExport={files.exportCanvas}
-        onClear={() => setClearOpen(true)}
+        onClear={() => {
+          clearTarget.current = captureCanvasTarget('drawing')
+          setReplaceError(null)
+          setClearOpen(true)
+        }}
         onSettings={() => setSettingsOpen(true)}
         onArrange={() => {
           useDrawingStore.getState().arrange()
@@ -330,74 +359,82 @@ export function DrawingWorkspace(props: { userId: number }) {
             }
           }}
         >
-          <ImageRetryContext value={retry}>
-            <ReactFlow<DrawingNode>
-              nodes={nodes}
-              edges={canvasEdges}
-              nodeTypes={nodeTypes}
-              defaultViewport={viewport}
-              colorMode={resolvedTheme}
-              onNodesChange={changeNodes}
-              onEdgesChange={changeEdges}
-              onConnect={referenceConnections.onConnect}
-              onConnectStart={referenceConnections.onConnectStart}
-              isValidConnection={(connection) =>
-                canConnectReference(
-                  useDrawingStore.getState().nodes,
-                  connection
-                )
-              }
-              onNodeDragStart={checkpoint}
-              onMoveEnd={(_event, nextViewport) => setViewport(nextViewport)}
-              defaultEdgeOptions={defaultEdgeOptions}
-              nodesConnectable={tool === 'select'}
-              edgesReconnectable={false}
-              selectionOnDrag={tool === 'select'}
-              panOnDrag={tool === 'hand' ? [0, 1, 2] : [1, 2]}
-              panActivationKeyCode='Space'
-              zoomOnDoubleClick={false}
-              minZoom={0.1}
-              maxZoom={4}
-              deleteKeyCode={['Delete', 'Backspace']}
-              onlyRenderVisibleElements
-              className='bg-muted/25'
-              attributionPosition='bottom-right'
-              ariaLabelConfig={{
-                'node.a11yDescription.default': t(
-                  'Press Enter to select an image and use arrow keys to move it. Delete removes the selection.'
-                ),
-                'node.a11yDescription.keyboardDisabled': t(
-                  'Press Enter to select an image.'
-                ),
-                'node.a11yDescription.ariaLiveMessage': ({ x, y }) =>
-                  t('Image moved to {{x}}, {{y}}.', { x, y }),
-                'edge.a11yDescription.default': t('Reference connection'),
-                'handle.ariaLabel': t('Reference connection'),
-                'minimap.ariaLabel': t('Canvas overview'),
-              }}
-            >
-              <Background
-                variant={BackgroundVariant.Dots}
-                gap={24}
-                size={1}
-                color='var(--border)'
-              />
-              <CanvasViewportControls />
-              {!compact && nodes.length > 0 && (
-                <MiniMap
-                  pannable
-                  zoomable
-                  position='bottom-right'
-                  className='!bg-background !mb-8 !overflow-hidden !rounded-lg !border'
-                  style={{ width: 144, height: 96 }}
-                  nodeColor='var(--muted-foreground)'
-                  maskColor='color-mix(in srgb, var(--background) 65%, transparent)'
-                  maskStrokeColor='var(--primary)'
-                  maskStrokeWidth={1}
+          <CanvasNodeDeletionContext value={deletion.request}>
+            <ImageRetryContext value={retry}>
+              <ReactFlow<DrawingNode>
+                nodes={nodes}
+                edges={canvasEdges}
+                nodeTypes={nodeTypes}
+                defaultViewport={viewport}
+                colorMode={resolvedTheme}
+                onNodesChange={changeNodes}
+                onBeforeDelete={async ({ nodes }) => {
+                  if (!nodes.length) return true
+                  deletion.request(nodes.map((node) => node.id))
+                  return false
+                }}
+                onEdgesChange={changeEdges}
+                onConnect={referenceConnections.onConnect}
+                onConnectStart={referenceConnections.onConnectStart}
+                isValidConnection={(connection) =>
+                  canConnectReference(
+                    useDrawingStore.getState().nodes,
+                    connection
+                  )
+                }
+                onNodeDragStart={checkpoint}
+                onMoveEnd={(_event, nextViewport) => setViewport(nextViewport)}
+                defaultEdgeOptions={defaultEdgeOptions}
+                nodesConnectable={tool === 'select'}
+                edgesReconnectable={false}
+                selectionOnDrag={tool === 'select'}
+                panOnDrag={tool === 'hand' ? [0, 1, 2] : [1, 2]}
+                panActivationKeyCode='Space'
+                zoomOnDoubleClick={false}
+                minZoom={0.1}
+                maxZoom={4}
+                deleteKeyCode={['Delete', 'Backspace']}
+                onlyRenderVisibleElements
+                className='bg-muted/25'
+                attributionPosition='bottom-right'
+                ariaLabelConfig={{
+                  'node.a11yDescription.default': t(
+                    'Press Enter to select an image and use arrow keys to move it. Delete removes the selection.'
+                  ),
+                  'node.a11yDescription.keyboardDisabled': t(
+                    'Press Enter to select an image.'
+                  ),
+                  'node.a11yDescription.ariaLiveMessage': ({ x, y }) =>
+                    t('Image moved to {{x}}, {{y}}.', { x, y }),
+                  'edge.a11yDescription.default': t('Reference connection'),
+                  'handle.ariaLabel': t('Reference connection'),
+                  'minimap.ariaLabel': t('Canvas overview'),
+                }}
+              >
+                <Background
+                  variant={BackgroundVariant.Dots}
+                  gap={24}
+                  size={1}
+                  color='var(--border)'
                 />
-              )}
-            </ReactFlow>
-          </ImageRetryContext>
+                <CanvasViewportControls />
+                {!compact && nodes.length > 0 && (
+                  <MiniMap
+                    pannable
+                    zoomable
+                    position='bottom-right'
+                    className='!bg-background !mb-8 !overflow-hidden !rounded-lg !border'
+                    style={{ width: 144, height: 96 }}
+                    nodeColor='var(--muted-foreground)'
+                    maskColor='color-mix(in srgb, var(--background) 65%, transparent)'
+                    maskStrokeColor='var(--primary)'
+                    maskStrokeWidth={1}
+                  />
+                )}
+              </ReactFlow>
+            </ImageRetryContext>
+          </CanvasNodeDeletionContext>
+          {deletion.dialog}
           {selectedEdges.length > 0 && (
             <div className='absolute bottom-14 left-1/2 z-10 flex -translate-x-1/2 flex-col items-center gap-2'>
               <Button
@@ -507,46 +544,101 @@ export function DrawingWorkspace(props: { userId: number }) {
           </SheetContent>
         </Sheet>
       )}
-      <AlertDialog
+      <ConfirmDialog
         open={clearOpen || Boolean(files.pendingImport)}
         onOpenChange={(open) => {
-          if (!open) {
+          if (!open && !replacing) {
             setClearOpen(false)
             files.setPendingImport(null)
+            setReplaceError(null)
           }
         }}
+        title={files.pendingImport ? t('Import canvas') : t('Clear canvas')}
+        desc={t(
+          'This replaces the current canvas and deletes its shared images from the gallery. This cannot be undone.'
+        )}
+        destructive
+        isLoading={replacing}
+        confirmText={t('Confirm')}
+        handleConfirm={() => {
+          const target = files.pendingImport
+            ? files.pendingImportTarget.current
+            : clearTarget.current
+          if (!target) return
+          const imported = files.pendingImport
+          setReplacing(true)
+          setReplaceError(null)
+          void (async () => {
+            assertCanvasTarget('drawing', target)
+            cancel()
+            await deleteCanvasNodes(
+              'drawing',
+              useDrawingStore.getState().nodes.map((node) => node.id),
+              target
+            )
+            assertCanvasTarget('drawing', target)
+            if (imported) {
+              // Imported resources are a deliberate new import, never resurrection
+              // of the identifiers explicitly deleted from the replaced document.
+              const ids = new Map<string, string>()
+              const asset = (
+                value: NonNullable<DrawingNode['data']['asset']>
+              ) => {
+                const id = ids.get(value.id) ?? crypto.randomUUID()
+                ids.set(value.id, id)
+                return { ...value, id }
+              }
+              const document = {
+                ...imported,
+                nodes: imported.nodes.map((node) => ({
+                  ...node,
+                  data: {
+                    ...node.data,
+                    ...(node.data.asset
+                      ? { asset: asset(node.data.asset) }
+                      : {}),
+                    ...(node.data.mask ? { mask: asset(node.data.mask) } : {}),
+                  },
+                })),
+                mask: imported.mask
+                  ? { ...imported.mask, asset: asset(imported.mask.asset) }
+                  : null,
+              }
+              useDrawingStore.getState().replaceDocument(document)
+              useDrawingStore.setState({
+                assetRoles: Object.fromEntries(
+                  document.nodes.flatMap((node) =>
+                    node.data.asset
+                      ? [
+                          [
+                            node.data.asset.id,
+                            { role: 'reference' as const, nodeId: node.id },
+                          ],
+                        ]
+                      : []
+                  )
+                ),
+                past: [],
+                future: [],
+              })
+              void flow.setViewport(document.viewport)
+            } else {
+              useDrawingStore.getState().clear()
+              useDrawingStore.setState({ past: [], future: [] })
+            }
+            setClearOpen(false)
+            files.setPendingImport(null)
+          })()
+            .catch((error: unknown) =>
+              setReplaceError(
+                error instanceof Error ? error.message : 'Request failed'
+              )
+            )
+            .finally(() => setReplacing(false))
+        }}
       >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              {files.pendingImport ? t('Import canvas') : t('Clear canvas')}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              {t(
-                'This replaces the current canvas and stops active generations. You can undo canvas changes.'
-              )}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t('Cancel')}</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => {
-                cancel()
-                if (files.pendingImport) {
-                  useDrawingStore
-                    .getState()
-                    .replaceDocument(files.pendingImport)
-                  void flow.setViewport(files.pendingImport.viewport)
-                } else useDrawingStore.getState().clear()
-                setClearOpen(false)
-                files.setPendingImport(null)
-              }}
-            >
-              {t('Confirm')}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+        {replaceError ? <p role='alert'>{t(replaceError)}</p> : null}
+      </ConfirmDialog>
       {maskEditorOpen && reference && (
         <MaskEditor
           image={reference}

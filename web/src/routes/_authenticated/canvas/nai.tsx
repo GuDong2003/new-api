@@ -17,9 +17,21 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { createFileRoute } from '@tanstack/react-router'
+import { z } from 'zod'
 
 import { NaiDrawing } from '@/features/playground/nai/components/NaiDrawingWorkspace'
 
-export const Route = createFileRoute('/_authenticated/canvas/nai')({
-  component: NaiDrawing,
+const canvasSearchSchema = z.object({
+  canvas: z.string().uuid().optional().catch(undefined),
+  image: z.string().uuid().optional().catch(undefined),
 })
+
+export const Route = createFileRoute('/_authenticated/canvas/nai')({
+  validateSearch: canvasSearchSchema,
+  component: NaiRoute,
+})
+
+function NaiRoute() {
+  const search = Route.useSearch()
+  return <NaiDrawing canvasId={search.canvas} focusAssetId={search.image} />
+}

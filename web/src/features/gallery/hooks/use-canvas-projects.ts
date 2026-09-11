@@ -1,3 +1,19 @@
+/*
+Copyright (C) 2023-2026 QuantumNous
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+*/
 import { useEffect, useState, useSyncExternalStore } from 'react'
 
 import { useAuthStore } from '@/stores/auth-store'
@@ -11,6 +27,7 @@ import {
   flushLocalEditors,
   getCanvasEditorState,
   type CanvasLocalStatus,
+  sameIdentity,
 } from '../lib/canvas-editor'
 import {
   canvasEditors,
@@ -81,6 +98,7 @@ export function useCanvasProjects(kind: CanvasKind) {
   )
   const [projects, setProjects] = useState<LocalCanvas[]>([])
   const [userState, setUserState] = useState<CanvasUserState | null>(null)
+  const [loading, setLoading] = useState(true)
   useEffect(() => {
     let active = true
     if (userId === null) {
@@ -96,32 +114,49 @@ export function useCanvasProjects(kind: CanvasKind) {
         }
       })
       .catch(() => undefined)
+      .finally(() => {
+        if (active) setLoading(false)
+      })
     return () => {
       active = false
     }
   }, [userId, sessionId, version])
   const identity: GalleryIdentity = { userId, sessionId }
-  const state = getCanvasEditorState(kind)
+  const binding = canvasEditors.get(kind)
+  const state =
+    !binding || sameIdentity(binding.identity, identity)
+      ? getCanvasEditorState(kind)
+      : undefined
   const current =
-    canvasEditors.get(kind)?.identity.userId === userId
+    binding && sameIdentity(binding.identity, identity)
       ? (state?.canvas ?? null)
       : null
   return {
     identity,
+    loading,
+    version,
     projects: projects.filter((canvas) => canvas.kind === kind),
     current,
     localStatus: state?.localStatus ?? 'loading',
     localError: state?.error,
     cloudStatus: userState?.cloudPause ? 'full' : (current?.status ?? 'local'),
     statusText:
-      userState?.cloudPause && state?.localStatus === 'saved'
+      userState?.cloudPause &&
+      (state
+        ? state.localStatus === 'saved'
+        : projects.some(
+            (canvas) =>
+              canvas.kind === kind &&
+              canvas.revision > 0 &&
+              canvas.localSavedAt > 0
+          ))
         ? CANVAS_FULL_MESSAGE
         : null,
     pendingCanvasRemovals: userState?.pendingCanvasRemovals ?? [],
     pendingAssetRemovals: userState?.pendingAssetRemovals ?? [],
-    create: () => createCanvasProject(identity, kind),
+    create: (name?: string) => createCanvasProject(identity, kind, name),
     open: (id: string, focusAssetId?: string) =>
-      openCanvasProject(identity, id, focusAssetId),
+      openCanvasProject(identity, id, focusAssetId, kind),
     rename: (id: string, name: string) =>
       renameCanvasProject(identity, id, name),
     save: async () => {

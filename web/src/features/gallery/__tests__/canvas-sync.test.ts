@@ -1,3 +1,19 @@
+/*
+Copyright (C) 2023-2026 QuantumNous
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+*/
 import { Blob as NodeBlob } from 'node:buffer'
 import { webcrypto } from 'node:crypto'
 
@@ -6,6 +22,7 @@ import { IDBFactory, IDBObjectStore } from 'fake-indexeddb'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 
 import { logout } from '@/features/auth/api'
+import * as legacyDrawing from '@/features/playground/drawing/lib/canvas-storage'
 import { api } from '@/lib/api'
 import { useAuthStore } from '@/stores/auth-store'
 import { useDrawingStore } from '@/stores/drawing-store'
@@ -27,6 +44,7 @@ import {
   updateCanvasUserState,
   saveLocalCanvas,
   readCanvasAssets,
+  listLocalCanvases,
 } from '../lib/canvas-repository'
 import {
   syncCanvas,
@@ -57,6 +75,7 @@ beforeEach(async () => {
       return response(config, {
         ...usage,
         can_save: !full,
+        reason: full ? 'Gallery storage limit reached.' : '',
         available_bytes: full ? 0 : 1e9,
         available_images: full ? 0 : 100,
       })
@@ -104,6 +123,59 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 const posts = () => requests.filter((r) => r.method === 'post')
+
+it('deduplicates concurrent startup for the same owner session and editor kind', async () => {
+  await Promise.all([
+    startCanvasEditor(identity, 'drawing'),
+    startCanvasEditor(identity, 'drawing'),
+  ])
+  expect(
+    (await listLocalCanvases(813)).filter((canvas) => canvas.kind === 'drawing')
+  ).toHaveLength(1)
+})
+
+it('opens an existing browser draft even when legacy migration cannot read its original', async () => {
+  const canvas = await createCanvasProject(identity, 'drawing')
+  const legacy = vi
+    .spyOn(legacyDrawing, 'loadDrawingDocument')
+    .mockRejectedValue(new Error('legacy original unavailable'))
+  await startCanvasEditor(identity, 'drawing')
+  expect(getCanvasEditorState('drawing')?.canvas?.id).toBe(canvas.id)
+  legacy.mockRestore()
+})
+
+it('ignores a remembered canvas belonging to the other editor kind', async () => {
+  const drawing = await createCanvasProject(identity, 'drawing')
+  const nai = await createCanvasProject(identity, 'nai')
+  await updateCanvasUserState(813, (state) => ({
+    ...state,
+    lastOpened: { ...state.lastOpened, drawing: nai.id },
+  }))
+  await startCanvasEditor(identity, 'drawing')
+  expect(getCanvasEditorState('drawing')?.canvas?.id).toBe(drawing.id)
+})
+
+it.each(['Gallery storage is unavailable.', 'Gallery is disabled.'])(
+  'does not persist a capacity pause for %s',
+  async (reason) => {
+    const canvas = await createCanvasProject(identity, 'drawing')
+    api.defaults.adapter = async (config) => {
+      if (config.url?.endsWith('/usage')) {
+        return response(config, { ...usage, can_save: false, reason })
+      }
+      throw new AxiosError(
+        'not found',
+        '',
+        config,
+        {},
+        { ...response(config, {}), status: 404 }
+      )
+    }
+    await syncCanvas(identity, canvas.id, 'manual')
+    expect((await readCanvasUserState(813)).cloudPause).toBeNull()
+    expect((await loadLocalCanvas(813, canvas.id))?.status).toBe('error')
+  }
+)
 const png =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aKn0AAAAASUVORK5CYII='
 const sourceId = '11111111-1111-4111-8111-111111111111'

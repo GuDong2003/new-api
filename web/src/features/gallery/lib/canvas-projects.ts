@@ -1,3 +1,19 @@
+/*
+Copyright (C) 2023-2026 QuantumNous
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+*/
 import { DEFAULT_IMAGE_SETTINGS } from '@/features/playground/drawing/lib/image-settings'
 import type { DrawingDocument } from '@/features/playground/drawing/types'
 import { DEFAULT_NAI_SETTINGS } from '@/features/playground/nai/lib/nai-settings'
@@ -35,7 +51,11 @@ import {
   updateCanvasUserState,
 } from './canvas-repository'
 import { reconcileCanvasRecord, syncCanvas } from './canvas-sync'
-import { galleryOwner, assertGalleryIdentity } from './session'
+import {
+  galleryOwner,
+  assertGalleryIdentity,
+  isGalleryIdentityCurrent,
+} from './session'
 
 type EditorDocument = DrawingDocument | NaiCanvasDocument
 export async function exportCanvasProject(
@@ -103,7 +123,8 @@ function initialCanvas(
 }
 export async function createCanvasProject(
   identity: GalleryIdentity,
-  kind: CanvasKind
+  kind: CanvasKind,
+  name?: string
 ): Promise<LocalCanvas> {
   assertGalleryIdentity(identity)
   const active = canvasEditors.get(kind)
@@ -117,6 +138,7 @@ export async function createCanvasProject(
   const canvas = await saveLocalCanvas(
     {
       ...initialCanvas(identity, kind, encoded.document),
+      ...(name?.trim() ? { name: name.trim().slice(0, 255) } : {}),
       status: 'local',
       needsExplicitSave: true,
     },
@@ -171,7 +193,8 @@ async function downloadCloudCanvas(
 export async function openCanvasProject(
   identity: GalleryIdentity,
   id: string,
-  focusAssetId?: string
+  focusAssetId?: string,
+  expectedKind?: CanvasKind
 ): Promise<void> {
   assertGalleryIdentity(identity)
   let canvas = await loadLocalCanvas(galleryOwner(identity), id)
@@ -182,8 +205,11 @@ export async function openCanvasProject(
     )
   }
   if (canvas.deleted) throw new Error('Canvas has been deleted.')
+  if (expectedKind && canvas.kind !== expectedKind) {
+    throw new Error('Canvas type does not match this editor.')
+  }
   const old = canvasEditors.get(canvas.kind)
-  if (old) {
+  if (old && sameIdentity(old.identity, identity)) {
     await old.flush()
     if (getCanvasEditorState(canvas.kind)?.localStatus !== 'saved') {
       throw new Error('Save or export the current canvas before switching.')
@@ -191,7 +217,7 @@ export async function openCanvasProject(
     cancelEditorJobs(canvas.kind, identity)
     old.stop()
     void syncCanvas(identity, old.canvasId, 'leave')
-  }
+  } else old?.stop()
   const document = await decodeCanvas(
     canvas,
     await readCanvasAssets(galleryOwner(identity), id)
@@ -215,7 +241,11 @@ export async function openCanvasProject(
     const node = storeFor(canvas.kind)
       .getState()
       .nodes.find((node) => node.data.asset?.id === focusAssetId)
-    if (node) storeFor(canvas.kind).getState().setPreview(node.id)
+    if (node) {
+      storeFor(canvas.kind)
+        .getState()
+        .changeNodes([{ id: node.id, type: 'select', selected: true }])
+    }
   }
   // Local content renders first. The owner-scoped state check never replaces edits.
   const opened = canvas
@@ -259,8 +289,10 @@ export async function renameCanvasProject(
     throw new Error('Invalid canvas name.')
   }
   await flushLocalEditors(identity)
-  const current = await loadLocalCanvas(galleryOwner(identity), id)
-  if (!current || current.deleted) throw new Error('Canvas has been deleted.')
+  const current =
+    (await loadLocalCanvas(galleryOwner(identity), id)) ??
+    (await downloadCloudCanvas(identity, await getCanvasRecord(identity, id)))
+  if (current.deleted) throw new Error('Canvas has been deleted.')
   if (
     canvasEditors.get(current.kind)?.canvasId === id &&
     getCanvasEditorState(current.kind)?.localStatus !== 'saved'
@@ -271,9 +303,25 @@ export async function renameCanvasProject(
     { ...current, name: normalized, needsExplicitSave: false },
     []
   )
-  updateState(canvas.kind, { canvas, localStatus: 'saved' })
+  if (canvasEditors.get(canvas.kind)?.canvasId === id) {
+    updateState(canvas.kind, { canvas, localStatus: 'saved' })
+  } else notifyCanvasProjects()
 }
-export async function startCanvasEditor(
+const startingEditors = new Map<string, Promise<void>>()
+export function startCanvasEditor(
+  identity: GalleryIdentity,
+  kind: CanvasKind
+): Promise<void> {
+  const key = `${identity.userId}:${identity.sessionId}:${kind}`
+  const pending = startingEditors.get(key)
+  if (pending) return pending
+  const work = startEditor(identity, kind).finally(() =>
+    startingEditors.delete(key)
+  )
+  startingEditors.set(key, work)
+  return work
+}
+async function startEditor(
   identity: GalleryIdentity,
   kind: CanvasKind
 ): Promise<void> {
@@ -283,25 +331,45 @@ export async function startCanvasEditor(
   assertGalleryIdentity(identity)
   updateState(kind, { canvas: null, localStatus: 'loading' })
   try {
-    await migrateLegacyCanvases(galleryOwner(identity), {
-      readOriginal: canvasOriginalReader(identity),
-    })
     const state = await readCanvasUserState(galleryOwner(identity))
     const canvases = await listLocalCanvases(galleryOwner(identity))
+    const local =
+      canvases.find(
+        (canvas) => canvas.kind === kind && canvas.id === state.lastOpened[kind]
+      ) ?? canvases.find((canvas) => canvas.kind === kind)
+    const migrate = () =>
+      migrateLegacyCanvases(
+        galleryOwner(identity),
+        {
+          readOriginal: canvasOriginalReader(identity),
+        },
+        [kind]
+      )
+    // Existing browser drafts must not depend on legacy originals being online.
+    if (local) {
+      await openCanvasProject(identity, local.id)
+      void migrate()
+        .then(() => notifyCanvasProjects())
+        .catch(() => undefined)
+      return
+    }
+    const migrated = await migrate().catch(() => [])
+    assertGalleryIdentity(identity)
     const selected =
-      canvases.find((canvas) => canvas.id === state.lastOpened[kind]) ??
-      canvases.find((canvas) => canvas.kind === kind) ??
+      migrated.find((canvas) => canvas.kind === kind) ??
       (await createCanvasProject(identity, kind))
     await openCanvasProject(identity, selected.id)
   } catch (error) {
-    updateState(kind, {
-      canvas: null,
-      localStatus: 'error',
-      error:
-        error instanceof Error
-          ? error.message
-          : 'Canvas storage is unavailable.',
-    })
+    if (isGalleryIdentityCurrent(identity)) {
+      updateState(kind, {
+        canvas: null,
+        localStatus: 'error',
+        error:
+          error instanceof Error
+            ? error.message
+            : 'Canvas storage is unavailable.',
+      })
+    }
     throw error
   }
 }

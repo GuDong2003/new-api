@@ -32,6 +32,7 @@ import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/ui/spinner'
+import { useCanvasNodeDeletionRequest } from '@/features/gallery/components/canvas-node-deletion'
 import { cn } from '@/lib/utils'
 import { useDrawingStore } from '@/stores/drawing-store'
 
@@ -46,6 +47,7 @@ export const ImageCanvasNode = memo(function ImageCanvasNode(
 ) {
   const { t } = useTranslation()
   const retry = useContext(ImageRetryContext)
+  const requestDeletion = useCanvasNodeDeletionRequest()
   const reference = useDrawingStore((state) =>
     state.referenceIds.includes(props.id)
   )
@@ -319,7 +321,7 @@ export const ImageCanvasNode = memo(function ImageCanvasNode(
               variant='ghost'
               title={t('Delete')}
               aria-label={t('Delete')}
-              onClick={() => useDrawingStore.getState().removeNodes([props.id])}
+              onClick={() => requestDeletion([props.id])}
             >
               <HugeiconsIcon icon={Delete02Icon} size={14} aria-hidden='true' />
             </Button>

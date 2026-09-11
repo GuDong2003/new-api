@@ -24,6 +24,7 @@ import {
   within,
 } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { IDBFactory } from 'fake-indexeddb'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 
 import { api } from '@/lib/api'
@@ -33,9 +34,14 @@ import { Gallery } from '../index'
 import { galleryImage, login, response, usage } from './fixtures'
 
 const adapter = api.defaults.adapter
+vi.mock('@tanstack/react-router', async (original) => ({
+  ...(await original<typeof import('@tanstack/react-router')>()),
+  useNavigate: () => vi.fn(),
+}))
 let client: QueryClient
 beforeEach(() => {
   login()
+  vi.stubGlobal('indexedDB', new IDBFactory())
   client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
@@ -58,9 +64,20 @@ it('shows combined usage, filters sources and paginates server results', async (
   const lists: unknown[] = []
   api.defaults.adapter = async (config) => {
     if (config.url?.endsWith('/usage')) return response(config, usage)
+    if (config.url?.endsWith('/file')) {
+      return { ...response(config, {}), data: new Blob(['private']) }
+    }
     lists.push(config.params)
     return response(config, {
-      items: [],
+      items: Array.from(
+        { length: config.params.page === 3 ? 1 : 24 },
+        (_, index) => ({
+          ...galleryImage,
+          id: `image-${(config.params.page - 1) * 24 + index}`,
+          source: 'nai',
+          prompt: `Picture ${(config.params.page - 1) * 24 + index}`,
+        })
+      ),
       total: 49,
       page: config.params.page,
       page_size: 24,
@@ -73,14 +90,12 @@ it('shows combined usage, filters sources and paginates server results', async (
   )
   expect(await screen.findByText('2 / 100 images')).toBeVisible()
   expect(screen.getByText('1.00 / 200.00 MiB')).toBeVisible()
-  await userEvent.click(screen.getByRole('button', { name: 'NAI Canvas' }))
-  await waitFor(() =>
-    expect(lists).toContainEqual({ page: 1, page_size: 24, source: 'nai' })
-  )
+  await userEvent.click(screen.getByRole('combobox', { name: 'Source' }))
+  await userEvent.click(screen.getByRole('option', { name: 'NAI Canvas' }))
+  await waitFor(() => expect(lists).toContainEqual({ page: 1, page_size: 24 }))
   await userEvent.click(screen.getByRole('button', { name: 'Go to next page' }))
-  await waitFor(() =>
-    expect(lists).toContainEqual({ page: 2, page_size: 24, source: 'nai' })
-  )
+  await waitFor(() => expect(lists).toContainEqual({ page: 2, page_size: 24 }))
+  expect(screen.getByText('2 / 3')).toBeVisible()
 })
 
 it('fetches private thumbnails with authentication and revokes blob URLs on disposal', async () => {
@@ -115,7 +130,7 @@ it('fetches private thumbnails with authentication and revokes blob URLs on disp
   expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:private-gallery')
 })
 
-it('does not automatically fetch originals when no safe thumbnail exists; explicit preview shows metadata', async () => {
+it('falls back to the private original without a thumbnail, and preview reuses it', async () => {
   const files: unknown[] = []
   api.defaults.adapter = async (config) => {
     if (config.url?.endsWith('/usage')) return response(config, usage)
@@ -145,8 +160,10 @@ it('does not automatically fetch originals when no safe thumbnail exists; explic
       <Gallery />
     </QueryClientProvider>
   )
-  expect(await screen.findByText('Thumbnail unavailable')).toBeVisible()
-  expect(files).toEqual([])
+  expect(
+    await screen.findByRole('img', { name: 'A quiet forest' })
+  ).toBeVisible()
+  expect(files).toEqual([undefined])
   await userEvent.click(
     screen.getByRole('button', { name: 'Preview original' })
   )
@@ -213,7 +230,7 @@ it('replaces failed loading with a retry action and keeps thumbnails private aft
   const retry = await screen.findByRole('button', { name: 'Retry' })
   failed = false
   fireEvent.click(retry)
-  expect(await screen.findByText('No saved images')).toBeVisible()
+  await waitFor(() => expect(screen.getByText('No saved images')).toBeVisible())
   act(() => useAuthStore.getState().auth.reset())
   expect(screen.queryByText('2 / 100 images')).not.toBeInTheDocument()
 })

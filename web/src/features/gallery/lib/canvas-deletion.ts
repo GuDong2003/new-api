@@ -1,6 +1,22 @@
+/*
+Copyright (C) 2023-2026 QuantumNous
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+*/
 import { deleteCanvasRecord, getCanvasRecord } from '../api'
 import type { CanvasRecord, GalleryIdentity } from '../types'
-import { emitCanvasEvent } from './canvas-events'
+import { emitCanvasEvent, notifyCanvasProjects } from './canvas-events'
 import {
   loadLocalCanvas,
   readCanvasUserState,
@@ -82,6 +98,21 @@ export async function deleteCanvasProject(
 ): Promise<void> {
   assertGalleryIdentity(identity)
   cancelCanvasUpload(identity, canvasId)
+  if (!(await loadLocalCanvas(galleryOwner(identity), canvasId))) {
+    const remote = await getCanvasRecord(identity, canvasId)
+    await updateCanvasUserState(galleryOwner(identity), (state) => ({
+      ...state,
+      pendingCanvasRemovals: [
+        ...state.pendingCanvasRemovals.filter(
+          (item) => item.canvasId !== canvasId
+        ),
+        { canvasId, revision: remote.revision },
+      ],
+    }))
+    notifyCanvasProjects()
+    await replayCanvasRemovals(identity)
+    return
+  }
   await removeLocalCanvas(galleryOwner(identity), canvasId)
   const canvas = await loadLocalCanvas(galleryOwner(identity), canvasId)
   if (canvas) await emitCanvasEvent({ identity, canvas })
@@ -95,6 +126,21 @@ export async function deleteCanvasResource(
 ): Promise<void> {
   assertGalleryIdentity(identity)
   cancelCanvasUpload(identity, canvasId)
+  if (!(await loadLocalCanvas(galleryOwner(identity), canvasId))) {
+    const remote = await getCanvasRecord(identity, canvasId)
+    await updateCanvasUserState(galleryOwner(identity), (state) => ({
+      ...state,
+      pendingAssetRemovals: [
+        ...state.pendingAssetRemovals.filter(
+          (item) => item.canvasId !== canvasId || item.assetId !== assetId
+        ),
+        { canvasId, assetId, revision: remote.revision },
+      ],
+    }))
+    notifyCanvasProjects()
+    await replayCanvasRemovals(identity)
+    return
+  }
   const canvas = await removeLocalCanvasAsset(
     galleryOwner(identity),
     canvasId,

@@ -49,6 +49,12 @@ import {
 } from '@/components/ui/sheet'
 import { Spinner } from '@/components/ui/spinner'
 import { useTheme } from '@/context/theme-provider'
+import { CanvasEditorHeader } from '@/features/gallery/components/canvas-editor-header'
+import {
+  CanvasNodeDeletionContext,
+  useCanvasNodeDeletion,
+} from '@/features/gallery/components/canvas-node-deletion'
+import { useCanvasRoute } from '@/features/gallery/hooks/use-canvas-route'
 import { exportCanvasProject } from '@/features/gallery/lib/canvas-projects'
 import { downloadBlob } from '@/features/playground/drawing/lib/image-assets'
 import { useMediaQuery } from '@/hooks/use-media-query'
@@ -64,13 +70,34 @@ import { NaiSettings } from './NaiSettings'
 
 const nodeTypes = { 'nai-image': NaiImageCanvasNode }
 
-export function NaiDrawing() {
+export function NaiDrawing(
+  props: { canvasId?: string; focusAssetId?: string } = {}
+) {
   const userId = useAuthStore((state) => state.auth.user?.id)
   if (!userId) return null
   return (
     <ReactFlowProvider key={userId}>
-      <NaiDrawingWorkspace userId={userId} />
+      <NaiDrawingEntry userId={userId} {...props} />
     </ReactFlowProvider>
+  )
+}
+
+function NaiDrawingEntry(props: {
+  userId: number
+  canvasId?: string
+  focusAssetId?: string
+}) {
+  const { t } = useTranslation()
+  const error = useCanvasRoute('nai', props.canvasId, props.focusAssetId)
+  return (
+    <>
+      {error ? (
+        <Alert variant='destructive'>
+          <AlertDescription>{t(error)}</AlertDescription>
+        </Alert>
+      ) : null}
+      <NaiDrawingWorkspace userId={props.userId} />
+    </>
   )
 }
 
@@ -78,6 +105,7 @@ function NaiDrawingWorkspace(props: { userId: number }) {
   const { t } = useTranslation()
   const { resolvedTheme } = useTheme()
   const flow = useReactFlow<NaiCanvasNode>()
+  const deletion = useCanvasNodeDeletion('nai')
   const compact = useMediaQuery('(max-width: 1023px)')
   const canvas = useRef<HTMLDivElement>(null)
   const [tool, setTool] = useState<'select' | 'hand'>('select')
@@ -134,6 +162,7 @@ function NaiDrawingWorkspace(props: { userId: number }) {
       className='flex min-h-0 flex-1 flex-col overflow-hidden'
       aria-label={t('NAI drawing canvas')}
     >
+      <CanvasEditorHeader kind='nai' />
       <div
         className='bg-background flex shrink-0 items-center gap-1 overflow-x-auto border-b px-3 py-2'
         role='toolbar'
@@ -280,56 +309,64 @@ function NaiDrawingWorkspace(props: { userId: number }) {
             }
           }}
         >
-          <ReactFlow<NaiCanvasNode>
-            nodes={nodes}
-            edges={[]}
-            nodeTypes={nodeTypes}
-            defaultViewport={viewport}
-            colorMode={resolvedTheme}
-            onNodesChange={changeNodes}
-            onNodeDragStart={checkpoint}
-            onMoveEnd={(_event, nextViewport) => setViewport(nextViewport)}
-            nodesConnectable={false}
-            selectionOnDrag={tool === 'select'}
-            panOnDrag={tool === 'hand' ? [0, 1, 2] : [1, 2]}
-            panActivationKeyCode='Space'
-            zoomOnDoubleClick={false}
-            minZoom={0.1}
-            maxZoom={4}
-            deleteKeyCode={['Delete', 'Backspace']}
-            onlyRenderVisibleElements
-            className='bg-muted/25'
-            attributionPosition='bottom-right'
-            ariaLabelConfig={{
-              'node.a11yDescription.default': t(
-                'Press Enter to select an NAI image and use arrow keys to move it. Delete removes the selection.'
-              ),
-              'minimap.ariaLabel': t('NAI canvas overview'),
-            }}
-          >
-            <Background
-              variant={BackgroundVariant.Dots}
-              gap={24}
-              size={1}
-              color='var(--border)'
-            />
-            <Panel position='bottom-left' className='!m-3'>
-              <div className='bg-background rounded-xl border p-2 text-xs shadow-sm'>
-                {t('NAI canvas')} · {Math.round(viewport.zoom * 100)}%
-              </div>
-            </Panel>
-            {!compact && nodes.length > 0 && (
-              <MiniMap
-                pannable
-                zoomable
-                position='bottom-right'
-                className='!bg-background !mb-8 !overflow-hidden !rounded-lg !border'
-                style={{ width: 144, height: 96 }}
-                nodeColor='var(--primary)'
-                maskColor='color-mix(in srgb, var(--background) 65%, transparent)'
+          <CanvasNodeDeletionContext value={deletion.request}>
+            <ReactFlow<NaiCanvasNode>
+              nodes={nodes}
+              edges={[]}
+              nodeTypes={nodeTypes}
+              defaultViewport={viewport}
+              colorMode={resolvedTheme}
+              onNodesChange={changeNodes}
+              onBeforeDelete={async ({ nodes }) => {
+                if (!nodes.length) return true
+                deletion.request(nodes.map((node) => node.id))
+                return false
+              }}
+              onNodeDragStart={checkpoint}
+              onMoveEnd={(_event, nextViewport) => setViewport(nextViewport)}
+              nodesConnectable={false}
+              selectionOnDrag={tool === 'select'}
+              panOnDrag={tool === 'hand' ? [0, 1, 2] : [1, 2]}
+              panActivationKeyCode='Space'
+              zoomOnDoubleClick={false}
+              minZoom={0.1}
+              maxZoom={4}
+              deleteKeyCode={['Delete', 'Backspace']}
+              onlyRenderVisibleElements
+              className='bg-muted/25'
+              attributionPosition='bottom-right'
+              ariaLabelConfig={{
+                'node.a11yDescription.default': t(
+                  'Press Enter to select an NAI image and use arrow keys to move it. Delete removes the selection.'
+                ),
+                'minimap.ariaLabel': t('NAI canvas overview'),
+              }}
+            >
+              <Background
+                variant={BackgroundVariant.Dots}
+                gap={24}
+                size={1}
+                color='var(--border)'
               />
-            )}
-          </ReactFlow>
+              <Panel position='bottom-left' className='!m-3'>
+                <div className='bg-background rounded-xl border p-2 text-xs shadow-sm'>
+                  {t('NAI canvas')} · {Math.round(viewport.zoom * 100)}%
+                </div>
+              </Panel>
+              {!compact && nodes.length > 0 && (
+                <MiniMap
+                  pannable
+                  zoomable
+                  position='bottom-right'
+                  className='!bg-background !mb-8 !overflow-hidden !rounded-lg !border'
+                  style={{ width: 144, height: 96 }}
+                  nodeColor='var(--primary)'
+                  maskColor='color-mix(in srgb, var(--background) 65%, transparent)'
+                />
+              )}
+            </ReactFlow>
+          </CanvasNodeDeletionContext>
+          {deletion.dialog}
           {nodes.length === 0 && (
             <div className='pointer-events-none absolute inset-0 flex items-center justify-center p-6 pb-20'>
               <Empty className='max-w-md flex-initial'>

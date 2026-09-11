@@ -143,7 +143,7 @@ export function GallerySettingsForm(props: {
       <SettingsCard
         title={t('Gallery storage')}
         description={t(
-          'When limits are reached, generation continues without saving. Unexpired images are not automatically deleted to make room.'
+          'Canvas drafts save in this browser first. Full cloud storage pauses uploads without stopping generation or deleting unexpired originals.'
         )}
       >
         <Form {...form}>
@@ -157,7 +157,7 @@ export function GallerySettingsForm(props: {
                     <FormLabel>{t('Enable personal gallery')}</FormLabel>
                     <FormDescription>
                       {t(
-                        'Automatically save new final images from the two site canvases. Existing images are retained when disabled.'
+                        'References count as originals. Thumbnails, masks and canvas documents share the byte quota. Cloud expiry keeps local drafts.'
                       )}
                     </FormDescription>
                   </SettingsSwitchContent>

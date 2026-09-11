@@ -24,7 +24,8 @@ export function useGalleryFile(
   identity: GalleryIdentity,
   id: string,
   thumbnail: boolean,
-  enabled = true
+  enabled = true,
+  local?: { blob?: Blob; only?: boolean }
 ) {
   const query = useQuery({
     queryKey: [
@@ -36,20 +37,23 @@ export function useGalleryFile(
       thumbnail,
     ],
     queryFn: ({ signal }) => getGalleryFile(identity, id, thumbnail, signal),
-    enabled,
+    enabled: enabled && !local?.blob && !local?.only,
     retry: false,
     gcTime: 0,
     staleTime: Infinity,
   })
   const [resource, setResource] = useState<{ blob: Blob; url: string }>()
+  const blob = local?.blob ?? query.data
   useEffect(() => {
-    if (!query.data || !enabled) return
-    const url = URL.createObjectURL(query.data)
-    setResource({ blob: query.data, url })
+    if (!blob || !enabled) return
+    const url = URL.createObjectURL(blob)
+    setResource({ blob, url })
     return () => URL.revokeObjectURL(url)
-  }, [query.data, enabled])
+  }, [blob, enabled, identity.userId, identity.sessionId])
   return {
     ...query,
-    url: enabled && resource?.blob === query.data ? resource?.url : undefined,
+    isError: !blob && (query.isError || Boolean(local?.only)),
+    isPending: !blob && query.isPending && !local?.only,
+    url: enabled && resource?.blob === blob ? resource?.url : undefined,
   }
 }

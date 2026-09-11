@@ -20,7 +20,6 @@ import { useCallback, useSyncExternalStore } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
-import { preserveCanvasOriginalSource } from '@/features/gallery/lib/canvas-original'
 import { useAuthStore } from '@/stores/auth-store'
 import { useDrawingStore } from '@/stores/drawing-store'
 
@@ -138,12 +137,7 @@ async function executeImageJob(
     const assets = await Promise.allSettled(
       result.images.map(async (image, index) =>
         imageSourceToAsset(
-          await preserveCanvasOriginalSource(
-            { userId: input.userId, sessionId: input.sessionId },
-            image.src,
-            image.mimeType,
-            input.job.controller.signal
-          ),
+          image.src,
           `${input.settings.model}-${index + 1}`,
           image.mimeType,
           input.job.controller.signal

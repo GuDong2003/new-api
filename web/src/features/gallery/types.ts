@@ -36,6 +36,11 @@ export type GalleryImage = GalleryMetadata & {
   created_at: number
   expires_at: number
   has_thumbnail: boolean
+  canvas_id?: string
+  node_id?: string
+  canvas_name?: string
+  localBlob?: Blob
+  localOnly?: boolean
 }
 export type GalleryUsage = {
   enabled: boolean

@@ -18,7 +18,6 @@ import { useCallback, useSyncExternalStore } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
-import { preserveCanvasOriginalSource } from '@/features/gallery/lib/canvas-original'
 import { useAuthStore } from '@/stores/auth-store'
 import { useNaiDrawingStore } from '@/stores/nai-drawing-store'
 
@@ -82,15 +81,6 @@ async function executeJob(
     })
     if (!isCurrentJob(input)) return
     input.job.controller.signal.throwIfAborted()
-    for (const image of result.images) {
-      image.src = await preserveCanvasOriginalSource(
-        { userId: input.userId, sessionId: input.sessionId },
-        image.src,
-        image.mimeType,
-        input.job.controller.signal
-      )
-    }
-    if (!isCurrentJob(input)) return
     const state = useNaiDrawingStore.getState()
     input.job.nodeIds.forEach((id, index) => {
       const asset = result.images[index]

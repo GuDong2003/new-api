@@ -29,6 +29,7 @@ import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/ui/spinner'
+import { useCanvasNodeDeletionRequest } from '@/features/gallery/components/canvas-node-deletion'
 import { cn } from '@/lib/utils'
 import { useNaiDrawingStore } from '@/stores/nai-drawing-store'
 
@@ -42,7 +43,7 @@ export const NaiImageCanvasNode = memo(function NaiImageCanvasNode(
   const { t } = useTranslation()
   const { retry } = useNaiImageGeneration()
   const checkpoint = useNaiDrawingStore((state) => state.checkpoint)
-  const removeNodes = useNaiDrawingStore((state) => state.removeNodes)
+  const removeNodes = useCanvasNodeDeletionRequest()
   const [downloading, setDownloading] = useState(false)
   const [failedSource, setFailedSource] = useState<string | null>(null)
   const asset = props.data.asset

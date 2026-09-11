@@ -44,8 +44,11 @@ func galleryRoot() (string, error) {
 
 func galleryFreeBytes(root string) (int64, error) {
 	usage, err := disk.Usage(root)
-	if err != nil || usage.Free <= 512<<20 {
+	if err != nil {
 		return 0, model.ErrGalleryUnavailable
+	}
+	if usage.Free <= 512<<20 {
+		return 0, model.ErrGalleryCapacity
 	}
 	return int64(min(usage.Free-(512<<20), uint64(1<<40))), nil
 }
@@ -92,8 +95,12 @@ func (w *galleryWriter) Write(data []byte) (int, error) {
 		return 0, w.failure
 	}
 	free, err := galleryFreeBytes(w.root)
-	if err != nil || free < int64(len(data)) {
-		w.failure = model.ErrGalleryUnavailable
+	if err != nil {
+		w.failure = err
+		return 0, w.failure
+	}
+	if free < int64(len(data)) {
+		w.failure = model.ErrGalleryCapacity
 		return 0, w.failure
 	}
 	n, err := w.file.Write(data)

@@ -30,7 +30,10 @@ export function GalleryPreview(props: {
   onClose: () => void
 }) {
   const { t } = useTranslation()
-  const file = useGalleryFile(props.identity, props.image.id, false)
+  const file = useGalleryFile(props.identity, props.image.id, false, true, {
+    blob: props.image.localBlob,
+    only: props.image.localOnly,
+  })
   const extension = props.image.mime_type.split('/')[1] || 'image'
   return (
     <Dialog
@@ -93,7 +96,11 @@ export function GalleryPreview(props: {
           <dt>{t('Created at')}</dt>
           <dd>{new Date(props.image.created_at * 1000).toLocaleString()}</dd>
           <dt>{t('Expires at')}</dt>
-          <dd>{new Date(props.image.expires_at * 1000).toLocaleString()}</dd>
+          <dd>
+            {props.image.expires_at
+              ? new Date(props.image.expires_at * 1000).toLocaleString()
+              : t('Local draft')}
+          </dd>
         </dl>
         <h3 className='text-sm font-medium'>{t('Generation parameters')}</h3>
         <dl className='grid min-w-0 gap-2 text-sm sm:grid-cols-[auto_1fr]'>

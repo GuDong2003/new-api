@@ -1,3 +1,19 @@
+/*
+Copyright (C) 2023-2026 QuantumNous
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+*/
 import axios from 'axios'
 import i18next from 'i18next'
 import { toast } from 'sonner'
@@ -10,6 +26,7 @@ import type {
   CanvasSaveMetadata,
   GalleryIdentity,
   LocalCanvas,
+  GalleryUsage,
 } from '../types'
 import { canvasDocumentAssetIds } from './canvas-document'
 import {
@@ -238,7 +255,8 @@ async function upload(
     let canvas = await loadLocalCanvas(userId, id)
     if (!canvas || canvas.deleted || canvas.status === 'conflict') return
     const activeEditor = [...canvasEditors.values()].find(
-      (editor) => editor.canvasId === id && editor.identity.userId === userId
+      (editor) =>
+        editor.canvasId === id && key(editor.identity) === key(identity)
     )
     if (activeEditor && !activeEditor.isLocallySaved()) return
     const userState = await readCanvasUserState(userId)
@@ -324,7 +342,9 @@ async function upload(
       required_images: requiredImages,
     })
     if (!budget.can_save) {
-      await pause(identity, requiredBytes, requiredImages, budget.reason)
+      if (budget.reason === 'Gallery storage limit reached.') {
+        await pause(identity, requiredBytes, requiredImages, budget.reason)
+      } else await cloudStatus(identity, id, 'error')
       return
     }
     signal.throwIfAborted()
@@ -353,7 +373,8 @@ async function upload(
       assetIdMap: saved.asset_id_map,
     })
     const binding = [...canvasEditors.values()].find(
-      (editor) => editor.canvasId === id && editor.identity.userId === userId
+      (editor) =>
+        editor.canvasId === id && key(editor.identity) === key(identity)
     )
     await retireCanvasMasks(
       userId,
@@ -370,7 +391,7 @@ async function upload(
       if (
         canvasResponseStatus(error) === 409 &&
         axios.isAxiosError(error) &&
-        error.response?.data?.code !== 'canvas_conflict'
+        error.response?.data?.message === 'Gallery storage limit reached.'
       ) {
         await pause(
           identity,
@@ -380,7 +401,11 @@ async function upload(
             error.response?.data?.message ?? 'Gallery storage limit reached.'
           )
         )
-      } else {
+      } else if (
+        canvasResponseStatus(error) === 410 ||
+        (axios.isAxiosError(error) &&
+          error.response?.data?.code === 'canvas_conflict')
+      ) {
         try {
           const latest = await loadLocalCanvas(userId, id)
           const remote = await getCanvasRecord(identity, id, signal)
@@ -391,7 +416,7 @@ async function upload(
         if (canvasResponseStatus(error) !== 410) {
           await cloudStatus(identity, id, 'conflict')
         }
-      }
+      } else await cloudStatus(identity, id, 'error')
     } else await cloudStatus(identity, id, 'error')
   } finally {
     session.requests.delete(id)
@@ -420,7 +445,7 @@ export async function syncCanvas(
 export async function checkCanvasCapacity(
   identity: GalleryIdentity,
   forceAfterDelete = false
-): Promise<void> {
+): Promise<GalleryUsage | undefined> {
   const session = sessionFor(identity)
   const pauseState = (await readCanvasUserState(galleryOwner(identity)))
     .cloudPause
@@ -451,7 +476,7 @@ export async function checkCanvasCapacity(
     required_bytes: pauseState.requiredBytes,
     required_images: pauseState.requiredImages,
   })
-  if (!budget.can_save) return
+  if (!budget.can_save) return budget
   await updateCanvasUserState(galleryOwner(identity), (current) => ({
     ...current,
     cloudPause: null,
@@ -465,6 +490,19 @@ export async function checkCanvasCapacity(
       await syncCanvas(identity, canvas.id, 'leave')
     }
   }
+  return budget
+}
+
+/** Gallery refresh respects the same durable quota-check clock as editor sync. */
+export async function getCanvasGalleryUsage(
+  identity: GalleryIdentity,
+  signal?: AbortSignal
+) {
+  const state = await readCanvasUserState(galleryOwner(identity)).catch(
+    () => null
+  )
+  if (state?.cloudPause) return (await checkCanvasCapacity(identity)) ?? null
+  return getGalleryUsage(identity, signal)
 }
 
 export async function flushCanvasSession(

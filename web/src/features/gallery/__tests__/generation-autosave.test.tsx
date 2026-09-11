@@ -1,3 +1,19 @@
+/*
+Copyright (C) 2023-2026 QuantumNous
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+*/
 import { Blob as NodeBlob } from 'node:buffer'
 import { webcrypto } from 'node:crypto'
 
@@ -15,7 +31,11 @@ import { useDrawingStore } from '@/stores/drawing-store'
 import { useNaiDrawingStore } from '@/stores/nai-drawing-store'
 
 import { deleteCanvasProject } from '../lib/canvas-deletion'
-import { flushLocalEditors, stopCanvasEditors } from '../lib/canvas-editor'
+import {
+  flushLocalEditors,
+  stopCanvasEditors,
+  getCanvasEditorState,
+} from '../lib/canvas-editor'
 import { preserveCanvasOriginalSource } from '../lib/canvas-original'
 import {
   createCanvasProject,
@@ -104,6 +124,34 @@ it('preserves generated originals in the shared local path while full without an
   })
   expect(assets[0].blob.size).toBe(68)
   expect(posts).toEqual([])
+})
+
+it('finishes URL generation before private original acquisition, and preserves generation success on storage failure', async () => {
+  await createCanvasProject(identity, 'drawing')
+  await startCanvasEditor(identity, 'drawing')
+  const post = vi.spyOn(api, 'post').mockResolvedValue({
+    headers: { 'content-type': 'application/json' },
+    data: new Response(
+      JSON.stringify({ data: [{ url: 'https://images.example/final.png' }] })
+    ).body,
+  })
+  api.defaults.adapter = async () => {
+    throw new Error('storage unavailable')
+  }
+  const hook = renderHook(useImageGeneration)
+  act(() => {
+    hook.result.current.generate(
+      { ...DEFAULT_IMAGE_SETTINGS, model: 'gpt-image-1', prompt: 'A forest' },
+      { x: 0, y: 0 }
+    )
+  })
+  await waitFor(() =>
+    expect(useDrawingStore.getState().nodes[0].data.status).toBe('complete')
+  )
+  post.mockRestore()
+  await flushLocalEditors(identity)
+  expect(getCanvasEditorState('drawing')?.localStatus).toBe('error')
+  expect(useDrawingStore.getState().nodes[0].data.status).toBe('complete')
 })
 
 it('discards a generation result arriving after explicit canvas deletion', async () => {

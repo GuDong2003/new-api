@@ -160,14 +160,21 @@ export function getGalleryImages(
   identity: GalleryIdentity,
   page: number,
   source?: GallerySource,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  options?: { search?: string; sort?: string }
 ) {
   return request<GalleryPage>(
     identity,
     {
       method: 'get',
       url: '/api/gallery/images',
-      params: { page, page_size: 24, source },
+      params: {
+        page,
+        page_size: 24,
+        ...(source ? { source } : {}),
+        ...(options?.search ? { search: options.search } : {}),
+        ...(options?.sort ? { sort: options.sort } : {}),
+      },
     },
     signal
   )

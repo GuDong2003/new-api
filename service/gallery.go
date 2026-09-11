@@ -108,8 +108,10 @@ func GetGalleryBudget(ctx context.Context, user int, requiredBytes, requiredImag
 	switch {
 	case !settings.Enabled:
 		usage.Reason = model.ErrGalleryDisabled.Error()
-	case rootErr != nil || diskErr != nil:
+	case rootErr != nil:
 		usage.Reason = model.ErrGalleryUnavailable.Error()
+	case diskErr != nil:
+		usage.Reason = diskErr.Error()
 	case requiredImages > usage.AvailableImages || requiredBytes > usage.AvailableBytes:
 		usage.Reason = model.ErrGalleryCapacity.Error()
 	}
@@ -245,7 +247,7 @@ func SaveGalleryImage(ctx context.Context, user int, reader *multipart.Reader) (
 	}
 	budget = min(budget, free)
 	if budget <= int64(len(normalized)) {
-		return nil, model.ErrGalleryUnavailable
+		return nil, model.ErrGalleryCapacity
 	}
 	now := time.Now().Unix()
 	parameterJSON, _ := common.Marshal(parameters)
