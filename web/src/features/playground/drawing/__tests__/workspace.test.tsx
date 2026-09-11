@@ -38,7 +38,10 @@ import { IDBFactory } from 'fake-indexeddb'
 import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest'
 
 import { login, response } from '@/features/gallery/__tests__/fixtures'
-import { getCanvasEditorState } from '@/features/gallery/lib/canvas-editor'
+import {
+  getCanvasEditorState,
+  stopCanvasEditors,
+} from '@/features/gallery/lib/canvas-editor'
 import { readCanvasAssets } from '@/features/gallery/lib/canvas-repository'
 import { api } from '@/lib/api'
 import { useAuthStore } from '@/stores/auth-store'
@@ -64,6 +67,10 @@ beforeEach(() => {
 })
 afterEach(() => {
   cleanup()
+  stopCanvasEditors({ userId: 801, sessionId: 'gallery-session' })
+  stopCanvasEditors({ userId: 811, sessionId: 'gallery-session' })
+  stopCanvasEditors({ userId: 821, sessionId: 'gallery-session' })
+  stopCanvasEditors({ userId: 831, sessionId: 'gallery-session' })
   useAuthStore.getState().auth.reset()
   client?.clear()
   api.defaults.adapter = adapter
