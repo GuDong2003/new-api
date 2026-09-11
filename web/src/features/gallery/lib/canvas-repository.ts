@@ -289,6 +289,67 @@ export async function loadLocalCanvas(
   )
 }
 
+/** Server metadata is not an editor mutation. Never replace newer content. */
+export async function updateCanvasCloudState(
+  userId: number,
+  id: string,
+  update: (
+    canvas: LocalCanvas
+  ) => Pick<
+    LocalCanvas,
+    | 'cloudRevision'
+    | 'cloudSavedRevision'
+    | 'expiresAt'
+    | 'status'
+    | 'needsExplicitSave'
+  >
+): Promise<LocalCanvas | null> {
+  return transact('readwrite', async (tx) => {
+    const store = tx.objectStore('canvases')
+    const canvas: LocalCanvas | undefined = await requestValue(
+      store.get([userId, id])
+    )
+    if (!canvas || canvas.deleted) return null
+    const next = { ...canvas, ...update(canvas) }
+    store.put(next, [userId, id])
+    return next
+  })
+}
+
+/** Only a latest acknowledged document can retire obsolete mask binaries. */
+export async function retireCanvasMasks(
+  userId: number,
+  id: string,
+  revision: number,
+  retainedIds: readonly string[]
+): Promise<void> {
+  return transact('readwrite', async (tx) => {
+    const canvas: LocalCanvas | undefined = await requestValue(
+      tx.objectStore('canvases').get([userId, id])
+    )
+    if (
+      !canvas ||
+      canvas.deleted ||
+      canvas.revision !== revision ||
+      canvas.cloudSavedRevision !== revision
+    ) {
+      return
+    }
+    const referenced = new Set([
+      ...canvasDocumentAssetIds(canvas.document),
+      ...retainedIds,
+    ])
+    const assets: CanvasBinary[] = await requestValue(
+      tx.objectStore('assets').getAll(canvasAssetRange(userId, id))
+    )
+    for (const asset of assets) {
+      if (asset.role === 'mask' && !referenced.has(asset.id)) {
+        tx.objectStore('assets').delete([userId, id, asset.id])
+      }
+    }
+  })
+}
+
 export async function listLocalCanvases(
   userId: number
 ): Promise<LocalCanvas[]> {

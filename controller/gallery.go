@@ -58,6 +58,33 @@ func GetGalleryUsage(c *gin.Context) {
 	common.ApiSuccess(c, usage)
 }
 
+func ReadGalleryOriginal(c *gin.Context) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 16<<10)
+	var input struct {
+		URL string `json:"url"`
+	}
+	if c.ShouldBindJSON(&input) != nil || input.URL == "" {
+		galleryAPIError(c, model.ErrGalleryInvalid)
+		return
+	}
+	file, mime, cleanup, err := service.DownloadGalleryOriginal(c.Request.Context(), c.GetInt("id"), input.URL)
+	if err != nil {
+		galleryAPIError(c, err)
+		return
+	}
+	defer cleanup()
+	info, err := file.Stat()
+	if err != nil {
+		galleryAPIError(c, model.ErrGalleryUnavailable)
+		return
+	}
+	c.Header("Cache-Control", "private, no-store")
+	c.Header("X-Content-Type-Options", "nosniff")
+	c.Header("Content-Disposition", `attachment; filename="original"`)
+	// No success headers are committed before acquisition and full validation.
+	c.DataFromReader(http.StatusOK, info.Size(), mime, file, nil)
+}
+
 func GetGallerySettings(c *gin.Context) {
 	settings, err := service.GetGallerySettings(c.Request.Context())
 	if err != nil {

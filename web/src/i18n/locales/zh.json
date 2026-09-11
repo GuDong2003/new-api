@@ -1,5 +1,9 @@
 {
   "translation": {
+    "已保存到本地，云端空间不足，暂未上传。": "已保存到本地，云端空间不足，暂未上传。",
+    "NAI canvas storage is unavailable. Export your current work before leaving.": "NAI 画布存储不可用，请在离开前导出当前作品。",
+    "The canvas could not be exported.": "画布导出失败，请稍后重试。",
+    "Save or export the current canvas before switching.": "当前画布尚未保存，请先保存或导出后再切换。",
     "Infinite Canvas": "无限画布",
     "Drawing, NAI Canvas and your private gallery. Sign-in is always required.": "绘图、NAI 画布与个人图库，始终需要登录后使用。",
     "Image details": "图片详情",

@@ -1,0 +1,307 @@
+import { DEFAULT_IMAGE_SETTINGS } from '@/features/playground/drawing/lib/image-settings'
+import type { DrawingDocument } from '@/features/playground/drawing/types'
+import { DEFAULT_NAI_SETTINGS } from '@/features/playground/nai/lib/nai-settings'
+import type { NaiCanvasDocument } from '@/features/playground/nai/types'
+import { useDrawingStore } from '@/stores/drawing-store'
+import { useNaiDrawingStore } from '@/stores/nai-drawing-store'
+
+import { getCanvasRecord, getGalleryFile } from '../api'
+import type {
+  CanvasKind,
+  CanvasRecord,
+  GalleryIdentity,
+  LocalCanvas,
+} from '../types'
+import { decodeCanvas, encodeCanvas } from './canvas-document'
+import {
+  bindEditor,
+  cancelEditorJobs,
+  canvasOriginalReader,
+  flushLocalEditors,
+  getCanvasEditorState,
+  sameIdentity,
+  storeFor,
+  updateState,
+} from './canvas-editor'
+import { canvasEditors, notifyCanvasProjects } from './canvas-events'
+import { migrateLegacyCanvases } from './canvas-migration'
+import {
+  acknowledgeCanvasSave,
+  listLocalCanvases,
+  loadLocalCanvas,
+  readCanvasAssets,
+  readCanvasUserState,
+  saveLocalCanvas,
+  updateCanvasUserState,
+} from './canvas-repository'
+import { reconcileCanvasRecord, syncCanvas } from './canvas-sync'
+import { galleryOwner, assertGalleryIdentity } from './session'
+
+type EditorDocument = DrawingDocument | NaiCanvasDocument
+export async function exportCanvasProject(
+  identity: GalleryIdentity,
+  kind: CanvasKind
+): Promise<Blob> {
+  assertGalleryIdentity(identity)
+  const state = storeFor(kind).getState()
+  const current = getCanvasEditorState(kind)?.canvas
+  const existingAssets = current
+    ? await readCanvasAssets(galleryOwner(identity), current.id).catch(() => [])
+    : []
+  const encoded = await encodeCanvas(kind, state, {
+    existingAssets,
+    roles: state.assetRoles,
+    readOriginal: canvasOriginalReader(identity),
+  })
+  const portable = await decodeCanvas(
+    initialCanvas(identity, kind, encoded.document),
+    encoded.assets
+  )
+  assertGalleryIdentity(identity)
+  return new Blob([JSON.stringify(portable, null, 2)], {
+    type: 'application/json',
+  })
+}
+function emptyDocument(kind: CanvasKind): EditorDocument {
+  const common = {
+    version: 1 as const,
+    nodes: [],
+    viewport: { x: 40, y: 40, zoom: 1 },
+  }
+  return kind === 'drawing'
+    ? {
+        ...common,
+        settings: { ...DEFAULT_IMAGE_SETTINGS },
+        edges: [],
+        referenceIds: [],
+        mask: null,
+      }
+    : { ...common, settings: { ...DEFAULT_NAI_SETTINGS } }
+}
+function initialCanvas(
+  identity: GalleryIdentity,
+  kind: CanvasKind,
+  document: Record<string, unknown>,
+  id: string = crypto.randomUUID()
+): LocalCanvas {
+  return {
+    id,
+    userId: galleryOwner(identity),
+    kind,
+    name: kind === 'drawing' ? '新画布' : 'NAI 新画布',
+    document,
+    revision: 0,
+    cloudRevision: 0,
+    localSavedAt: 0,
+    cloudSavedRevision: 0,
+    expiresAt: 0,
+    status: 'pending',
+    needsExplicitSave: false,
+    removedAssetIds: [],
+    deleted: false,
+  }
+}
+export async function createCanvasProject(
+  identity: GalleryIdentity,
+  kind: CanvasKind
+): Promise<LocalCanvas> {
+  assertGalleryIdentity(identity)
+  const active = canvasEditors.get(kind)
+  if (active && sameIdentity(active.identity, identity)) {
+    await active.flush()
+    if (getCanvasEditorState(kind)?.localStatus !== 'saved') {
+      throw new Error('Save or export the current canvas before switching.')
+    }
+  }
+  const encoded = await encodeCanvas(kind, emptyDocument(kind))
+  const canvas = await saveLocalCanvas(
+    {
+      ...initialCanvas(identity, kind, encoded.document),
+      status: 'local',
+      needsExplicitSave: true,
+    },
+    encoded.assets
+  )
+  await updateCanvasUserState(galleryOwner(identity), (state) => ({
+    ...state,
+    lastOpened: { ...state.lastOpened, [kind]: canvas.id },
+  }))
+  if (canvasEditors.has(kind)) await openCanvasProject(identity, canvas.id)
+  notifyCanvasProjects()
+  return canvas
+}
+async function downloadCloudCanvas(
+  identity: GalleryIdentity,
+  remote: CanvasRecord,
+  existing?: LocalCanvas
+): Promise<LocalCanvas> {
+  if (remote.state !== 'ready' || !remote.document) {
+    throw new Error('Canvas original is unavailable.')
+  }
+  const assets = await Promise.all(
+    remote.assets.map(async (asset) => ({
+      id: asset.id,
+      role: asset.role,
+      nodeId: asset.node_id,
+      sha256: asset.sha256,
+      blob: await getGalleryFile(identity, asset.id, false),
+    }))
+  )
+  assertGalleryIdentity(identity)
+  const canvas = await saveLocalCanvas(
+    {
+      ...(existing ??
+        initialCanvas(identity, remote.kind, remote.document, remote.id)),
+      name: remote.name,
+      document: remote.document,
+      status: 'pending',
+      needsExplicitSave: false,
+      cloudRevision: remote.revision,
+    },
+    assets
+  )
+  return acknowledgeCanvasSave(galleryOwner(identity), remote.id, {
+    localRevision: canvas.revision,
+    cloudRevision: remote.revision,
+    expiresAt: remote.expires_at,
+    assetIdMap: remote.asset_id_map,
+    assets: remote.assets,
+  })
+}
+export async function openCanvasProject(
+  identity: GalleryIdentity,
+  id: string,
+  focusAssetId?: string
+): Promise<void> {
+  assertGalleryIdentity(identity)
+  let canvas = await loadLocalCanvas(galleryOwner(identity), id)
+  if (!canvas) {
+    canvas = await downloadCloudCanvas(
+      identity,
+      await getCanvasRecord(identity, id)
+    )
+  }
+  if (canvas.deleted) throw new Error('Canvas has been deleted.')
+  const old = canvasEditors.get(canvas.kind)
+  if (old) {
+    await old.flush()
+    if (getCanvasEditorState(canvas.kind)?.localStatus !== 'saved') {
+      throw new Error('Save or export the current canvas before switching.')
+    }
+    cancelEditorJobs(canvas.kind, identity)
+    old.stop()
+    void syncCanvas(identity, old.canvasId, 'leave')
+  }
+  const document = await decodeCanvas(
+    canvas,
+    await readCanvasAssets(galleryOwner(identity), id)
+  )
+  assertGalleryIdentity(identity)
+  if (canvas.kind === 'drawing') {
+    useDrawingStore
+      .getState()
+      .initialize(galleryOwner(identity), document as DrawingDocument)
+  } else {
+    useNaiDrawingStore
+      .getState()
+      .initialize(galleryOwner(identity), document as NaiCanvasDocument)
+  }
+  await updateCanvasUserState(galleryOwner(identity), (state) => ({
+    ...state,
+    lastOpened: { ...state.lastOpened, [canvas.kind]: id },
+  }))
+  bindEditor(identity, canvas)
+  if (focusAssetId) {
+    const node = storeFor(canvas.kind)
+      .getState()
+      .nodes.find((node) => node.data.asset?.id === focusAssetId)
+    if (node) storeFor(canvas.kind).getState().setPreview(node.id)
+  }
+  // Local content renders first. The owner-scoped state check never replaces edits.
+  const opened = canvas
+  void getCanvasRecord(identity, id)
+    .then((remote) => reconcileCanvasRecord(identity, opened, remote))
+    .catch(() => undefined)
+}
+export async function reloadCanvasProject(
+  identity: GalleryIdentity,
+  id: string
+): Promise<void> {
+  const current = await loadLocalCanvas(galleryOwner(identity), id)
+  if (!current || current.deleted) throw new Error('Canvas has been deleted.')
+  // Deliberate conflict action only; callers confirm discarding their local version.
+  const binding = canvasEditors.get(current.kind)
+  if (binding?.canvasId === id) {
+    await binding.flush()
+    binding.stop()
+  }
+  const latest = await loadLocalCanvas(galleryOwner(identity), id)
+  if (!latest || latest.deleted) throw new Error('Canvas has been deleted.')
+  await downloadCloudCanvas(
+    identity,
+    await getCanvasRecord(identity, id),
+    latest
+  )
+  await openCanvasProject(identity, id)
+}
+export async function renameCanvasProject(
+  identity: GalleryIdentity,
+  id: string,
+  name: string
+): Promise<void> {
+  assertGalleryIdentity(identity)
+  const normalized = name.trim()
+  if (
+    !normalized ||
+    [...normalized].length > 255 ||
+    /[\0\r\n]/.test(normalized)
+  ) {
+    throw new Error('Invalid canvas name.')
+  }
+  await flushLocalEditors(identity)
+  const current = await loadLocalCanvas(galleryOwner(identity), id)
+  if (!current || current.deleted) throw new Error('Canvas has been deleted.')
+  if (
+    canvasEditors.get(current.kind)?.canvasId === id &&
+    getCanvasEditorState(current.kind)?.localStatus !== 'saved'
+  ) {
+    throw new Error('Save or export the current canvas before switching.')
+  }
+  const canvas = await saveLocalCanvas(
+    { ...current, name: normalized, needsExplicitSave: false },
+    []
+  )
+  updateState(canvas.kind, { canvas, localStatus: 'saved' })
+}
+export async function startCanvasEditor(
+  identity: GalleryIdentity,
+  kind: CanvasKind
+): Promise<void> {
+  const existing = canvasEditors.get(kind)
+  if (existing && sameIdentity(existing.identity, identity)) return
+  existing?.stop()
+  assertGalleryIdentity(identity)
+  updateState(kind, { canvas: null, localStatus: 'loading' })
+  try {
+    await migrateLegacyCanvases(galleryOwner(identity), {
+      readOriginal: canvasOriginalReader(identity),
+    })
+    const state = await readCanvasUserState(galleryOwner(identity))
+    const canvases = await listLocalCanvases(galleryOwner(identity))
+    const selected =
+      canvases.find((canvas) => canvas.id === state.lastOpened[kind]) ??
+      canvases.find((canvas) => canvas.kind === kind) ??
+      (await createCanvasProject(identity, kind))
+    await openCanvasProject(identity, selected.id)
+  } catch (error) {
+    updateState(kind, {
+      canvas: null,
+      localStatus: 'error',
+      error:
+        error instanceof Error
+          ? error.message
+          : 'Canvas storage is unavailable.',
+    })
+    throw error
+  }
+}

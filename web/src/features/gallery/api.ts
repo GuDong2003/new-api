@@ -24,6 +24,10 @@ import type {
   GallerySettings,
   GallerySource,
   GalleryUsage,
+  CanvasRecord,
+  CanvasSummary,
+  CanvasSaveMetadata,
+  CanvasBinary,
 } from './types'
 
 async function request<T>(
@@ -60,11 +64,95 @@ async function request<T>(
 
 export function getGalleryUsage(
   identity: GalleryIdentity,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  budget?: { required_bytes: number; required_images: number }
 ) {
   return request<GalleryUsage>(
     identity,
-    { method: 'get', url: '/api/gallery/usage' },
+    { method: 'get', url: '/api/gallery/usage', params: budget },
+    signal
+  )
+}
+
+export function getCanvasRecord(
+  identity: GalleryIdentity,
+  id: string,
+  signal?: AbortSignal
+) {
+  return request<CanvasRecord>(
+    identity,
+    { method: 'get', url: `/api/gallery/canvases/${encodeURIComponent(id)}` },
+    signal
+  )
+}
+export function listCanvasRecords(
+  identity: GalleryIdentity,
+  params: { page?: number; source?: string; search?: string; sort?: string },
+  signal?: AbortSignal
+) {
+  return request<{
+    items: CanvasSummary[]
+    total: number
+    page: number
+    page_size: number
+  }>(
+    identity,
+    {
+      method: 'get',
+      url: '/api/gallery/canvases',
+      params: { page_size: 24, ...params },
+    },
+    signal
+  )
+}
+export function saveCanvasRecord(
+  identity: GalleryIdentity,
+  metadata: CanvasSaveMetadata,
+  assets: CanvasBinary[],
+  signal?: AbortSignal
+) {
+  const data = new FormData()
+  data.append('metadata', JSON.stringify(metadata))
+  for (const asset of assets) {
+    data.append(`file:${asset.id}`, asset.blob, asset.id)
+  }
+  return request<CanvasRecord>(
+    identity,
+    { method: 'post', url: '/api/gallery/canvases', data },
+    signal
+  )
+}
+export function deleteCanvasRecord(
+  identity: GalleryIdentity,
+  id: string,
+  revision: number,
+  assetId?: string,
+  signal?: AbortSignal
+) {
+  const suffix = assetId ? `/assets/${encodeURIComponent(assetId)}` : ''
+  return request<CanvasRecord>(
+    identity,
+    {
+      method: 'delete',
+      url: `/api/gallery/canvases/${encodeURIComponent(id)}${suffix}`,
+      params: { revision },
+    },
+    signal
+  )
+}
+export function readRemoteCanvasOriginal(
+  identity: GalleryIdentity,
+  url: string,
+  signal?: AbortSignal
+) {
+  return request<Blob>(
+    identity,
+    {
+      method: 'post',
+      url: '/api/gallery/original',
+      data: { url },
+      responseType: 'blob',
+    },
     signal
   )
 }

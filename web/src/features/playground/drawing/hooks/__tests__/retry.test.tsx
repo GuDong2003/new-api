@@ -26,7 +26,9 @@ import {
 import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { login } from '@/features/gallery/__tests__/fixtures'
 import { api } from '@/lib/api'
+import { useAuthStore } from '@/stores/auth-store'
 import { useDrawingStore } from '@/stores/drawing-store'
 
 import {
@@ -83,6 +85,7 @@ let client: QueryClient
 let hook: RenderHookResult<ReturnType<typeof useImageGeneration>, unknown>
 
 beforeEach(() => {
+  login(816)
   decoders.length = 0
   useDrawingStore.getState().initialize(816)
   useDrawingStore.getState().hydrate(null)
@@ -113,6 +116,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  useAuthStore.getState().auth.reset()
   hook.unmount()
   client.clear()
   vi.unstubAllGlobals()

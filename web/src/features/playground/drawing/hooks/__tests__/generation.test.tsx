@@ -22,7 +22,9 @@ import type { GenericAbortSignal } from 'axios'
 import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { login } from '@/features/gallery/__tests__/fixtures'
 import { api } from '@/lib/api'
+import { useAuthStore } from '@/stores/auth-store'
 import { useDrawingStore } from '@/stores/drawing-store'
 
 import { DEFAULT_IMAGE_SETTINGS } from '../../lib/image-settings'
@@ -34,6 +36,7 @@ import {
 
 const decoders: EventTarget[] = []
 beforeEach(() => {
+  login()
   decoders.length = 0
   useDrawingStore.getState().initialize(813)
   useDrawingStore.getState().hydrate(null)
@@ -62,7 +65,10 @@ beforeEach(() => {
     ).body,
   })
 })
-afterEach(() => vi.unstubAllGlobals())
+afterEach(() => {
+  useAuthStore.getState().auth.reset()
+  vi.unstubAllGlobals()
+})
 
 function generationReference(
   id: string,
@@ -348,7 +354,7 @@ describe('Image generation jobs', () => {
     act(() => hook.result.current.cancel())
     expect(signal?.aborted).toBe(false)
 
-    cancelImageGenerationJobs(813, null)
+    cancelImageGenerationJobs(813, 'gallery-session')
     await waitFor(() => expect(signal?.aborted).toBe(true))
     hook.unmount()
     client.clear()

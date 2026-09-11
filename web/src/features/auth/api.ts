@@ -18,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import axios from 'axios'
 
+import { flushCanvasSession } from '@/features/gallery/lib/canvas-sync'
 import { api, refreshAuthentication, type RefreshOutcome } from '@/lib/api'
 import { AuthOperationError } from '@/lib/secure-verification'
 import { getServerErrorMessageKey } from '@/lib/server-error-message'
@@ -127,6 +128,15 @@ export async function executeLogout(
 
 // User logout
 export async function logout(): Promise<ApiResponse> {
+  const auth = useAuthStore.getState().auth
+  try {
+    await flushCanvasSession({
+      userId: auth.user?.id ?? null,
+      sessionId: auth.session?.sid ?? null,
+    })
+  } catch {
+    // Draft failures must never prevent backend session invalidation.
+  }
   return executeLogout({
     getExpectedSID: () => useAuthStore.getState().auth.session?.sid,
     request: async (sid) => {

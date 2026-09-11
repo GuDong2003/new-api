@@ -539,6 +539,36 @@ func TestGalleryCanvasDeleteAssetDetachesRelationsPreservesOtherImages(t *testin
 	assert.Contains(t, loaded.RemovedAssetIDs, canvasFixtureAsset)
 }
 
+func TestGalleryCanvasExplicitAssetDeletionAfterExpiry(t *testing.T) {
+	galleryFixture(t, sqlite.Open(filepath.Join(t.TempDir(), "gallery.db")))
+	ctx := context.Background()
+	metadata := canvasSaveMetadata(t)
+	saved, err := saveCanvasMetadata(t, 41, metadata, []string{"file:" + canvasFixtureAsset, string(galleryPNG(t))})
+	require.NoError(t, err)
+	require.NoError(t, model.DB.Model(&model.GalleryCanvas{}).Where("id = ?", saved.ID).Update("expires_at", time.Now().Unix()-1).Error)
+	require.NoError(t, service.CleanupGallery(ctx))
+	expired, err := service.GetGalleryCanvas(ctx, 41, saved.ID)
+	require.NoError(t, err)
+	_, err = service.DeleteGalleryCanvasAsset(ctx, 42, saved.ID, canvasFixtureAsset, expired.Revision)
+	require.ErrorIs(t, err, gorm.ErrRecordNotFound)
+	_, err = service.DeleteGalleryCanvasAsset(ctx, 41, saved.ID, canvasFixtureAsset, expired.Revision-1)
+	require.ErrorIs(t, err, model.ErrGalleryCanvasConflict)
+	removed, err := service.DeleteGalleryCanvasAsset(ctx, 41, saved.ID, canvasFixtureAsset, expired.Revision)
+	require.NoError(t, err)
+	require.Equal(t, "expired", removed.State)
+	require.Nil(t, removed.Document)
+	require.Empty(t, removed.Assets)
+	require.Equal(t, expired.ExpiresAt, removed.ExpiresAt)
+	require.Equal(t, expired.UpdatedAt, removed.UpdatedAt)
+	require.Contains(t, removed.RemovedAssetIDs, canvasFixtureAsset)
+	repeated, err := service.DeleteGalleryCanvasAsset(ctx, 41, saved.ID, canvasFixtureAsset, expired.Revision)
+	require.NoError(t, err)
+	require.Equal(t, removed.Revision, repeated.Revision)
+	metadata["base_revision"], metadata["mutation_id"], metadata["explicit_save"] = removed.Revision, "revive-removed", true
+	_, err = saveCanvasMetadata(t, 41, metadata, []string{"file:" + canvasFixtureAsset, string(galleryPNG(t))})
+	require.ErrorIs(t, err, model.ErrGalleryCanvasConflict)
+}
+
 func TestGalleryCanvasBudgetListingAndHTTPContract(t *testing.T) {
 	galleryFixture(t, sqlite.Open(filepath.Join(t.TempDir(), "gallery.db")))
 	ctx := context.Background()

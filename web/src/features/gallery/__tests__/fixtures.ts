@@ -18,6 +18,13 @@ import type { AxiosResponse, InternalAxiosRequestConfig } from 'axios'
 
 import { useAuthStore } from '@/stores/auth-store'
 
+export function required<T>(value: T | null | undefined): T {
+  if (value === null || value === undefined) {
+    throw new Error('Expected fixture value.')
+  }
+  return value
+}
+
 export function login(userId = 813, sessionId = 'gallery-session', role = 100) {
   useAuthStore.getState().auth.setBundle({
     access_token: `token-${userId}-${sessionId}`,

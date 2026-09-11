@@ -19,8 +19,10 @@ For commercial licensing, please contact support@quantumnous.com
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 
+import { login } from '@/features/gallery/__tests__/fixtures'
+import { useAuthStore } from '@/stores/auth-store'
 import { useDrawingStore } from '@/stores/drawing-store'
 
 import { validateImageSettings } from '../../lib/image-settings'
@@ -28,7 +30,9 @@ import { useDrawingPersistence } from '../use-drawing-persistence'
 import { useImageOptions } from '../use-image-options'
 
 describe('Drawing settings and persistence', () => {
+  afterEach(() => useAuthStore.getState().auth.reset())
   it('reports unsaved changes immediately while waiting for the autosave debounce', async () => {
+    login(811)
     const hook = renderHook(() => useDrawingPersistence(811))
     await waitFor(() => expect(hook.result.current).toBe('saved'))
     act(() =>

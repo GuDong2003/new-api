@@ -18,13 +18,12 @@ import { useCallback, useSyncExternalStore } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
-import { safeGalleryParameters } from '@/features/gallery/lib/metadata'
-import { queueGallerySave } from '@/features/gallery/lib/save-queue'
+import { preserveCanvasOriginalSource } from '@/features/gallery/lib/canvas-original'
 import { useAuthStore } from '@/stores/auth-store'
 import { useNaiDrawingStore } from '@/stores/nai-drawing-store'
 
 import { generateNaiImages, getNaiGenerationError } from '../api'
-import { buildNaiImagePayload, validateNaiSettings } from '../lib/nai-settings'
+import { validateNaiSettings } from '../lib/nai-settings'
 import type { NaiCanvasNode, NaiSettings } from '../types'
 
 type NaiImageJob = {
@@ -61,7 +60,14 @@ function getPendingCount(userId: number | null, sessionId: string | null) {
 function isCurrentJob(input: NaiGenerationInput) {
   return (
     useNaiDrawingStore.getState().userId === input.userId &&
-    useAuthStore.getState().auth.session?.sid === input.sessionId
+    useAuthStore.getState().auth.session?.sid === input.sessionId &&
+    useNaiDrawingStore
+      .getState()
+      .nodes.some(
+        (node) =>
+          input.job.nodeIds.includes(node.id) &&
+          node.data.jobId === input.job.id
+      )
   )
 }
 
@@ -76,23 +82,15 @@ async function executeJob(
     })
     if (!isCurrentJob(input)) return
     input.job.controller.signal.throwIfAborted()
-    const payload = buildNaiImagePayload(input.settings)
-    const nai = payload.nai as { parameters: Record<string, unknown> }
-    for (const [index, image] of result.images.entries()) {
-      void queueGallerySave({
-        userId: input.userId,
-        sessionId: input.sessionId,
-        src: image.src,
-        metadata: {
-          source_id: `${input.job.id}:${index}`,
-          source: 'nai',
-          model: input.settings.model,
-          prompt: input.settings.prompt,
-          negative_prompt: input.settings.negativePrompt,
-          parameters: safeGalleryParameters(nai.parameters),
-        },
-      })
+    for (const image of result.images) {
+      image.src = await preserveCanvasOriginalSource(
+        { userId: input.userId, sessionId: input.sessionId },
+        image.src,
+        image.mimeType,
+        input.job.controller.signal
+      )
     }
+    if (!isCurrentJob(input)) return
     const state = useNaiDrawingStore.getState()
     input.job.nodeIds.forEach((id, index) => {
       const asset = result.images[index]

@@ -46,6 +46,8 @@ export type GalleryUsage = {
   used_bytes: number
   can_save: boolean
   reason: string
+  available_bytes?: number
+  available_images?: number
 }
 export type GallerySettings = {
   enabled: boolean

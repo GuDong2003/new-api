@@ -31,6 +31,10 @@ import type {
 type NaiSnapshot = Pick<NaiCanvasDocument, 'nodes'>
 
 type NaiDrawingState = NaiCanvasDocument & {
+  assetRoles: Record<
+    string,
+    { role: 'generated' | 'reference' | 'mask'; nodeId: string }
+  >
   userId: number | null
   ready: boolean
   revision: number
@@ -71,6 +75,7 @@ function arrangeNodes(nodes: NaiCanvasNode[]): NaiCanvasNode[] {
 }
 
 export const useNaiDrawingStore = create<NaiDrawingState>((set, get) => ({
+  assetRoles: {},
   version: 1,
   nodes: [],
   viewport: defaultViewport,
@@ -83,6 +88,7 @@ export const useNaiDrawingStore = create<NaiDrawingState>((set, get) => ({
   previewId: null,
   initialize: (userId, document) =>
     set({
+      assetRoles: {},
       userId,
       ready: Boolean(document),
       revision: 0,
@@ -126,6 +132,23 @@ export const useNaiDrawingStore = create<NaiDrawingState>((set, get) => ({
   addNodes: (nodes) => {
     get().checkpoint()
     set((state) => ({
+      assetRoles: {
+        ...state.assetRoles,
+        ...Object.fromEntries(
+          nodes.flatMap((node) =>
+            node.data.asset
+              ? [
+                  [
+                    node.data.asset.id,
+                    { role: 'reference' as const, nodeId: node.id },
+                  ],
+                ]
+              : []
+          )
+        ),
+      },
+    }))
+    set((state) => ({
       nodes: [
         ...state.nodes.map((node) => ({ ...node, selected: false })),
         ...nodes,
@@ -143,6 +166,13 @@ export const useNaiDrawingStore = create<NaiDrawingState>((set, get) => ({
   },
   updateNodeData: (id, data, jobId) =>
     set((state) => ({
+      assetRoles:
+        data.asset && jobId
+          ? {
+              ...state.assetRoles,
+              [data.asset.id]: { role: 'generated' as const, nodeId: id },
+            }
+          : state.assetRoles,
       nodes: state.nodes.map((node) => {
         if (node.id !== id || (jobId && node.data.jobId !== jobId)) return node
         return { ...node, data: { ...node.data, ...data } }

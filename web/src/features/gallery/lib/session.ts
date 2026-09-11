@@ -36,6 +36,14 @@ export function assertGalleryIdentity(identity: GalleryIdentity): void {
   }
 }
 
+export function galleryOwner(identity: GalleryIdentity): number {
+  assertGalleryIdentity(identity)
+  if (identity.userId === null) {
+    throw new DOMException('Gallery session changed', 'AbortError')
+  }
+  return identity.userId
+}
+
 export function cancelGalleryRequests(
   userId: number | null,
   sessionId: string | null

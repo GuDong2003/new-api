@@ -28,6 +28,7 @@ import {
 import { Redo2, Settings2, Undo2, WandSparkles } from 'lucide-react'
 import { useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
 
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -48,6 +49,8 @@ import {
 } from '@/components/ui/sheet'
 import { Spinner } from '@/components/ui/spinner'
 import { useTheme } from '@/context/theme-provider'
+import { exportCanvasProject } from '@/features/gallery/lib/canvas-projects'
+import { downloadBlob } from '@/features/playground/drawing/lib/image-assets'
 import { useMediaQuery } from '@/hooks/use-media-query'
 import { useAuthStore } from '@/stores/auth-store'
 import { useNaiDrawingStore } from '@/stores/nai-drawing-store'
@@ -208,6 +211,25 @@ function NaiDrawingWorkspace(props: { userId: number }) {
             ? t('Saving…')
             : t('NAI image nodes: {{count}}', { count: nodes.length })}
         </span>
+        <Button
+          type='button'
+          variant='ghost'
+          size='sm'
+          onClick={() => {
+            const auth = useAuthStore.getState().auth
+            void exportCanvasProject(
+              {
+                userId: auth.user?.id ?? null,
+                sessionId: auth.session?.sid ?? null,
+              },
+              'nai'
+            )
+              .then((blob) => downloadBlob(blob, 'nai-canvas.json'))
+              .catch(() => toast.error(t('The canvas could not be exported.')))
+          }}
+        >
+          {t('Export canvas')}
+        </Button>
       </div>
       {status === 'error' && (
         <Alert
@@ -216,7 +238,7 @@ function NaiDrawingWorkspace(props: { userId: number }) {
         >
           <AlertDescription>
             {t(
-              'NAI canvas storage is unavailable. Your current work is still visible; export support will be added later.'
+              'NAI canvas storage is unavailable. Export your current work before leaving.'
             )}
           </AlertDescription>
         </Alert>

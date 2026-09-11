@@ -43,6 +43,10 @@ type CanvasSnapshot = Pick<
   'nodes' | 'edges' | 'referenceIds' | 'mask'
 >
 type DrawingState = DrawingDocument & {
+  assetRoles: Record<
+    string,
+    { role: 'generated' | 'reference' | 'mask'; nodeId: string }
+  >
   userId: number | null
   ready: boolean
   revision: number
@@ -78,6 +82,7 @@ type DrawingState = DrawingDocument & {
 }
 
 export const useDrawingStore = create<DrawingState>((set, get) => ({
+  assetRoles: {},
   version: 1,
   nodes: [],
   edges: [],
@@ -94,6 +99,7 @@ export const useDrawingStore = create<DrawingState>((set, get) => ({
 
   initialize: (userId, document) =>
     set({
+      assetRoles: {},
       userId,
       ready: Boolean(document),
       revision: 0,
@@ -239,6 +245,23 @@ export const useDrawingStore = create<DrawingState>((set, get) => ({
   addNodes: (nodes, edges = []) => {
     get().checkpoint()
     set((state) => ({
+      assetRoles: {
+        ...state.assetRoles,
+        ...Object.fromEntries(
+          nodes.flatMap((node) =>
+            node.data.asset
+              ? [
+                  [
+                    node.data.asset.id,
+                    { role: 'reference' as const, nodeId: node.id },
+                  ],
+                ]
+              : []
+          )
+        ),
+      },
+    }))
+    set((state) => ({
       nodes: [
         ...state.nodes.map((node) => ({ ...node, selected: false })),
         ...nodes,
@@ -286,6 +309,13 @@ export const useDrawingStore = create<DrawingState>((set, get) => ({
           }
         })
       return {
+        assetRoles:
+          data.asset && jobId
+            ? {
+                ...state.assetRoles,
+                [data.asset.id]: { role: 'generated' as const, nodeId: id },
+              }
+            : state.assetRoles,
         nodes: update(state.nodes),
         past: state.past.map((snapshot) => ({
           ...snapshot,

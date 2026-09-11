@@ -80,6 +80,31 @@ func deleteGalleryCanvasAssetLocked(ctx context.Context, user int, id, assetID s
 	if canvas.Revision != revision {
 		return nil, model.ErrGalleryCanvasConflict
 	}
+	if canvas.State == "expired" {
+		if !galleryCanvasUUID(assetID) {
+			return nil, model.ErrGalleryInvalid
+		}
+		// Expiry removed the binary, not the owner's ability to explicitly
+		// remove it from retained drafts. Keep the canvas minimal and expired.
+		canvas.RemovedAssetIDs = append(canvas.RemovedAssetIDs, assetID)
+		slices.Sort(canvas.RemovedAssetIDs)
+		raw, _ := common.Marshal(canvas.RemovedAssetIDs)
+		canvas.RemovedAssetIDsJSON = string(raw)
+		canvas.Revision++
+		marker := model.GalleryRemoval{UserID: user, CanvasID: id, AssetID: assetID, Revision: canvas.Revision, Reason: "deleted", CreatedAt: time.Now().Unix()}
+		if err := model.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&marker).Error; err != nil {
+				return err
+			}
+			if err := accountGalleryCanvasRemovals(tx, &canvas); err != nil {
+				return err
+			}
+			return tx.Save(&canvas).Error
+		}); err != nil {
+			return nil, model.ErrGalleryUnavailable
+		}
+		return galleryCanvasRecordLocked(ctx, user, id)
+	}
 	var asset model.GalleryImage
 	if err := model.DB.WithContext(ctx).Where("user_id = ? AND canvas_id = ? AND id = ? AND state = ? AND expires_at > ?", user, id, assetID, "ready", time.Now().Unix()).First(&asset).Error; err != nil {
 		return nil, err

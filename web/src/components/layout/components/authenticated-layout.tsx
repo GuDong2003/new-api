@@ -24,6 +24,7 @@ import { SkipToMain } from '@/components/skip-to-main'
 import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar'
 import { LayoutProvider } from '@/context/layout-provider'
 import { SearchProvider } from '@/context/search-provider'
+import { flushCanvasSession } from '@/features/gallery/lib/canvas-sync'
 import { cancelGallerySaves } from '@/features/gallery/lib/save-queue'
 import { DrawingPersistence } from '@/features/playground/drawing/hooks/use-drawing-persistence'
 import { cancelImageGenerationJobs } from '@/features/playground/drawing/hooks/use-image-generation'
@@ -49,6 +50,16 @@ export function AuthenticatedLayout(props: AuthenticatedLayoutProps) {
   const defaultOpen = getCookie('sidebar_state') !== 'false'
   const userId = useAuthStore((state) => state.auth.user?.id ?? null)
   const sessionId = useAuthStore((state) => state.auth.session?.sid ?? null)
+  const pathname = useRouterState({
+    select: (state) => state.location.pathname,
+  })
+  const previousPathname = useRef(pathname)
+  useEffect(() => {
+    if (previousPathname.current !== pathname) {
+      void flushCanvasSession({ userId, sessionId })
+    }
+    previousPathname.current = pathname
+  }, [pathname, userId, sessionId])
   const previousIdentity = useRef<{
     userId: number | null
     sessionId: string | null
