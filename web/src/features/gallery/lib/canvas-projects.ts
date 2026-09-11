@@ -211,8 +211,20 @@ export async function openCanvasProject(
   const old = canvasEditors.get(canvas.kind)
   if (old && sameIdentity(old.identity, identity)) {
     await old.flush()
+    assertGalleryIdentity(identity)
     if (getCanvasEditorState(canvas.kind)?.localStatus !== 'saved') {
       throw new Error('Save or export the current canvas before switching.')
+    }
+    if (old.canvasId === id) {
+      // The initial lookup predates flush: reopening this same project must
+      // hydrate the committed latest editor revision, never that stale object.
+      const latest = await loadLocalCanvas(galleryOwner(identity), id)
+      assertGalleryIdentity(identity)
+      if (!latest || latest.deleted) throw new Error('Canvas has been deleted.')
+      canvas = latest
+    }
+    if (canvasEditors.get(canvas.kind) !== old || !old.isLocallySaved()) {
+      throw new Error('The canvas changed. Please try again.')
     }
     cancelEditorJobs(canvas.kind, identity)
     old.stop()

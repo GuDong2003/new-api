@@ -124,6 +124,22 @@ afterEach(() => {
 })
 const posts = () => requests.filter((r) => r.method === 'post')
 
+it('reopens the same canvas from its post-flush revision without losing pending editor changes', async () => {
+  const canvas = await createCanvasProject(identity, 'drawing')
+  await startCanvasEditor(identity, 'drawing')
+  useDrawingStore
+    .getState()
+    .updateSettings({ prompt: '尚未 debounce 的新提示词' })
+  expect(getCanvasEditorState('drawing')?.localStatus).toBe('saving')
+  await openCanvasProject(identity, canvas.id)
+  expect(useDrawingStore.getState().settings.prompt).toBe(
+    '尚未 debounce 的新提示词'
+  )
+  expect(
+    (await loadLocalCanvas(813, canvas.id))?.document.settings
+  ).toMatchObject({ prompt: '尚未 debounce 的新提示词' })
+})
+
 it('deduplicates concurrent startup for the same owner session and editor kind', async () => {
   await Promise.all([
     startCanvasEditor(identity, 'drawing'),
