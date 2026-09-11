@@ -210,6 +210,11 @@ func SetApiRouter(router *gin.Engine) {
 		galleryRoute.Use(middleware.DisableCache(), middleware.UserAuth())
 		{
 			galleryRoute.GET("/usage", controller.GetGalleryUsage)
+			galleryRoute.GET("/canvases", controller.ListGalleryCanvases)
+			galleryRoute.GET("/canvases/:id", controller.GetGalleryCanvas)
+			galleryRoute.POST("/canvases", controller.SaveGalleryCanvas)
+			galleryRoute.DELETE("/canvases/:id", controller.DeleteGalleryCanvas)
+			galleryRoute.DELETE("/canvases/:id/assets/:assetId", controller.DeleteGalleryCanvasAsset)
 			galleryRoute.GET("/images", controller.ListGalleryImages)
 			galleryRoute.POST("/images", controller.SaveGalleryImage)
 			galleryRoute.GET("/images/:id/file", controller.GetGalleryFile)

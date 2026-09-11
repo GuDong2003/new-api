@@ -41,10 +41,10 @@ type GalleryImage struct {
 	Role           string         `json:"role" gorm:"type:varchar(16)"`
 	SHA256         string         `json:"-" gorm:"type:varchar(64)"`
 	Model          string         `json:"model" gorm:"type:varchar(255)"`
-	Prompt         string         `json:"prompt" gorm:"type:text"`
-	NegativePrompt string         `json:"negative_prompt" gorm:"type:text"`
+	Prompt         string         `json:"prompt" gorm:"size:-1"`
+	NegativePrompt string         `json:"negative_prompt" gorm:"size:-1"`
 	Parameters     map[string]any `json:"parameters" gorm:"-"`
-	ParametersJSON string         `json:"-" gorm:"type:text"`
+	ParametersJSON string         `json:"-" gorm:"size:-1"`
 	Width          int            `json:"width"`
 	Height         int            `json:"height"`
 	MIMEType       string         `json:"mime_type" gorm:"type:varchar(32)"`
@@ -98,7 +98,7 @@ func GalleryTotals(ctx context.Context, user int) (count, userBytes, totalBytes 
 	}
 	// Include pending physical deletion in byte usage, and treat legacy NULL
 	// roles as originals. Masks are auxiliary bytes, not additional originals.
-	err = DB.WithContext(ctx).Model(&GalleryImage{}).Where("user_id = ?", user).Select("COALESCE(SUM(CASE WHEN role = 'mask' THEN 0 ELSE 1 END), 0) AS count, COALESCE(SUM(storage_bytes), 0) AS bytes").Scan(&totals).Error
+	err = DB.WithContext(ctx).Model(&GalleryImage{}).Where("user_id = ?", user).Select("COALESCE(SUM(CASE WHEN role = 'mask' OR (canvas_id <> '' AND state = 'deleting' AND bytes = 0) THEN 0 ELSE 1 END), 0) AS count, COALESCE(SUM(storage_bytes), 0) AS bytes").Scan(&totals).Error
 	if err != nil {
 		return
 	}

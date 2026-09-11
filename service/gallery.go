@@ -27,14 +27,16 @@ var galleryDone chan struct{}
 var gallerySourceID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.:-]{0,190}$`)
 
 type GalleryUsage struct {
-	Enabled       bool   `json:"enabled"`
-	RetentionDays int    `json:"retention_days"`
-	MaxImages     int    `json:"max_images"`
-	MaxBytes      int64  `json:"max_bytes"`
-	UsedImages    int64  `json:"used_images"`
-	UsedBytes     int64  `json:"used_bytes"`
-	CanSave       bool   `json:"can_save"`
-	Reason        string `json:"reason"`
+	Enabled         bool   `json:"enabled"`
+	RetentionDays   int    `json:"retention_days"`
+	MaxImages       int    `json:"max_images"`
+	MaxBytes        int64  `json:"max_bytes"`
+	UsedImages      int64  `json:"used_images"`
+	UsedBytes       int64  `json:"used_bytes"`
+	CanSave         bool   `json:"can_save"`
+	Reason          string `json:"reason"`
+	AvailableBytes  int64  `json:"available_bytes"`
+	AvailableImages int64  `json:"available_images"`
 }
 
 type GalleryPage struct {
@@ -74,6 +76,13 @@ func UpdateGallerySettings(ctx context.Context, settings model.GallerySettings) 
 }
 
 func GetGalleryUsage(ctx context.Context, user int) (*GalleryUsage, error) {
+	return GetGalleryBudget(ctx, user, 1, 1)
+}
+
+func GetGalleryBudget(ctx context.Context, user int, requiredBytes, requiredImages int64) (*GalleryUsage, error) {
+	if user <= 0 || requiredBytes < 0 || requiredImages < 0 || requiredBytes > 1<<40 || requiredImages > 1<<40 {
+		return nil, model.ErrGalleryInvalid
+	}
 	galleryMu.Lock()
 	defer galleryMu.Unlock()
 	settings, err := GetGallerySettings(ctx)
@@ -85,36 +94,50 @@ func GetGalleryUsage(ctx context.Context, user int) (*GalleryUsage, error) {
 		return nil, model.ErrGalleryUnavailable
 	}
 	usage := &GalleryUsage{Enabled: settings.Enabled, RetentionDays: settings.RetentionDays, MaxImages: settings.UserMaxImages, MaxBytes: settings.UserMaxBytes, UsedImages: count, UsedBytes: used, CanSave: true}
+	usage.AvailableBytes = max(0, min(settings.UserMaxBytes-used, settings.TotalMaxBytes-total))
+	usage.AvailableImages = max(0, int64(settings.UserMaxImages)-count)
+	root, rootErr := galleryRoot()
+	var diskErr error
+	if rootErr == nil {
+		var free int64
+		free, diskErr = galleryFreeBytes(root)
+		usage.AvailableBytes = min(usage.AvailableBytes, max(0, free))
+	} else {
+		usage.AvailableBytes = 0
+	}
 	switch {
 	case !settings.Enabled:
 		usage.Reason = model.ErrGalleryDisabled.Error()
-	case count >= int64(settings.UserMaxImages) || used >= settings.UserMaxBytes || total >= settings.TotalMaxBytes:
+	case rootErr != nil || diskErr != nil:
+		usage.Reason = model.ErrGalleryUnavailable.Error()
+	case requiredImages > usage.AvailableImages || requiredBytes > usage.AvailableBytes:
 		usage.Reason = model.ErrGalleryCapacity.Error()
-	default:
-		root, rootErr := galleryRoot()
-		if rootErr != nil {
-			usage.Reason = model.ErrGalleryUnavailable.Error()
-		} else if _, diskErr := galleryFreeBytes(root); diskErr != nil {
-			usage.Reason = model.ErrGalleryUnavailable.Error()
-		}
 	}
 	usage.CanSave = usage.Reason == ""
 	return usage, nil
 }
 
 func ListGalleryImages(ctx context.Context, user, page, pageSize int, source string) (*GalleryPage, error) {
-	if page < 1 || page > 1000000 || pageSize < 1 || pageSize > 100 || (source != "" && source != "drawing" && source != "nai") {
+	return SearchGalleryImages(ctx, user, page, pageSize, source, "", "created_desc")
+}
+
+func SearchGalleryImages(ctx context.Context, user, page, pageSize int, source, search, sort string) (*GalleryPage, error) {
+	order := map[string]string{"created_desc": "created_at DESC, id DESC", "created_asc": "created_at ASC, id ASC"}[sort]
+	if user <= 0 || page < 1 || page > 1000000 || pageSize < 1 || pageSize > 100 || (source != "" && source != "drawing" && source != "nai") || order == "" || len(search) > 512 || !utf8.ValidString(search) {
 		return nil, model.ErrGalleryInvalid
 	}
 	result := &GalleryPage{Items: []model.GalleryImage{}, Page: page, PageSize: pageSize}
-	query := model.DB.WithContext(ctx).Model(&model.GalleryImage{}).Where("user_id = ? AND state = ? AND expires_at > ?", user, "ready", time.Now().Unix())
+	query := model.DB.WithContext(ctx).Model(&model.GalleryImage{}).Where("user_id = ? AND state = ? AND expires_at > ? AND (role IS NULL OR role = ? OR role = ?)", user, "ready", time.Now().Unix(), "", "generated")
 	if source != "" {
 		query = query.Where("source = ?", source)
+	}
+	if search != "" {
+		query = query.Where("(prompt LIKE ? OR model LIKE ?)", "%"+search+"%", "%"+search+"%")
 	}
 	if err := query.Count(&result.Total).Error; err != nil {
 		return nil, model.ErrGalleryUnavailable
 	}
-	if err := query.Order("created_at DESC, id DESC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&result.Items).Error; err != nil {
+	if err := query.Order(order).Offset((page - 1) * pageSize).Limit(pageSize).Find(&result.Items).Error; err != nil {
 		return nil, model.ErrGalleryUnavailable
 	}
 	return result, nil
@@ -344,6 +367,14 @@ func DeleteGalleryImage(ctx context.Context, user int, id string) error {
 		}
 		return model.ErrGalleryUnavailable
 	}
+	if record.CanvasID != "" {
+		var canvas model.GalleryCanvas
+		if err := model.DB.WithContext(ctx).Where("user_id = ? AND id = ?", user, record.CanvasID).First(&canvas).Error; err != nil {
+			return err
+		}
+		_, err := deleteGalleryCanvasAssetLocked(ctx, user, canvas.ID, id, canvas.Revision)
+		return err
+	}
 	root, err := galleryRoot()
 	if err != nil {
 		return err
@@ -361,6 +392,20 @@ func cleanupGalleryLocked(ctx context.Context) error {
 	root, err := galleryRoot()
 	if err != nil {
 		return err
+	}
+	for {
+		var canvases []model.GalleryCanvas
+		if err := model.DB.WithContext(ctx).Where("state = ? AND expires_at <= ?", "ready", time.Now().Unix()).Limit(100).Find(&canvases).Error; err != nil {
+			return model.ErrGalleryUnavailable
+		}
+		if len(canvases) == 0 {
+			break
+		}
+		for i := range canvases {
+			if err := removeGalleryCanvasLocked(ctx, &canvases[i], "expired"); err != nil {
+				return err
+			}
+		}
 	}
 	// Only records created by this feature authorize file removal. No directory scan.
 	for {

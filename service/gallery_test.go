@@ -3,8 +3,10 @@ package service_test
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/binary"
+	"fmt"
 	"hash/crc32"
 	"image"
 	"image/color"
@@ -317,7 +319,7 @@ func TestGalleryCanvasDocumentStorageType(t *testing.T) {
 		{"sqlite", sqlite.Open(":memory:"), "text"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			for _, name := range []string{"DocumentJSON", "RemovedAssetIDsJSON"} {
+			for _, name := range []string{"DocumentJSON", "RemovedAssetIDsJSON", "MutationAssetIDMapJSON"} {
 				field := canvasSchema.LookUpField(name)
 				require.NotNil(t, field)
 				assert.Equal(t, tc.want, tc.dialect.DataTypeOf(field), name)
@@ -353,6 +355,612 @@ func gallerySave(t *testing.T, user int, source, id string, data []byte) (*model
 	t.Helper()
 	metadata, _ := common.Marshal(map[string]any{"source": source, "source_id": id, "model": "test", "prompt": "fox", "parameters": map[string]any{"seed": 42, "api_key": "never persist", "url": "https://secret.invalid"}})
 	return service.SaveGalleryImage(context.Background(), user, galleryMultipart(t, string(metadata), []string{"file", string(data)}))
+}
+
+const canvasFixtureID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+const canvasFixtureAsset = "11111111-1111-4111-8111-111111111111"
+
+func canvasSaveMetadata(t *testing.T) map[string]any {
+	t.Helper()
+	doc := galleryCanvasDrawingReferences(t)
+	doc["nodes"] = doc["nodes"].([]any)[:1]
+	doc["edges"], doc["referenceIds"], doc["mask"] = []any{}, []any{}, nil
+	original := galleryPNG(t)
+	return map[string]any{"id": canvasFixtureID, "kind": "drawing", "name": "白狐", "base_revision": 0, "mutation_id": "mutation-a", "document": doc, "assets": []any{map[string]any{"id": canvasFixtureAsset, "role": "generated", "node_id": "reference-node", "bytes": len(original), "sha256": fmt.Sprintf("%x", sha256.Sum256(original))}}}
+}
+
+func saveCanvasMetadata(t *testing.T, user int, metadata map[string]any, fields ...[]string) (*model.GalleryCanvas, error) {
+	t.Helper()
+	raw, err := common.Marshal(metadata)
+	require.NoError(t, err)
+	return service.SaveGalleryCanvas(context.Background(), user, galleryMultipart(t, string(raw), fields...))
+}
+
+func TestGalleryCanvasAtomicCreateRetryAndRetention(t *testing.T) {
+	galleryFixture(t, sqlite.Open(filepath.Join(t.TempDir(), "gallery.db")))
+	ctx := context.Background()
+	metadata := canvasSaveMetadata(t)
+	saved, err := saveCanvasMetadata(t, 41, metadata, []string{"file:" + canvasFixtureAsset, string(galleryPNG(t))})
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, saved.Revision)
+	assert.Len(t, saved.Assets, 1)
+	loaded, err := service.GetGalleryCanvas(ctx, 41, canvasFixtureID)
+	require.NoError(t, err)
+	assert.Equal(t, saved.Document, loaded.Document)
+	f, _, err := service.OpenGalleryImage(ctx, 41, canvasFixtureAsset, false)
+	require.NoError(t, err)
+	data, err := io.ReadAll(f)
+	require.NoError(t, f.Close())
+	require.NoError(t, err)
+	assert.Equal(t, galleryPNG(t), data)
+	// Lower limits below existing usage: an idempotent retry must still work.
+	require.NoError(t, model.DB.Model(&model.GallerySettings{}).Where("id = ?", 1).Updates(map[string]any{"user_max_bytes": 1, "user_max_images": 1}).Error)
+	retry, err := saveCanvasMetadata(t, 41, metadata)
+	require.NoError(t, err)
+	assert.Equal(t, saved.Revision, retry.Revision)
+	assert.Equal(t, saved.ExpiresAt, retry.ExpiresAt)
+	count, used, _, err := model.GalleryTotals(ctx, 41)
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, count)
+	assert.Greater(t, used, int64(len(data)))
+	require.NoError(t, model.DB.Model(&model.GallerySettings{}).Where("id = ?", 1).Update("user_max_bytes", 1<<20).Error)
+	// Persist an earlier retention timestamp without sleeping.
+	earlier := time.Now().Unix() - 1000
+	require.NoError(t, model.DB.Model(&model.GalleryCanvas{}).Where("id = ?", saved.ID).Updates(map[string]any{"updated_at": earlier, "expires_at": earlier + 86400}).Error)
+	metadata["base_revision"], metadata["mutation_id"] = 1, "mutation-viewport"
+	metadata["document"].(map[string]any)["viewport"].(map[string]any)["x"] = 10
+	viewport, err := saveCanvasMetadata(t, 41, metadata)
+	require.NoError(t, err)
+	assert.Equal(t, earlier+86400, viewport.ExpiresAt)
+	assert.Equal(t, earlier, viewport.UpdatedAt)
+	metadata["base_revision"], metadata["mutation_id"], metadata["name"] = viewport.Revision, "mutation-name", "雪狐"
+	renamed, err := saveCanvasMetadata(t, 41, metadata)
+	require.NoError(t, err)
+	assert.Greater(t, renamed.ExpiresAt, viewport.ExpiresAt)
+	assert.Greater(t, renamed.UpdatedAt, viewport.UpdatedAt)
+	metadata["base_revision"], metadata["mutation_id"] = 1, "stale"
+	_, err = saveCanvasMetadata(t, 41, metadata)
+	assert.ErrorIs(t, err, model.ErrGalleryCanvasConflict)
+}
+
+func TestGalleryCanvasFailedSnapshotPreservesRevision(t *testing.T) {
+	galleryFixture(t, sqlite.Open(filepath.Join(t.TempDir(), "gallery.db")))
+	metadata := canvasSaveMetadata(t)
+	saved, err := saveCanvasMetadata(t, 41, metadata, []string{"file:" + canvasFixtureAsset, string(galleryPNG(t))})
+	require.NoError(t, err)
+	metadata["base_revision"], metadata["mutation_id"] = 1, "mutation-b"
+	metadata["document"].(map[string]any)["settings"].(map[string]any)["prompt"] = "a much longer new prompt"
+	_, used, _, err := model.GalleryTotals(context.Background(), 41)
+	require.NoError(t, err)
+	require.NoError(t, model.DB.Model(&model.GallerySettings{}).Where("id = ?", 1).Update("user_max_bytes", used).Error)
+	_, err = saveCanvasMetadata(t, 41, metadata)
+	assert.ErrorIs(t, err, model.ErrGalleryCapacity)
+	loaded, err := service.GetGalleryCanvas(context.Background(), 41, saved.ID)
+	require.NoError(t, err)
+	assert.Equal(t, saved.Document, loaded.Document)
+	assert.Equal(t, saved.Revision, loaded.Revision)
+}
+
+func TestGalleryCanvasOwnerDeletionAndExpiredReconciliation(t *testing.T) {
+	for _, reason := range []string{"deleted", "expired"} {
+		t.Run(reason, func(t *testing.T) {
+			galleryFixture(t, sqlite.Open(filepath.Join(t.TempDir(), "gallery.db")))
+			ctx := context.Background()
+			metadata := canvasSaveMetadata(t)
+			saved, err := saveCanvasMetadata(t, 41, metadata, []string{"file:" + canvasFixtureAsset, string(galleryPNG(t))})
+			require.NoError(t, err)
+			_, err = service.GetGalleryCanvas(ctx, 42, saved.ID)
+			assert.ErrorIs(t, err, gorm.ErrRecordNotFound)
+			assert.ErrorIs(t, service.DeleteGalleryCanvas(ctx, 42, saved.ID, 1), gorm.ErrRecordNotFound)
+			_, err = service.DeleteGalleryCanvasAsset(ctx, 42, saved.ID, canvasFixtureAsset, 1)
+			assert.ErrorIs(t, err, gorm.ErrRecordNotFound)
+			_, _, err = service.OpenGalleryImage(ctx, 42, canvasFixtureAsset, false)
+			assert.ErrorIs(t, err, gorm.ErrRecordNotFound)
+			_, err = saveCanvasMetadata(t, 42, metadata)
+			assert.ErrorIs(t, err, gorm.ErrRecordNotFound)
+			if reason == "deleted" {
+				assert.ErrorIs(t, service.DeleteGalleryCanvas(ctx, 41, saved.ID, 0), model.ErrGalleryCanvasConflict)
+				require.NoError(t, service.DeleteGalleryCanvas(ctx, 41, saved.ID, 1))
+				require.NoError(t, service.DeleteGalleryCanvas(ctx, 41, saved.ID, 1))
+			} else {
+				require.NoError(t, model.DB.Model(&model.GalleryCanvas{}).Where("id = ?", saved.ID).Update("expires_at", time.Now().Unix()-1).Error)
+				require.NoError(t, service.CleanupGallery(ctx))
+			}
+			removed, err := service.GetGalleryCanvas(ctx, 41, saved.ID)
+			require.NoError(t, err)
+			assert.Equal(t, reason, removed.State)
+			assert.Nil(t, removed.Document)
+			assert.Empty(t, removed.Name)
+			assert.Empty(t, removed.Assets)
+			_, _, err = service.OpenGalleryImage(ctx, 41, canvasFixtureAsset, false)
+			assert.ErrorIs(t, err, gorm.ErrRecordNotFound)
+			metadata["base_revision"], metadata["mutation_id"] = removed.Revision, "mutation-b"
+			_, err = saveCanvasMetadata(t, 41, metadata, []string{"file:" + canvasFixtureAsset, string(galleryPNG(t))})
+			if reason == "deleted" {
+				assert.ErrorIs(t, err, model.ErrGalleryCanvasDeleted)
+			} else {
+				assert.ErrorIs(t, err, model.ErrGalleryCanvasConflict)
+				metadata["explicit_save"] = true
+				revived, err := saveCanvasMetadata(t, 41, metadata, []string{"file:" + canvasFixtureAsset, string(galleryPNG(t))})
+				require.NoError(t, err)
+				assert.Equal(t, "ready", revived.State)
+				assert.Greater(t, revived.Revision, removed.Revision)
+			}
+		})
+	}
+}
+
+func TestGalleryCanvasDeleteAssetDetachesRelationsPreservesOtherImages(t *testing.T) {
+	galleryFixture(t, sqlite.Open(filepath.Join(t.TempDir(), "gallery.db")))
+	ctx := context.Background()
+	metadata := canvasSaveMetadata(t)
+	doc := galleryCanvasDrawingReferences(t)
+	otherID, maskID := "33333333-3333-4333-8333-333333333333", "22222222-2222-4222-8222-222222222222"
+	doc["nodes"].([]any)[1].(map[string]any)["data"].(map[string]any)["asset"].(map[string]any)["id"] = otherID
+	metadata["document"] = doc
+	base := metadata["assets"].([]any)[0].(map[string]any)
+	metadata["assets"] = []any{base, map[string]any{"id": otherID, "role": "generated", "node_id": "result-node", "bytes": base["bytes"], "sha256": base["sha256"]}, map[string]any{"id": maskID, "role": "mask", "node_id": "reference-node", "bytes": base["bytes"], "sha256": base["sha256"]}}
+	fields := [][]string{{"file:" + canvasFixtureAsset, string(galleryPNG(t))}, {"file:" + otherID, string(galleryPNG(t))}, {"file:" + maskID, string(galleryPNG(t))}}
+	_, err := saveCanvasMetadata(t, 41, metadata, fields...)
+	require.NoError(t, err)
+	count, _, _, err := model.GalleryTotals(ctx, 41)
+	require.NoError(t, err)
+	assert.EqualValues(t, 2, count)
+	deleted, err := service.DeleteGalleryCanvasAsset(ctx, 41, canvasFixtureID, canvasFixtureAsset, 1)
+	require.NoError(t, err)
+	assert.EqualValues(t, 2, deleted.Revision)
+	assert.Contains(t, deleted.RemovedAssetIDs, canvasFixtureAsset)
+	assert.Contains(t, deleted.RemovedAssetIDs, maskID)
+	assert.Len(t, deleted.Assets, 1)
+	assert.Equal(t, otherID, deleted.Assets[0].ID)
+	assert.Empty(t, deleted.Document["edges"])
+	assert.Empty(t, deleted.Document["referenceIds"])
+	assert.Nil(t, deleted.Document["mask"])
+	nodes := deleted.Document["nodes"].([]any)
+	require.Len(t, nodes, 1)
+	data := nodes[0].(map[string]any)["data"].(map[string]any)
+	assert.Empty(t, data["referenceIds"])
+	assert.Nil(t, data["mask"])
+	metadata["base_revision"], metadata["mutation_id"] = deleted.Revision, "resurrect"
+	_, err = saveCanvasMetadata(t, 41, metadata, fields...)
+	assert.ErrorIs(t, err, model.ErrGalleryCanvasConflict)
+	// Linked legacy gallery deletion uses the same cascade and tombstone.
+	require.NoError(t, service.DeleteGalleryImage(ctx, 41, otherID))
+	loaded, err := service.GetGalleryCanvas(ctx, 41, canvasFixtureID)
+	require.NoError(t, err)
+	assert.Empty(t, loaded.Assets)
+	assert.Empty(t, loaded.Document["nodes"])
+	assert.Contains(t, loaded.RemovedAssetIDs, otherID)
+	// Expiry must never discard the persistent explicit removal IDs.
+	require.NoError(t, model.DB.Model(&model.GalleryCanvas{}).Where("id = ?", canvasFixtureID).Update("expires_at", time.Now().Unix()-1).Error)
+	require.NoError(t, service.CleanupGallery(ctx))
+	loaded, err = service.GetGalleryCanvas(ctx, 41, canvasFixtureID)
+	require.NoError(t, err)
+	assert.Contains(t, loaded.RemovedAssetIDs, canvasFixtureAsset)
+}
+
+func TestGalleryCanvasBudgetListingAndHTTPContract(t *testing.T) {
+	galleryFixture(t, sqlite.Open(filepath.Join(t.TempDir(), "gallery.db")))
+	ctx := context.Background()
+	metadata := canvasSaveMetadata(t)
+	saved, err := saveCanvasMetadata(t, 41, metadata, []string{"file:" + canvasFixtureAsset, string(galleryPNG(t))})
+	require.NoError(t, err)
+	page, err := service.ListGalleryCanvases(ctx, 41, 1, 24, "drawing", "白狐", "updated_desc")
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, page.Total)
+	require.Len(t, page.Items, 1)
+	assert.Equal(t, []string{canvasFixtureAsset}, page.Items[0].CoverAssetIDs)
+	raw, err := common.Marshal(page.Items[0])
+	require.NoError(t, err)
+	assert.NotContains(t, string(raw), "document")
+	assert.NotContains(t, string(raw), "prompt")
+	other, err := service.ListGalleryCanvases(ctx, 42, 1, 24, "", "", "updated_desc")
+	require.NoError(t, err)
+	assert.Empty(t, other.Items)
+	_, err = service.ListGalleryCanvases(ctx, 41, 1, 24, "", "", "id; DROP TABLE gallery_canvas")
+	assert.ErrorIs(t, err, model.ErrGalleryInvalid)
+	usage, err := service.GetGalleryBudget(ctx, 41, 0, 0)
+	require.NoError(t, err)
+	assert.Greater(t, usage.AvailableBytes, int64(0))
+	assert.EqualValues(t, 99, usage.AvailableImages)
+	tooBig, err := service.GetGalleryBudget(ctx, 41, usage.AvailableBytes+1, 1)
+	require.NoError(t, err)
+	assert.False(t, tooBig.CanSave)
+	tooMany, err := service.GetGalleryBudget(ctx, 41, 1, 100)
+	require.NoError(t, err)
+	assert.False(t, tooMany.CanSave)
+	exact, err := service.GetGalleryBudget(ctx, 41, usage.AvailableBytes, 99)
+	require.NoError(t, err)
+	assert.True(t, exact.CanSave)
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	engine.Use(func(c *gin.Context) { c.Set("id", 41) })
+	engine.GET("/canvases", controller.ListGalleryCanvases)
+	engine.GET("/canvases/:id", controller.GetGalleryCanvas)
+	engine.POST("/canvases", controller.SaveGalleryCanvas)
+	engine.DELETE("/canvases/:id", controller.DeleteGalleryCanvas)
+	engine.DELETE("/canvases/:id/assets/:assetId", controller.DeleteGalleryCanvasAsset)
+	engine.GET("/usage", controller.GetGalleryUsage)
+	for _, query := range []string{"required_bytes=-1", "required_images=abc", "required_bytes=9223372036854775808"} {
+		response := httptest.NewRecorder()
+		engine.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/usage?"+query, nil))
+		assert.Equal(t, http.StatusBadRequest, response.Code)
+	}
+	response := httptest.NewRecorder()
+	engine.ServeHTTP(response, httptest.NewRequest(http.MethodDelete, "/canvases/"+saved.ID+"?revision=0", nil))
+	assert.Equal(t, http.StatusConflict, response.Code)
+	assert.Contains(t, response.Body.String(), `"code":"canvas_conflict"`)
+	response = httptest.NewRecorder()
+	engine.ServeHTTP(response, httptest.NewRequest(http.MethodDelete, "/canvases/"+saved.ID+"?revision=1", nil))
+	assert.Equal(t, http.StatusOK, response.Code)
+	assert.Contains(t, response.Body.String(), `"state":"deleted"`)
+	var body bytes.Buffer
+	w := multipart.NewWriter(&body)
+	metadataRaw, err := common.Marshal(metadata)
+	require.NoError(t, err)
+	require.NoError(t, w.WriteField("metadata", string(metadataRaw)))
+	require.NoError(t, w.Close())
+	request := httptest.NewRequest(http.MethodPost, "/canvases", &body)
+	request.Header.Set("Content-Type", w.FormDataContentType())
+	response = httptest.NewRecorder()
+	engine.ServeHTTP(response, request)
+	assert.Equal(t, http.StatusGone, response.Code)
+	assert.Contains(t, response.Body.String(), `"code":"canvas_deleted"`)
+}
+
+func canvasMaskMetadata(t *testing.T) map[string]any {
+	t.Helper()
+	metadata := canvasSaveMetadata(t)
+	metadata["document"] = galleryCanvasDrawingReferences(t)
+	base := metadata["assets"].([]any)[0].(map[string]any)
+	metadata["assets"] = append(metadata["assets"].([]any), map[string]any{"id": "22222222-2222-4222-8222-222222222222", "role": "mask", "node_id": "reference-node", "bytes": base["bytes"], "sha256": base["sha256"]})
+	return metadata
+}
+
+func TestGalleryCanvasLegacyExactReuseAndMutationIntegrity(t *testing.T) {
+	galleryFixture(t, sqlite.Open(filepath.Join(t.TempDir(), "gallery.db")))
+	ctx := context.Background()
+	legacy, err := gallerySave(t, 41, "drawing", "old-job", galleryPNG(t))
+	require.NoError(t, err)
+	metadata := canvasSaveMetadata(t)
+	saved, err := saveCanvasMetadata(t, 41, metadata, []string{"file:" + canvasFixtureAsset, string(galleryPNG(t))})
+	require.NoError(t, err)
+	assert.Equal(t, legacy.ID, saved.AssetIDMap[canvasFixtureAsset])
+	require.Len(t, saved.Assets, 1)
+	assert.Equal(t, legacy.ID, saved.Assets[0].ID)
+	count, _, _, err := model.GalleryTotals(ctx, 41)
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, count)
+	retry, err := saveCanvasMetadata(t, 41, metadata)
+	require.NoError(t, err)
+	assert.Equal(t, saved.Revision, retry.Revision)
+	assert.Equal(t, saved.AssetIDMap, retry.AssetIDMap)
+	metadata["document"].(map[string]any)["viewport"].(map[string]any)["x"] = 2
+	_, err = saveCanvasMetadata(t, 41, metadata)
+	assert.ErrorIs(t, err, model.ErrGalleryCanvasConflict)
+	metadata["document"].(map[string]any)["viewport"].(map[string]any)["x"] = 0
+	metadata["assets"].([]any)[0].(map[string]any)["sha256"] = strings.Repeat("0", 64)
+	_, err = saveCanvasMetadata(t, 41, metadata)
+	assert.ErrorIs(t, err, model.ErrGalleryCanvasConflict)
+}
+
+func TestGalleryCanvasMaskReplacementAndRoleQuota(t *testing.T) {
+	galleryFixture(t, sqlite.Open(filepath.Join(t.TempDir(), "gallery.db")))
+	ctx := context.Background()
+	metadata := canvasMaskMetadata(t)
+	maskID := "22222222-2222-4222-8222-222222222222"
+	newMaskID := "44444444-4444-4444-8444-444444444444"
+	fields := [][]string{{"file:" + canvasFixtureAsset, string(galleryPNG(t))}, {"file:" + maskID, string(galleryPNG(t))}}
+	saved, err := saveCanvasMetadata(t, 41, metadata, fields...)
+	require.NoError(t, err)
+	count, used, _, err := model.GalleryTotals(ctx, 41)
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, count) // duplicate node reference and masks add no originals.
+	assert.Greater(t, used, int64(2*len(galleryPNG(t))))
+	page, err := service.ListGalleryImages(ctx, 41, 1, 24, "")
+	require.NoError(t, err)
+	assert.Len(t, page.Items, 1)
+	metadata["base_revision"], metadata["mutation_id"] = saved.Revision, "mask-edit"
+	doc := metadata["document"].(map[string]any)
+	doc["mask"].(map[string]any)["asset"].(map[string]any)["id"] = newMaskID
+	doc["nodes"].([]any)[1].(map[string]any)["data"].(map[string]any)["mask"].(map[string]any)["id"] = newMaskID
+	metadata["assets"].([]any)[1].(map[string]any)["id"] = newMaskID
+	_, err = saveCanvasMetadata(t, 41, metadata, []string{"file:" + newMaskID, "bad mask"})
+	assert.ErrorIs(t, err, model.ErrGalleryInvalid)
+	old, err := service.GetGalleryCanvas(ctx, 41, canvasFixtureID)
+	require.NoError(t, err)
+	assert.Equal(t, saved.Document, old.Document)
+	replaced, err := saveCanvasMetadata(t, 41, metadata, []string{"file:" + newMaskID, string(galleryPNG(t))})
+	require.NoError(t, err)
+	assert.Len(t, replaced.Assets, 2)
+	_, _, err = service.OpenGalleryImage(ctx, 41, maskID, false)
+	assert.ErrorIs(t, err, gorm.ErrRecordNotFound)
+	// An original reused as a mask cannot lie about role to bypass image count.
+	bad := canvasMaskMetadata(t)
+	bad["id"] = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+	badDoc := bad["document"].(map[string]any)
+	badDoc["mask"].(map[string]any)["asset"].(map[string]any)["id"] = canvasFixtureAsset
+	badDoc["mask"].(map[string]any)["asset"].(map[string]any)["name"] = "fox.png"
+	badDoc["nodes"].([]any)[1].(map[string]any)["data"].(map[string]any)["mask"].(map[string]any)["id"] = canvasFixtureAsset
+	badDoc["nodes"].([]any)[1].(map[string]any)["data"].(map[string]any)["mask"].(map[string]any)["name"] = "fox.png"
+	bad["assets"] = bad["assets"].([]any)[:1]
+	bad["assets"].([]any)[0].(map[string]any)["role"] = "mask"
+	_, err = saveCanvasMetadata(t, 42, bad, []string{"file:" + canvasFixtureAsset, string(galleryPNG(t))})
+	assert.ErrorIs(t, err, model.ErrGalleryInvalid)
+}
+
+func TestGalleryCanvasSnapshotCannotOmitOriginalAndCountAdmission(t *testing.T) {
+	galleryFixture(t, sqlite.Open(filepath.Join(t.TempDir(), "gallery.db")))
+	metadata := canvasSaveMetadata(t)
+	saved, err := saveCanvasMetadata(t, 41, metadata, []string{"file:" + canvasFixtureAsset, string(galleryPNG(t))})
+	require.NoError(t, err)
+	metadata["base_revision"], metadata["mutation_id"] = 1, "omitted"
+	metadata["document"] = galleryCanvasDocument(t, "drawing")
+	metadata["assets"] = []any{}
+	_, err = saveCanvasMetadata(t, 41, metadata)
+	assert.ErrorIs(t, err, model.ErrGalleryCanvasConflict)
+	metadata = canvasSaveMetadata(t)
+	metadata["base_revision"], metadata["mutation_id"] = 1, "extra"
+	doc := galleryCanvasDrawingReferences(t)
+	doc["mask"] = nil
+	data := doc["nodes"].([]any)[1].(map[string]any)["data"].(map[string]any)
+	delete(data, "mask")
+	otherID := "33333333-3333-4333-8333-333333333333"
+	data["asset"].(map[string]any)["id"] = otherID
+	metadata["document"] = doc
+	base := metadata["assets"].([]any)[0].(map[string]any)
+	metadata["assets"] = append(metadata["assets"].([]any), map[string]any{"id": otherID, "role": "reference", "node_id": "result-node", "bytes": base["bytes"], "sha256": base["sha256"]})
+	require.NoError(t, model.DB.Model(&model.GallerySettings{}).Where("id = ?", 1).Update("user_max_images", 1).Error)
+	_, err = saveCanvasMetadata(t, 41, metadata, []string{"file:" + otherID, string(galleryPNG(t))})
+	assert.ErrorIs(t, err, model.ErrGalleryCapacity)
+	loaded, err := service.GetGalleryCanvas(context.Background(), 41, canvasFixtureID)
+	require.NoError(t, err)
+	assert.Equal(t, saved.Document, loaded.Document)
+}
+
+func TestGalleryCanvasFailedStagingRetainsOnlyUnremovedPhysicalBytes(t *testing.T) {
+	galleryFixture(t, sqlite.Open(filepath.Join(t.TempDir(), "gallery.db")))
+	ctx := context.Background()
+	metadata := canvasSaveMetadata(t)
+	saved, err := saveCanvasMetadata(t, 41, metadata, []string{"file:" + canvasFixtureAsset, string(galleryPNG(t))})
+	require.NoError(t, err)
+	_, beforeBytes, _, err := model.GalleryTotals(ctx, 41)
+	require.NoError(t, err)
+	newID := "44444444-4444-4444-8444-444444444444"
+	path := filepath.Join(os.Getenv("GALLERY_STORAGE_DIR"), "gallery-"+newID+".thumbnail")
+	// Inject a real filesystem removal failure after the ownership row exists.
+	require.NoError(t, model.DB.Callback().Create().After("gorm:create").Register("canvas-test-obstruct", func(tx *gorm.DB) {
+		if asset, ok := tx.Statement.Dest.(*model.GalleryImage); ok && asset.ID == newID {
+			if err := os.Mkdir(path, 0700); err != nil {
+				tx.AddError(err)
+				return
+			}
+			tx.AddError(os.WriteFile(filepath.Join(path, "blocker"), []byte("x"), 0600))
+		}
+	}))
+	t.Cleanup(func() { _ = model.DB.Callback().Create().Remove("canvas-test-obstruct") })
+	metadata = canvasMaskMetadata(t)
+	metadata["base_revision"], metadata["mutation_id"] = saved.Revision, "stage-fails"
+	doc := metadata["document"].(map[string]any)
+	doc["mask"].(map[string]any)["asset"].(map[string]any)["id"] = newID
+	doc["nodes"].([]any)[1].(map[string]any)["data"].(map[string]any)["mask"].(map[string]any)["id"] = newID
+	metadata["assets"].([]any)[1].(map[string]any)["id"] = newID
+	_, err = saveCanvasMetadata(t, 41, metadata, []string{"file:" + newID, string(galleryPNG(t))}, []string{"unexpected", "bad"})
+	assert.ErrorIs(t, err, model.ErrGalleryInvalid)
+	_, afterBytes, _, err := model.GalleryTotals(ctx, 41)
+	require.NoError(t, err)
+	assert.Greater(t, afterBytes, beforeBytes)
+	assert.Less(t, afterBytes-beforeBytes, int64(10000))
+	var pending model.GalleryImage
+	require.NoError(t, model.DB.Where("id = ?", newID).First(&pending).Error)
+	assert.Equal(t, "deleting", pending.State)
+	assert.Zero(t, pending.Bytes)
+	_, err = os.Stat(filepath.Join(os.Getenv("GALLERY_STORAGE_DIR"), "gallery-"+newID+".original"))
+	assert.True(t, os.IsNotExist(err))
+	loaded, err := service.GetGalleryCanvas(ctx, 41, saved.ID)
+	require.NoError(t, err)
+	assert.Equal(t, saved.Document, loaded.Document)
+	require.NoError(t, os.Remove(filepath.Join(path, "blocker")))
+	require.NoError(t, service.CleanupGallery(ctx))
+	_, afterBytes, _, err = model.GalleryTotals(ctx, 41)
+	require.NoError(t, err)
+	assert.Equal(t, beforeBytes, afterBytes)
+}
+
+type canvasGatedReader struct {
+	reader  io.Reader
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (r *canvasGatedReader) Read(p []byte) (int, error) {
+	r.once.Do(func() { close(r.started); <-r.release })
+	return r.reader.Read(p)
+}
+
+func TestGalleryCanvasDeleteWinsLateSaveWithoutResurrection(t *testing.T) {
+	galleryFixture(t, sqlite.Open(filepath.Join(t.TempDir(), "gallery.db")))
+	metadata := canvasSaveMetadata(t)
+	saved, err := saveCanvasMetadata(t, 41, metadata, []string{"file:" + canvasFixtureAsset, string(galleryPNG(t))})
+	require.NoError(t, err)
+	metadata["base_revision"], metadata["mutation_id"] = saved.Revision, "late-save"
+	raw, err := common.Marshal(metadata)
+	require.NoError(t, err)
+	var buffer bytes.Buffer
+	w := multipart.NewWriter(&buffer)
+	require.NoError(t, w.WriteField("metadata", string(raw)))
+	require.NoError(t, w.Close())
+	gate := &canvasGatedReader{reader: &buffer, started: make(chan struct{}), release: make(chan struct{})}
+	result := make(chan error, 1)
+	go func() {
+		_, err := service.SaveGalleryCanvas(context.Background(), 41, multipart.NewReader(gate, w.Boundary()))
+		result <- err
+	}()
+	<-gate.started
+	deleteErr := service.DeleteGalleryCanvas(context.Background(), 41, saved.ID, saved.Revision)
+	close(gate.release)
+	require.NoError(t, deleteErr)
+	assert.ErrorIs(t, <-result, model.ErrGalleryCanvasDeleted)
+}
+
+func TestGalleryCanvasPublicationRollbackAndUnownedFilePreservation(t *testing.T) {
+	galleryFixture(t, sqlite.Open(filepath.Join(t.TempDir(), "gallery.db")))
+	metadata := canvasSaveMetadata(t)
+	path := filepath.Join(os.Getenv("GALLERY_STORAGE_DIR"), "gallery-"+canvasFixtureAsset+".original")
+	require.NoError(t, os.WriteFile(path, []byte("unowned"), 0600))
+	_, err := saveCanvasMetadata(t, 41, metadata, []string{"file:" + canvasFixtureAsset, string(galleryPNG(t))})
+	require.Error(t, err)
+	unowned, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.Equal(t, "unowned", string(unowned))
+	require.NoError(t, os.Remove(path))
+	saved, err := saveCanvasMetadata(t, 41, metadata, []string{"file:" + canvasFixtureAsset, string(galleryPNG(t))})
+	require.NoError(t, err)
+	require.NoError(t, model.DB.Callback().Update().Before("gorm:update").Register("canvas-test-reject-publish", func(tx *gorm.DB) {
+		if canvas, ok := tx.Statement.Dest.(*model.GalleryCanvas); ok && canvas.Revision == 2 {
+			tx.AddError(fmt.Errorf("test publication failure"))
+		}
+	}))
+	t.Cleanup(func() { _ = model.DB.Callback().Update().Remove("canvas-test-reject-publish") })
+	metadata = canvasMaskMetadata(t)
+	metadata["base_revision"], metadata["mutation_id"] = 1, "failed-tx"
+	_, err = saveCanvasMetadata(t, 41, metadata, []string{"file:22222222-2222-4222-8222-222222222222", string(galleryPNG(t))})
+	assert.ErrorIs(t, err, model.ErrGallerySave)
+	loaded, err := service.GetGalleryCanvas(context.Background(), 41, canvasFixtureID)
+	require.NoError(t, err)
+	assert.Equal(t, saved.Document, loaded.Document)
+	assert.Equal(t, saved.Revision, loaded.Revision)
+	var records int64
+	require.NoError(t, model.DB.Model(&model.GalleryImage{}).Count(&records).Error)
+	assert.EqualValues(t, 1, records)
+}
+
+func TestGalleryCanvasLinkedPreviewMetadataAndTombstoneAccounting(t *testing.T) {
+	galleryFixture(t, sqlite.Open(filepath.Join(t.TempDir(), "gallery.db")))
+	ctx := context.Background()
+	metadata := canvasSaveMetadata(t)
+	data := metadata["document"].(map[string]any)["nodes"].([]any)[0].(map[string]any)["data"].(map[string]any)
+	data["prompt"] = strings.Repeat("白狐", 16000)
+	data["settings"].(map[string]any)["model"] = "gpt-image-1"
+	data["settings"].(map[string]any)["quality"] = "high"
+	saved, err := saveCanvasMetadata(t, 41, metadata, []string{"file:" + canvasFixtureAsset, string(galleryPNG(t))})
+	require.NoError(t, err)
+	page, err := service.SearchGalleryImages(ctx, 41, 1, 24, "drawing", "白狐", "created_desc")
+	require.NoError(t, err)
+	require.Len(t, page.Items, 1)
+	assert.Equal(t, data["prompt"], page.Items[0].Prompt)
+	assert.Equal(t, "gpt-image-1", page.Items[0].Model)
+	assert.Equal(t, "high", page.Items[0].Parameters["quality"])
+	require.NoError(t, service.DeleteGalleryCanvas(ctx, 41, saved.ID, saved.Revision))
+	var removed model.GalleryCanvas
+	require.NoError(t, model.DB.Where("id = ?", saved.ID).First(&removed).Error)
+	var marker model.GalleryRemoval
+	require.NoError(t, model.DB.Where("canvas_id = ?", saved.ID).First(&marker).Error)
+	markerRaw, err := common.Marshal(marker)
+	require.NoError(t, err)
+	assert.Greater(t, removed.StorageBytes, int64(len(markerRaw)))
+}
+
+func TestGalleryCanvasThumbnailActualBytesAndNAICloudRoundtrip(t *testing.T) {
+	galleryFixture(t, sqlite.Open(filepath.Join(t.TempDir(), "gallery.db")))
+	ctx := context.Background()
+	metadata := canvasSaveMetadata(t)
+	var thumb bytes.Buffer
+	require.NoError(t, jpeg.Encode(&thumb, image.NewRGBA(image.Rect(0, 0, 16, 8)), &jpeg.Options{Quality: 80}))
+	saved, err := saveCanvasMetadata(t, 41, metadata, []string{"file:" + canvasFixtureAsset, string(galleryPNG(t))}, []string{"thumbnail:" + canvasFixtureAsset, thumb.String()})
+	require.NoError(t, err)
+	require.Len(t, saved.Assets, 1)
+	assert.True(t, saved.Assets[0].HasThumbnail)
+	f, _, err := service.OpenGalleryImage(ctx, 41, canvasFixtureAsset, true)
+	require.NoError(t, err)
+	data, err := io.ReadAll(f)
+	require.NoError(t, f.Close())
+	require.NoError(t, err)
+	assert.Equal(t, thumb.Bytes(), data)
+	count, used, _, err := model.GalleryTotals(ctx, 41)
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, count)
+	assert.Greater(t, used, int64(thumb.Len()+len(galleryPNG(t))))
+	naiMetadata := map[string]any{"id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "kind": "nai", "name": "NAI draft", "base_revision": 0, "mutation_id": "nai-create", "document": galleryCanvasDocument(t, "nai"), "assets": []any{}}
+	nai, err := saveCanvasMetadata(t, 41, naiMetadata)
+	require.NoError(t, err)
+	reopened, err := service.GetGalleryCanvas(ctx, 41, nai.ID)
+	require.NoError(t, err)
+	assert.Equal(t, nai.Document, reopened.Document)
+	assert.Empty(t, reopened.Assets)
+}
+
+func TestGalleryCanvasDeletionFailureScrubsPromptAndKeepsBytes(t *testing.T) {
+	galleryFixture(t, sqlite.Open(filepath.Join(t.TempDir(), "gallery.db")))
+	ctx := context.Background()
+	saved, err := saveCanvasMetadata(t, 41, canvasSaveMetadata(t), []string{"file:" + canvasFixtureAsset, string(galleryPNG(t))})
+	require.NoError(t, err)
+	path := filepath.Join(os.Getenv("GALLERY_STORAGE_DIR"), "gallery-"+canvasFixtureAsset+".original")
+	require.NoError(t, os.Rename(path, path+".held"))
+	require.NoError(t, os.Mkdir(path, 0700))
+	require.NoError(t, os.WriteFile(filepath.Join(path, "blocker"), []byte("x"), 0600))
+	assert.ErrorIs(t, service.DeleteGalleryCanvas(ctx, 41, saved.ID, saved.Revision), model.ErrGalleryUnavailable)
+	var pending model.GalleryImage
+	require.NoError(t, model.DB.Where("id = ?", canvasFixtureAsset).First(&pending).Error)
+	assert.Empty(t, pending.Prompt)
+	assert.Empty(t, pending.ParametersJSON)
+	assert.Greater(t, pending.StorageBytes, int64(len(galleryPNG(t))))
+	removed, err := service.GetGalleryCanvas(ctx, 41, saved.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "deleted", removed.State)
+	assert.Nil(t, removed.Document)
+	assert.Empty(t, removed.Name)
+	require.NoError(t, os.Remove(filepath.Join(path, "blocker")))
+	require.NoError(t, os.Remove(path))
+	require.NoError(t, os.Rename(path+".held", path))
+	require.NoError(t, service.DeleteGalleryCanvas(ctx, 41, saved.ID, saved.Revision))
+}
+
+func TestGalleryCanvasDeclaredLengthIsInvalidNotCapacity(t *testing.T) {
+	galleryFixture(t, sqlite.Open(filepath.Join(t.TempDir(), "gallery.db")))
+	metadata := canvasSaveMetadata(t)
+	_, err := saveCanvasMetadata(t, 41, metadata, []string{"file:" + canvasFixtureAsset, string(galleryPNG(t)) + "extra"})
+	assert.ErrorIs(t, err, model.ErrGalleryInvalid)
+	var records int64
+	require.NoError(t, model.DB.Model(&model.GalleryImage{}).Count(&records).Error)
+	assert.Zero(t, records)
+}
+
+func TestGalleryCanvasReclaimedOriginalNoLongerConsumesImageCount(t *testing.T) {
+	galleryFixture(t, sqlite.Open(filepath.Join(t.TempDir(), "gallery.db")))
+	ctx := context.Background()
+	saved, err := saveCanvasMetadata(t, 41, canvasSaveMetadata(t), []string{"file:" + canvasFixtureAsset, string(galleryPNG(t))})
+	require.NoError(t, err)
+	path := filepath.Join(os.Getenv("GALLERY_STORAGE_DIR"), "gallery-"+canvasFixtureAsset+".thumbnail")
+	require.NoError(t, os.Mkdir(path, 0700))
+	require.NoError(t, os.WriteFile(filepath.Join(path, "blocker"), []byte("x"), 0600))
+	assert.ErrorIs(t, service.DeleteGalleryCanvas(ctx, 41, saved.ID, saved.Revision), model.ErrGalleryUnavailable)
+	count, used, _, err := model.GalleryTotals(ctx, 41)
+	require.NoError(t, err)
+	assert.Zero(t, count)
+	assert.Positive(t, used)
+	require.NoError(t, os.Remove(filepath.Join(path, "blocker")))
+	require.NoError(t, service.CleanupGallery(ctx))
+}
+
+func TestGalleryCanvasAddedBytesCannotReplaceLastCompleteSnapshot(t *testing.T) {
+	galleryFixture(t, sqlite.Open(filepath.Join(t.TempDir(), "gallery.db")))
+	metadata := canvasSaveMetadata(t)
+	metadata["document"], metadata["assets"] = galleryCanvasDocument(t, "drawing"), []any{}
+	saved, err := saveCanvasMetadata(t, 41, metadata)
+	require.NoError(t, err)
+	_, used, _, err := model.GalleryTotals(context.Background(), 41)
+	require.NoError(t, err)
+	require.NoError(t, model.DB.Model(&model.GallerySettings{}).Where("id = ?", 1).Update("user_max_bytes", used+int64(len(galleryPNG(t)))-1).Error)
+	metadata = canvasSaveMetadata(t)
+	metadata["base_revision"], metadata["mutation_id"] = saved.Revision, "too-many-bytes"
+	_, err = saveCanvasMetadata(t, 41, metadata, []string{"file:" + canvasFixtureAsset, string(galleryPNG(t))})
+	assert.ErrorIs(t, err, model.ErrGalleryCapacity)
+	loaded, err := service.GetGalleryCanvas(context.Background(), 41, saved.ID)
+	require.NoError(t, err)
+	assert.Equal(t, saved.Document, loaded.Document)
+	assert.Empty(t, loaded.Assets)
 }
 
 func TestGalleryDatabaseMatrix(t *testing.T) {
@@ -438,6 +1046,14 @@ func TestGalleryDatabaseMatrix(t *testing.T) {
 			require.NoError(t, err)
 			require.Greater(t, len(raw), 65535)
 			canvas := model.GalleryCanvas{ID: "large-document", UserID: 1, Kind: "drawing", State: "ready", DocumentVersion: 1, DocumentJSON: string(raw), StorageBytes: info.Bytes, ContentHash: info.ContentHash, Revision: 1, UpdatedAt: 123, ExpiresAt: 456}
+			largeMap := map[string]string{}
+			for i := range 1000 {
+				largeMap[fmt.Sprintf("%08d-1111-4111-8111-111111111111", i)] = "22222222-2222-4222-8222-222222222222"
+			}
+			mapRaw, err := common.Marshal(largeMap)
+			require.NoError(t, err)
+			require.Greater(t, len(mapRaw), 65535)
+			canvas.MutationAssetIDMapJSON = string(mapRaw)
 			require.NoError(t, model.DB.Create(&canvas).Error)
 			for range 2 {
 				require.NoError(t, model.MigrateGallery(model.DB))
@@ -445,9 +1061,20 @@ func TestGalleryDatabaseMatrix(t *testing.T) {
 			var restored model.GalleryCanvas
 			require.NoError(t, model.DB.First(&restored, "id = ?", canvas.ID).Error)
 			assert.Equal(t, string(raw), restored.DocumentJSON)
+			assert.Equal(t, string(mapRaw), restored.MutationAssetIDMapJSON)
 			assert.Equal(t, info.Document, restored.Document)
 			assert.Equal(t, int64(123), restored.UpdatedAt)
 			assert.Equal(t, int64(456), restored.ExpiresAt)
+			longPrompt := strings.Repeat("白狐", 16000)
+			image := model.GalleryImage{ID: "unicode-preview", UserID: 1, SourceID: "unicode-preview", Prompt: longPrompt, NegativePrompt: longPrompt, ParametersJSON: `{"prompt":"` + longPrompt + `"}`}
+			require.NoError(t, model.DB.Create(&image).Error)
+			require.NoError(t, model.MigrateGallery(model.DB))
+			require.NoError(t, model.MigrateGallery(model.DB))
+			var restoredImage model.GalleryImage
+			require.NoError(t, model.DB.Where("id = ?", image.ID).First(&restoredImage).Error)
+			assert.Equal(t, longPrompt, restoredImage.Prompt)
+			assert.Equal(t, longPrompt, restoredImage.NegativePrompt)
+			assert.Equal(t, longPrompt, restoredImage.Parameters["prompt"])
 		})
 	}
 }

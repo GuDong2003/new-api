@@ -137,7 +137,11 @@ func openGalleryFile(root, id, kind string) (*os.File, error) {
 }
 
 func removeGalleryRecord(ctx context.Context, root string, record *model.GalleryImage) error {
-	if err := model.DB.WithContext(ctx).Model(record).Update("state", "deleting").Error; err != nil {
+	updates := map[string]any{"state": "deleting"}
+	if record.CanvasID != "" {
+		updates["prompt"], updates["negative_prompt"], updates["parameters_json"], updates["model"] = "", "", "", ""
+	}
+	if err := model.DB.WithContext(ctx).Model(record).Updates(updates).Error; err != nil {
 		return model.ErrGalleryUnavailable
 	}
 	for _, kind := range []string{"original", "thumbnail", "metadata"} {
@@ -145,8 +149,29 @@ func removeGalleryRecord(ctx context.Context, root string, record *model.Gallery
 		if err != nil {
 			return err
 		}
+		info, statErr := os.Lstat(path)
 		if err = os.Remove(path); err != nil && !os.IsNotExist(err) {
 			return model.ErrGalleryUnavailable
+		}
+		if record.CanvasID != "" {
+			updates := map[string]any{}
+			if statErr == nil && info.Mode().IsRegular() {
+				record.StorageBytes = max(0, record.StorageBytes-info.Size())
+				updates["storage_bytes"] = record.StorageBytes
+			}
+			if kind == "original" {
+				record.Bytes = 0
+				updates["bytes"] = 0
+			}
+			if kind == "thumbnail" {
+				record.HasThumbnail = false
+				updates["has_thumbnail"] = false
+			}
+			if len(updates) > 0 {
+				if err := model.DB.WithContext(ctx).Model(record).Updates(updates).Error; err != nil {
+					return model.ErrGalleryUnavailable
+				}
+			}
 		}
 	}
 	if err := model.DB.WithContext(ctx).Delete(record).Error; err != nil {

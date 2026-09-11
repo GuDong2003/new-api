@@ -17,7 +17,12 @@ import (
 
 func galleryAPIError(c *gin.Context, err error) {
 	status, message := http.StatusServiceUnavailable, model.ErrGalleryUnavailable.Error()
+	code := ""
 	switch {
+	case errors.Is(err, model.ErrGalleryCanvasConflict):
+		status, message, code = http.StatusConflict, model.ErrGalleryCanvasConflict.Error(), "canvas_conflict"
+	case errors.Is(err, model.ErrGalleryCanvasDeleted):
+		status, message, code = http.StatusGone, model.ErrGalleryCanvasDeleted.Error(), "canvas_deleted"
 	case errors.Is(err, gorm.ErrRecordNotFound):
 		status, message = http.StatusNotFound, "The gallery image was not found."
 	case errors.Is(err, model.ErrGalleryInvalid):
@@ -31,11 +36,21 @@ func galleryAPIError(c *gin.Context, err error) {
 	case errors.Is(err, model.ErrGallerySave):
 		message = model.ErrGallerySave.Error()
 	}
-	c.JSON(status, gin.H{"success": false, "message": message})
+	response := gin.H{"success": false, "message": message}
+	if code != "" {
+		response["code"] = code
+	}
+	c.JSON(status, response)
 }
 
 func GetGalleryUsage(c *gin.Context) {
-	usage, err := service.GetGalleryUsage(c.Request.Context(), c.GetInt("id"))
+	bytes, e1 := strconv.ParseInt(c.DefaultQuery("required_bytes", "1"), 10, 64)
+	images, e2 := strconv.ParseInt(c.DefaultQuery("required_images", "1"), 10, 64)
+	if e1 != nil || e2 != nil {
+		galleryAPIError(c, model.ErrGalleryInvalid)
+		return
+	}
+	usage, err := service.GetGalleryBudget(c.Request.Context(), c.GetInt("id"), bytes, images)
 	if err != nil {
 		galleryAPIError(c, err)
 		return
@@ -90,7 +105,7 @@ func ListGalleryImages(c *gin.Context) {
 		galleryAPIError(c, model.ErrGalleryInvalid)
 		return
 	}
-	result, err := service.ListGalleryImages(c.Request.Context(), c.GetInt("id"), page, size, c.Query("source"))
+	result, err := service.SearchGalleryImages(c.Request.Context(), c.GetInt("id"), page, size, c.Query("source"), c.Query("search"), c.DefaultQuery("sort", "created_desc"))
 	if err != nil {
 		galleryAPIError(c, err)
 		return
