@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -190,13 +191,18 @@ func validateGalleryCanvasRetry(reader *multipart.Reader, manifest map[string]Ga
 			return model.ErrGalleryInvalid
 		}
 		seen[part.FormName()] = true
-		limit := asset.Bytes
 		if kind == "thumbnail" {
-			limit = 1 << 20
+			if !seen["file:"+id] {
+				return model.ErrGalleryInvalid
+			}
+			if err := discardGalleryCanvasThumbnail(part); err != nil {
+				return err
+			}
+			continue
 		}
 		hash := sha256.New()
-		n, err := io.CopyBuffer(hash, io.LimitReader(part, limit+1), make([]byte, 32<<10))
-		if err != nil || n > limit || (kind == "file" && (n != asset.Bytes || hex.EncodeToString(hash.Sum(nil)) != asset.SHA256)) {
+		n, err := io.CopyBuffer(hash, io.LimitReader(part, asset.Bytes+1), make([]byte, 32<<10))
+		if err != nil || n != asset.Bytes || hex.EncodeToString(hash.Sum(nil)) != asset.SHA256 {
 			return model.ErrGalleryInvalid
 		}
 	}
@@ -222,10 +228,20 @@ func prepareGalleryCanvasAssets(ctx context.Context, root string, reader *multip
 			return model.ErrGalleryInvalid
 		}
 		seen[part.FormName()] = true
+		if kind == "thumbnail" && !seen["file:"+inputID] {
+			return model.ErrGalleryInvalid
+		}
 		if asset.State != "pending" {
-			// An exact legacy remap may arrive with the client's original upload.
-			if remap[inputID] == "" || kind != "file" {
+			// Transparent legacy reuse can receive both redundant original and
+			// thumbnail parts. Validate them without changing canonical files.
+			if remap[inputID] == "" {
 				return model.ErrGalleryInvalid
+			}
+			if kind == "thumbnail" {
+				if err := discardGalleryCanvasThumbnail(part); err != nil {
+					return err
+				}
+				continue
 			}
 			hash := sha256.New()
 			n, e := io.CopyBuffer(hash, io.LimitReader(part, asset.Bytes+1), make([]byte, 32<<10))
@@ -233,9 +249,6 @@ func prepareGalleryCanvasAssets(ctx context.Context, root string, reader *multip
 				return model.ErrGalleryInvalid
 			}
 			continue
-		}
-		if kind == "thumbnail" && !seen["file:"+inputID] {
-			return model.ErrGalleryInvalid
 		}
 		if kind == "file" {
 			metadataBytes := galleryCanvasImageMetadataBytes(asset)
@@ -294,8 +307,17 @@ func prepareGalleryCanvasAssets(ctx context.Context, root string, reader *multip
 			}
 			asset.StorageBytes = asset.Bytes + galleryCanvasImageMetadataBytes(asset)
 		} else {
-			if err := validateGalleryCanvasThumbnail(root, asset.ID); err != nil {
+			file, err := openGalleryFile(root, asset.ID, "thumbnail")
+			if err != nil {
 				return err
+			}
+			validationErr := validateGalleryCanvasThumbnail(file)
+			closeErr := file.Close()
+			if validationErr != nil {
+				return validationErr
+			}
+			if closeErr != nil {
+				return model.ErrGallerySave
 			}
 			asset.HasThumbnail = true
 			asset.StorageBytes += writer.written
@@ -312,20 +334,23 @@ func prepareGalleryCanvasAssets(ctx context.Context, root string, reader *multip
 	return nil
 }
 
-func validateGalleryCanvasThumbnail(root, id string) error {
-	f, err := openGalleryFile(root, id, "thumbnail")
-	if err != nil {
-		return err
+func discardGalleryCanvasThumbnail(reader io.Reader) error {
+	data, err := io.ReadAll(io.LimitReader(reader, (1<<20)+1))
+	if err != nil || len(data) > 1<<20 {
+		return model.ErrGalleryInvalid
 	}
-	defer f.Close()
-	config, format, err := image.DecodeConfig(f)
+	return validateGalleryCanvasThumbnail(bytes.NewReader(data))
+}
+
+func validateGalleryCanvasThumbnail(reader io.ReadSeeker) error {
+	config, format, err := image.DecodeConfig(reader)
 	if err != nil || format != "jpeg" || config.Width < 1 || config.Height < 1 || config.Width > 512 || config.Height > 512 {
 		return model.ErrGalleryInvalid
 	}
-	if _, err = f.Seek(0, io.SeekStart); err != nil {
+	if _, err = reader.Seek(0, io.SeekStart); err != nil {
 		return model.ErrGalleryInvalid
 	}
-	if _, _, err = image.Decode(f); err != nil {
+	if _, _, err = image.Decode(reader); err != nil {
 		return model.ErrGalleryInvalid
 	}
 	return nil

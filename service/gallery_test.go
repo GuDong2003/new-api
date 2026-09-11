@@ -644,6 +644,101 @@ func TestGalleryCanvasLegacyExactReuseAndMutationIntegrity(t *testing.T) {
 	assert.ErrorIs(t, err, model.ErrGalleryCanvasConflict)
 }
 
+func TestGalleryCanvasLegacyRedundantThumbnail(t *testing.T) {
+	var thumbnail bytes.Buffer
+	require.NoError(t, jpeg.Encode(&thumbnail, image.NewRGBA(image.Rect(0, 0, 8, 4)), &jpeg.Options{Quality: 60}))
+	var baselineBytes int64
+	for _, withThumbnail := range []bool{false, true} {
+		t.Run(fmt.Sprintf("thumbnail=%t", withThumbnail), func(t *testing.T) {
+			galleryFixture(t, sqlite.Open(filepath.Join(t.TempDir(), "gallery.db")))
+			ctx := context.Background()
+			legacy, err := gallerySave(t, 41, "drawing", "old-job", galleryPNG(t))
+			require.NoError(t, err)
+			root := os.Getenv("GALLERY_STORAGE_DIR")
+			originalPath := filepath.Join(root, "gallery-"+legacy.ID+".original")
+			thumbnailPath := filepath.Join(root, "gallery-"+legacy.ID+".thumbnail")
+			original, err := os.ReadFile(originalPath)
+			require.NoError(t, err)
+			canonicalThumbnail, err := os.ReadFile(thumbnailPath)
+			require.NoError(t, err)
+			require.NotEqual(t, canonicalThumbnail, thumbnail.Bytes())
+			fields := [][]string{{"file:" + canvasFixtureAsset, string(galleryPNG(t))}}
+			if withThumbnail {
+				fields = append(fields, []string{"thumbnail:" + canvasFixtureAsset, thumbnail.String()})
+			}
+			metadata := canvasSaveMetadata(t)
+			saved, err := saveCanvasMetadata(t, 41, metadata, fields...)
+			require.NoError(t, err)
+			assert.Equal(t, legacy.ID, saved.AssetIDMap[canvasFixtureAsset])
+			count, used, _, err := model.GalleryTotals(ctx, 41)
+			require.NoError(t, err)
+			assert.EqualValues(t, 1, count)
+			if !withThumbnail {
+				baselineBytes = used
+			} else {
+				assert.Equal(t, baselineBytes, used)
+			}
+			retry, err := saveCanvasMetadata(t, 41, metadata, fields...)
+			require.NoError(t, err)
+			assert.Equal(t, saved.Revision, retry.Revision)
+			assert.Equal(t, saved.ExpiresAt, retry.ExpiresAt)
+			assert.Equal(t, saved.AssetIDMap, retry.AssetIDMap)
+			_, after, _, err := model.GalleryTotals(ctx, 41)
+			require.NoError(t, err)
+			assert.Equal(t, used, after)
+			storedOriginal, err := os.ReadFile(originalPath)
+			require.NoError(t, err)
+			storedThumbnail, err := os.ReadFile(thumbnailPath)
+			require.NoError(t, err)
+			assert.Equal(t, original, storedOriginal)
+			assert.Equal(t, canonicalThumbnail, storedThumbnail)
+			_, err = os.Stat(filepath.Join(root, "gallery-"+canvasFixtureAsset+".thumbnail"))
+			assert.True(t, os.IsNotExist(err))
+		})
+	}
+}
+
+func TestGalleryCanvasLegacyRedundantThumbnailRejectsInvalid(t *testing.T) {
+	var thumbnail bytes.Buffer
+	require.NoError(t, jpeg.Encode(&thumbnail, image.NewRGBA(image.Rect(0, 0, 8, 4)), &jpeg.Options{Quality: 60}))
+	for _, retry := range []bool{false, true} {
+		for _, invalid := range []string{"malformed", "oversized", "before original", "duplicate"} {
+			t.Run(fmt.Sprintf("retry=%t/%s", retry, invalid), func(t *testing.T) {
+				galleryFixture(t, sqlite.Open(filepath.Join(t.TempDir(), "gallery.db")))
+				legacy, err := gallerySave(t, 41, "drawing", "old-job", galleryPNG(t))
+				require.NoError(t, err)
+				metadata := canvasSaveMetadata(t)
+				if retry {
+					_, err = saveCanvasMetadata(t, 41, metadata)
+					require.NoError(t, err)
+				}
+				count, before, _, err := model.GalleryTotals(context.Background(), 41)
+				require.NoError(t, err)
+				fields := [][]string{{"file:" + canvasFixtureAsset, string(galleryPNG(t))}, {"thumbnail:" + canvasFixtureAsset, thumbnail.String()}}
+				switch invalid {
+				case "malformed":
+					fields[1][1] = "not a JPEG"
+				case "oversized":
+					fields[1][1] = thumbnail.String() + strings.Repeat("x", 1<<20)
+				case "before original":
+					fields[0], fields[1] = fields[1], fields[0]
+				case "duplicate":
+					fields = append(fields, fields[1])
+				}
+				_, err = saveCanvasMetadata(t, 41, metadata, fields...)
+				assert.ErrorIs(t, err, model.ErrGalleryInvalid)
+				afterCount, after, _, err := model.GalleryTotals(context.Background(), 41)
+				require.NoError(t, err)
+				assert.Equal(t, count, afterCount)
+				assert.Equal(t, before, after)
+				file, _, err := service.OpenGalleryImage(context.Background(), 41, legacy.ID, true)
+				require.NoError(t, err)
+				require.NoError(t, file.Close())
+			})
+		}
+	}
+}
+
 func TestGalleryCanvasMaskReplacementAndRoleQuota(t *testing.T) {
 	galleryFixture(t, sqlite.Open(filepath.Join(t.TempDir(), "gallery.db")))
 	ctx := context.Background()
