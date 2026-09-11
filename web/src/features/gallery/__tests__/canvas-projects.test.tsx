@@ -205,6 +205,41 @@ it('deduplicates linked images, previews the local original and navigates with t
   ).toBe(true)
 })
 
+it('marks an unuploaded image in a synced canvas local-only until its exact asset appears remotely', async () => {
+  const canvas = await localImage()
+  await updateCanvasCloudState(813, canvas.id, (current) => ({
+    ...current,
+    cloudRevision: 1,
+    expiresAt: 1900000000,
+    needsExplicitSave: false,
+  }))
+  renderGallery()
+  expect(await screen.findByText('Local draft')).toBeVisible()
+  await userEvent.click(
+    screen.getByRole('button', { name: 'Preview original' })
+  )
+  expect(
+    await within(screen.getByRole('dialog')).findByText('Local draft')
+  ).toBeVisible()
+  await userEvent.keyboard('{Escape}')
+  remoteImages = [{ ...galleryImage, id: assetId, expires_at: 2000000000 }]
+  await userEvent.click(screen.getByRole('button', { name: 'Refresh' }))
+  expect(await screen.findByText(galleryImage.prompt)).toBeVisible()
+  expect(screen.queryByText('Local draft')).not.toBeInTheDocument()
+  await userEvent.click(
+    screen.getByRole('button', { name: 'Preview original' })
+  )
+  const preview = screen.getByRole('dialog')
+  expect(await within(preview).findByRole('img')).toHaveAttribute(
+    'src',
+    'blob:local-original'
+  )
+  expect(
+    within(preview).getByText(new Date(2000000000 * 1000).toLocaleString())
+  ).toBeVisible()
+  expect(fileReads).toEqual([])
+})
+
 it('filters and paginates local canvases using the same title, source and sort controls', async () => {
   for (let index = 0; index < 25; index++) {
     await createCanvasProject(

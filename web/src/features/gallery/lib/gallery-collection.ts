@@ -69,10 +69,10 @@ export function localGalleryImages(
         created_at: Math.floor(
           (node.data.createdAt ?? canvas.localSavedAt) / 1000
         ),
-        expires_at: canvas.expiresAt,
+        expires_at: 0,
         has_thumbnail: false,
         localBlob: binary.blob,
-        localOnly: canvas.cloudRevision === 0 || canvas.needsExplicitSave,
+        localOnly: true,
       },
     ]
   })
@@ -83,13 +83,18 @@ export function mergeGalleryImages(
   remote: readonly GalleryImage[],
   local: readonly GalleryImage[]
 ) {
-  const images = new Map(remote.map((image) => [image.id, image]))
+  const remoteImages = new Map(remote.map((image) => [image.id, image]))
+  const images = new Map(remoteImages)
   for (const image of local) {
-    const cloud = images.get(image.id)
+    // Canvas publication does not prove that this newly generated asset was
+    // uploaded. Only an exact original in the remote listing establishes that.
+    const cloud = remoteImages.get(image.id)
     images.set(image.id, {
-      ...cloud,
       ...image,
-      localOnly: !cloud && image.localOnly,
+      ...cloud,
+      localBlob: image.localBlob,
+      localOnly: !cloud,
+      expires_at: cloud?.expires_at ?? 0,
     })
   }
   return [...images.values()]
