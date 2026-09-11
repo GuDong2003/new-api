@@ -17,11 +17,29 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import {
+  createMemoryHistory,
+  createRootRoute,
+  createRouter,
+  RouterProvider,
+} from '@tanstack/react-router'
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Position, ReactFlowProvider } from '@xyflow/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { AxiosError } from 'axios'
+import { IDBFactory } from 'fake-indexeddb'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { login, response } from '@/features/gallery/__tests__/fixtures'
+import { api } from '@/lib/api'
+import { useAuthStore } from '@/stores/auth-store'
 import { useDrawingStore } from '@/stores/drawing-store'
 
 import { DrawingWorkspace } from '../components/DrawingWorkspace'
@@ -30,9 +48,30 @@ import { DEFAULT_IMAGE_SETTINGS } from '../lib/image-settings'
 import type { DrawingNode } from '../types'
 
 let client: QueryClient
-afterEach(() => client?.clear())
+const adapter = api.defaults.adapter
+beforeEach(() => {
+  vi.stubGlobal('indexedDB', new IDBFactory())
+  api.defaults.adapter = async (config) => {
+    // Newly created local projects have no remote revision yet.
+    throw new AxiosError(
+      'not found',
+      '',
+      config,
+      {},
+      { ...response(config, {}), status: 404 }
+    )
+  }
+})
+afterEach(() => {
+  cleanup()
+  useAuthStore.getState().auth.reset()
+  client?.clear()
+  api.defaults.adapter = adapter
+  vi.unstubAllGlobals()
+})
 
 async function renderReferenceCanvas(userId: number) {
+  login(userId)
   client = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: Infinity } },
   })
@@ -44,12 +83,23 @@ async function renderReferenceCanvas(userId: number) {
     ['drawing-models', userId, 'default'],
     [{ value: 'gpt-image-1', label: 'gpt-image-1' }]
   )
+  const route = createRootRoute({
+    component: () => (
+      <>
+        <DrawingPersistence userId={userId} />
+        <ReactFlowProvider initialWidth={1000} initialHeight={600}>
+          <DrawingWorkspace userId={userId} />
+        </ReactFlowProvider>
+      </>
+    ),
+  })
+  const router = createRouter({
+    routeTree: route,
+    history: createMemoryHistory({ initialEntries: ['/'] }),
+  })
   render(
     <QueryClientProvider client={client}>
-      <DrawingPersistence userId={userId} />
-      <ReactFlowProvider initialWidth={1000} initialHeight={600}>
-        <DrawingWorkspace userId={userId} />
-      </ReactFlowProvider>
+      <RouterProvider router={router} />
     </QueryClientProvider>
   )
   await waitFor(() =>

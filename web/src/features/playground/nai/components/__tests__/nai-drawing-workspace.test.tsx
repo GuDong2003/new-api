@@ -14,13 +14,24 @@ GNU Affero General Public License for more details.
 You should have received a copy of the GNU Affero General Public License
 along with this program. If not, see <https://www.gnu.org/licenses/>.
 */
-import { render, screen } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import {
+  createMemoryHistory,
+  createRootRoute,
+  createRouter,
+  RouterProvider,
+} from '@tanstack/react-router'
+import { cleanup, render, screen } from '@testing-library/react'
+import { AxiosError } from 'axios'
+import { IDBFactory } from 'fake-indexeddb'
 import type { ReactNode } from 'react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { login, response } from '@/features/gallery/__tests__/fixtures'
+import { api } from '@/lib/api'
 import { useAuthStore } from '@/stores/auth-store'
-import { useNaiDrawingStore } from '@/stores/nai-drawing-store'
 
+import { NaiDrawingPersistence } from '../../hooks/use-nai-drawing-persistence'
 import { NaiDrawing } from '../NaiDrawingWorkspace'
 
 vi.mock('@xyflow/react', () => {
@@ -50,18 +61,6 @@ vi.mock('@/hooks/use-media-query', () => ({
   useMediaQuery: () => false,
 }))
 
-vi.mock('../hooks/use-nai-drawing-persistence', () => ({
-  useNaiDrawingPersistenceStatus: () => 'saved',
-}))
-
-vi.mock('../hooks/use-nai-image-generation', () => ({
-  useNaiImageGeneration: () => ({
-    cancel: vi.fn(),
-    generate: vi.fn(() => false),
-    pendingCount: 0,
-  }),
-}))
-
 vi.mock('../NaiImageCanvasNode', () => ({
   NaiImageCanvasNode: () => null,
 }))
@@ -75,27 +74,52 @@ vi.mock('../NaiSettings', () => ({
 }))
 
 describe('NAI drawing workspace', () => {
+  let client: QueryClient
+  const adapter = api.defaults.adapter
   beforeEach(() => {
-    useAuthStore.getState().auth.setUser({
-      id: 1,
-      username: 'alice',
-      role: 1,
-    })
-    useNaiDrawingStore.setState({
-      nodes: [],
-      ready: true,
-      userId: 1,
-      past: [],
-      future: [],
-      previewId: null,
-      revision: 0,
-    })
+    vi.stubGlobal('indexedDB', new IDBFactory())
+    login(1, 'nai-workspace-session', 1)
+    client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    api.defaults.adapter = async (config) => {
+      throw new AxiosError(
+        'not found',
+        '',
+        config,
+        {},
+        { ...response(config, {}), status: 404 }
+      )
+    }
+  })
+  afterEach(() => {
+    cleanup()
+    useAuthStore.getState().auth.reset()
+    client.clear()
+    api.defaults.adapter = adapter
+    vi.unstubAllGlobals()
   })
 
-  it('shows guidance when the NAI canvas has no image nodes', () => {
-    render(<NaiDrawing />)
+  it('shows guidance when the NAI canvas has no image nodes', async () => {
+    const route = createRootRoute({
+      component: () => (
+        <>
+          <NaiDrawingPersistence userId={1} />
+          <NaiDrawing />
+        </>
+      ),
+    })
+    const router = createRouter({
+      routeTree: route,
+      history: createMemoryHistory({ initialEntries: ['/'] }),
+    })
+    render(
+      <QueryClientProvider client={client}>
+        <RouterProvider router={router} />
+      </QueryClientProvider>
+    )
 
-    expect(screen.getByText('Start creating NAI images')).toBeInTheDocument()
+    expect(
+      await screen.findByText('Start creating NAI images')
+    ).toBeInTheDocument()
     expect(
       screen.getByText(
         'Generate images with NovelAI, then arrange and refine them on your canvas.'

@@ -17,18 +17,52 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { act, render, screen, waitFor } from '@testing-library/react'
+import {
+  createMemoryHistory,
+  createRootRoute,
+  createRouter,
+  RouterProvider,
+} from '@tanstack/react-router'
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import { ReactFlowProvider } from '@xyflow/react'
-import { describe, it, expect } from 'vitest'
+import { AxiosError } from 'axios'
+import { IDBFactory } from 'fake-indexeddb'
+import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest'
 
+import { login, response } from '@/features/gallery/__tests__/fixtures'
+import { api } from '@/lib/api'
+import { useAuthStore } from '@/stores/auth-store'
 import { useDrawingStore } from '@/stores/drawing-store'
 
 import { DrawingWorkspace } from '../components/DrawingWorkspace'
 import { DrawingPersistence } from '../hooks/use-drawing-persistence'
 import { DEFAULT_IMAGE_SETTINGS } from '../lib/image-settings'
 
+let client: QueryClient
+const adapter = api.defaults.adapter
+beforeEach(() => {
+  vi.stubGlobal('indexedDB', new IDBFactory())
+  api.defaults.adapter = async (config) => {
+    throw new AxiosError(
+      'not found',
+      '',
+      config,
+      {},
+      { ...response(config, {}), status: 404 }
+    )
+  }
+})
+afterEach(() => {
+  cleanup()
+  useAuthStore.getState().auth.reset()
+  client?.clear()
+  api.defaults.adapter = adapter
+  vi.unstubAllGlobals()
+})
+
 function renderWorkspace(userId: number) {
-  const client = new QueryClient({
+  login(userId)
+  client = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: Infinity } },
   })
   client.setQueryData(
@@ -39,12 +73,23 @@ function renderWorkspace(userId: number) {
     ['drawing-models', userId, 'default'],
     [{ value: 'gpt-image-1', label: 'gpt-image-1' }]
   )
+  const route = createRootRoute({
+    component: () => (
+      <>
+        <DrawingPersistence userId={userId} />
+        <ReactFlowProvider>
+          <DrawingWorkspace userId={userId} />
+        </ReactFlowProvider>
+      </>
+    ),
+  })
+  const router = createRouter({
+    routeTree: route,
+    history: createMemoryHistory({ initialEntries: ['/'] }),
+  })
   const view = render(
     <QueryClientProvider client={client}>
-      <DrawingPersistence userId={userId} />
-      <ReactFlowProvider>
-        <DrawingWorkspace userId={userId} />
-      </ReactFlowProvider>
+      <RouterProvider router={router} />
     </QueryClientProvider>
   )
   return { client, view }
