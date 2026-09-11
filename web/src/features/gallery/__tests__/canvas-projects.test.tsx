@@ -57,6 +57,7 @@ import {
   updateCanvasCloudState,
 } from '../lib/canvas-repository'
 import { cancelCanvasSession } from '../lib/canvas-sync'
+import type { GalleryImage } from '../types'
 import { galleryImage, login, response, usage, required } from './fixtures'
 
 const navigate = vi.hoisted(() => vi.fn())
@@ -68,7 +69,7 @@ vi.mock('@tanstack/react-router', async (original) => ({
 const identity = { userId: 813, sessionId: 'gallery-session' }
 const adapter = api.defaults.adapter
 let client: QueryClient
-let remoteImages: (typeof galleryImage)[]
+let remoteImages: GalleryImage[]
 let fileReads: string[]
 let usageReads: number
 beforeEach(() => {
@@ -311,6 +312,38 @@ it('creates the user-entered canvas name and confirms image and whole-canvas del
   const created = required(navigate.mock.calls.at(-1))[0].search
     .canvas as string
   expect((await loadLocalCanvas(813, created))?.name).toBe('用户指定画布')
+})
+
+it('removes cached gallery images when their canvas is deleted', async () => {
+  const canvas = await localImage()
+  remoteImages = [
+    {
+      ...galleryImage,
+      id: assetId,
+      canvas_id: canvas.id,
+    },
+  ]
+  renderGallery()
+  expect(await screen.findByText(galleryImage.prompt)).toBeVisible()
+  await userEvent.click(screen.getByRole('tab', { name: 'Canvases' }))
+  await userEvent.click(
+    await screen.findByRole('button', { name: 'Delete canvas' })
+  )
+  await userEvent.click(
+    within(screen.getByRole('alertdialog')).getByRole('button', {
+      name: 'Delete',
+    })
+  )
+  await waitFor(() =>
+    expect(
+      client.getQueryData([
+        'gallery',
+        identity.userId,
+        identity.sessionId,
+        'images',
+      ])
+    ).toEqual([])
+  )
 })
 
 it('shows persisted full status on direct gallery reload without a binding or quota-refresh bypass', async () => {

@@ -108,12 +108,14 @@ func GalleryTotals(ctx context.Context, user int) (count, userBytes, totalBytes 
 		return
 	}
 	var documentBytes int64
-	err = DB.WithContext(ctx).Model(&GalleryCanvas{}).Where("user_id = ?", user).Select("COALESCE(SUM(storage_bytes), 0)").Scan(&documentBytes).Error
+	// Deleted and expired canvases retain small tombstones for conflict
+	// reconciliation, but their document bytes are no longer user storage.
+	err = DB.WithContext(ctx).Model(&GalleryCanvas{}).Where("user_id = ? AND COALESCE(state, '') NOT IN ?", user, []string{"deleted", "expired"}).Select("COALESCE(SUM(storage_bytes), 0)").Scan(&documentBytes).Error
 	if err != nil {
 		return
 	}
 	userBytes += documentBytes
-	err = DB.WithContext(ctx).Model(&GalleryCanvas{}).Select("COALESCE(SUM(storage_bytes), 0)").Scan(&documentBytes).Error
+	err = DB.WithContext(ctx).Model(&GalleryCanvas{}).Where("COALESCE(state, '') NOT IN ?", []string{"deleted", "expired"}).Select("COALESCE(SUM(storage_bytes), 0)").Scan(&documentBytes).Error
 	totalBytes += documentBytes
 	return
 }

@@ -47,7 +47,6 @@ type CanvasToolbarProps = {
   onArrange: () => void
   busy: boolean
   compact: boolean
-  saveStatus: 'loading' | 'saving' | 'saved' | 'error'
 }
 
 export function CanvasToolbar(props: CanvasToolbarProps) {
@@ -179,14 +178,6 @@ export function CanvasToolbar(props: CanvasToolbarProps) {
       >
         <HugeiconsIcon icon={Delete02Icon} size={16} aria-hidden='true' />
       </Button>
-      <span
-        className='text-muted-foreground ml-auto hidden shrink-0 pl-3 text-[11px] lg:inline'
-        role='status'
-      >
-        {props.saveStatus === 'saved' && t('Saved in this browser')}
-        {props.saveStatus === 'saving' && t('Saving…')}
-        {props.saveStatus === 'error' && t('Canvas not saved')}
-      </span>
       <input
         ref={upload}
         type='file'

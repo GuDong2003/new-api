@@ -58,6 +58,10 @@ import {
   captureCanvasTarget,
   assertCanvasTarget,
 } from '@/features/gallery/components/canvas-node-deletion'
+import {
+  flushLocalEditors,
+  getCanvasEditorState,
+} from '@/features/gallery/lib/canvas-editor'
 import { useMediaQuery } from '@/hooks/use-media-query'
 import { useDrawingStore } from '@/stores/drawing-store'
 
@@ -248,7 +252,6 @@ export function DrawingWorkspace(props: { userId: number }) {
           setTool(nextTool)
         }}
         compact={compact}
-        saveStatus={saveStatus}
         busy={files.busy}
         onUpload={(uploaded) => {
           void files.addImages(uploaded, insertionPoint())
@@ -622,6 +625,17 @@ export function DrawingWorkspace(props: { userId: number }) {
                 future: [],
               })
               void flow.setViewport(document.viewport)
+              // Materialize imported data URLs before the confirmation closes.
+              // Otherwise a quick gallery save can publish a document whose
+              // asset manifest is still missing the imported originals.
+              await flushLocalEditors(target.identity)
+              assertCanvasTarget('drawing', target)
+              const editorState = getCanvasEditorState('drawing')
+              if (editorState?.localStatus !== 'saved') {
+                throw new Error(
+                  editorState?.error ?? 'Canvas storage is unavailable.'
+                )
+              }
             } else {
               useDrawingStore.getState().clear()
               useDrawingStore.setState({ past: [], future: [] })

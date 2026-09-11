@@ -57,7 +57,12 @@ import {
   mergeGalleryImages,
 } from './lib/gallery-collection'
 import { galleryOwner } from './lib/session'
-import type { CanvasKind, GalleryIdentity, GalleryImage } from './types'
+import type {
+  CanvasKind,
+  CanvasSummary,
+  GalleryIdentity,
+  GalleryImage,
+} from './types'
 
 export { GallerySettingsSection } from './components/gallery-settings-section'
 
@@ -313,6 +318,17 @@ function GalleryContent(props: { identity: GalleryIdentity }) {
       await (target.kind === 'drawing' ? drawing : nai).deleteProject(target.id)
       setRemovedProjects((ids) => [...ids, target.id])
       setDeleteTarget(null)
+      await Promise.all(
+        ['images', 'canvases'].map((part) =>
+          client.cancelQueries({ queryKey: [...key, part] })
+        )
+      )
+      client.setQueryData<GalleryImage[]>([...key, 'images'], (current) =>
+        current?.filter((image) => image.canvas_id !== target.id)
+      )
+      client.setQueryData<CanvasSummary[]>([...key, 'canvases'], (current) =>
+        current?.filter((canvas) => canvas.id !== target.id)
+      )
       await invalidate()
     })
   }
@@ -512,8 +528,9 @@ function GalleryContent(props: { identity: GalleryIdentity }) {
                   onOpenCanvas={
                     image.canvas_id
                       ? () => {
-                          if (image.canvas_id)
+                          if (image.canvas_id) {
                             openProject(image.canvas_id, image.source, image.id)
+                          }
                         }
                       : undefined
                   }

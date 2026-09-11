@@ -462,6 +462,13 @@ func TestGalleryCanvasOwnerDeletionAndExpiredReconciliation(t *testing.T) {
 				assert.ErrorIs(t, service.DeleteGalleryCanvas(ctx, 41, saved.ID, 0), model.ErrGalleryCanvasConflict)
 				require.NoError(t, service.DeleteGalleryCanvas(ctx, 41, saved.ID, 1))
 				require.NoError(t, service.DeleteGalleryCanvas(ctx, 41, saved.ID, 1))
+				usage, usageErr := service.GetGalleryUsage(ctx, 41)
+				require.NoError(t, usageErr)
+				assert.Zero(t, usage.UsedImages)
+				assert.Zero(t, usage.UsedBytes)
+				images, imagesErr := service.ListGalleryImages(ctx, 41, 1, 24, "")
+				require.NoError(t, imagesErr)
+				assert.Empty(t, images.Items)
 			} else {
 				require.NoError(t, model.DB.Model(&model.GalleryCanvas{}).Where("id = ?", saved.ID).Update("expires_at", time.Now().Unix()-1).Error)
 				require.NoError(t, service.CleanupGallery(ctx))
