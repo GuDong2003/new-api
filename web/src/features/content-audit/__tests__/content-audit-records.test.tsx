@@ -287,7 +287,7 @@ it('shows a controlled list error instead of displaying raw backend messages', a
   ).not.toBeInTheDocument()
 })
 
-it('offers a per-record delete action and a reset action for saved content', async () => {
+it('offers a per-record delete action but leaves clearing everything to settings', async () => {
   const detail = auditDetail()
   transport = installAuditTransport((config) => {
     if (config.url === '/api/content-audit/records') {
@@ -306,8 +306,8 @@ it('offers a per-record delete action and a reset action for saved content', asy
   await screen.findByText('inference-user (#7)')
   expect(screen.getByRole('button', { name: 'Delete record' })).toBeVisible()
   expect(
-    screen.getByRole('button', { name: 'Clear saved content' })
-  ).toBeVisible()
+    screen.queryByRole('button', { name: 'Clear saved content' })
+  ).not.toBeInTheDocument()
 })
 
 it('binds deletion to the confirmed sorted selection even if selection changes during verification', async () => {

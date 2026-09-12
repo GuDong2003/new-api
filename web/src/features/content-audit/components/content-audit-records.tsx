@@ -47,10 +47,7 @@ import {
   type ContentAuditFilterValues,
 } from '../lib/schema'
 import type { ContentAuditFilters, ContentAuditRecord } from '../types'
-import {
-  ContentAuditDeleteButton,
-  ContentAuditResetButton,
-} from './content-audit-delete'
+import { ContentAuditDeleteButton } from './content-audit-delete'
 import { ContentAuditFilterBar } from './content-audit-filters'
 
 const emptyRecords: ContentAuditRecord[] = []
@@ -276,12 +273,6 @@ export function ContentAuditRecords() {
               onApply={apply}
               isFetching={query.isFetching}
             />
-            <div className='flex justify-end'>
-              <ContentAuditResetButton
-                disabled={query.isFetching || query.isError}
-                onRequested={() => setSelection({})}
-              />
-            </div>
             {query.isError && (
               <ErrorState
                 description={contentAuditErrorMessage(query.error, t)}
