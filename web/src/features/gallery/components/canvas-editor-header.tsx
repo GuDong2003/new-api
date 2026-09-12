@@ -182,12 +182,13 @@ export function CanvasEditorHeader(props: {
           >
             <HugeiconsIcon icon={SaveIcon} size={16} aria-hidden='true' />
           </Button>
-          <div className='max-w-48 min-w-0 truncate'>
+          <div className='max-w-64 min-w-0'>
             <CanvasSaveStatus
               localStatus={canvas.localStatus}
               cloudStatus={canvas.cloudStatus}
               statusText={canvas.statusText}
               error={canvas.localError}
+              className='truncate'
             />
           </div>
           {canvas.localStatus === 'error' ||

@@ -16,6 +16,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 */
 import { useTranslation } from 'react-i18next'
 
+import { cn } from '@/lib/utils'
+
 import type { CanvasLocalStatus } from '../lib/canvas-editor'
 
 type CanvasSaveStatusProps = {
@@ -23,6 +25,7 @@ type CanvasSaveStatusProps = {
   cloudStatus: string
   statusText?: string | null
   error?: string
+  className?: string
 }
 
 export function CanvasSaveStatus(props: CanvasSaveStatusProps) {
@@ -45,7 +48,14 @@ export function CanvasSaveStatus(props: CanvasSaveStatusProps) {
     } else text = t('Saved in this browser')
   }
   return (
-    <p className='text-muted-foreground text-xs' role='status'>
+    // Callers that clip this line must pass the truncation here rather than on a
+    // wrapper: an ancestor's text-overflow never reaches this block, so the
+    // message would be cut without an ellipsis. The title keeps it readable.
+    <p
+      className={cn('text-muted-foreground text-xs', props.className)}
+      title={text || undefined}
+      role='status'
+    >
       {text}
     </p>
   )

@@ -526,4 +526,20 @@ describe('canvas project save status', () => {
     ).not.toBeInTheDocument()
     expect(screen.getByText('Canvas not saved')).toBeVisible()
   })
+  it('carries clipping on the status line itself and keeps the full message in its title', () => {
+    render(
+      <CanvasSaveStatus
+        localStatus='saved'
+        cloudStatus='error'
+        className='truncate'
+      />
+    )
+
+    const status = screen.getByRole('status')
+    expect(status).toHaveClass('truncate')
+    expect(status).toHaveAttribute(
+      'title',
+      'Saved locally. Cloud save failed; try again later.'
+    )
+  })
 })
