@@ -100,6 +100,8 @@ export function DrawingWorkspace(props: { userId: number }) {
   )
   const nodes = useDrawingStore((state) => state.nodes)
   const edges = useDrawingStore((state) => state.edges)
+  const canUndo = useDrawingStore((state) => state.past.length > 0)
+  const canRedo = useDrawingStore((state) => state.future.length > 0)
   const selectedEdges = edges.filter((edge) => edge.selected)
   const selectedReferencesPending = selectedEdges.some((edge) =>
     nodes.some(
@@ -253,6 +255,11 @@ export function DrawingWorkspace(props: { userId: number }) {
           }}
           compact={compact}
           busy={files.busy}
+          canUndo={canUndo}
+          canRedo={canRedo}
+          count={nodes.length}
+          onUndo={() => useDrawingStore.getState().undo()}
+          onRedo={() => useDrawingStore.getState().redo()}
           onUpload={(uploaded) => {
             void files.addImages(uploaded, insertionPoint())
           }}

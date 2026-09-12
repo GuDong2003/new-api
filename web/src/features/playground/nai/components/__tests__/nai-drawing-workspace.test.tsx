@@ -22,6 +22,7 @@ import {
   RouterProvider,
 } from '@tanstack/react-router'
 import { cleanup, render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { AxiosError } from 'axios'
 import { IDBFactory } from 'fake-indexeddb'
 import type { ReactNode } from 'react'
@@ -33,6 +34,13 @@ import { useAuthStore } from '@/stores/auth-store'
 
 import { NaiDrawingPersistence } from '../../hooks/use-nai-drawing-persistence'
 import { NaiDrawing } from '../NaiDrawingWorkspace'
+
+const flow = vi.hoisted(() => ({
+  fitView: vi.fn(),
+  screenToFlowPosition: vi.fn(),
+  zoomIn: vi.fn(),
+  zoomOut: vi.fn(),
+}))
 
 vi.mock('@xyflow/react', () => {
   const Container = ({ children }: { children?: ReactNode }) => (
@@ -46,10 +54,8 @@ vi.mock('@xyflow/react', () => {
     Panel: Container,
     ReactFlow: Container,
     ReactFlowProvider: Container,
-    useReactFlow: () => ({
-      fitView: vi.fn(),
-      screenToFlowPosition: vi.fn(),
-    }),
+    useReactFlow: () => flow,
+    useViewport: () => ({ x: 0, y: 0, zoom: 1 }),
   }
 })
 
@@ -130,5 +136,46 @@ describe('NAI drawing workspace', () => {
         'Scroll to zoom · Space + drag to pan · Shift + drag to select'
       )
     ).toBeInTheDocument()
+  })
+
+  it('uses the shared canvas toolbar and viewport controls', async () => {
+    const route = createRootRoute({
+      component: () => (
+        <>
+          <NaiDrawingPersistence userId={1} />
+          <NaiDrawing />
+        </>
+      ),
+    })
+    const router = createRouter({
+      routeTree: route,
+      history: createMemoryHistory({ initialEntries: ['/'] }),
+    })
+    render(
+      <QueryClientProvider client={client}>
+        <RouterProvider router={router} />
+      </QueryClientProvider>
+    )
+
+    expect(
+      await screen.findByRole('button', { name: 'Select images' })
+    ).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Pan canvas' })).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Undo' })).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Redo' })).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Arrange images' })).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Export canvas' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Zoom out' })).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Zoom in' })).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Fit canvas' })).toBeVisible()
+    expect(screen.queryByText(/NAI canvas ·/)).not.toBeInTheDocument()
+
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: 'Zoom in' }))
+    await user.click(screen.getByRole('button', { name: 'Zoom out' }))
+    await user.click(screen.getByRole('button', { name: 'Fit canvas' }))
+    expect(flow.zoomIn).toHaveBeenCalled()
+    expect(flow.zoomOut).toHaveBeenCalled()
+    expect(flow.fitView).toHaveBeenCalledWith({ padding: 0.2, maxZoom: 1 })
   })
 })

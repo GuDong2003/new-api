@@ -14,18 +14,16 @@ GNU Affero General Public License for more details.
 You should have received a copy of the GNU Affero General Public License
 along with this program. If not, see <https://www.gnu.org/licenses/>.
 */
-import { Download04Icon, ImageAdd01Icon } from '@hugeicons/core-free-icons'
+import { ImageAdd01Icon } from '@hugeicons/core-free-icons'
 import { HugeiconsIcon } from '@hugeicons/react'
 import {
   Background,
   BackgroundVariant,
   MiniMap,
-  Panel,
   ReactFlow,
   ReactFlowProvider,
   useReactFlow,
 } from '@xyflow/react'
-import { Redo2, Settings2, Undo2, WandSparkles } from 'lucide-react'
 import { useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -56,6 +54,8 @@ import {
 } from '@/features/gallery/components/canvas-node-deletion'
 import { useCanvasRoute } from '@/features/gallery/hooks/use-canvas-route'
 import { exportCanvasProject } from '@/features/gallery/lib/canvas-projects'
+import { CanvasToolbar } from '@/features/playground/drawing/components/CanvasToolbar'
+import { CanvasViewportControls } from '@/features/playground/drawing/components/CanvasViewportControls'
 import { downloadBlob } from '@/features/playground/drawing/lib/image-assets'
 import { useMediaQuery } from '@/hooks/use-media-query'
 import { useAuthStore } from '@/stores/auth-store'
@@ -173,80 +173,23 @@ function NaiDrawingWorkspace(props: { userId: number }) {
           </span>
         }
       >
-        {compact && (
-          <Button
-            type='button'
-            variant='secondary'
-            size='sm'
-            onClick={() => setSettingsOpen(true)}
-          >
-            <Settings2 className='size-4' aria-hidden='true' />
-            {t('Generate')}
-          </Button>
-        )}
-        <Button
-          type='button'
-          variant={tool === 'select' ? 'secondary' : 'ghost'}
-          size='sm'
-          aria-pressed={tool === 'select'}
-          onClick={() => setTool('select')}
-        >
-          {t('Select')}
-        </Button>
-        <Button
-          type='button'
-          variant={tool === 'hand' ? 'secondary' : 'ghost'}
-          size='sm'
-          aria-pressed={tool === 'hand'}
-          onClick={() => setTool('hand')}
-        >
-          {t('Pan')}
-        </Button>
-        <span className='bg-border mx-1 h-5 w-px' />
-        <Button
-          type='button'
-          variant='ghost'
-          size='icon-sm'
-          title={t('Undo')}
-          aria-label={t('Undo')}
-          disabled={!canUndo}
-          onClick={() => useNaiDrawingStore.getState().undo()}
-        >
-          <Undo2 className='size-4' aria-hidden='true' />
-        </Button>
-        <Button
-          type='button'
-          variant='ghost'
-          size='icon-sm'
-          title={t('Redo')}
-          aria-label={t('Redo')}
-          disabled={!canRedo}
-          onClick={() => useNaiDrawingStore.getState().redo()}
-        >
-          <Redo2 className='size-4' aria-hidden='true' />
-        </Button>
-        <Button
-          type='button'
-          variant='ghost'
-          size='sm'
-          disabled={!nodes.length}
-          onClick={() => {
+        <CanvasToolbar
+          tool={tool}
+          onToolChange={setTool}
+          compact={compact}
+          canUndo={canUndo}
+          canRedo={canRedo}
+          count={nodes.length}
+          onUndo={() => useNaiDrawingStore.getState().undo()}
+          onRedo={() => useNaiDrawingStore.getState().redo()}
+          onSettings={() => setSettingsOpen(true)}
+          onArrange={() => {
             useNaiDrawingStore.getState().arrange()
             requestAnimationFrame(
               () => void flow.fitView({ padding: 0.2, maxZoom: 1 })
             )
           }}
-        >
-          <WandSparkles className='size-4' aria-hidden='true' />
-          {t('Arrange')}
-        </Button>
-        <Button
-          type='button'
-          variant='ghost'
-          size='icon-sm'
-          aria-label={t('Export canvas')}
-          title={t('Export canvas')}
-          onClick={() => {
+          onExport={() => {
             const auth = useAuthStore.getState().auth
             void exportCanvasProject(
               {
@@ -258,9 +201,7 @@ function NaiDrawingWorkspace(props: { userId: number }) {
               .then((blob) => downloadBlob(blob, 'nai-canvas.json'))
               .catch(() => toast.error(t('The canvas could not be exported.')))
           }}
-        >
-          <HugeiconsIcon icon={Download04Icon} size={16} aria-hidden='true' />
-        </Button>
+        />
       </CanvasEditorHeader>
       {status === 'error' && (
         <Alert
@@ -350,11 +291,7 @@ function NaiDrawingWorkspace(props: { userId: number }) {
                 size={1}
                 color='var(--border)'
               />
-              <Panel position='bottom-left' className='!m-3'>
-                <div className='bg-background rounded-xl border p-2 text-xs shadow-sm'>
-                  {t('NAI canvas')} · {Math.round(viewport.zoom * 100)}%
-                </div>
-              </Panel>
+              <CanvasViewportControls />
               {!compact && nodes.length > 0 && (
                 <MiniMap
                   pannable
