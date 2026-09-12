@@ -310,7 +310,9 @@ it('creates the user-entered canvas name and confirms image and whole-canvas del
   await waitFor(() =>
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
   )
-  await userEvent.click(screen.getByRole('button', { name: 'New canvas' }))
+  const createButton = screen.getByRole('button', { name: 'New canvas' })
+  await waitFor(() => expect(createButton).toBeEnabled())
+  await userEvent.click(createButton)
   await userEvent.type(
     screen.getByRole('textbox', { name: 'Canvas name' }),
     '用户指定画布'
