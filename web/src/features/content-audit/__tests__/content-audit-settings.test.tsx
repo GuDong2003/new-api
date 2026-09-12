@@ -89,11 +89,12 @@ afterEach(() => {
 })
 
 async function confirmWithAuthenticator(
-  user: ReturnType<typeof userEvent.setup>
+  user: ReturnType<typeof userEvent.setup>,
+  confirmationButton = 'Confirm'
 ) {
   await user.click(
     within(await screen.findByRole('alertdialog')).getByRole('button', {
-      name: 'Confirm',
+      name: confirmationButton,
     })
   )
   await user.type(
@@ -260,6 +261,62 @@ it('saves enabled settings when initialized local storage is ready without a pre
     context,
   })
   expect(update?.headers.get('X-Security-Proof')).toBe('audit-one-use-proof')
+})
+
+it('offers clearing saved content from settings and requires reset verification', async () => {
+  const status = auditStatus()
+  status.state.storage_id = 'initialized-store'
+  status.state.mode = 'aes-gcm'
+  status.state.pause_reason = ''
+  status.state.used_records = 3
+  status.ready = true
+  transport = installAuditTransport((config) => {
+    if (config.url?.startsWith('/api/verify')) {
+      return { body: verificationReply(config) }
+    }
+    if (config.url === '/api/content-audit/records/reset') {
+      return {
+        status: 202,
+        body: auditSuccess({
+          operation_id: 'reset-operation',
+          count: 3,
+          status: 'deleting',
+        }),
+      }
+    }
+    return { body: auditSuccess(status) }
+  })
+  const user = userEvent.setup()
+  renderSettings()
+  await user.click(
+    await screen.findByRole('button', { name: 'Clear saved content' })
+  )
+  expect(
+    await screen.findByText('Clear saved content audit records?')
+  ).toBeVisible()
+  await confirmWithAuthenticator(user, 'Clear saved content')
+  await waitFor(() =>
+    expect(
+      transport.requests.some(
+        (request) => request.url === '/api/content-audit/records/reset'
+      )
+    ).toBe(true)
+  )
+  const reset = transport.requests.find(
+    (request) => request.url === '/api/content-audit/records/reset'
+  )
+  expect(requestBody(reset)).toEqual({})
+  expect(reset?.headers.get('X-Security-Proof')).toBe('audit-one-use-proof')
+  expect(
+    requestBody(
+      transport.requests.find((request) => request.url === '/api/verify')
+    )
+  ).toEqual({
+    method: '2fa',
+    code: '123456',
+    scope: 'content_audit.reset',
+    context: {},
+  })
 })
 
 it('allows disabling an already enabled but paused audit without passing readiness', async () => {

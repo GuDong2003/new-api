@@ -26,6 +26,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { getContentAuditStatus } from '@/features/content-audit/api'
 import { ContentAuditAccessBoundary } from '@/features/content-audit/components/content-audit-access'
+import { ContentAuditResetButton } from '@/features/content-audit/components/content-audit-delete'
 import { ContentAuditSettingsForm } from '@/features/content-audit/components/content-audit-settings-form'
 import { ContentAuditStatusPanel } from '@/features/content-audit/components/content-audit-status'
 import {
@@ -121,6 +122,11 @@ function ContentAuditSettingsContent() {
         >
           {t('View content audit records')}
         </Link>
+        <ContentAuditResetButton
+          disabled={
+            query.isFetching || query.isError || !status.state.storage_id
+          }
+        />
       </div>
       <ContentAuditSettingsForm status={status} />
       <ContentAuditStatusPanel status={status} />

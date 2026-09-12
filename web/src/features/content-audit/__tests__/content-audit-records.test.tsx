@@ -306,7 +306,7 @@ it('offers a per-record delete action and a reset action for saved content', asy
   await screen.findByText('inference-user (#7)')
   expect(screen.getByRole('button', { name: 'Delete record' })).toBeVisible()
   expect(
-    screen.getByRole('button', { name: 'Reset saved content' })
+    screen.getByRole('button', { name: 'Clear saved content' })
   ).toBeVisible()
 })
 

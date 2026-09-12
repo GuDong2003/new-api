@@ -105,18 +105,18 @@ export function ContentAuditResetButton(props: {
         disabled={props.disabled || action.mutation.isPending}
         onClick={() => setOpen(true)}
       >
-        {t('Reset saved content')}
+        {t('Clear saved content')}
       </Button>
       <ConfirmDialog
         open={open}
         onOpenChange={setOpen}
-        title={t('Reset saved content audit records?')}
+        title={t('Clear saved content audit records?')}
         desc={t(
-          'Reset all completed content audit records. Records that are still being written will be left alone. Physical deletion and capacity release happen asynchronously. This cannot be undone.'
+          'Clear all completed content audit records. Records that are still being written will be left alone. Physical deletion and capacity release happen asynchronously. This cannot be undone.'
         )}
         destructive
         isLoading={action.mutation.isPending}
-        confirmText={t('Reset saved content')}
+        confirmText={t('Clear saved content')}
         handleConfirm={() => {
           setOpen(false)
           action.mutation.mutate({

@@ -116,7 +116,7 @@ export function useContentAuditAction(options?: {
         )
       } else if (operation.scope === 'content_audit.reset') {
         toast.success(
-          t('Content audit reset requested. Physical cleanup is still pending.')
+          t('Content audit clear requested. Physical cleanup is still pending.')
         )
       } else {
         client.setQueryData([...access.queryKey, 'status'], result)
