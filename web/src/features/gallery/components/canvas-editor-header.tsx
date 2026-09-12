@@ -13,13 +13,22 @@ GNU Affero General Public License for more details.
 
 You should have received a copy of the GNU Affero General Public License
 along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+For commercial licensing, please contact support@quantumnous.com
 */
+import {
+  FileAddIcon,
+  FolderOpenIcon,
+  SaveIcon,
+} from '@hugeicons/core-free-icons'
+import { HugeiconsIcon } from '@hugeicons/react'
 import { Link, useNavigate } from '@tanstack/react-router'
-import { useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { ConfirmDialog } from '@/components/confirm-dialog'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { downloadBlob } from '@/features/playground/drawing/lib/image-assets'
 
 import { useCanvasProjects } from '../hooks/use-canvas-projects'
@@ -28,15 +37,27 @@ import type { CanvasKind } from '../types'
 import { CanvasProjectDialog } from './canvas-project-dialog'
 import { CanvasSaveStatus } from './canvas-save-status'
 
-export function CanvasEditorHeader(props: { kind: CanvasKind }) {
+export function CanvasEditorHeader(props: {
+  kind: CanvasKind
+  children?: ReactNode
+  toolbarLabel?: string
+  statusDetail?: ReactNode
+}) {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const canvas = useCanvasProjects(props.kind)
   const current = canvas.current
-  const [dialog, setDialog] = useState<'create' | 'rename' | null>(null)
+  const [createOpen, setCreateOpen] = useState(false)
   const [reloadOpen, setReloadOpen] = useState(false)
+  const [title, setTitle] = useState('')
+  const cancelTitleBlur = useRef(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    setTitle(current?.name ?? '')
+  }, [current?.id, current?.name])
+
   const run = async (action: () => Promise<unknown>) => {
     setError(null)
     setBusy(true)
@@ -48,6 +69,7 @@ export function CanvasEditorHeader(props: { kind: CanvasKind }) {
       setBusy(false)
     }
   }
+
   const exportLocal = () =>
     void run(async () =>
       downloadBlob(
@@ -55,105 +77,145 @@ export function CanvasEditorHeader(props: { kind: CanvasKind }) {
         `new-api-${props.kind}-canvas.json`
       )
     )
+
+  const saveTitle = () => {
+    if (cancelTitleBlur.current) {
+      cancelTitleBlur.current = false
+      return
+    }
+    if (!current || busy) return
+    const normalized = title.trim()
+    if (!normalized || normalized === current.name) {
+      setTitle(current.name)
+      return
+    }
+    void run(async () => {
+      await canvas.rename(current.id, normalized)
+      setTitle(normalized)
+    })
+  }
+
   return (
-    <header className='bg-background flex shrink-0 flex-wrap items-center gap-2 border-b px-3 py-2'>
-      <strong
-        className='max-w-56 min-w-0 truncate text-sm'
-        title={current?.name}
+    <>
+      <header
+        className='bg-background grid min-w-0 shrink-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 border-b px-3 py-2'
+        role='toolbar'
+        aria-label={props.toolbarLabel ?? t('Canvas tools')}
       >
-        {current?.name ?? t('New canvas')}
-      </strong>
-      <span className='text-muted-foreground text-xs'>
-        {props.kind === 'nai' ? t('NAI Canvas') : t('Drawing')}
-      </span>
-      <div className='ml-auto flex flex-wrap items-center gap-1'>
-        <Button
-          size='sm'
-          variant='ghost'
-          disabled={busy}
-          onClick={() => setDialog('create')}
-        >
-          {t('New canvas')}
-        </Button>
-        <Button
-          size='sm'
-          variant='ghost'
-          render={<Link to='/canvas/gallery' />}
-        >
-          {t('Open canvas')}
-        </Button>
-        <Button
-          size='sm'
-          variant='ghost'
-          onClick={() => setDialog('rename')}
-          disabled={!current || busy}
-        >
-          {t('Rename canvas')}
-        </Button>
-        <Button
-          size='sm'
-          variant='outline'
-          onClick={() => void run(canvas.save)}
-          disabled={!current || busy}
-        >
-          {t('Save')}
-        </Button>
-        {canvas.localStatus === 'error' || canvas.cloudStatus === 'conflict' ? (
+        <div className='flex min-w-0 items-center gap-1 overflow-x-auto'>
           <Button
-            size='sm'
-            variant='outline'
+            type='button'
+            variant='ghost'
+            size='icon-sm'
             disabled={busy}
-            onClick={exportLocal}
+            onClick={() => setCreateOpen(true)}
+            aria-label={t('New canvas')}
+            title={t('New canvas')}
           >
-            {t('Export canvas')}
+            <HugeiconsIcon icon={FileAddIcon} size={16} aria-hidden='true' />
           </Button>
-        ) : null}
-        {canvas.cloudStatus === 'conflict' ? (
+          {props.children}
+        </div>
+
+        <div className='flex max-w-[min(42vw,28rem)] min-w-0 items-center justify-center gap-1'>
+          <Input
+            aria-label={t('Canvas title')}
+            value={title}
+            placeholder={t('New canvas')}
+            maxLength={255}
+            disabled={!current || busy}
+            className='h-7 min-w-0 text-center text-sm'
+            onChange={(event) => setTitle(event.target.value)}
+            onBlur={saveTitle}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault()
+                event.currentTarget.blur()
+              } else if (event.key === 'Escape') {
+                event.preventDefault()
+                cancelTitleBlur.current = true
+                setTitle(current?.name ?? '')
+                event.currentTarget.blur()
+              }
+            }}
+          />
           <Button
-            size='sm'
-            variant='outline'
-            disabled={busy}
-            onClick={() => setReloadOpen(true)}
+            type='button'
+            variant='ghost'
+            size='icon-sm'
+            render={<Link to='/canvas/gallery' />}
+            aria-label={t('Open canvas')}
+            title={t('Open canvas')}
           >
-            {t('Reload cloud version')}
+            <HugeiconsIcon icon={FolderOpenIcon} size={16} aria-hidden='true' />
           </Button>
-        ) : null}
-      </div>
-      <div className='w-full min-w-0'>
-        <CanvasSaveStatus
-          localStatus={canvas.localStatus}
-          cloudStatus={canvas.cloudStatus}
-          statusText={canvas.statusText}
-          error={canvas.localError}
-        />
-        {error ? (
-          <p role='alert' className='text-destructive text-xs break-words'>
-            {t(error)}
-          </p>
-        ) : null}
-      </div>
+        </div>
+
+        <div className='flex min-w-0 items-center justify-end gap-1'>
+          {props.statusDetail}
+          <Button
+            type='button'
+            variant='ghost'
+            size='icon-sm'
+            onClick={() => void run(canvas.save)}
+            disabled={!current || busy}
+            aria-label={t('Save canvas')}
+            title={t('Save canvas')}
+          >
+            <HugeiconsIcon icon={SaveIcon} size={16} aria-hidden='true' />
+          </Button>
+          <div className='max-w-48 min-w-0 truncate'>
+            <CanvasSaveStatus
+              localStatus={canvas.localStatus}
+              cloudStatus={canvas.cloudStatus}
+              statusText={canvas.statusText}
+              error={canvas.localError}
+            />
+          </div>
+          {canvas.localStatus === 'error' ||
+          canvas.cloudStatus === 'conflict' ? (
+            <Button
+              size='sm'
+              variant='outline'
+              disabled={busy}
+              onClick={exportLocal}
+            >
+              {t('Export canvas')}
+            </Button>
+          ) : null}
+          {canvas.cloudStatus === 'conflict' ? (
+            <Button
+              size='sm'
+              variant='outline'
+              disabled={busy}
+              onClick={() => setReloadOpen(true)}
+            >
+              {t('Reload cloud version')}
+            </Button>
+          ) : null}
+        </div>
+      </header>
+      {error ? (
+        <p role='alert' className='text-destructive shrink-0 px-3 py-1 text-xs'>
+          {t(error)}
+        </p>
+      ) : null}
       <CanvasProjectDialog
-        open={dialog !== null}
-        mode={dialog ?? 'create'}
+        open={createOpen}
+        mode='create'
         initialKind={props.kind}
         fixedKind
-        initialName={dialog === 'rename' ? current?.name : undefined}
         busy={busy}
         error={error}
-        onOpenChange={(open) => {
-          if (!open) setDialog(null)
-        }}
+        onOpenChange={setCreateOpen}
         onSubmit={(name) =>
           void run(async () => {
-            if (dialog === 'create') {
-              const created = await canvas.create(name)
-              await navigate({
-                to:
-                  props.kind === 'drawing' ? '/canvas/drawing' : '/canvas/nai',
-                search: { canvas: created.id },
-              })
-            } else if (current) await canvas.rename(current.id, name)
-            setDialog(null)
+            const created = await canvas.create(name)
+            await navigate({
+              to: props.kind === 'drawing' ? '/canvas/drawing' : '/canvas/nai',
+              search: { canvas: created.id },
+            })
+            setCreateOpen(false)
           })
         }
       />
@@ -176,6 +238,6 @@ export function CanvasEditorHeader(props: { kind: CanvasKind }) {
       >
         {error ? <p role='alert'>{t(error)}</p> : null}
       </ConfirmDialog>
-    </header>
+    </>
   )
 }

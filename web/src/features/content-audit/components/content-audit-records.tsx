@@ -47,7 +47,10 @@ import {
   type ContentAuditFilterValues,
 } from '../lib/schema'
 import type { ContentAuditFilters, ContentAuditRecord } from '../types'
-import { ContentAuditDeleteButton } from './content-audit-delete'
+import {
+  ContentAuditDeleteButton,
+  ContentAuditResetButton,
+} from './content-audit-delete'
 import { ContentAuditFilterBar } from './content-audit-filters'
 
 const emptyRecords: ContentAuditRecord[] = []
@@ -164,20 +167,32 @@ export function ContentAuditRecords() {
       },
       {
         id: 'actions',
-        header: t('Details'),
+        header: t('Actions'),
         cell: ({ row }) => (
-          <Link
-            className={buttonVariants({ variant: 'ghost', size: 'sm' })}
-            to='/content-audit/$id'
-            params={{ id: row.original.id }}
-            preload={false}
-          >
-            {t('Details')}
-          </Link>
+          <div className='flex items-center gap-1'>
+            <Link
+              className={buttonVariants({ variant: 'ghost', size: 'sm' })}
+              to='/content-audit/$id'
+              params={{ id: row.original.id }}
+              preload={false}
+            >
+              {t('Details')}
+            </Link>
+            <ContentAuditDeleteButton
+              ids={[row.original.id]}
+              compact
+              disabled={
+                query.isFetching ||
+                query.isError ||
+                row.original.status === 'pending' ||
+                row.original.status === 'deleting'
+              }
+            />
+          </div>
         ),
       },
     ],
-    [t]
+    [query.isError, query.isFetching, t]
   )
   const { table } = useDataTable({
     columns,
@@ -261,6 +276,12 @@ export function ContentAuditRecords() {
               onApply={apply}
               isFetching={query.isFetching}
             />
+            <div className='flex justify-end'>
+              <ContentAuditResetButton
+                disabled={query.isFetching || query.isError}
+                onRequested={() => setSelection({})}
+              />
+            </div>
             {query.isError && (
               <ErrorState
                 description={contentAuditErrorMessage(query.error, t)}

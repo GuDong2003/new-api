@@ -16,6 +16,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { Delete02Icon } from '@hugeicons/core-free-icons'
+import { HugeiconsIcon } from '@hugeicons/react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -29,6 +31,7 @@ export function ContentAuditDeleteButton(props: {
   ids: string[]
   disabled?: boolean
   onRequested?: () => void
+  compact?: boolean
 }) {
   const { t } = useTranslation()
   const [selection, setSelection] = useState<string[] | null>(null)
@@ -39,8 +42,10 @@ export function ContentAuditDeleteButton(props: {
     <>
       <Button
         type='button'
-        variant='destructive'
-        size='sm'
+        variant={props.compact ? 'ghost' : 'destructive'}
+        size={props.compact ? 'icon-sm' : 'sm'}
+        aria-label={props.compact ? t('Delete record') : undefined}
+        title={props.compact ? t('Delete record') : undefined}
         disabled={
           props.disabled ||
           props.ids.length === 0 ||
@@ -49,7 +54,11 @@ export function ContentAuditDeleteButton(props: {
         }
         onClick={() => setSelection([...new Set(props.ids)].sort())}
       >
-        {t('Request deletion')}
+        {props.compact ? (
+          <HugeiconsIcon icon={Delete02Icon} size={16} aria-hidden='true' />
+        ) : (
+          t('Request deletion')
+        )}
       </Button>
       <ConfirmDialog
         open={selection !== null}
@@ -70,6 +79,49 @@ export function ContentAuditDeleteButton(props: {
           action.mutation.mutate({
             scope: 'content_audit.delete',
             context: { ids },
+          })
+        }}
+      />
+      <SecureVerificationDialog {...action.verification.dialogProps} />
+    </>
+  )
+}
+
+export function ContentAuditResetButton(props: {
+  disabled?: boolean
+  onRequested?: () => void
+}) {
+  const { t } = useTranslation()
+  const [open, setOpen] = useState(false)
+  const action = useContentAuditAction({
+    onDeletionSettled: props.onRequested,
+  })
+  return (
+    <>
+      <Button
+        type='button'
+        variant='outline'
+        size='sm'
+        disabled={props.disabled || action.mutation.isPending}
+        onClick={() => setOpen(true)}
+      >
+        {t('Reset saved content')}
+      </Button>
+      <ConfirmDialog
+        open={open}
+        onOpenChange={setOpen}
+        title={t('Reset saved content audit records?')}
+        desc={t(
+          'Reset all completed content audit records. Records that are still being written will be left alone. Physical deletion and capacity release happen asynchronously. This cannot be undone.'
+        )}
+        destructive
+        isLoading={action.mutation.isPending}
+        confirmText={t('Reset saved content')}
+        handleConfirm={() => {
+          setOpen(false)
+          action.mutation.mutate({
+            scope: 'content_audit.reset',
+            context: {},
           })
         }}
       />

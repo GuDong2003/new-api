@@ -30,6 +30,8 @@ import type {
   ContentAuditList,
   ContentAuditImagePage,
   ContentAuditOriginal,
+  ContentAuditResetRequest,
+  ContentAuditResetResult,
   ContentAuditSettingsUpdate,
   ContentAuditStatus,
 } from './types'
@@ -311,6 +313,22 @@ export function deleteContentAudits(
 ): Promise<ContentAuditDeletion> {
   return auditResult(
     api.post('/api/content-audit/records/delete', context, {
+      ...requestOptions,
+      headers: { ...requestOptions.headers, 'X-Security-Proof': proof },
+      singleUseAuthorization: true,
+      signal,
+    }),
+    signal
+  )
+}
+
+export function resetContentAudits(
+  context: ContentAuditResetRequest,
+  proof: string,
+  signal: AbortSignal
+): Promise<ContentAuditResetResult> {
+  return auditResult(
+    api.post('/api/content-audit/records/reset', context, {
       ...requestOptions,
       headers: { ...requestOptions.headers, 'X-Security-Proof': proof },
       singleUseAuthorization: true,

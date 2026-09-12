@@ -37,8 +37,16 @@ export type ContentAuditInitializeRequest = {
 
 export type ContentAuditDeleteRequest = { ids: string[] }
 
+export type ContentAuditResetRequest = Record<string, never>
+
 export type ContentAuditDeletion = ContentAuditDeleteRequest & {
   operation_id: string
+  status: 'deleting'
+}
+
+export type ContentAuditResetResult = {
+  operation_id: string
+  count: number
   status: 'deleting'
 }
 

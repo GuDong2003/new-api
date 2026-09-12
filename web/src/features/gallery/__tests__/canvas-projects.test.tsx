@@ -64,7 +64,15 @@ const navigate = vi.hoisted(() => vi.fn())
 vi.mock('@tanstack/react-router', async (original) => ({
   ...(await original<typeof import('@tanstack/react-router')>()),
   useNavigate: () => navigate,
-  Link: (props: { children?: React.ReactNode }) => <a>{props.children}</a>,
+  Link: ({
+    children,
+    to,
+    ...props
+  }: React.ComponentProps<'a'> & { to?: string }) => (
+    <a href={to} {...props}>
+      {children}
+    </a>
+  ),
 }))
 const identity = { userId: 813, sessionId: 'gallery-session' }
 const adapter = api.defaults.adapter
@@ -380,11 +388,11 @@ it('requires an explicit conflict reload and offers local export without a nativ
   expect(
     await screen.findByRole('button', { name: 'Export canvas' })
   ).toBeVisible()
-  await userEvent.click(screen.getByRole('button', { name: 'Rename canvas' }))
-  expect(screen.getByRole('textbox', { name: 'Canvas name' })).toHaveValue(
-    '本地画布'
-  )
-  await userEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+  const title = screen.getByRole('textbox', { name: 'Canvas title' })
+  await userEvent.clear(title)
+  await userEvent.type(title, '冲突本地画布')
+  await userEvent.keyboard('{Escape}')
+  expect(title).toHaveValue('本地画布')
   await userEvent.click(
     screen.getByRole('button', { name: 'Reload cloud version' })
   )
@@ -393,6 +401,20 @@ it('requires an explicit conflict reload and offers local export without a nativ
   )
   await userEvent.click(screen.getByRole('button', { name: 'Cancel' }))
   expect(useDrawingStore.getState().nodes).toHaveLength(1)
+})
+
+it('keeps the title editable and exposes compact canvas actions beside it', async () => {
+  await localImage()
+  render(<CanvasEditorHeader kind='drawing' />)
+  expect(
+    await screen.findByRole('textbox', { name: 'Canvas title' })
+  ).toHaveValue('本地画布')
+  expect(screen.getByRole('button', { name: 'New canvas' })).toBeVisible()
+  expect(screen.getByRole('button', { name: 'Open canvas' })).toBeVisible()
+  expect(screen.getByRole('button', { name: 'Save canvas' })).toBeVisible()
+  expect(
+    screen.queryByRole('button', { name: 'Rename canvas' })
+  ).not.toBeInTheDocument()
 })
 
 it('discards asynchronous Drawing file import when the selected canvas changes', async () => {

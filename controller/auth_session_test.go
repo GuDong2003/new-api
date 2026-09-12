@@ -190,6 +190,7 @@ func contentAuditManagementFixture(t *testing.T) (*model.User, service.AuthIdent
 	group.PUT("/settings", UpdateContentAuditSettings)
 	group.POST("/records/delete", DeleteContentAudits)
 	group.DELETE("/records/:id", DeleteContentAudits)
+	group.POST("/records/reset", ResetContentAudits)
 	return user, identity, token, router
 }
 
@@ -386,6 +387,36 @@ func TestContentAuditProofScopeMethodAndDeleteSelection(t *testing.T) {
 	require.NoError(t, model.DB.Model(&model.User{}).Where("id = ?", identity.UserID).Update("role", common.RoleAdminUser).Error)
 	response = contentAuditManagementRequest(router, http.MethodGet, "/api/content-audit/status", token, "", nil)
 	assert.Contains(t, []int{http.StatusForbidden, http.StatusUnauthorized}, response.Code)
+}
+
+func TestContentAuditResetMarksStoppedRecordsButLeavesLiveWriters(t *testing.T) {
+	_, identity, token, router := contentAuditManagementFixture(t)
+	ids := []string{
+		"0123456789abcdef0123456789abcdef",
+		"abcdef0123456789abcdef0123456789",
+		"fedcba9876543210fedcba9876543210",
+	}
+	now := time.Now().Unix()
+	records := []model.ContentAudit{
+		{AuditID: ids[0], Attempt: "attempt-ready", Status: model.ContentAuditReady, WriterStopped: true, CreatedAt: now, ExpiresAt: now + 86400},
+		{AuditID: ids[1], Attempt: "attempt-failed", Status: model.ContentAuditFailed, WriterStopped: true, CreatedAt: now, ExpiresAt: now + 86400},
+		{AuditID: ids[2], Attempt: "attempt-pending", Status: model.ContentAuditPending, WriterStopped: false, CreatedAt: now, ExpiresAt: now + 86400},
+	}
+	require.NoError(t, model.DB.Create(&records).Error)
+	operation := service.VerificationOperation{Scope: "content_audit.reset", Context: []byte(`{}`)}
+	proof := issueSecurityEnrollmentProof(t, identity, operation, service.VerificationMethodPassword)
+	response := contentAuditManagementRequest(router, http.MethodPost, "/api/content-audit/records/reset", token, proof, []byte(`{}`))
+	assert.Equal(t, http.StatusAccepted, response.Code, response.Body.String())
+	var saved []model.ContentAudit
+	require.NoError(t, model.DB.Where("audit_id IN ?", ids).Find(&saved).Error)
+	byID := make(map[string]model.ContentAudit, len(saved))
+	for _, record := range saved {
+		byID[record.AuditID] = record
+	}
+	assert.Equal(t, model.ContentAuditDeleting, byID[ids[0]].Status)
+	assert.Equal(t, model.ContentAuditDeleting, byID[ids[1]].Status)
+	assert.Equal(t, model.ContentAuditPending, byID[ids[2]].Status)
+	assert.False(t, byID[ids[2]].WriterStopped)
 }
 
 func TestContentAuditHTTPDisclosureRequiresDurableResultAndLiveSession(t *testing.T) {

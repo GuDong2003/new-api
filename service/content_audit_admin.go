@@ -65,6 +65,15 @@ func normalizeContentAuditOperation(scope string, raw json.RawMessage, fields ma
 		slices.Sort(input.IDs)
 		input.IDs = slices.Compact(input.IDs)
 		return input, nil
+	case VerificationScopeContentAuditReset:
+		if len(fields) != 0 {
+			return nil, ErrVerificationContextInvalid
+		}
+		var input struct{}
+		if common.Unmarshal(raw, &input) != nil {
+			return nil, ErrVerificationContextInvalid
+		}
+		return input, nil
 	}
 	return nil, ErrProofScope
 }
@@ -134,6 +143,15 @@ func RequestContentAuditDeletion(ctx context.Context, input ContentAuditDeleteRe
 	}
 	contentAuditEngine.wakeMaintenance()
 	return nil
+}
+
+func RequestContentAuditReset(ctx context.Context) (int64, error) {
+	count, err := model.RequestContentAuditReset(ctx)
+	if err != nil {
+		return 0, err
+	}
+	contentAuditEngine.wakeMaintenance()
+	return count, nil
 }
 
 func contentAuditReadable(ctx context.Context, id string) (*model.ContentAudit, *model.ContentAuditStorageState, *contentAuditStore, error) {

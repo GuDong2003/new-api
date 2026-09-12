@@ -287,6 +287,29 @@ it('shows a controlled list error instead of displaying raw backend messages', a
   ).not.toBeInTheDocument()
 })
 
+it('offers a per-record delete action and a reset action for saved content', async () => {
+  const detail = auditDetail()
+  transport = installAuditTransport((config) => {
+    if (config.url === '/api/content-audit/records') {
+      return {
+        body: auditSuccess({
+          items: [detail.record],
+          total: 1,
+          page: 1,
+          page_size: 25,
+        }),
+      }
+    }
+    return { body: auditSuccess({}) }
+  })
+  renderRecords()
+  await screen.findByText('inference-user (#7)')
+  expect(screen.getByRole('button', { name: 'Delete record' })).toBeVisible()
+  expect(
+    screen.getByRole('button', { name: 'Reset saved content' })
+  ).toBeVisible()
+})
+
 it('binds deletion to the confirmed sorted selection even if selection changes during verification', async () => {
   transport = installAuditTransport((config) => {
     if (config.url?.startsWith('/api/verify')) {

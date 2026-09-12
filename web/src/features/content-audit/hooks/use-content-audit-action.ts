@@ -27,10 +27,15 @@ import type { ContentAuditOperation } from '@/features/auth/secure-verification/
 import {
   deleteContentAudits,
   initializeContentAudit,
+  resetContentAudits,
   updateContentAuditSettings,
 } from '../api'
 import { contentAuditErrorMessage } from '../lib/labels'
-import type { ContentAuditDeletion, ContentAuditStatus } from '../types'
+import type {
+  ContentAuditDeletion,
+  ContentAuditResetResult,
+  ContentAuditStatus,
+} from '../types'
 import { useContentAuditAccess } from './use-content-audit-access'
 
 export function useContentAuditAction(options?: {
@@ -69,31 +74,36 @@ export function useContentAuditAction(options?: {
           title: t('Verify content audit operation'),
         })
         if (!proof || controller.signal.aborted) return null
-        return await access.run<ContentAuditStatus | ContentAuditDeletion>(
-          (signal) => {
-            switch (operation.scope) {
-              case 'content_audit.initialize':
-                return initializeContentAudit(
-                  operation.context,
-                  proof.proof_token,
-                  signal
-                )
-              case 'content_audit.settings.update':
-                return updateContentAuditSettings(
-                  operation.context,
-                  proof.proof_token,
-                  signal
-                )
-              case 'content_audit.delete':
-                return deleteContentAudits(
-                  operation.context,
-                  proof.proof_token,
-                  signal
-                )
-            }
-          },
-          controller.signal
-        )
+        return await access.run<
+          ContentAuditStatus | ContentAuditDeletion | ContentAuditResetResult
+        >((signal) => {
+          switch (operation.scope) {
+            case 'content_audit.initialize':
+              return initializeContentAudit(
+                operation.context,
+                proof.proof_token,
+                signal
+              )
+            case 'content_audit.settings.update':
+              return updateContentAuditSettings(
+                operation.context,
+                proof.proof_token,
+                signal
+              )
+            case 'content_audit.delete':
+              return deleteContentAudits(
+                operation.context,
+                proof.proof_token,
+                signal
+              )
+            case 'content_audit.reset':
+              return resetContentAudits(
+                operation.context,
+                proof.proof_token,
+                signal
+              )
+          }
+        }, controller.signal)
       } finally {
         if (current.current === controller) current.current = null
       }
@@ -103,6 +113,10 @@ export function useContentAuditAction(options?: {
       if (operation.scope === 'content_audit.delete') {
         toast.success(
           t('Deletion requested. Physical cleanup is still pending.')
+        )
+      } else if (operation.scope === 'content_audit.reset') {
+        toast.success(
+          t('Content audit reset requested. Physical cleanup is still pending.')
         )
       } else {
         client.setQueryData([...access.queryKey, 'status'], result)
@@ -115,7 +129,10 @@ export function useContentAuditAction(options?: {
     // Even a failed write can have committed. Refetch before accepting another
     // operation; a retry always obtains a fresh, context-bound proof.
     onSettled: async (result, error, operation) => {
-      if (operation.scope === 'content_audit.delete' && (result || error)) {
+      const destructive =
+        operation.scope === 'content_audit.delete' ||
+        operation.scope === 'content_audit.reset'
+      if (destructive && (result || error)) {
         // Mounted observers retain their data after removeQueries. Hide the
         // disclosure before waiting for any metadata refresh or navigation.
         if (mounted.current) options?.onDeletionSettled?.()

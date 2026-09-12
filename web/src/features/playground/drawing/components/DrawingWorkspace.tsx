@@ -244,35 +244,36 @@ export function DrawingWorkspace(props: { userId: number }) {
       className='flex min-h-0 flex-1 flex-col overflow-hidden'
       aria-label={t('Drawing playground')}
     >
-      <CanvasEditorHeader kind='drawing' />
-      <CanvasToolbar
-        tool={tool}
-        onToolChange={(nextTool) => {
-          referenceConnections.cancel()
-          setTool(nextTool)
-        }}
-        compact={compact}
-        busy={files.busy}
-        onUpload={(uploaded) => {
-          void files.addImages(uploaded, insertionPoint())
-        }}
-        onImport={(file) => {
-          void files.importCanvas(file)
-        }}
-        onExport={files.exportCanvas}
-        onClear={() => {
-          clearTarget.current = captureCanvasTarget('drawing')
-          setReplaceError(null)
-          setClearOpen(true)
-        }}
-        onSettings={() => setSettingsOpen(true)}
-        onArrange={() => {
-          useDrawingStore.getState().arrange()
-          requestAnimationFrame(() => {
-            void flow.fitView({ padding: 0.2, maxZoom: 1 })
-          })
-        }}
-      />
+      <CanvasEditorHeader kind='drawing'>
+        <CanvasToolbar
+          tool={tool}
+          onToolChange={(nextTool) => {
+            referenceConnections.cancel()
+            setTool(nextTool)
+          }}
+          compact={compact}
+          busy={files.busy}
+          onUpload={(uploaded) => {
+            void files.addImages(uploaded, insertionPoint())
+          }}
+          onImport={(file) => {
+            void files.importCanvas(file)
+          }}
+          onExport={files.exportCanvas}
+          onClear={() => {
+            clearTarget.current = captureCanvasTarget('drawing')
+            setReplaceError(null)
+            setClearOpen(true)
+          }}
+          onSettings={() => setSettingsOpen(true)}
+          onArrange={() => {
+            useDrawingStore.getState().arrange()
+            requestAnimationFrame(() => {
+              void flow.fitView({ padding: 0.2, maxZoom: 1 })
+            })
+          }}
+        />
+      </CanvasEditorHeader>
       {saveStatus === 'error' && (
         <Alert
           variant='destructive'

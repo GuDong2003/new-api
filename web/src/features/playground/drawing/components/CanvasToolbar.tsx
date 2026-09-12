@@ -57,11 +57,7 @@ export function CanvasToolbar(props: CanvasToolbarProps) {
   const canRedo = useDrawingStore((state) => state.future.length > 0)
   const count = useDrawingStore((state) => state.nodes.length)
   return (
-    <div
-      className='bg-background flex shrink-0 items-center gap-1 overflow-x-auto border-b px-3 py-2'
-      role='toolbar'
-      aria-label={t('Canvas tools')}
-    >
+    <>
       {props.compact && (
         <Button
           type='button'
@@ -202,6 +198,6 @@ export function CanvasToolbar(props: CanvasToolbarProps) {
           event.target.value = ''
         }}
       />
-    </div>
+    </>
   )
 }

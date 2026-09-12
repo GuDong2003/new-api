@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import type {
   ContentAuditDeleteRequest,
   ContentAuditInitializeRequest,
+  ContentAuditResetRequest,
   ContentAuditSettingsUpdate,
 } from '@/features/content-audit/types'
 import type { AuthBundle } from '@/stores/auth-store'
@@ -46,6 +47,7 @@ export type SecurityProofScope =
   | 'content_audit.initialize'
   | 'content_audit.settings.update'
   | 'content_audit.delete'
+  | 'content_audit.reset'
 
 export type ContentAuditOperation =
   | {
@@ -57,6 +59,7 @@ export type ContentAuditOperation =
       context: ContentAuditSettingsUpdate
     }
   | { scope: 'content_audit.delete'; context: ContentAuditDeleteRequest }
+  | { scope: 'content_audit.reset'; context: ContentAuditResetRequest }
 
 export type VerificationOperation =
   | ContentAuditOperation

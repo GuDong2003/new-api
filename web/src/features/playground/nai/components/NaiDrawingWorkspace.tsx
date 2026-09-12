@@ -14,7 +14,7 @@ GNU Affero General Public License for more details.
 You should have received a copy of the GNU Affero General Public License
 along with this program. If not, see <https://www.gnu.org/licenses/>.
 */
-import { ImageAdd01Icon } from '@hugeicons/core-free-icons'
+import { Download04Icon, ImageAdd01Icon } from '@hugeicons/core-free-icons'
 import { HugeiconsIcon } from '@hugeicons/react'
 import {
   Background,
@@ -162,11 +162,16 @@ function NaiDrawingWorkspace(props: { userId: number }) {
       className='flex min-h-0 flex-1 flex-col overflow-hidden'
       aria-label={t('NAI drawing canvas')}
     >
-      <CanvasEditorHeader kind='nai' />
-      <div
-        className='bg-background flex shrink-0 items-center gap-1 overflow-x-auto border-b px-3 py-2'
-        role='toolbar'
-        aria-label={t('NAI canvas tools')}
+      <CanvasEditorHeader
+        kind='nai'
+        toolbarLabel={t('NAI canvas tools')}
+        statusDetail={
+          <span className='text-muted-foreground max-w-40 truncate text-xs'>
+            {status === 'saving'
+              ? t('Saving…')
+              : t('NAI image nodes: {{count}}', { count: nodes.length })}
+          </span>
+        }
       >
         {compact && (
           <Button
@@ -235,15 +240,12 @@ function NaiDrawingWorkspace(props: { userId: number }) {
           <WandSparkles className='size-4' aria-hidden='true' />
           {t('Arrange')}
         </Button>
-        <span className='text-muted-foreground ml-auto text-xs'>
-          {status === 'saving'
-            ? t('Saving…')
-            : t('NAI image nodes: {{count}}', { count: nodes.length })}
-        </span>
         <Button
           type='button'
           variant='ghost'
-          size='sm'
+          size='icon-sm'
+          aria-label={t('Export canvas')}
+          title={t('Export canvas')}
           onClick={() => {
             const auth = useAuthStore.getState().auth
             void exportCanvasProject(
@@ -257,9 +259,9 @@ function NaiDrawingWorkspace(props: { userId: number }) {
               .catch(() => toast.error(t('The canvas could not be exported.')))
           }}
         >
-          {t('Export canvas')}
+          <HugeiconsIcon icon={Download04Icon} size={16} aria-hidden='true' />
         </Button>
-      </div>
+      </CanvasEditorHeader>
       {status === 'error' && (
         <Alert
           variant='destructive'

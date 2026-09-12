@@ -371,3 +371,26 @@ func DeleteContentAudits(c *gin.Context) {
 	}
 	c.JSON(http.StatusAccepted, gin.H{"success": true, "message": "", "data": gin.H{"operation_id": operationID, "ids": input.IDs, "status": "deleting"}})
 }
+
+func ResetContentAudits(c *gin.Context) {
+	var input struct{}
+	if !contentAuditOperationBody(c, service.VerificationScopeContentAuditReset, &input) {
+		return
+	}
+	operationID := common.NewRequestId()
+	c.Header("X-Content-Audit-Operation", operationID)
+	if err := recordContentAuditAccess(c, operationID, "content_audit.reset", "authorized", nil, true); err != nil {
+		contentAuditAPIError(c, err)
+		return
+	}
+	count, err := service.RequestContentAuditReset(c.Request.Context())
+	if logErr := recordContentAuditAccess(c, operationID, "content_audit.reset", "reset_requested", nil, err == nil); logErr != nil {
+		contentAuditAPIError(c, logErr)
+		return
+	}
+	if err != nil {
+		contentAuditAPIError(c, err)
+		return
+	}
+	c.JSON(http.StatusAccepted, gin.H{"success": true, "message": "", "data": gin.H{"operation_id": operationID, "count": count, "status": "deleting"}})
+}

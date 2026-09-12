@@ -237,6 +237,7 @@ func SetApiRouter(router *gin.Engine) {
 			contentAuditRoute.GET("/records/:id/thumbnails/:index", controller.GetContentAuditThumbnail)
 			contentAuditRoute.DELETE("/records/:id", middleware.CriticalRateLimit(), controller.DeleteContentAudits)
 			contentAuditRoute.POST("/records/delete", middleware.CriticalRateLimit(), controller.DeleteContentAudits)
+			contentAuditRoute.POST("/records/reset", middleware.CriticalRateLimit(), controller.ResetContentAudits)
 		}
 		optionRoute := apiRouter.Group("/option")
 		optionRoute.Use(middleware.RootAuth())

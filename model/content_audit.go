@@ -636,6 +636,27 @@ func RequestContentAuditDeletion(ctx context.Context, ids []string) error {
 	})
 }
 
+// RequestContentAuditReset marks every completed, stopped capture for
+// asynchronous physical cleanup. Pending writers are deliberately excluded so
+// an administrative reset cannot interrupt an in-flight request.
+func RequestContentAuditReset(ctx context.Context) (int64, error) {
+	var count int64
+	err := contentAuditTransaction(ctx, func(tx *gorm.DB, state *ContentAuditStorageState) error {
+		result := tx.Model(&ContentAudit{}).
+			Where("writer_stopped = ? AND status IN ?", true, []string{ContentAuditReady, ContentAuditFailed}).
+			Updates(map[string]any{"status": ContentAuditDeleting, "fence": gorm.Expr("fence + ?", 1)})
+		if result.Error != nil {
+			return result.Error
+		}
+		count = result.RowsAffected
+		if count > 0 {
+			state.LedgerVersion++
+		}
+		return nil
+	})
+	return count, err
+}
+
 // Authorization is private, bounded, and owned by this exact stopped deletion
 // fence. It changes no charge; child references survive until Finish succeeds.
 func AuthorizeContentAuditDeletion(ctx context.Context, record *ContentAudit, authorization string) error {

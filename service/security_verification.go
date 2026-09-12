@@ -37,6 +37,7 @@ const (
 	VerificationScopeContentAuditInitialize = "content_audit.initialize"
 	VerificationScopeContentAuditSettings   = "content_audit.settings.update"
 	VerificationScopeContentAuditDelete     = "content_audit.delete"
+	VerificationScopeContentAuditReset      = "content_audit.reset"
 )
 
 var (
@@ -85,7 +86,7 @@ func BindVerificationOperation(operation VerificationOperation) (VerificationBin
 	}
 	var normalized any
 	switch operation.Scope {
-	case VerificationScopeContentAuditInitialize, VerificationScopeContentAuditSettings, VerificationScopeContentAuditDelete:
+	case VerificationScopeContentAuditInitialize, VerificationScopeContentAuditSettings, VerificationScopeContentAuditDelete, VerificationScopeContentAuditReset:
 		var err error
 		normalized, err = normalizeContentAuditOperation(operation.Scope, operation.Context, fields)
 		if err != nil {
@@ -196,7 +197,7 @@ func securityVerificationPolicy(scope string, state model.UserVerificationState)
 		VerificationScopeAccessTokenGenerate, VerificationScopeAccessTokenRevoke,
 		VerificationScopeAccountBind, VerificationScopeAccountUnbind,
 		VerificationScopePasswordSet, VerificationScopePasswordChange, VerificationScopeAccountDelete,
-		VerificationScopeContentAuditInitialize, VerificationScopeContentAuditSettings, VerificationScopeContentAuditDelete:
+		VerificationScopeContentAuditInitialize, VerificationScopeContentAuditSettings, VerificationScopeContentAuditDelete, VerificationScopeContentAuditReset:
 		if scope == VerificationScopeAccountDelete && state.Role == common.RoleRootUser {
 			return nil, ErrVerificationForbidden
 		}
@@ -242,7 +243,7 @@ func GetVerificationRequirements(identity AuthIdentity, scope string) (*Verifica
 		return nil, ErrAuthTokenInvalid
 	}
 	switch scope {
-	case VerificationScopeChannelKeyRead, VerificationScopeContentAuditInitialize, VerificationScopeContentAuditSettings, VerificationScopeContentAuditDelete:
+	case VerificationScopeChannelKeyRead, VerificationScopeContentAuditInitialize, VerificationScopeContentAuditSettings, VerificationScopeContentAuditDelete, VerificationScopeContentAuditReset:
 		if state.Role != common.RoleRootUser {
 			return nil, ErrVerificationForbidden
 		}
@@ -256,7 +257,7 @@ func GetVerificationRequirements(identity AuthIdentity, scope string) (*Verifica
 		if methods[i].Method == VerificationMethodPassword && !common.PasswordLoginEnabled {
 			switch scope {
 			case VerificationScopeAccountBind, VerificationScopeAccountUnbind, VerificationScopePasswordSet, VerificationScopePasswordChange, VerificationScopeAccountDelete,
-				VerificationScopeContentAuditInitialize, VerificationScopeContentAuditSettings, VerificationScopeContentAuditDelete:
+				VerificationScopeContentAuditInitialize, VerificationScopeContentAuditSettings, VerificationScopeContentAuditDelete, VerificationScopeContentAuditReset:
 				methods[i].Available, methods[i].Reason = false, "Password authentication is disabled."
 			}
 		}

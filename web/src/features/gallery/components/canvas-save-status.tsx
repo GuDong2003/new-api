@@ -36,13 +36,13 @@ export function CanvasSaveStatus(props: CanvasSaveStatusProps) {
   if (!text && props.localStatus === 'saved') {
     if (full) text = t('已保存到本地，云端空间不足，暂未上传。')
     else if (props.cloudStatus === 'synced') text = t('Synced')
-    else if (props.cloudStatus === 'conflict')
+    else if (props.cloudStatus === 'conflict') {
       text = t(
         'Cloud conflict. Export your local canvas or reload the cloud version.'
       )
-    else if (props.cloudStatus === 'error')
+    } else if (props.cloudStatus === 'error') {
       text = t('Saved locally. Cloud save failed; try again later.')
-    else text = t('Saved in this browser')
+    } else text = t('Saved in this browser')
   }
   return (
     <p className='text-muted-foreground text-xs' role='status'>
