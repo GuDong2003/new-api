@@ -101,7 +101,6 @@ export function ContentAuditResetButton(props: {
       <Button
         type='button'
         variant='outline'
-        size='sm'
         disabled={props.disabled || action.mutation.isPending}
         onClick={() => setOpen(true)}
       >

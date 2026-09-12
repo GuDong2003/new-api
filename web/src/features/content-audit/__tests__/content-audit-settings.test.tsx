@@ -319,6 +319,22 @@ it('offers clearing saved content from settings and requires reset verification'
   })
 })
 
+it('sizes the clear action like the other buttons in the settings action row', async () => {
+  const status = auditStatus()
+  status.state = { ...status.state, storage_id: 'initialized-store' }
+  status.ready = true
+  transport = installAuditTransport(() => ({ body: auditSuccess(status) }))
+  renderSettings()
+
+  const clear = await screen.findByRole('button', {
+    name: 'Clear saved content',
+  })
+  const refresh = screen.getByRole('button', { name: 'Refresh status' })
+
+  expect(clear.className).toContain('h-8')
+  expect(clear.className).toBe(refresh.className)
+})
+
 it('allows disabling an already enabled but paused audit without passing readiness', async () => {
   const status = auditStatus()
   status.state = {
