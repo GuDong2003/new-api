@@ -41,9 +41,11 @@ func UsingLogDatabase(databaseType DatabaseType) bool {
 	return logDatabaseType == databaseType
 }
 
-// SQLitePath is the DSN for the default SQLite database. It uses WAL journal
-// mode so readers are never blocked by the single writer, plus a 30s busy
-// timeout for writers to queue.
+// SQLiteConcurrencyParams are the DSN query parameters every SQLite connection
+// that serves concurrent writers needs, including the ones tests open to
+// exercise concurrent request handling. They select WAL journal mode so readers
+// are never blocked by the single writer, plus a 30s busy timeout for writers to
+// queue.
 //
 // Two details are non-obvious and both are required for concurrent correctness:
 //
@@ -61,4 +63,7 @@ func UsingLogDatabase(databaseType DatabaseType) bool {
 //     front, so writers serialize through the busy timeout instead of dying on
 //     a stale snapshot. Autocommit SELECTs stay concurrent because WAL keeps
 //     readers unlocked.
-var SQLitePath = "one-api.db?_pragma=busy_timeout(30000)&_pragma=journal_mode(WAL)&_txlock=immediate"
+const SQLiteConcurrencyParams = "_pragma=busy_timeout(30000)&_pragma=journal_mode(WAL)&_txlock=immediate"
+
+// SQLitePath is the DSN for the default SQLite database.
+var SQLitePath = "one-api.db?" + SQLiteConcurrencyParams

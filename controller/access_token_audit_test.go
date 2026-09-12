@@ -432,12 +432,21 @@ type releasedAuditLog struct {
 
 func (releasedAuditLog) TableName() string { return "logs" }
 
+// newAuditTestDatabase opens an isolated database for the given dialect.
 // External tests create a new database per case on a loopback-only disposable
 // instance. They never drop databases or tables supplied through an environment variable.
-func newAuditTestDatabase(t *testing.T, kind, dsn string) (*gorm.DB, string) {
+//
+// SQLite defaults to a bare DSN, which fails concurrent writers instantly with
+// "database is locked". Tests that exercise concurrent requests should pass
+// common.SQLiteConcurrencyParams so writers queue the way they do in production;
+// tests that assert on the fast failure must keep the bare DSN.
+func newAuditTestDatabase(t *testing.T, kind, dsn string, sqliteParams ...string) (*gorm.DB, string) {
 	t.Helper()
 	if kind == "sqlite" {
 		path := t.TempDir() + "/audit.db"
+		if len(sqliteParams) > 0 {
+			path += "?" + strings.Join(sqliteParams, "&")
+		}
 		db, err := gorm.Open(sqlite.Open(path), &gorm.Config{})
 		require.NoError(t, err)
 		return db, path
