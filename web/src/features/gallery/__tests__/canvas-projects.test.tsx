@@ -223,7 +223,7 @@ it('marks an unuploaded image in a synced canvas local-only until its exact asse
     needsExplicitSave: false,
   }))
   renderGallery()
-  expect(await screen.findByText('Local draft')).toBeVisible()
+  expect(await screen.findByText(/Local draft/)).toBeVisible()
   await userEvent.click(
     screen.getByRole('button', { name: 'Preview original' })
   )
@@ -234,7 +234,7 @@ it('marks an unuploaded image in a synced canvas local-only until its exact asse
   remoteImages = [{ ...galleryImage, id: assetId, expires_at: 2000000000 }]
   await userEvent.click(screen.getByRole('button', { name: 'Refresh' }))
   expect(await screen.findByText(galleryImage.prompt)).toBeVisible()
-  expect(screen.queryByText('Local draft')).not.toBeInTheDocument()
+  expect(screen.queryByText(/Local draft/)).not.toBeInTheDocument()
   await userEvent.click(
     screen.getByRole('button', { name: 'Preview original' })
   )
@@ -388,11 +388,14 @@ it('requires an explicit conflict reload and offers local export without a nativ
   expect(
     await screen.findByRole('button', { name: 'Export canvas' })
   ).toBeVisible()
+  await userEvent.click(screen.getByRole('button', { name: 'Canvas title' }))
   const title = screen.getByRole('textbox', { name: 'Canvas title' })
   await userEvent.clear(title)
   await userEvent.type(title, '冲突本地画布')
   await userEvent.keyboard('{Escape}')
-  expect(title).toHaveValue('本地画布')
+  expect(
+    screen.getByRole('button', { name: 'Canvas title' })
+  ).toHaveTextContent('本地画布')
   await userEvent.click(
     screen.getByRole('button', { name: 'Reload cloud version' })
   )
@@ -403,9 +406,16 @@ it('requires an explicit conflict reload and offers local export without a nativ
   expect(useDrawingStore.getState().nodes).toHaveLength(1)
 })
 
-it('keeps the title editable and exposes compact canvas actions beside it', async () => {
+it('shows the canvas title as text until it is clicked', async () => {
   await localImage()
   render(<CanvasEditorHeader kind='drawing' />)
+  expect(
+    screen.queryByRole('textbox', { name: 'Canvas title' })
+  ).not.toBeInTheDocument()
+  expect(
+    screen.getByRole('button', { name: 'Canvas title' })
+  ).toHaveTextContent('本地画布')
+  await userEvent.click(screen.getByRole('button', { name: 'Canvas title' }))
   expect(
     await screen.findByRole('textbox', { name: 'Canvas title' })
   ).toHaveValue('本地画布')
@@ -415,6 +425,22 @@ it('keeps the title editable and exposes compact canvas actions beside it', asyn
   expect(
     screen.queryByRole('button', { name: 'Rename canvas' })
   ).not.toBeInTheDocument()
+})
+
+it('saves a title edited from the text view with Enter', async () => {
+  const canvas = await localImage()
+  render(<CanvasEditorHeader kind='drawing' />)
+
+  await userEvent.click(screen.getByRole('button', { name: 'Canvas title' }))
+  const title = screen.getByRole('textbox', { name: 'Canvas title' })
+  await userEvent.clear(title)
+  await userEvent.type(title, '新的画布标题')
+  await userEvent.keyboard('{Enter}')
+
+  expect(
+    await screen.findByRole('button', { name: 'Canvas title' })
+  ).toHaveTextContent('新的画布标题')
+  expect((await loadLocalCanvas(813, canvas.id))?.name).toBe('新的画布标题')
 })
 
 it('discards asynchronous Drawing file import when the selected canvas changes', async () => {

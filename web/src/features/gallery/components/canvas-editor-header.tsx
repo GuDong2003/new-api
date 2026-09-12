@@ -23,7 +23,7 @@ import {
 } from '@hugeicons/core-free-icons'
 import { HugeiconsIcon } from '@hugeicons/react'
 import { Link, useNavigate } from '@tanstack/react-router'
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { ConfirmDialog } from '@/components/confirm-dialog'
@@ -50,12 +50,13 @@ export function CanvasEditorHeader(props: {
   const [createOpen, setCreateOpen] = useState(false)
   const [reloadOpen, setReloadOpen] = useState(false)
   const [title, setTitle] = useState('')
-  const cancelTitleBlur = useRef(false)
+  const [editingTitle, setEditingTitle] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     setTitle(current?.name ?? '')
+    setEditingTitle(false)
   }, [current?.id, current?.name])
 
   const run = async (action: () => Promise<unknown>) => {
@@ -78,20 +79,23 @@ export function CanvasEditorHeader(props: {
       )
     )
 
+  const cancelTitleEdit = () => {
+    setTitle(current?.name ?? '')
+    setEditingTitle(false)
+  }
+
   const saveTitle = () => {
-    if (cancelTitleBlur.current) {
-      cancelTitleBlur.current = false
-      return
-    }
     if (!current || busy) return
     const normalized = title.trim()
     if (!normalized || normalized === current.name) {
       setTitle(current.name)
+      setEditingTitle(false)
       return
     }
     void run(async () => {
       await canvas.rename(current.id, normalized)
       setTitle(normalized)
+      setEditingTitle(false)
     })
   }
 
@@ -103,6 +107,10 @@ export function CanvasEditorHeader(props: {
         aria-label={props.toolbarLabel ?? t('Canvas tools')}
       >
         <div className='flex min-w-0 items-center gap-1 overflow-x-auto'>
+          {props.children}
+        </div>
+
+        <div className='flex max-w-[min(42vw,28rem)] min-w-0 items-center justify-center gap-1'>
           <Button
             type='button'
             variant='ghost'
@@ -114,31 +122,41 @@ export function CanvasEditorHeader(props: {
           >
             <HugeiconsIcon icon={FileAddIcon} size={16} aria-hidden='true' />
           </Button>
-          {props.children}
-        </div>
-
-        <div className='flex max-w-[min(42vw,28rem)] min-w-0 items-center justify-center gap-1'>
-          <Input
-            aria-label={t('Canvas title')}
-            value={title}
-            placeholder={t('New canvas')}
-            maxLength={255}
-            disabled={!current || busy}
-            className='h-7 min-w-0 text-center text-sm'
-            onChange={(event) => setTitle(event.target.value)}
-            onBlur={saveTitle}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') {
-                event.preventDefault()
-                event.currentTarget.blur()
-              } else if (event.key === 'Escape') {
-                event.preventDefault()
-                cancelTitleBlur.current = true
-                setTitle(current?.name ?? '')
-                event.currentTarget.blur()
-              }
-            }}
-          />
+          {editingTitle ? (
+            <Input
+              autoFocus
+              aria-label={t('Canvas title')}
+              value={title}
+              placeholder={t('New canvas')}
+              maxLength={255}
+              disabled={!current || busy}
+              className='h-7 min-w-0 text-center text-sm'
+              onChange={(event) => setTitle(event.target.value)}
+              onBlur={saveTitle}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault()
+                  event.currentTarget.blur()
+                } else if (event.key === 'Escape') {
+                  event.preventDefault()
+                  cancelTitleEdit()
+                }
+              }}
+            />
+          ) : (
+            <Button
+              type='button'
+              variant='ghost'
+              size='sm'
+              disabled={!current || busy}
+              className='h-7 max-w-[min(32vw,20rem)] min-w-0 truncate px-2 font-medium'
+              aria-label={t('Canvas title')}
+              title={t('Canvas title')}
+              onClick={() => setEditingTitle(true)}
+            >
+              <span className='truncate'>{title || t('New canvas')}</span>
+            </Button>
+          )}
           <Button
             type='button'
             variant='ghost'
