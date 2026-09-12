@@ -223,7 +223,7 @@ it('marks an unuploaded image in a synced canvas local-only until its exact asse
     needsExplicitSave: false,
   }))
   renderGallery()
-  expect(await screen.findByText(/Local draft/)).toBeVisible()
+  expect(await screen.findByText('Local draft')).toBeVisible()
   await userEvent.click(
     screen.getByRole('button', { name: 'Preview original' })
   )
@@ -234,7 +234,7 @@ it('marks an unuploaded image in a synced canvas local-only until its exact asse
   remoteImages = [{ ...galleryImage, id: assetId, expires_at: 2000000000 }]
   await userEvent.click(screen.getByRole('button', { name: 'Refresh' }))
   expect(await screen.findByText(galleryImage.prompt)).toBeVisible()
-  expect(screen.queryByText(/Local draft/)).not.toBeInTheDocument()
+  expect(screen.queryByText('Local draft')).not.toBeInTheDocument()
   await userEvent.click(
     screen.getByRole('button', { name: 'Preview original' })
   )

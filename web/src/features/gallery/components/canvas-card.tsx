@@ -62,13 +62,13 @@ export function CanvasCard(props: {
     <article className='bg-background flex min-w-0 flex-col overflow-hidden rounded-xl border'>
       <Button
         variant='ghost'
-        className='h-44 w-full rounded-none p-0'
+        className='h-32 w-full rounded-none p-0'
         onClick={props.onOpen}
         aria-label={t('Open canvas: {{name}}', { name: project.name })}
       >
-        <div className='bg-muted flex size-full items-center justify-center p-4'>
+        <div className='bg-muted flex size-full items-center justify-center p-2'>
           {project.coverAssetIds.length ? (
-            <div className='grid w-full max-w-xs grid-cols-2 gap-2'>
+            <div className='grid w-full max-w-44 grid-cols-2 gap-1.5'>
               {project.coverAssetIds.slice(0, 4).map((id) => (
                 <CanvasCover
                   key={id}
@@ -80,44 +80,47 @@ export function CanvasCard(props: {
               ))}
             </div>
           ) : (
-            <span className='text-muted-foreground text-sm'>
+            <span className='text-muted-foreground text-xs'>
               {t('Empty canvas')}
             </span>
           )}
         </div>
       </Button>
-      <div className='flex min-w-0 flex-col gap-2 p-4'>
-        <div className='flex min-w-0 items-start justify-between gap-2'>
-          <h3 className='min-w-0 truncate font-medium' title={project.name}>
+      <div className='flex min-w-0 flex-col gap-0.5 p-3'>
+        <div className='flex min-w-0 items-center justify-between gap-1'>
+          <h3
+            className='min-w-0 truncate text-sm font-medium'
+            title={project.name}
+          >
             {project.name}
           </h3>
-          <div className='flex shrink-0 gap-1'>
+          <div className='flex shrink-0'>
             <Button
-              size='icon-sm'
+              size='icon-xs'
               variant='ghost'
               onClick={props.onRename}
               aria-label={t('Rename canvas')}
             >
               <HugeiconsIcon
                 icon={PencilEdit01Icon}
-                size={16}
+                size={14}
                 aria-hidden='true'
               />
             </Button>
             <Button
-              size='icon-sm'
+              size='icon-xs'
               variant='ghost'
               onClick={props.onDelete}
               aria-label={t('Delete canvas')}
             >
-              <HugeiconsIcon icon={Delete02Icon} size={16} aria-hidden='true' />
+              <HugeiconsIcon icon={Delete02Icon} size={14} aria-hidden='true' />
             </Button>
           </div>
         </div>
         <p className='text-muted-foreground truncate text-xs'>
           {type} · {updated}
         </p>
-        <p className='text-muted-foreground text-xs'>{status}</p>
+        <p className='text-muted-foreground truncate text-xs'>{status}</p>
       </div>
     </article>
   )

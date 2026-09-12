@@ -70,7 +70,6 @@
     "Oldest": "最早",
     "Name": "名称",
     "Gallery usage": "图库用量",
-    "Private final images from Drawing and NAI Canvas. Both sources share one quota.": "仅自己可见的绘图与 NAI 画布最终图片，两种来源共用存储额度。",
     "{{used}} / {{max}} images": "{{used}} / {{max}} 张图片",
     "New images expire after {{days}} days. Originals, thumbnails and metadata all count toward storage.": "新图片保存 {{days}} 天后过期，原图、缩略图与元数据均计入用量。",
     "Gallery could not be loaded.": "图库加载失败。",

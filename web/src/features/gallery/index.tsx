@@ -22,6 +22,7 @@ import { useTranslation } from 'react-i18next'
 import { ConfirmDialog } from '@/components/confirm-dialog'
 import { EmptyState } from '@/components/empty-state'
 import { ErrorState } from '@/components/error-state'
+import { LearnMore } from '@/components/learn-more'
 import { LoadingState } from '@/components/loading-state'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -359,73 +360,8 @@ function GalleryContent(props: { identity: GalleryIdentity }) {
   return (
     <main
       id='content'
-      className='flex h-full min-h-0 flex-col gap-5 overflow-y-auto p-4 sm:p-6'
+      className='flex h-full min-h-0 flex-col gap-3 overflow-y-auto p-4 sm:px-6 sm:pb-6'
     >
-      <header className='flex flex-wrap items-start justify-between gap-3'>
-        <div className='flex min-w-0 flex-col gap-1'>
-          <h1 className='text-2xl font-semibold'>{t('My Gallery')}</h1>
-          <p className='text-muted-foreground text-sm'>
-            {t(
-              'Private final images from Drawing and NAI Canvas. Both sources share one quota.'
-            )}
-          </p>
-          {status ? (
-            <CanvasSaveStatus
-              localStatus='saved'
-              cloudStatus='full'
-              statusText={status}
-            />
-          ) : null}
-        </div>
-        <div className='flex gap-2'>
-          <Button
-            variant='outline'
-            onClick={() => void run(refresh)}
-            disabled={busy}
-          >
-            {t('Refresh')}
-          </Button>
-          <Button
-            onClick={() => {
-              setRenameTarget(null)
-              setDialog('create')
-            }}
-            disabled={busy}
-          >
-            {t('New canvas')}
-          </Button>
-        </div>
-      </header>
-      {usage.data ? (
-        <section
-          aria-label={t('Gallery usage')}
-          className='rounded-lg border p-4 text-sm'
-        >
-          <div className='flex flex-wrap justify-between gap-2'>
-            <span>
-              {t('{{used}} / {{max}} images', {
-                used: usage.data.used_images,
-                max: usage.data.max_images,
-              })}
-            </span>
-            <span>
-              {(usage.data.used_bytes / 1048576).toFixed(2)} /{' '}
-              {(usage.data.max_bytes / 1048576).toFixed(2)} MiB
-            </span>
-          </div>
-          <p className='text-muted-foreground mt-2'>
-            {t(
-              'New images expire after {{days}} days. Originals, thumbnails and metadata all count toward storage.',
-              { days: usage.data.retention_days }
-            )}
-          </p>
-          <p className='text-muted-foreground mt-1'>
-            {t(
-              'References count as originals. Thumbnails, masks and canvas documents share the byte quota. Cloud expiry keeps local drafts.'
-            )}
-          </p>
-        </section>
-      ) : null}
       {error ? (
         <Alert variant='destructive'>
           <AlertDescription>{t(error)}</AlertDescription>
@@ -444,14 +380,14 @@ function GalleryContent(props: { identity: GalleryIdentity }) {
           setPage(1)
         }}
       >
-        <div className='flex flex-wrap items-center justify-between gap-3'>
+        <div className='flex flex-wrap items-center justify-between gap-2'>
           <TabsList>
             <TabsTrigger value='images'>{t('Images')}</TabsTrigger>
             <TabsTrigger value='canvases'>{t('Canvases')}</TabsTrigger>
           </TabsList>
-          <div className='flex min-w-0 flex-wrap gap-2'>
+          <div className='flex min-w-0 flex-wrap items-center gap-2'>
             <Input
-              className='w-full sm:w-64'
+              className='w-full sm:w-56'
               value={search}
               onChange={(event) => {
                 setSearch(event.target.value)
@@ -512,12 +448,70 @@ function GalleryContent(props: { identity: GalleryIdentity }) {
                 </SelectGroup>
               </SelectContent>
             </Select>
+            <Button
+              variant='outline'
+              onClick={() => void run(refresh)}
+              disabled={busy}
+            >
+              {t('Refresh')}
+            </Button>
+            <Button
+              onClick={() => {
+                setRenameTarget(null)
+                setDialog('create')
+              }}
+              disabled={busy}
+            >
+              {t('New canvas')}
+            </Button>
           </div>
         </div>
+        {usage.data || status ? (
+          <div className='flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1'>
+            {usage.data ? (
+              <section
+                aria-label={t('Gallery usage')}
+                className='text-muted-foreground flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs'
+              >
+                <span>
+                  {t('{{used}} / {{max}} images', {
+                    used: usage.data.used_images,
+                    max: usage.data.max_images,
+                  })}
+                </span>
+                <span aria-hidden='true'>·</span>
+                <span>
+                  {(usage.data.used_bytes / 1048576).toFixed(2)} /{' '}
+                  {(usage.data.max_bytes / 1048576).toFixed(2)} MiB
+                </span>
+                <LearnMore contentProps={{ className: 'text-xs' }}>
+                  <p>
+                    {t(
+                      'New images expire after {{days}} days. Originals, thumbnails and metadata all count toward storage.',
+                      { days: usage.data.retention_days }
+                    )}
+                  </p>
+                  <p className='mt-1'>
+                    {t(
+                      'References count as originals. Thumbnails, masks and canvas documents share the byte quota. Cloud expiry keeps local drafts.'
+                    )}
+                  </p>
+                </LearnMore>
+              </section>
+            ) : null}
+            {status ? (
+              <CanvasSaveStatus
+                localStatus='saved'
+                cloudStatus='full'
+                statusText={status}
+              />
+            ) : null}
+          </div>
+        ) : null}
         <TabsContent value='images'>
           {loading && <LoadingState />}
           {!loading && imageItems.length > 0 && (
-            <div className='grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4'>
+            <div className='grid grid-cols-2 gap-3 sm:grid-cols-[repeat(auto-fill,minmax(11rem,1fr))]'>
               {imageItems.slice(offset, offset + 24).map((image) => (
                 <GalleryImageCard
                   key={image.id}
@@ -550,7 +544,7 @@ function GalleryContent(props: { identity: GalleryIdentity }) {
         <TabsContent value='canvases'>
           {loading && <LoadingState />}
           {!loading && projects.length > 0 && (
-            <div className='grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3'>
+            <div className='grid grid-cols-1 gap-3 sm:grid-cols-[repeat(auto-fill,minmax(15rem,1fr))]'>
               {projects.slice(offset, offset + 24).map((project) => (
                 <CanvasCard
                   key={project.id}
