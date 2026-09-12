@@ -186,9 +186,6 @@ export function PrefillGroupFormDrawer({
 
   const meta =
     PREFILL_GROUP_TYPE_META[selectedType] || PREFILL_GROUP_TYPE_META.model
-  let submitLabel = t('Create')
-  if (isEdit) submitLabel = t('Save changes')
-  if (isSaving) submitLabel = t('Saving...')
 
   return (
     <Sheet open={open} onOpenChange={handleOpenChange}>
@@ -401,7 +398,9 @@ export function PrefillGroupFormDrawer({
           </SheetClose>
           <Button type='submit' form='prefill-group-form' disabled={isSaving}>
             {isSaving && <Loader2 className='mr-2 h-4 w-4 animate-spin' />}
-            {submitLabel}
+            {isSaving && t('Saving...')}
+            {!isSaving && isEdit && t('Save changes')}
+            {!isSaving && !isEdit && t('Create')}
           </Button>
         </SheetFooter>
       </SheetContent>

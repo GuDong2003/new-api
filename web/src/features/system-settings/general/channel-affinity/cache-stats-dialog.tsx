@@ -76,9 +76,6 @@ export function CacheStatsDialog(props: Props) {
         if (seq !== seqRef.current) return
         setLoading(false)
       })
-      .catch(() => {
-        // Guard failures in the finalizer from becoming unhandled rejections.
-      })
   }, [props.open, props.target, t])
 
   const rows = useMemo(() => {
@@ -144,40 +141,6 @@ export function CacheStatsDialog(props: Props) {
     return data
   }, [stats, props.target, t])
 
-  const renderBody = () => {
-    if (loading) {
-      return (
-        <div className='text-muted-foreground py-8 text-center text-sm'>
-          {t('Loading...')}
-        </div>
-      )
-    }
-
-    if (rows.length > 0) {
-      return (
-        <div className='space-y-2'>
-          {rows.map((row) => (
-            <div
-              key={row.key}
-              className='flex justify-between gap-4 border-b pb-1 text-sm'
-            >
-              <span className='text-muted-foreground'>{row.key}</span>
-              <span className='text-right font-medium break-all'>
-                {row.value}
-              </span>
-            </div>
-          ))}
-        </div>
-      )
-    }
-
-    return (
-      <div className='text-muted-foreground py-8 text-center text-sm'>
-        {t('No data available')}
-      </div>
-    )
-  }
-
   return (
     <Dialog
       open={props.open}
@@ -192,7 +155,31 @@ export function CacheStatsDialog(props: Props) {
           'Hit criteria: If cached tokens exist in usage, it counts as a hit.'
         )}
       </p>
-      {renderBody()}
+      {loading && (
+        <div className='text-muted-foreground py-8 text-center text-sm'>
+          {t('Loading...')}
+        </div>
+      )}
+      {!loading && rows.length > 0 && (
+        <div className='space-y-2'>
+          {rows.map((row) => (
+            <div
+              key={row.key}
+              className='flex justify-between gap-4 border-b pb-1 text-sm'
+            >
+              <span className='text-muted-foreground'>{row.key}</span>
+              <span className='text-right font-medium break-all'>
+                {row.value}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+      {!loading && !(rows.length > 0) && (
+        <div className='text-muted-foreground py-8 text-center text-sm'>
+          {t('No data available')}
+        </div>
+      )}
     </Dialog>
   )
 }

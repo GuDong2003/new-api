@@ -135,29 +135,26 @@ export function UserQuotaDialog(props: UserQuotaDialogProps) {
         <div className='space-y-2'>
           <Label>{t('Mode')}</Label>
           <div className='flex gap-1'>
-            {(['add', 'subtract', 'override'] as const).map((m) => {
-              let modeLabel = t('Override')
-              if (m === 'add') modeLabel = t('Add')
-              else if (m === 'subtract') modeLabel = t('Subtract')
-              return (
-                <Button
-                  key={m}
-                  type='button'
-                  variant='outline'
-                  size='sm'
-                  className={cn(
-                    mode === m &&
-                      'bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground'
-                  )}
-                  onClick={() => {
-                    setMode(m)
-                    setAmount('')
-                  }}
-                >
-                  {modeLabel}
-                </Button>
-              )
-            })}
+            {(['add', 'subtract', 'override'] as const).map((m) => (
+              <Button
+                key={m}
+                type='button'
+                variant='outline'
+                size='sm'
+                className={cn(
+                  mode === m &&
+                    'bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground'
+                )}
+                onClick={() => {
+                  setMode(m)
+                  setAmount('')
+                }}
+              >
+                {m === 'add' && t('Add')}
+                {!(m === 'add') && m === 'subtract' && t('Subtract')}
+                {!(m === 'add') && !(m === 'subtract') && t('Override')}
+              </Button>
+            ))}
           </div>
         </div>
 

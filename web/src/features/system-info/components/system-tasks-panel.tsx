@@ -85,8 +85,6 @@ const TYPE_LABEL: Record<string, string> = {
   model_update: 'Batch upstream model update',
   midjourney_poll: 'Drawing task polling',
   async_task_poll: 'Async task polling',
-  channel_queue_warmup: 'Upstream queue warmer',
-  upstream_account_maintenance: 'Automatic Check-in',
 }
 
 const TYPE_DISPLAY_ID: Record<string, string> = {
@@ -290,9 +288,10 @@ export function SystemTasksPanel() {
       <div aria-busy={tasksQuery.isFetching}>
         {loading && (
           <div className='space-y-2 p-4 sm:p-5'>
-            {['one', 'two', 'three', 'four'].map((id) => (
-              <Skeleton key={id} className='h-9 w-full rounded-md' />
-            ))}
+            <Skeleton className='h-9 w-full rounded-md' />
+            <Skeleton className='h-9 w-full rounded-md' />
+            <Skeleton className='h-9 w-full rounded-md' />
+            <Skeleton className='h-9 w-full rounded-md' />
           </div>
         )}
         {!loading && tasksQuery.isError && (
@@ -322,7 +321,7 @@ export function SystemTasksPanel() {
             </p>
           </div>
         )}
-        {!loading && !tasksQuery.isError && tasks.length > 0 && (
+        {!loading && !tasksQuery.isError && !(tasks.length === 0) && (
           <div className='space-y-4 p-4 sm:p-5'>
             <div>
               <div className='mb-2 flex items-center justify-between gap-3'>

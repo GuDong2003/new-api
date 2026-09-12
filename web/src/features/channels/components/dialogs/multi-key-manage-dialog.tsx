@@ -373,72 +373,66 @@ export function MultiKeyManageDialog({
 
           {/* Table */}
           <div className='min-h-0 flex-1 overflow-auto rounded-md border'>
-            {(() => {
-              if (isLoading) {
-                return (
-                  <div className='flex items-center justify-center py-12'>
-                    <Loader2 className='text-muted-foreground h-8 w-8 animate-spin' />
-                  </div>
-                )
-              }
-              if (keys.length === 0) {
-                return (
-                  <div className='text-muted-foreground py-12 text-center'>
-                    {t('No keys found')}
-                  </div>
-                )
-              }
-              return (
-                <StaticDataTable
-                  className='rounded-none border-0'
-                  tableClassName='min-w-[800px]'
-                  data={keys}
-                  getRowKey={(key) => key.index}
-                  columns={[
-                    {
-                      id: 'index',
-                      header: t('Index'),
-                      className: 'w-20',
-                      cellClassName: 'font-mono text-sm',
-                      cell: (key) => `#${key.index + 1}`,
-                    },
-                    {
-                      id: 'status',
-                      header: t('Status'),
-                      className: 'w-32',
-                      cell: (key) => renderStatusBadge(key.status),
-                    },
-                    {
-                      id: 'reason',
-                      header: t('Disabled Reason'),
-                      className: 'min-w-[200px]',
-                      cellClassName: 'max-w-xs truncate text-sm',
-                      cell: (key) => key.reason || '-',
-                    },
-                    {
-                      id: 'disabled-time',
-                      header: t('Disabled Time'),
-                      className: 'w-44',
-                      cellClassName: 'text-muted-foreground text-sm',
-                      cell: (key) => formatKeyTimestamp(key.disabled_time),
-                    },
-                    {
-                      id: 'actions',
-                      header: t('Actions'),
-                      className: 'text-right',
-                      cell: (key) => (
-                        <MultiKeyTableRowActions
-                          keyIndex={key.index}
-                          status={key.status}
-                          canDelete={canEditSensitive}
-                          onAction={setConfirmAction}
-                        />
-                      ),
-                    },
-                  ]}
-                />
-              )
-            })()}
+            {isLoading && (
+              <div className='flex items-center justify-center py-12'>
+                <Loader2 className='text-muted-foreground h-8 w-8 animate-spin' />
+              </div>
+            )}
+            {!isLoading && keys.length === 0 && (
+              <div className='text-muted-foreground py-12 text-center'>
+                {t('No keys found')}
+              </div>
+            )}
+            {!isLoading && !(keys.length === 0) && (
+              <StaticDataTable
+                className='rounded-none border-0'
+                tableClassName='min-w-[800px]'
+                data={keys}
+                getRowKey={(key) => key.index}
+                columns={[
+                  {
+                    id: 'index',
+                    header: t('Index'),
+                    className: 'w-20',
+                    cellClassName: 'font-mono text-sm',
+                    cell: (key) => `#${key.index + 1}`,
+                  },
+                  {
+                    id: 'status',
+                    header: t('Status'),
+                    className: 'w-32',
+                    cell: (key) => renderStatusBadge(key.status),
+                  },
+                  {
+                    id: 'reason',
+                    header: t('Disabled Reason'),
+                    className: 'min-w-[200px]',
+                    cellClassName: 'max-w-xs truncate text-sm',
+                    cell: (key) => key.reason || '-',
+                  },
+                  {
+                    id: 'disabled-time',
+                    header: t('Disabled Time'),
+                    className: 'w-44',
+                    cellClassName: 'text-muted-foreground text-sm',
+                    cell: (key) => formatKeyTimestamp(key.disabled_time),
+                  },
+                  {
+                    id: 'actions',
+                    header: t('Actions'),
+                    className: 'text-right',
+                    cell: (key) => (
+                      <MultiKeyTableRowActions
+                        keyIndex={key.index}
+                        status={key.status}
+                        canDelete={canEditSensitive}
+                        onAction={setConfirmAction}
+                      />
+                    ),
+                  },
+                ]}
+              />
+            )}
           </div>
 
           {/* Pagination */}

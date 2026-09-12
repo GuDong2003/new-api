@@ -422,17 +422,22 @@ export function CreateDeploymentDrawer({
                     <FormControl>
                       <Input placeholder={t('Enter a name')} {...field} />
                     </FormControl>
-                    {open && field.value?.trim() && (
+                    {open && field.value?.trim() ? (
                       <div className='text-muted-foreground text-xs'>
                         {isCheckingName && t('Checking name...')}
                         {!isCheckingName &&
                           nameAvailable === true &&
                           t('Name is available')}
                         {!isCheckingName &&
+                          !(nameAvailable === true) &&
                           nameAvailable === false &&
                           t('Name is not available')}
+                        {!isCheckingName &&
+                          !(nameAvailable === true) &&
+                          !(nameAvailable === false) &&
+                          ''}
                       </div>
-                    )}
+                    ) : null}
                     <FormMessage />
                   </FormItem>
                 )}
