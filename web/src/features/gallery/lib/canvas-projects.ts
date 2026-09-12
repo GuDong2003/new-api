@@ -370,7 +370,14 @@ async function startEditor(
     const selected =
       migrated.find((canvas) => canvas.kind === kind) ??
       (await createCanvasProject(identity, kind))
-    await openCanvasProject(identity, selected.id)
+    const binding = canvasEditors.get(kind)
+    if (
+      !binding ||
+      binding.canvasId !== selected.id ||
+      !sameIdentity(binding.identity, identity)
+    ) {
+      await openCanvasProject(identity, selected.id)
+    }
   } catch (error) {
     if (isGalleryIdentityCurrent(identity)) {
       updateState(kind, {

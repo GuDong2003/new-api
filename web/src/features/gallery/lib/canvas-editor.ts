@@ -257,6 +257,8 @@ export function bindEditor(identity: GalleryIdentity, initial: LocalCanvas) {
     document.removeEventListener('visibilitychange', visibility)
     if (canvasEditors.get(kind)?.canvasId === initial.id) {
       canvasEditors.delete(kind)
+      delete states[kind]
+      notifyCanvasProjects()
     }
   }
   canvasEditors.set(kind, {
