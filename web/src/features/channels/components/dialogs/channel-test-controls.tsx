@@ -202,9 +202,7 @@ export function ChannelTestControls(props: {
                         props.onSelectedChange(
                           value
                             ? [...props.selected, probe.id]
-                            : props.selected.filter(
-                                (item) => item !== probe.id
-                              )
+                            : props.selected.filter((item) => item !== probe.id)
                         )
                       }
                     />

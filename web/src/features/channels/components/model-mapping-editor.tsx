@@ -20,6 +20,7 @@ import { Code, Plus, Table, Trash2 } from 'lucide-react'
 import {
   useCallback,
   useEffect,
+  useEffectEvent,
   useId,
   useMemo,
   useRef,
@@ -82,63 +83,69 @@ export function ModelMappingEditor(props: ModelMappingEditorProps) {
     return `mapping-${nextRowIdRef.current}`
   }, [])
 
-  const parseJsonToRows = useCallback((json: string): boolean => {
-    try {
-      if (!json.trim()) {
-        setRows([])
-        setJsonError(null)
-        return true
-      }
-      const parsed = JSON.parse(json)
-      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-        setJsonError(t('Model mapping must be a valid JSON object'))
-        return false
-      }
-      const entries = Object.entries(parsed)
-      const invalidValue = entries.find(([, to]) => typeof to !== 'string')
-      if (invalidValue) {
-        setJsonError(t('Model mapping values must be strings'))
-        return false
-      }
-      setRows((previousRows) => {
-        const remainingRows = [...previousRows]
-        return entries.map(([from, to], index) => {
-          const toString = String(to)
-          const existingIndex = remainingRows.findIndex(
-            (row) =>
-              row.from === from ||
-              (row.from === from && row.to === toString) ||
-              previousRows[index]?.id === row.id
-          )
-          if (existingIndex >= 0) {
-            const [existing] = remainingRows.splice(existingIndex, 1)
+  const parseJsonToRows = useCallback(
+    (json: string): boolean => {
+      try {
+        if (!json.trim()) {
+          setRows([])
+          setJsonError(null)
+          return true
+        }
+        const parsed = JSON.parse(json)
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+          setJsonError(t('Model mapping must be a valid JSON object'))
+          return false
+        }
+        const entries = Object.entries(parsed)
+        const invalidValue = entries.find(([, to]) => typeof to !== 'string')
+        if (invalidValue) {
+          setJsonError(t('Model mapping values must be strings'))
+          return false
+        }
+        setRows((previousRows) => {
+          const remainingRows = [...previousRows]
+          return entries.map(([from, to], index) => {
+            const toString = String(to)
+            const existingIndex = remainingRows.findIndex(
+              (row) =>
+                row.from === from ||
+                (row.from === from && row.to === toString) ||
+                previousRows[index]?.id === row.id
+            )
+            if (existingIndex >= 0) {
+              const [existing] = remainingRows.splice(existingIndex, 1)
+              return {
+                id: existing.id,
+                from,
+                to: toString,
+              }
+            }
             return {
-              id: existing.id,
+              id: createRowId(),
               from,
               to: toString,
             }
-          }
-          return {
-            id: createRowId(),
-            from,
-            to: toString,
-          }
+          })
         })
-      })
-      setJsonError(null)
-      return true
-    } catch {
-      setJsonError(t('Model mapping must be valid JSON format'))
-      return false
-    }
-  }, [createRowId, t])
+        setJsonError(null)
+        return true
+      } catch {
+        setJsonError(t('Model mapping must be valid JSON format'))
+        return false
+      }
+    },
+    [createRowId, t]
+  )
 
-  // Parse JSON to rows when value changes externally
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+  const syncExternalValue = useEffectEvent(() => {
     setJsonValue(props.value)
     parseJsonToRows(props.value)
-  }, [parseJsonToRows, props.value])
+  })
+
+  // Only replace the draft when the external value changes, not on language changes.
+  useEffect(() => {
+    syncExternalValue()
+  }, [props.value])
 
   const convertRowsToJson = (updatedRows: MappingRow[]): string => {
     if (updatedRows.length === 0) {
@@ -272,8 +279,8 @@ export function ModelMappingEditor(props: ModelMappingEditorProps) {
           {rows.length > 0 ? (
             <div className='space-y-2'>
               <div className='grid grid-cols-[1fr_1fr_auto] gap-2 text-sm font-medium'>
-                <div>{t('Original Model')}</div>
-                <div>{t('Replacement Model')}</div>
+                <div>{t('Request Model Name')}</div>
+                <div>{t('Upstream Model Name')}</div>
                 <div className='w-10' />
               </div>
               {rows.map((row) => (
@@ -332,11 +339,16 @@ export function ModelMappingEditor(props: ModelMappingEditorProps) {
             {t('Add Mapping')}
           </Button>
         </TabsContent>
-        <TabsContent value='json'>
+        <TabsContent value='json' className='space-y-2'>
+          <p className='text-muted-foreground text-sm'>
+            {t(
+              'JSON keys are request model names; values are upstream model names.'
+            )}
+          </p>
           <JsonCodeEditor
             value={jsonValue}
             onChange={handleJsonChange}
-            placeholder={t('{"original-model": "replacement-model"}')}
+            placeholder='{"request-model": "upstream-model"}'
             disabled={props.disabled}
             className={jsonError ? 'border-destructive' : undefined}
             aria-invalid={Boolean(jsonError)}

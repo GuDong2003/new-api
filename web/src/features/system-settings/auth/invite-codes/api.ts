@@ -39,8 +39,7 @@ export async function getInviteCodes(
       keyword: params.keyword || undefined,
       status: params.status === 'all' ? undefined : params.status,
       usage: params.usage === 'all' ? undefined : params.usage,
-      expiration:
-        params.expiration === 'all' ? undefined : params.expiration,
+      expiration: params.expiration === 'all' ? undefined : params.expiration,
       sort: params.sort === 'newest' ? undefined : params.sort,
     },
   })

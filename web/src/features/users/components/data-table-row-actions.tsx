@@ -52,6 +52,7 @@ import {
   hasUserPermission,
   USER_PERMISSION_ACTIONS,
 } from '@/lib/admin-permissions'
+import { handleServerError } from '@/lib/handle-server-error'
 import { useAuthStore } from '@/stores/auth-store'
 
 import { manageUser, resetUserPasskey, resetUserTwoFA } from '../api'
@@ -127,12 +128,10 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
         toast.success(t(getUserActionMessage(action)))
         triggerRefresh()
       } else {
-        toast.error(
-          result.message || t('Failed to {{action}} user', { action })
-        )
+        handleServerError(result, t('Failed to {{action}} user', { action }))
       }
-    } catch {
-      toast.error(t(ERROR_MESSAGES.UNEXPECTED))
+    } catch (error) {
+      handleServerError(error, t(ERROR_MESSAGES.UNEXPECTED))
     }
   }
 
@@ -144,10 +143,10 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
         toast.success(t('Passkey reset successfully'))
         triggerRefresh()
       } else {
-        toast.error(result.message || t('Failed to reset Passkey'))
+        handleServerError(result, t('Failed to reset Passkey'))
       }
-    } catch {
-      toast.error(t(ERROR_MESSAGES.UNEXPECTED))
+    } catch (error) {
+      handleServerError(error, t(ERROR_MESSAGES.UNEXPECTED))
     } finally {
       setResetPasskeyOpen(false)
     }
@@ -161,10 +160,10 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
         toast.success(t('Two-factor authentication reset'))
         triggerRefresh()
       } else {
-        toast.error(result.message || t('Failed to reset 2FA'))
+        handleServerError(result, t('Failed to reset 2FA'))
       }
-    } catch {
-      toast.error(t(ERROR_MESSAGES.UNEXPECTED))
+    } catch (error) {
+      handleServerError(error, t(ERROR_MESSAGES.UNEXPECTED))
     } finally {
       setResetTwoFAOpen(false)
     }

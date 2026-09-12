@@ -183,12 +183,12 @@ export function PromptInputProvider({
     setAttachements((prev) => [
       ...prev,
       ...incoming.map((file) => ({
-          id: nanoid(),
-          type: 'file' as const,
-          url: URL.createObjectURL(file),
-          mediaType: file.type,
-          filename: file.name,
-        })),
+        id: nanoid(),
+        type: 'file' as const,
+        url: URL.createObjectURL(file),
+        mediaType: file.type,
+        filename: file.name,
+      })),
     ])
   }, [])
 
@@ -737,35 +737,37 @@ export const PromptInput = ({
         }
         return item
       })
-    ).then((convertedFiles: FileUIPart[]) => {
-      try {
-        const result = onSubmit({ text, files: convertedFiles }, event)
+    )
+      .then((convertedFiles: FileUIPart[]) => {
+        try {
+          const result = onSubmit({ text, files: convertedFiles }, event)
 
-        // Handle both sync and async onSubmit
-        if (result instanceof Promise) {
-          result
-            .then(() => {
-              clear()
-              if (usingProvider) {
-                controller.textInput.clear()
-              }
-            })
-            .catch(() => {
-              // Don't clear on error - user may want to retry
-            })
-        } else {
-          // Sync function completed without throwing, clear attachments
-          clear()
-          if (usingProvider) {
-            controller.textInput.clear()
+          // Handle both sync and async onSubmit
+          if (result instanceof Promise) {
+            result
+              .then(() => {
+                clear()
+                if (usingProvider) {
+                  controller.textInput.clear()
+                }
+              })
+              .catch(() => {
+                // Don't clear on error - user may want to retry
+              })
+          } else {
+            // Sync function completed without throwing, clear attachments
+            clear()
+            if (usingProvider) {
+              controller.textInput.clear()
+            }
           }
+        } catch {
+          // Don't clear on error - user may want to retry
         }
-      } catch {
-        // Don't clear on error - user may want to retry
-      }
-    }).catch(() => {
-      // Blob conversion failures leave the input intact so the user can retry.
-    })
+      })
+      .catch(() => {
+        // Blob conversion failures leave the input intact so the user can retry.
+      })
   }
 
   // Render with or without local provider
@@ -844,9 +846,7 @@ export const PromptInputTextarea = ({
     ) {
       e.preventDefault()
       const lastAttachment =
-        attachments.files.length > 0
-          ? attachments.files.at(-1)
-          : undefined
+        attachments.files.length > 0 ? attachments.files.at(-1) : undefined
       if (lastAttachment) {
         attachments.remove(lastAttachment.id)
       }

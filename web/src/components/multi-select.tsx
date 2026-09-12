@@ -198,6 +198,25 @@ export function MultiSelect(props: MultiSelectProps) {
     setInputValue(value)
   }
 
+  const handlePaste = (event: React.ClipboardEvent<HTMLInputElement>): void => {
+    if (!props.allowCreate || props.disabled) return
+
+    const pasted = event.clipboardData.getData('text/plain')
+    if (!COMMA_REGEX.test(pasted)) return
+
+    event.preventDefault()
+    const input = event.currentTarget
+    const value =
+      input.value.slice(0, input.selectionStart ?? input.value.length) +
+      pasted +
+      input.value.slice(input.selectionEnd ?? input.value.length)
+
+    // A pasted batch is complete, including its final value. Read the clipboard
+    // before the single-line input can strip newline separators.
+    addValues(value.split(COMMA_REGEX))
+    setInputValue('')
+  }
+
   const handleValueChange = (next: string[]) => {
     props.onChange(next)
     // When an item is picked (multiple mode), Base UI keeps the input but most
@@ -346,6 +365,7 @@ export function MultiSelect(props: MultiSelectProps) {
               : undefined
           }
           onKeyDown={handleKeyDown}
+          onPaste={handlePaste}
           aria-label={placeholder}
         />
       </ComboboxChips>

@@ -166,15 +166,7 @@ export function InviteCodesSection() {
   ]
 
   const query = useQuery({
-    queryKey: [
-      'invite-codes',
-      page,
-      keyword,
-      status,
-      usage,
-      expiration,
-      sort,
-    ],
+    queryKey: ['invite-codes', page, keyword, status, usage, expiration, sort],
     queryFn: () =>
       getInviteCodes({
         page,
@@ -271,10 +263,7 @@ export function InviteCodesSection() {
                     })
                   }
                 >
-                  <SelectTrigger
-                    className='min-w-32'
-                    aria-label={t('Status')}
-                  >
+                  <SelectTrigger className='min-w-32' aria-label={t('Status')}>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent alignItemWithTrigger={false}>
@@ -301,10 +290,7 @@ export function InviteCodesSection() {
                     })
                   }
                 >
-                  <SelectTrigger
-                    className='min-w-28'
-                    aria-label={t('Usage')}
-                  >
+                  <SelectTrigger className='min-w-28' aria-label={t('Usage')}>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent alignItemWithTrigger={false}>

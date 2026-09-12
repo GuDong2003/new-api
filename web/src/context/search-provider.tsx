@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { useEffect, useState } from 'react'
 
 import { CommandMenu } from '@/components/command-menu'
+
 import { SearchContext } from './search-context'
 
 type SearchProviderProps = {

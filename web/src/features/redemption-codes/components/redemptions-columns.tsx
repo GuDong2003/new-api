@@ -233,7 +233,7 @@ export function useRedemptionsColumns(): ColumnDef<Redemption>[] {
                   className='cursor-help'
                 />
               }
-             />
+            />
             <TooltipContent>
               <div className='space-y-1 text-xs'>
                 <div>

@@ -387,7 +387,9 @@ export function ChannelTestSection({ defaultValues }: ChannelTestSectionProps) {
                         </SelectGroup>
                       </SelectContent>
                     </Select>
-                    <FormDescription>{channelTestModeDescription}</FormDescription>
+                    <FormDescription>
+                      {channelTestModeDescription}
+                    </FormDescription>
                     <FormMessage />
                   </FormItem>
                 )}

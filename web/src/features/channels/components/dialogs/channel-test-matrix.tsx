@@ -175,8 +175,8 @@ export function ChannelTestMatrix(props: {
                       result={result}
                       stale={Boolean(
                         result &&
-                          result.configurationKey !==
-                            props.configurationKey(model, probe.id)
+                        result.configurationKey !==
+                          props.configurationKey(model, probe.id)
                       )}
                       notApplicable={isProbeNotApplicable(
                         props.endpointForModel(model),
@@ -258,8 +258,8 @@ export function ChannelTestMatrix(props: {
                           result={result}
                           stale={Boolean(
                             result &&
-                              result.configurationKey !==
-                                props.configurationKey(model, probe.id)
+                            result.configurationKey !==
+                              props.configurationKey(model, probe.id)
                           )}
                           notApplicable={isProbeNotApplicable(
                             props.endpointForModel(model),

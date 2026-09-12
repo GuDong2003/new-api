@@ -78,8 +78,7 @@ function GrowthChip(props: { value: number }) {
     palette =
       'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300'
   } else if (isDown) {
-    palette =
-      'bg-rose-100 text-rose-700 dark:bg-rose-500/20 dark:text-rose-300'
+    palette = 'bg-rose-100 text-rose-700 dark:bg-rose-500/20 dark:text-rose-300'
   }
   const formatted = `${value > 0 ? '+' : ''}${value.toFixed(1)}%`
   return (

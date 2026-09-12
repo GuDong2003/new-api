@@ -101,7 +101,8 @@ describe('channel test dialog workflow', () => {
     expect(
       api.requests.some(
         (request) =>
-          request.body.test_type === 'tool_call' && request.body.stream === false
+          request.body.test_type === 'tool_call' &&
+          request.body.stream === false
       )
     ).toBe(false)
     await act(async () => api.finish())

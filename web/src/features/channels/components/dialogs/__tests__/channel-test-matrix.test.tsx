@@ -20,7 +20,10 @@ import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
-import type { ChannelProbeId, ChannelProbeResults } from '../../../lib/channel-test'
+import type {
+  ChannelProbeId,
+  ChannelProbeResults,
+} from '../../../lib/channel-test'
 import { ChannelTestMatrix } from '../channel-test-matrix'
 
 describe('ChannelTestMatrix', () => {

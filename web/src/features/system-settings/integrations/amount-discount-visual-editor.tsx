@@ -60,7 +60,9 @@ export function AmountDiscountVisualEditor({
           typeof rate === 'number' ? rate : Number.parseFloat(String(rate)),
       }))
       .filter(
-        (item) => Number.isNaN(item.amount) === false && Number.isNaN(item.discountRate) === false
+        (item) =>
+          Number.isNaN(item.amount) === false &&
+          Number.isNaN(item.discountRate) === false
       )
       .sort((a, b) => a.amount - b.amount)
   }, [value])

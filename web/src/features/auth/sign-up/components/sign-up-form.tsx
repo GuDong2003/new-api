@@ -57,7 +57,12 @@ import {
 } from '@/features/auth/lib/storage'
 import { isPendingOAuthRegistration } from '@/features/auth/types'
 import { useStatus } from '@/hooks/use-status'
-import { getServerErrorMessageKey } from '@/lib/server-error-message'
+import { handleServerError } from '@/lib/handle-server-error'
+import { AuthOperationError } from '@/lib/secure-verification'
+import {
+  createServerError,
+  getServerErrorMessageKey,
+} from '@/lib/server-error-message'
 import { cn } from '@/lib/utils'
 
 type InviteAction = (
@@ -235,11 +240,13 @@ export function SignUpForm({
         redirectToLogin()
         return true
       } else {
-        toast.error(res?.message || t('Failed to create account'))
+        handleServerError(createServerError(res, t('Failed to create account')))
         return false
       }
-    } catch {
-      // Errors are handled by global interceptor
+    } catch (error) {
+      handleServerError(
+        AuthOperationError.from(error, t('Failed to create account'))
+      )
       return false
     } finally {
       setIsLoading(false)
@@ -344,12 +351,12 @@ export function SignUpForm({
           toast.success(t('Signed in via WeChat'))
         }
       } else {
-        if (getServerErrorMessageKey(res)) return
-        toast.error(res?.message || t('Login failed'))
+        handleServerError(createServerError(res, t('Login failed')))
       }
     } catch (error: unknown) {
-      if (getServerErrorMessageKey(error)) return
-      toast.error(t('Login failed'))
+      handleServerError(
+        new AuthOperationError(t('Login failed'), undefined, { cause: error })
+      )
     } finally {
       setIsWeChatSubmitting(false)
     }

@@ -51,6 +51,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
+import { handleServerError } from '@/lib/handle-server-error'
 
 import { updateChannel } from '../../api'
 import {
@@ -338,11 +339,7 @@ function ChannelTestDialogContent(props: {
         queryKey: channelsQueryKeys.lists(),
       })
     } catch (error: unknown) {
-      toast.error(
-        error instanceof Error
-          ? error.message
-          : t('Failed to delete failed models')
-      )
+      handleServerError(error, t('Failed to delete failed models'))
     } finally {
       setDeleting(false)
     }
@@ -353,9 +350,9 @@ function ChannelTestDialogContent(props: {
     : undefined
   const detailStale = Boolean(
     detail &&
-      detailResult &&
-      detailResult.configurationKey !==
-        configurationKey(detail.model, detail.probe)
+    detailResult &&
+    detailResult.configurationKey !==
+      configurationKey(detail.model, detail.probe)
   )
   const progress = probes.progress
   const finished = progress.completed + progress.cancelled

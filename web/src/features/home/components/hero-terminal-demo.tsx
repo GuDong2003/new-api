@@ -374,7 +374,9 @@ function ResponseBlock(props: { demo: ApiDemoConfig; transitioning: boolean }) {
         )}
       >
         {demo.response.map((line) => (
-          <CodeLine key={`response-${line}`}>{renderResponseLine(line, demo)}</CodeLine>
+          <CodeLine key={`response-${line}`}>
+            {renderResponseLine(line, demo)}
+          </CodeLine>
         ))}
       </div>
     </div>

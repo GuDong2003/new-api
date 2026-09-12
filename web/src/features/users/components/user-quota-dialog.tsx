@@ -26,6 +26,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { getCurrencyDisplay, getCurrencyLabel } from '@/lib/currency'
 import { formatQuota, parseQuotaFromDollars } from '@/lib/format'
+import { handleServerError } from '@/lib/handle-server-error'
 import { cn } from '@/lib/utils'
 
 import { adjustUserQuota } from '../api'
@@ -90,10 +91,10 @@ export function UserQuotaDialog(props: UserQuotaDialogProps) {
         props.onOpenChange(false)
         props.onSuccess()
       } else {
-        toast.error(result.message || t('Failed to adjust quota'))
+        handleServerError(result, t('Failed to adjust quota'))
       }
     } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : t('Failed to adjust quota'))
+      handleServerError(e, t('Failed to adjust quota'))
     } finally {
       setLoading(false)
     }
@@ -134,29 +135,29 @@ export function UserQuotaDialog(props: UserQuotaDialogProps) {
         <div className='space-y-2'>
           <Label>{t('Mode')}</Label>
           <div className='flex gap-1'>
-          {(['add', 'subtract', 'override'] as const).map((m) => {
-            let modeLabel = t('Override')
-            if (m === 'add') modeLabel = t('Add')
-            else if (m === 'subtract') modeLabel = t('Subtract')
-            return (
-            <Button
-                key={m}
-                type='button'
-                variant='outline'
-                size='sm'
-                className={cn(
-                  mode === m &&
-                    'bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground'
-                )}
-                onClick={() => {
-                  setMode(m)
-                  setAmount('')
-                }}
-              >
-                {modeLabel}
-              </Button>
-            )
-          })}
+            {(['add', 'subtract', 'override'] as const).map((m) => {
+              let modeLabel = t('Override')
+              if (m === 'add') modeLabel = t('Add')
+              else if (m === 'subtract') modeLabel = t('Subtract')
+              return (
+                <Button
+                  key={m}
+                  type='button'
+                  variant='outline'
+                  size='sm'
+                  className={cn(
+                    mode === m &&
+                      'bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground'
+                  )}
+                  onClick={() => {
+                    setMode(m)
+                    setAmount('')
+                  }}
+                >
+                  {modeLabel}
+                </Button>
+              )
+            })}
           </div>
         </div>
 

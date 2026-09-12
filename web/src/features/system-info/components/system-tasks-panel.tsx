@@ -40,6 +40,7 @@ import type {
 } from '@/features/system-settings/types'
 import { toIntlLocale } from '@/i18n/languages'
 import { formatTimestampRelative, formatTimestampToDate } from '@/lib/format'
+import { createServerError } from '@/lib/server-error-message'
 import { cn } from '@/lib/utils'
 
 const TASK_LIMIT = 20
@@ -213,7 +214,7 @@ export function SystemTasksPanel() {
     queryFn: async () => {
       const res = await listSystemTasks(TASK_LIMIT)
       if (!res.success || !Array.isArray(res.data)) {
-        throw new Error(res.message || t('We could not load system tasks.'))
+        throw createServerError(res, t('We could not load system tasks.'))
       }
       return res.data
     },

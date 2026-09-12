@@ -63,6 +63,7 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet'
 import { Textarea } from '@/components/ui/textarea'
+import { handleServerError } from '@/lib/handle-server-error'
 
 import { createPrefillGroup, updatePrefillGroup } from '../../api'
 import { ENDPOINT_TEMPLATES } from '../../constants'
@@ -157,12 +158,13 @@ export function PrefillGroupFormDrawer({
     }
 
     try {
-      const response = isEdit
-        ? await updatePrefillGroup({
-            id: currentGroup?.id ?? 0,
-            ...payload,
-          })
-        : await createPrefillGroup(payload)
+      const response =
+        isEdit && currentGroup
+          ? await updatePrefillGroup({
+              id: currentGroup.id,
+              ...payload,
+            })
+          : await createPrefillGroup(payload)
 
       if (response.success) {
         toast.success(
@@ -173,10 +175,10 @@ export function PrefillGroupFormDrawer({
         })
         onClose()
       } else {
-        toast.error(response.message || 'Operation failed')
+        handleServerError(response, t('Operation failed'))
       }
     } catch (err: unknown) {
-      toast.error((err as Error)?.message || 'Operation failed')
+      handleServerError(err, t('Operation failed'))
     } finally {
       setIsSaving(false)
     }
@@ -280,19 +282,19 @@ export function PrefillGroupFormDrawer({
                     <FormLabel>Group Type</FormLabel>
                     <Select
                       items={PREFILL_GROUP_TYPES.map((type) => ({
-                          value: type.value,
-                          label: (
-                            <div className='flex flex-col text-left'>
-                              <span className='font-medium'>{type.label}</span>
-                              <span
-                                data-prefill-description
-                                className='text-muted-foreground text-xs'
-                              >
-                                {type.description}
-                              </span>
-                            </div>
-                          ),
-                        }))}
+                        value: type.value,
+                        label: (
+                          <div className='flex flex-col text-left'>
+                            <span className='font-medium'>{type.label}</span>
+                            <span
+                              data-prefill-description
+                              className='text-muted-foreground text-xs'
+                            >
+                              {type.description}
+                            </span>
+                          </div>
+                        ),
+                      }))}
                       value={field.value}
                       onValueChange={(value) =>
                         value !== null &&

@@ -131,8 +131,12 @@ export function getSyncPriceLines(
   return lines
 }
 
-export function getSyncExpressionPricing(expression: string, t: (key: string) => string) {
-  const { billingExpr, requestRuleExpr } = splitBillingExprAndRequestRules(expression)
+export function getSyncExpressionPricing(
+  expression: string,
+  t: (key: string) => string
+) {
+  const { billingExpr, requestRuleExpr } =
+    splitBillingExprAndRequestRules(expression)
   const config = tryParseVisualConfig(billingExpr)
   if (!config) return null
   // Do not turn malformed or overflowing upstream numbers into free prices.
@@ -142,16 +146,24 @@ export function getSyncExpressionPricing(expression: string, t: (key: string) =>
   }
   const fields = BILLING_PRICING_VARS.filter(
     (field): field is BillingVar & { tierField: string } =>
-      Boolean(field.tierField) && new RegExp(`\\b${field.key}\\s*\\*`).test(body)
+      Boolean(field.tierField) &&
+      new RegExp(`\\b${field.key}\\s*\\*`).test(body)
   )
-  const conditionLabels = { p: t('Input tokens'), c: t('Output tokens'), len: t('Length') }
+  const conditionLabels = {
+    p: t('Input tokens'),
+    c: t('Output tokens'),
+    len: t('Length'),
+  }
   return {
     requestRuleExpr,
     tiers: config.tiers.map((tier) => ({
       label: tier.label,
-      condition: tier.conditions.map((condition) =>
-        `${conditionLabels[condition.var]} ${condition.op} ${Number(condition.value).toLocaleString()}`
-      ).join(' ∧ '),
+      condition: tier.conditions
+        .map(
+          (condition) =>
+            `${conditionLabels[condition.var]} ${condition.op} ${Number(condition.value).toLocaleString()}`
+        )
+        .join(' ∧ '),
       lines: fields.map((field) => ({
         label: t(field.shortLabel),
         value: `$${formatPricingNumber(Number(tier[field.tierField]))}`,
@@ -172,10 +184,14 @@ export function describeSyncPrice(
         t('Expression pricing'),
         `USD / ${t('1M token')}`,
         ...parsed.tiers.flatMap((tier) => [
-          ...(parsed.tiers.length > 1 ? [tier.condition || tier.label || t('Default')] : []),
+          ...(parsed.tiers.length > 1
+            ? [tier.condition || tier.label || t('Default')]
+            : []),
           ...tier.lines.map((line) => `${line.label}: ${line.value}`),
         ]),
-        ...(parsed.requestRuleExpr ? [`${t('Includes request rules')}: ${parsed.requestRuleExpr}`] : []),
+        ...(parsed.requestRuleExpr
+          ? [`${t('Includes request rules')}: ${parsed.requestRuleExpr}`]
+          : []),
       ].join('\n')
     }
     return `${t('Expression pricing')}\n${values.billing_expr}`
