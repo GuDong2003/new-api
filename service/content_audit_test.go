@@ -1534,6 +1534,73 @@ func contentAuditServeCaptured(t *testing.T, r *contentAuditRuntime, path, conte
 	}
 }
 
+func TestContentAuditCaptureSkipsDisabledContentKinds(t *testing.T) {
+	for _, testCase := range []struct {
+		name string
+		path string
+		set  func(*model.ContentAuditStorageState) map[string]any
+	}{
+		{
+			name: "text",
+			path: "/v1/chat/completions",
+			set: func(state *model.ContentAuditStorageState) map[string]any {
+				return map[string]any{"text_enabled": false, "image_enabled": state.ImageEnabled}
+			},
+		},
+		{
+			name: "image",
+			path: "/v1/images/generations",
+			set: func(state *model.ContentAuditStorageState) map[string]any {
+				return map[string]any{"text_enabled": state.TextEnabled, "image_enabled": false}
+			},
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			r, _, state := contentAuditTestRuntime(t)
+			require.NoError(t, model.DB.Model(&model.ContentAuditStorageState{}).Where("id = ?", 1).Updates(testCase.set(state)).Error)
+			r.refreshLocal(context.Background())
+
+			_, job := contentAuditServeCaptured(t, r, testCase.path, "application/json", []byte(`{"prompt":"audit"}`), []byte(`{"ok":true}`), false, false)
+			assert.Nil(t, job, "disabled content kind must not create an audit job")
+		})
+	}
+}
+
+func TestContentAuditMigrationInitializesCategoryFlagsOnce(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "content_audit_migration.db")), &gorm.Config{Logger: gormlogger.Default.LogMode(gormlogger.Silent)})
+	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = sqlDB.Close() })
+
+	// Simulate a state row created before the category switches existed. The
+	// migration must enable both categories once, then preserve later choices.
+	require.NoError(t, db.AutoMigrate(&model.ContentAuditStorageState{}))
+	legacy := model.ContentAuditStorageState{ID: 1, ContentAuditSettings: model.DefaultContentAuditSettings(), ConfigVersion: 1, Epoch: 1, Revision: 1, LedgerVersion: 1, PauseReason: "not_initialized"}
+	legacy.TextEnabled, legacy.ImageEnabled, legacy.ContentKindSettingsVersion = false, false, 0
+	require.NoError(t, db.Create(&legacy).Error)
+	require.NoError(t, model.MigrateContentAudit(db))
+	state, err := func() (*model.ContentAuditStorageState, error) {
+		var value model.ContentAuditStorageState
+		return &value, db.First(&value, 1).Error
+	}()
+	require.NoError(t, err)
+	assert.True(t, state.TextEnabled)
+	assert.True(t, state.ImageEnabled)
+	assert.Equal(t, 1, state.ContentKindSettingsVersion)
+
+	state.TextEnabled, state.ImageEnabled = false, false
+	require.NoError(t, db.Save(state).Error)
+	require.NoError(t, model.MigrateContentAudit(db))
+	state, err = func() (*model.ContentAuditStorageState, error) {
+		var value model.ContentAuditStorageState
+		return &value, db.First(&value, 1).Error
+	}()
+	require.NoError(t, err)
+	assert.False(t, state.TextEnabled)
+	assert.False(t, state.ImageEnabled)
+}
+
 func TestContentAuditCaptureProtocolsAndBodyOwnership(t *testing.T) {
 	r, store, _ := contentAuditTestRuntime(t)
 	imageResult := fmt.Sprintf(`{"data":[{"b64_json":%q,"revised_prompt":"safe image"}]}`, base64.StdEncoding.EncodeToString(contentAuditTestPNG(t)))

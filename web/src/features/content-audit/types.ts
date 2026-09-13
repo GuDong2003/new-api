@@ -22,6 +22,8 @@ export type ContentAuditSettings = {
   request_limit: number
   response_limit: number
   capacity_bytes: number
+  text_enabled: boolean
+  image_enabled: boolean
   thumbnail_enabled: boolean
   plaintext_acknowledged: boolean
 }

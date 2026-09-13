@@ -190,6 +190,10 @@ func CaptureContentAudit(c *gin.Context) {
 		c.Next()
 		return
 	}
+	if (kind == "text" && !config.state.TextEnabled) || (kind == "image" && !config.state.ImageEnabled) {
+		c.Next()
+		return
+	}
 	if r.active.Add(1) > 64 {
 		r.active.Add(-1)
 		r.dropped.Add(1)

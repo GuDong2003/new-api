@@ -1876,7 +1876,7 @@ test('a background refresh updates untouched values without moving the selected 
   await waitFor(() => expect(screen.getByLabelText('Priority')).toHaveValue(5))
 })
 
-test('closing an edited channel retains its left exit direction after the parent clears the row', async () => {
+test('closing an edited channel retains its right exit direction after the parent clears the row', async () => {
   const animation = deferredResponse<void>()
   const originalGetAnimations = Object.getOwnPropertyDescriptor(
     HTMLElement.prototype,
@@ -1897,13 +1897,13 @@ test('closing an edited channel retains its left exit direction after the parent
     )
     await screen.findByDisplayValue('Existing channel')
     const drawer = screen.getByRole('dialog')
-    expect(drawer).toHaveAttribute('data-side', 'left')
+    expect(drawer).toHaveAttribute('data-side', 'right')
     await user.click(screen.getByRole('button', { name: 'Cancel' }))
     await waitFor(() => expect(drawer).toHaveAttribute('data-ending-style'))
     expect(drawer).toBeInTheDocument()
-    expect(drawer).toHaveAttribute('data-side', 'left')
-    expect(drawer).toHaveClass('left-0')
-    expect(drawer).not.toHaveClass('right-0')
+    expect(drawer).toHaveAttribute('data-side', 'right')
+    expect(drawer).toHaveClass('right-0')
+    expect(drawer).not.toHaveClass('left-0')
     await act(async () => {
       animation.resolve()
     })

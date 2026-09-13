@@ -147,6 +147,50 @@ export function ContentAuditSettingsForm(props: {
                 </SettingsSwitchItem>
               )}
             />
+            <FormField
+              control={form.control}
+              name='text_enabled'
+              render={({ field }) => (
+                <SettingsSwitchItem>
+                  <SettingsSwitchContent>
+                    <FormLabel>{t('Record text content')}</FormLabel>
+                    <FormDescription>
+                      {t(
+                        'Save new chat, completion and response audit records.'
+                      )}
+                    </FormDescription>
+                  </SettingsSwitchContent>
+                  <FormControl>
+                    <Switch
+                      checked={field.value}
+                      onCheckedChange={field.onChange}
+                      disabled={busy || Boolean(confirmation)}
+                    />
+                  </FormControl>
+                </SettingsSwitchItem>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name='image_enabled'
+              render={({ field }) => (
+                <SettingsSwitchItem>
+                  <SettingsSwitchContent>
+                    <FormLabel>{t('Record image generation')}</FormLabel>
+                    <FormDescription>
+                      {t('Save new image generation audit records.')}
+                    </FormDescription>
+                  </SettingsSwitchContent>
+                  <FormControl>
+                    <Switch
+                      checked={field.value}
+                      onCheckedChange={field.onChange}
+                      disabled={busy || Boolean(confirmation)}
+                    />
+                  </FormControl>
+                </SettingsSwitchItem>
+              )}
+            />
             {numbers.map((item) => (
               <FormField
                 key={item.name}

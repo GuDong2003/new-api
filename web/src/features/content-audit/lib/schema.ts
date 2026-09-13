@@ -34,6 +34,8 @@ export const contentAuditSettingsSchema = z.object({
   request_limit: boundedInteger(65536, 2097152),
   response_limit: boundedInteger(65536, 4194304),
   capacity_bytes: boundedInteger(67108864, 10737418240),
+  text_enabled: z.boolean(),
+  image_enabled: z.boolean(),
   thumbnail_enabled: z.boolean(),
   plaintext_acknowledged: z.boolean(),
 })

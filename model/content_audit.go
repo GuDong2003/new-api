@@ -41,12 +41,14 @@ type ContentAuditSettings struct {
 	RequestLimit          int   `json:"request_limit"`
 	ResponseLimit         int   `json:"response_limit"`
 	CapacityBytes         int64 `json:"capacity_bytes"`
+	TextEnabled           bool  `json:"text_enabled"`
+	ImageEnabled          bool  `json:"image_enabled"`
 	ThumbnailEnabled      bool  `json:"thumbnail_enabled"`
 	PlaintextAcknowledged bool  `json:"plaintext_acknowledged"`
 }
 
 func DefaultContentAuditSettings() ContentAuditSettings {
-	return ContentAuditSettings{RetentionDays: 7, RequestLimit: 512 << 10, ResponseLimit: 1 << 20, CapacityBytes: 512 << 20, ThumbnailEnabled: true}
+	return ContentAuditSettings{RetentionDays: 7, RequestLimit: 512 << 10, ResponseLimit: 1 << 20, CapacityBytes: 512 << 20, TextEnabled: true, ImageEnabled: true, ThumbnailEnabled: true}
 }
 
 func (s ContentAuditSettings) Validate() error {
@@ -60,27 +62,28 @@ func (s ContentAuditSettings) Validate() error {
 // with a separate (possibly ClickHouse) log database. Revision protects local
 // concurrent transactions, including SQLite's deferred transactions.
 type ContentAuditStorageState struct {
-	ID                   int    `json:"-" gorm:"primaryKey"`
-	StorageID            string `json:"storage_id" gorm:"type:varchar(32);uniqueIndex"`
-	ContentAuditSettings `gorm:"embedded"`
-	ConfigVersion        int64  `json:"config_version"`
-	Epoch                int64  `json:"epoch"`
-	Revision             int64  `json:"-"`
-	LedgerVersion        int64  `json:"-"`
-	Mode                 string `json:"mode" gorm:"type:varchar(16)"`
-	KeyID                string `json:"key_id" gorm:"type:varchar(32)"`
-	UsedBytes            int64  `json:"used_bytes"`
-	ReservedBytes        int64  `json:"reserved_bytes"`
-	UsedRecords          int64  `json:"used_records"`
-	ReservedRecords      int64  `json:"reserved_records"`
-	QuarantinedBytes     int64  `json:"quarantined_bytes"`
-	PauseReason          string `json:"pause_reason" gorm:"type:varchar(64)"`
-	CapacityPaused       bool   `json:"capacity_paused"`
-	RecordLimitPaused    bool   `json:"record_limit_paused"`
-	HealthyUntil         int64  `json:"healthy_until"`
-	Reconciling          bool   `json:"reconciling"`
-	LastReconciledAt     int64  `json:"last_reconciled_at"`
-	LastCleanupAt        int64  `json:"last_cleanup_at"`
+	ID                         int    `json:"-" gorm:"primaryKey"`
+	StorageID                  string `json:"storage_id" gorm:"type:varchar(32);uniqueIndex"`
+	ContentAuditSettings       `gorm:"embedded"`
+	ConfigVersion              int64  `json:"config_version"`
+	ContentKindSettingsVersion int    `json:"-"`
+	Epoch                      int64  `json:"epoch"`
+	Revision                   int64  `json:"-"`
+	LedgerVersion              int64  `json:"-"`
+	Mode                       string `json:"mode" gorm:"type:varchar(16)"`
+	KeyID                      string `json:"key_id" gorm:"type:varchar(32)"`
+	UsedBytes                  int64  `json:"used_bytes"`
+	ReservedBytes              int64  `json:"reserved_bytes"`
+	UsedRecords                int64  `json:"used_records"`
+	ReservedRecords            int64  `json:"reserved_records"`
+	QuarantinedBytes           int64  `json:"quarantined_bytes"`
+	PauseReason                string `json:"pause_reason" gorm:"type:varchar(64)"`
+	CapacityPaused             bool   `json:"capacity_paused"`
+	RecordLimitPaused          bool   `json:"record_limit_paused"`
+	HealthyUntil               int64  `json:"healthy_until"`
+	Reconciling                bool   `json:"reconciling"`
+	LastReconciledAt           int64  `json:"last_reconciled_at"`
+	LastCleanupAt              int64  `json:"last_cleanup_at"`
 }
 
 type ContentAudit struct {
@@ -184,8 +187,25 @@ func MigrateContentAudit(db *gorm.DB) error {
 	if err := db.AutoMigrate(&ContentAuditStorageState{}, &ContentAudit{}, &ContentAuditOrphan{}, &ContentAuditImage{}); err != nil {
 		return err
 	}
-	state := ContentAuditStorageState{ID: 1, ContentAuditSettings: DefaultContentAuditSettings(), ConfigVersion: 1, Epoch: 1, Revision: 1, LedgerVersion: 1, PauseReason: "not_initialized"}
-	return db.Clauses(clause.OnConflict{DoNothing: true}).Create(&state).Error
+	state := ContentAuditStorageState{ID: 1, ContentAuditSettings: DefaultContentAuditSettings(), ConfigVersion: 1, ContentKindSettingsVersion: 1, Epoch: 1, Revision: 1, LedgerVersion: 1, PauseReason: "not_initialized"}
+	if err := db.Clauses(clause.OnConflict{DoNothing: true}).Create(&state).Error; err != nil {
+		return err
+	}
+	// The two category columns were added after the original audit schema. Old
+	// rows read as false for new boolean columns, so initialize them once before
+	// honoring any later explicit administrator choice.
+	var existing ContentAuditStorageState
+	if err := db.First(&existing, 1).Error; err != nil {
+		return err
+	}
+	if existing.ContentKindSettingsVersion == 0 {
+		return db.Model(&ContentAuditStorageState{}).Where("id = ? AND content_kind_settings_version = ?", 1, 0).Updates(map[string]any{
+			"text_enabled":                  true,
+			"image_enabled":                 true,
+			"content_kind_settings_version": 1,
+		}).Error
+	}
+	return nil
 }
 
 // Content access never relies on a cached role/session remaining current. This
@@ -289,6 +309,7 @@ func UpdateContentAuditSettings(ctx context.Context, expected int64, settings Co
 			state.Epoch++
 		}
 		state.ContentAuditSettings = settings
+		state.ContentKindSettingsVersion = 1
 		state.ConfigVersion++
 		state.CapacityPaused, state.RecordLimitPaused = false, false
 		if state.PauseReason == "capacity" || state.PauseReason == "record_limit" {

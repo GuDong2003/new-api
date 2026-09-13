@@ -44,6 +44,7 @@ import {
 } from '../components/canvas-node-deletion'
 import { CanvasSaveStatus } from '../components/canvas-save-status'
 import { Gallery } from '../index'
+import { deleteCanvasResource } from '../lib/canvas-deletion'
 import { flushLocalEditors, stopCanvasEditors } from '../lib/canvas-editor'
 import {
   createCanvasProject,
@@ -343,6 +344,64 @@ it('removes cached gallery images when their canvas is deleted', async () => {
     within(screen.getByRole('alertdialog')).getByRole('button', {
       name: 'Delete',
     })
+  )
+  await waitFor(() =>
+    expect(
+      client.getQueryData([
+        'gallery',
+        identity.userId,
+        identity.sessionId,
+        'images',
+      ])
+    ).toEqual([])
+  )
+})
+
+it('removes a gallery image immediately when it is deleted from the canvas', async () => {
+  const canvas = await localImage()
+  remoteImages = [
+    {
+      ...galleryImage,
+      id: assetId,
+      canvas_id: canvas.id,
+    },
+  ]
+  renderGallery()
+  expect(await screen.findByText(galleryImage.prompt)).toBeVisible()
+
+  await deleteCanvasResource(identity, canvas.id, assetId)
+
+  await waitFor(() =>
+    expect(
+      client.getQueryData([
+        'gallery',
+        identity.userId,
+        identity.sessionId,
+        'images',
+      ])
+    ).toEqual([])
+  )
+  expect(screen.queryByText(galleryImage.prompt)).not.toBeInTheDocument()
+})
+
+it('reconciles a cached image when entering the gallery after canvas deletion', async () => {
+  const canvas = await localImage()
+  remoteImages = [
+    {
+      ...galleryImage,
+      id: assetId,
+      canvas_id: canvas.id,
+    },
+  ]
+  const rendered = renderGallery()
+  expect(await screen.findByText(galleryImage.prompt)).toBeVisible()
+  rendered.unmount()
+
+  await deleteCanvasResource(identity, canvas.id, assetId)
+  renderGallery()
+
+  await waitFor(() =>
+    expect(screen.queryByText(galleryImage.prompt)).not.toBeInTheDocument()
   )
   await waitFor(() =>
     expect(

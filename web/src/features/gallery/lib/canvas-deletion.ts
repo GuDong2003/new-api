@@ -16,7 +16,11 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 */
 import { deleteCanvasRecord, getCanvasRecord } from '../api'
 import type { CanvasRecord, GalleryIdentity } from '../types'
-import { emitCanvasEvent, notifyCanvasProjects } from './canvas-events'
+import {
+  emitCanvasDeletion,
+  emitCanvasEvent,
+  notifyCanvasProjects,
+} from './canvas-events'
 import {
   loadLocalCanvas,
   readCanvasUserState,
@@ -76,6 +80,11 @@ export async function replayCanvasRemovals(
             Boolean(assetId && entry.assetId !== assetId)
         ),
       }))
+      emitCanvasDeletion({
+        identity,
+        canvasId: item.canvasId,
+        ...(assetId ? { assetId } : {}),
+      })
       if (assetId && remote) {
         const cloudRevision = remote.revision
         await updateCanvasCloudState(

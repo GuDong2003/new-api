@@ -98,7 +98,7 @@ it('reveals the storage rules only after the usage hint is opened', async () => 
   ).toBeVisible()
 })
 
-it('lays out image cards on a dense auto-fill track', async () => {
+it('lays out image cards on a larger auto-fill track', async () => {
   renderGallery([galleryImage, { ...galleryImage, id: 'image-2' }])
 
   const cards = await screen.findAllByRole('article')
@@ -106,7 +106,8 @@ it('lays out image cards on a dense auto-fill track', async () => {
   expect(cards).toHaveLength(2)
   expect(cards[0].parentElement).toHaveClass(
     'grid-cols-2',
-    'sm:grid-cols-[repeat(auto-fill,minmax(11rem,1fr))]'
+    'gap-4',
+    'sm:grid-cols-[repeat(auto-fill,minmax(15rem,1fr))]'
   )
 })
 

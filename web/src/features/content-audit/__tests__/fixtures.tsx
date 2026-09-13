@@ -65,6 +65,8 @@ export function auditStatus(): ContentAuditStatus {
       request_limit: 524288,
       response_limit: 1048576,
       capacity_bytes: 536870912,
+      text_enabled: true,
+      image_enabled: true,
       thumbnail_enabled: true,
       plaintext_acknowledged: false,
       storage_id: '',

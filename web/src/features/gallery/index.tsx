@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 */
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { ConfirmDialog } from '@/components/confirm-dialog'
@@ -50,6 +50,11 @@ import { CanvasSaveStatus } from './components/canvas-save-status'
 import { GalleryImageCard } from './components/gallery-image-card'
 import { GalleryPreview } from './components/gallery-preview'
 import { useCanvasProjects } from './hooks/use-canvas-projects'
+import {
+  canvasDeletionVersion,
+  getCanvasDeletionEvents,
+  subscribeCanvasDeletions,
+} from './lib/canvas-events'
 import { readCanvasAssets } from './lib/canvas-repository'
 import { checkCanvasCapacity, getCanvasGalleryUsage } from './lib/canvas-sync'
 import {
@@ -66,6 +71,10 @@ import type {
 } from './types'
 
 export { GallerySettingsSection } from './components/gallery-settings-section'
+
+const galleryDeletionCursors = new Map<string, number>()
+const galleryIdentityKey = (identity: GalleryIdentity) =>
+  `${identity.userId}:${identity.sessionId}`
 
 export function Gallery() {
   const { t } = useTranslation()
@@ -86,6 +95,13 @@ function GalleryContent(props: { identity: GalleryIdentity }) {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const client = useQueryClient()
+  const identity = useMemo(
+    () => ({
+      userId: props.identity.userId,
+      sessionId: props.identity.sessionId,
+    }),
+    [props.identity.sessionId, props.identity.userId]
+  )
   const [view, setView] = useState('images')
   const [source, setSource] = useState('all')
   const [search, setSearch] = useState('')
@@ -105,6 +121,14 @@ function GalleryContent(props: { identity: GalleryIdentity }) {
   const [error, setError] = useState<string | null>(null)
   const [removedImages, setRemovedImages] = useState<string[]>([])
   const [removedProjects, setRemovedProjects] = useState<string[]>([])
+  const deletionVersion = useSyncExternalStore(
+    subscribeCanvasDeletions,
+    canvasDeletionVersion,
+    canvasDeletionVersion
+  )
+  const deletionCursor =
+    galleryDeletionCursors.get(galleryIdentityKey(props.identity)) ?? 0
+  const deletionEvents = getCanvasDeletionEvents(props.identity, deletionCursor)
   const drawing = useCanvasProjects('drawing')
   const nai = useCanvasProjects('nai')
   const localProjects = useMemo(
@@ -160,13 +184,83 @@ function GalleryContent(props: { identity: GalleryIdentity }) {
     staleTime: Infinity,
     gcTime: 0,
   })
+  useEffect(() => {
+    const identityKey = galleryIdentityKey(identity)
+    const cursor = galleryDeletionCursors.get(identityKey) ?? 0
+    const events = getCanvasDeletionEvents(identity, cursor)
+    if (!events.length) {
+      galleryDeletionCursors.set(identityKey, deletionVersion)
+      return
+    }
+    if (images.data === undefined && canvases.data === undefined) return
+    let imagesChanged = false
+    let canvasesChanged = false
+    const imagesKey = ['gallery', identity.userId, identity.sessionId, 'images']
+    const canvasesKey = [
+      'gallery',
+      identity.userId,
+      identity.sessionId,
+      'canvases',
+    ]
+    client.setQueryData<GalleryImage[]>(imagesKey, (current) => {
+      if (!current) return current
+      const next = current.filter(
+        (image) =>
+          !events.some(
+            (event) =>
+              event.assetId === image.id ||
+              (!event.assetId && event.canvasId === image.canvas_id)
+          )
+      )
+      imagesChanged = next.length !== current.length
+      return next
+    })
+    client.setQueryData<CanvasSummary[]>(canvasesKey, (current) => {
+      if (!current) return current
+      const next = current.filter(
+        (canvas) => !events.some((event) => event.canvasId === canvas.id)
+      )
+      canvasesChanged = next.length !== current.length
+      return next
+    })
+    galleryDeletionCursors.set(
+      identityKey,
+      Math.max(deletionVersion, ...events.map((event) => event.version))
+    )
+    if (imagesChanged || canvasesChanged) {
+      void Promise.all([
+        client.invalidateQueries({
+          queryKey: ['gallery', identity.userId, identity.sessionId, 'images'],
+          refetchType: 'none',
+        }),
+        client.invalidateQueries({
+          queryKey: [
+            'gallery',
+            identity.userId,
+            identity.sessionId,
+            'canvases',
+          ],
+          refetchType: 'none',
+        }),
+        client.invalidateQueries({
+          queryKey: ['gallery', identity.userId, identity.sessionId, 'usage'],
+        }),
+      ])
+    }
+  }, [canvases.data, client, deletionVersion, images.data, identity])
   const hiddenProjects = new Set([
     ...removedProjects,
     ...drawing.pendingCanvasRemovals.map((item) => item.canvasId),
+    ...nai.pendingCanvasRemovals.map((item) => item.canvasId),
+    ...deletionEvents.map((event) => event.canvasId),
   ])
   const hiddenImages = new Set([
     ...removedImages,
     ...drawing.pendingAssetRemovals.map((item) => item.assetId),
+    ...nai.pendingAssetRemovals.map((item) => item.assetId),
+    ...deletionEvents
+      .filter((event) => event.assetId)
+      .map((event) => event.assetId as string),
   ])
   const matches = (kind: string, title: string) =>
     (source === 'all' || source === kind) &&
@@ -511,7 +605,7 @@ function GalleryContent(props: { identity: GalleryIdentity }) {
         <TabsContent value='images'>
           {loading && <LoadingState />}
           {!loading && imageItems.length > 0 && (
-            <div className='grid grid-cols-2 gap-3 sm:grid-cols-[repeat(auto-fill,minmax(11rem,1fr))]'>
+            <div className='grid grid-cols-2 gap-4 sm:grid-cols-[repeat(auto-fill,minmax(15rem,1fr))]'>
               {imageItems.slice(offset, offset + 24).map((image) => (
                 <GalleryImageCard
                   key={image.id}

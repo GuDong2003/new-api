@@ -43,10 +43,10 @@ func normalizeContentAuditOperation(scope string, raw json.RawMessage, fields ma
 		return input, nil
 	case VerificationScopeContentAuditSettings:
 		var input ContentAuditSettingsUpdate
-		if len(fields) != 8 || common.Unmarshal(raw, &input) != nil || input.ExpectedVersion < 1 || input.ContentAuditSettings.Validate() != nil {
+		if len(fields) != 10 || common.Unmarshal(raw, &input) != nil || input.ExpectedVersion < 1 || input.ContentAuditSettings.Validate() != nil {
 			return nil, ErrVerificationContextInvalid
 		}
-		for _, key := range []string{"expected_version", "enabled", "retention_days", "request_limit", "response_limit", "capacity_bytes", "thumbnail_enabled", "plaintext_acknowledged"} {
+		for _, key := range []string{"expected_version", "enabled", "retention_days", "request_limit", "response_limit", "capacity_bytes", "text_enabled", "image_enabled", "thumbnail_enabled", "plaintext_acknowledged"} {
 			if _, ok := fields[key]; !ok {
 				return nil, ErrVerificationContextInvalid
 			}

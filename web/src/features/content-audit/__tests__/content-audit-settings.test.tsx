@@ -232,6 +232,19 @@ it('saves enabled settings when initialized local storage is ready without a pre
     transport.requests.filter((request) => request.url === '/api/verify')
   ).toHaveLength(0)
   await user.click(toggle)
+  expect(
+    screen.getByRole('switch', { name: 'Record text content' })
+  ).toBeChecked()
+  expect(
+    screen.getByRole('switch', { name: 'Record image generation' })
+  ).toBeChecked()
+  await user.click(screen.getByRole('switch', { name: 'Record text content' }))
+  await user.click(
+    screen.getByRole('switch', { name: 'Record image generation' })
+  )
+  expect(
+    transport.requests.filter((request) => request.url === '/api/verify')
+  ).toHaveLength(0)
   await user.click(screen.getByRole('button', { name: 'Save Changes' }))
   await confirmWithAuthenticator(user)
   await screen.findByText('Collection enabled')
@@ -246,6 +259,8 @@ it('saves enabled settings when initialized local storage is ready without a pre
     request_limit: 524288,
     response_limit: 1048576,
     capacity_bytes: 536870912,
+    text_enabled: false,
+    image_enabled: false,
     thumbnail_enabled: true,
     plaintext_acknowledged: false,
   }
@@ -917,6 +932,10 @@ it.each([
       'Storage usage includes in-flight writes. Deleted and expired content releases space after cleanup.',
       'Initialize storage and wait for local checks to pass before enabling collection.',
       'Storage capacity (bytes)',
+      'Record text content',
+      'Save new chat, completion and response audit records.',
+      'Record image generation',
+      'Save new image generation audit records.',
       'Local storage checks are incomplete. Refresh status and try again.',
       'Configure a stable CRYPTO_SECRET or SESSION_SECRET before initialization to use encryption. The encryption mode and key cannot be changed here.',
       'Set CONTENT_AUDIT_STORAGE_DIR to an existing private directory. The directory is not created automatically.',
