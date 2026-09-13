@@ -38,6 +38,7 @@ import {
   Settings,
   SlidersHorizontal,
   Wand2,
+  X,
 } from 'lucide-react'
 import {
   type ComponentProps,
@@ -52,13 +53,7 @@ import { type SubmitErrorHandler, useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
-import {
-  sideDrawerContentClassName,
-  sideDrawerFooterClassName,
-  sideDrawerFormClassName,
-  sideDrawerHeaderClassName,
-  sideDrawerSwitchItemClassName,
-} from '@/components/drawer-layout'
+import { sideDrawerSwitchItemClassName } from '@/components/drawer-layout'
 import { EmptyState } from '@/components/empty-state'
 import { ErrorState } from '@/components/error-state'
 import { JsonCodeEditor } from '@/components/json-code-editor'
@@ -69,6 +64,16 @@ import { MultiSelect } from '@/components/multi-select'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Combobox } from '@/components/ui/combobox'
+import {
+  Dialog as DialogRoot,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import {
   Form,
   FormControl,
@@ -90,15 +95,6 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Separator } from '@/components/ui/separator'
-import {
-  Sheet,
-  SheetClose,
-  SheetContent,
-  SheetDescription,
-  SheetFooter,
-  SheetHeader,
-  SheetTitle,
-} from '@/components/ui/sheet'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
@@ -125,6 +121,8 @@ import {
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/auth-store'
 
+import { listUpstreamSiteTypes } from '../../../upstream-accounts/api'
+import type { UpstreamSiteTypeOption } from '../../../upstream-accounts/types'
 import {
   getAllModels,
   getChannel,
@@ -192,6 +190,10 @@ import {
   assessBaseUrlTrust,
   nextTaskPluginBaseUrl,
 } from '../../lib/task-plugin-base-url'
+import {
+  formatLastCheckinTime,
+  getUpstreamAuthTypeLabel,
+} from '../../lib/upstream-account-display'
 import type { Channel } from '../../types'
 import { ChannelPluginExtensions } from '../channel-plugin-extensions'
 import { ChannelTypeLogo } from '../channel-type-badge'
@@ -217,6 +219,7 @@ import {
   ChannelBasicSection,
   ChannelEditorLoadingState,
   ChannelModelsSection,
+  ChannelUpstreamAccountSection,
 } from './sections'
 
 type ChannelMutateDrawerProps = {
@@ -486,6 +489,13 @@ export function ChannelMutateDrawer({
     enabled: open && !showProviderPicker,
   })
 
+  const { data: upstreamSiteTypes = [] } = useQuery<UpstreamSiteTypeOption[]>({
+    queryKey: ['upstream-account-site-types'],
+    queryFn: listUpstreamSiteTypes,
+    enabled: open && !showProviderPicker,
+    staleTime: 24 * 60 * 60 * 1000,
+  })
+
   const { copyToClipboard } = useCopyToClipboard()
 
   const { channelKey, isChannelKeyLoading, handleRevealKey, verification } =
@@ -525,6 +535,25 @@ export function ChannelMutateDrawer({
   const currentHeaderOverride = formValues.header_override
   const currentProxy = formValues.proxy
   const currentHttpProtocol = formValues.http_protocol
+  const currentUpstreamAccountEnabled =
+    formValues.upstream_account_enabled === true
+  const currentUpstreamAccountAuthType = formValues.upstream_account_auth_type
+  const upstreamCredentialLabel = getUpstreamAuthTypeLabel(
+    currentUpstreamAccountAuthType,
+    t
+  )
+  let upstreamCredentialPlaceholder = t('Enter pass token')
+  if (currentUpstreamAccountAuthType === 'cookie') {
+    upstreamCredentialPlaceholder = t('Enter browser cookie')
+  }
+  if (channelData?.data?.upstream_account_config?.credential_configured) {
+    upstreamCredentialPlaceholder = t(
+      'Already configured; leave empty to keep it'
+    )
+  }
+  const lastUpstreamCheckinTime = formatLastCheckinTime(
+    channelData?.data?.upstream_account_config?.last_checkin_time
+  )
   const {
     unlocked: doubaoApiEditUnlocked,
     handleClick: handleApiConfigSecretClick,
@@ -1462,7 +1491,7 @@ export function ChannelMutateDrawer({
 
   // Handle drawer close
   const handleOpenChange = useCallback<
-    NonNullable<ComponentProps<typeof Sheet>['onOpenChange']>
+    NonNullable<ComponentProps<typeof DialogRoot>['onOpenChange']>
   >(
     (v, details) => {
       if (!v && isSubmitting) return
@@ -3022,6 +3051,289 @@ export function ChannelMutateDrawer({
     </div>
   )
 
+  const checkinSection = (
+    <div className='scroll-mt-4'>
+      <ChannelUpstreamAccountSection>
+        <fieldset
+          disabled={sensitiveLocked}
+          className='space-y-4 disabled:opacity-60'
+        >
+          <FormField
+            control={form.control}
+            name='upstream_account_enabled'
+            render={({ field }) => (
+              <FormItem className={sideDrawerSwitchItemClassName()}>
+                <div className='flex flex-col gap-0.5'>
+                  <FormLabel>{t('Enable upstream account')}</FormLabel>
+                  <FormDescription className='text-xs'>
+                    {t(
+                      'Save the pass token for balance queries; automatic check-in is controlled separately.'
+                    )}
+                  </FormDescription>
+                </div>
+                <FormControl>
+                  <Switch
+                    checked={field.value === true}
+                    onCheckedChange={field.onChange}
+                  />
+                </FormControl>
+              </FormItem>
+            )}
+          />
+
+          {currentUpstreamAccountEnabled && (
+            <div className='space-y-4'>
+              <div className='grid gap-4 sm:grid-cols-2'>
+                <FormField
+                  control={form.control}
+                  name='upstream_account_site_type'
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{t('Site type')}</FormLabel>
+                      <FormControl>
+                        <Combobox
+                          options={upstreamSiteTypes.map((option) => ({
+                            value: option.value,
+                            label: option.label,
+                          }))}
+                          value={field.value || 'new_api'}
+                          onValueChange={field.onChange}
+                          placeholder={t('Select site type')}
+                          searchPlaceholder={t('Search site type...')}
+                          emptyText={t('No site type found.')}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name='upstream_account_auth_type'
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{t('Authentication')}</FormLabel>
+                      <Select
+                        value={field.value || 'token'}
+                        onValueChange={field.onChange}
+                      >
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue>
+                              {getUpstreamAuthTypeLabel(field.value, t)}
+                            </SelectValue>
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value='token'>
+                            {t('Pass token')}
+                          </SelectItem>
+                          <SelectItem value='cookie'>
+                            {t('Browser Cookie')}
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+
+              <FormField
+                control={form.control}
+                name='upstream_account_user_id'
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{t('Upstream user ID')}</FormLabel>
+                    <FormControl>
+                      <Input
+                        type='number'
+                        min={0}
+                        step={1}
+                        placeholder={t('Optional upstream user ID')}
+                        value={field.value ?? ''}
+                        onChange={(event) => {
+                          const value = event.target.value.trim()
+                          field.onChange(
+                            value === '' ? undefined : Number(value)
+                          )
+                        }}
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      {t('Used when the upstream site requires a user ID.')}
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name='upstream_account_credential'
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{upstreamCredentialLabel}</FormLabel>
+                    <FormControl>
+                      <Input
+                        type='password'
+                        autoComplete='new-password'
+                        placeholder={upstreamCredentialPlaceholder}
+                        {...field}
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      {t(
+                        'The token is encrypted and is only used for upstream balance and check-in requests.'
+                      )}
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <div className='grid gap-4 sm:grid-cols-2'>
+                <FormField
+                  control={form.control}
+                  name='upstream_account_auto_checkin'
+                  render={({ field }) => (
+                    <FormItem className={sideDrawerSwitchItemClassName()}>
+                      <div className='flex flex-col gap-0.5'>
+                        <FormLabel>{t('Automatic check-in')}</FormLabel>
+                        <FormDescription className='text-xs'>
+                          {t(
+                            'Run the scheduled check-in task for this account.'
+                          )}
+                        </FormDescription>
+                      </div>
+                      <FormControl>
+                        <Switch
+                          checked={field.value === true}
+                          onCheckedChange={field.onChange}
+                        />
+                      </FormControl>
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name='upstream_account_auto_balance'
+                  render={({ field }) => (
+                    <FormItem className={sideDrawerSwitchItemClassName()}>
+                      <div className='flex flex-col gap-0.5'>
+                        <FormLabel>{t('Automatic balance refresh')}</FormLabel>
+                        <FormDescription className='text-xs'>
+                          {t('Refresh the stored balance on the schedule.')}
+                        </FormDescription>
+                      </div>
+                      <FormControl>
+                        <Switch
+                          checked={field.value !== false}
+                          onCheckedChange={field.onChange}
+                        />
+                      </FormControl>
+                    </FormItem>
+                  )}
+                />
+              </div>
+
+              <FormField
+                control={form.control}
+                name='upstream_account_balance_interval'
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>
+                      {t('Balance refresh interval (minutes)')}
+                    </FormLabel>
+                    <FormControl>
+                      <Input
+                        type='number'
+                        min={5}
+                        step={1}
+                        {...field}
+                        onChange={(event) =>
+                          field.onChange(Number(event.target.value))
+                        }
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      {t(
+                        'This only affects scheduled refreshes; the channel card can refresh manually at any time.'
+                      )}
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <div className='grid gap-4 sm:grid-cols-2'>
+                <FormField
+                  control={form.control}
+                  name='upstream_account_external_checkin_url'
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{t('External check-in URL')}</FormLabel>
+                      <FormControl>
+                        <Input
+                          type='url'
+                          placeholder={t('Optional external check-in page')}
+                          {...field}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name='upstream_account_redeem_url'
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{t('Recharge / redeem URL')}</FormLabel>
+                      <FormControl>
+                        <Input
+                          type='url'
+                          placeholder={t('Optional recharge or redeem page')}
+                          {...field}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+
+              <FormField
+                control={form.control}
+                name='upstream_account_open_redeem_with_checkin'
+                render={({ field }) => (
+                  <FormItem className={sideDrawerSwitchItemClassName()}>
+                    <div className='flex flex-col gap-0.5'>
+                      <FormLabel>
+                        {t('Open recharge / redeem after check-in')}
+                      </FormLabel>
+                    </div>
+                    <FormControl>
+                      <Switch
+                        checked={field.value === true}
+                        onCheckedChange={field.onChange}
+                      />
+                    </FormControl>
+                  </FormItem>
+                )}
+              />
+              {lastUpstreamCheckinTime && (
+                <div className='text-muted-foreground flex justify-end text-xs'>
+                  {t('Last check-in time')}: {lastUpstreamCheckinTime}
+                </div>
+              )}
+            </div>
+          )}
+        </fieldset>
+      </ChannelUpstreamAccountSection>
+    </div>
+  )
+
   const connectionSection = (
     <div className='scroll-mt-4'>
       <ChannelApiAccessSection>
@@ -4111,6 +4423,7 @@ export function ChannelMutateDrawer({
           </>
         }
         models={modelsSection}
+        checkin={checkinSection}
         routing={
           <>
             {modelMappingFields}
@@ -4194,23 +4507,35 @@ export function ChannelMutateDrawer({
 
   return (
     <>
-      <Sheet open={open} onOpenChange={handleOpenChange}>
-        <SheetContent
-          side='right'
-          className={sideDrawerContentClassName('sm:max-w-7xl')}
+      <DialogRoot open={open} onOpenChange={handleOpenChange}>
+        <DialogContent
+          showCloseButton={false}
+          className='flex h-[min(900px,calc(100vh-2rem))] max-h-[calc(100vh-2rem)] w-[calc(100vw-2rem)] max-w-[1400px] flex-col gap-0 overflow-hidden p-0 sm:max-w-[1400px]'
         >
-          <SheetHeader className={sideDrawerHeaderClassName('pr-12 sm:pr-14')}>
+          <DialogClose
+            render={
+              <Button
+                variant='ghost'
+                size='icon-sm'
+                className='absolute top-4 right-4 z-10'
+                aria-label={t('Close')}
+              />
+            }
+          >
+            <X className='size-4' aria-hidden='true' />
+          </DialogClose>
+          <DialogHeader className='shrink-0 border-b px-4 py-4 pr-12 sm:px-6 sm:py-5 sm:pr-14'>
             <div className='flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between'>
               <div className='min-w-0 flex-1'>
                 <div className='flex min-w-0 items-center gap-2 sm:gap-3'>
-                  <SheetTitle className='flex shrink-0 items-center gap-2 sm:gap-3'>
+                  <DialogTitle className='flex shrink-0 items-center gap-2 sm:gap-3'>
                     <IconBadge tone='info' size='title'>
                       <Server className='size-5' />
                     </IconBadge>
                     <span>
                       {isEditing ? t('Edit Channel') : t('Create Channel')}
                     </span>
-                  </SheetTitle>
+                  </DialogTitle>
                   {(!showProviderPicker || providerTarget) && (
                     <Button
                       ref={providerControlRef}
@@ -4270,7 +4595,7 @@ export function ChannelMutateDrawer({
                     )}
                   </Badge>
                 )}
-                <SheetDescription
+                <DialogDescription
                   className={cn(
                     'mt-1',
                     showProviderPicker && providerTarget && 'truncate'
@@ -4282,7 +4607,7 @@ export function ChannelMutateDrawer({
                   }
                 >
                   {description}
-                </SheetDescription>
+                </DialogDescription>
               </div>
               {!isEditing && !showProviderPicker && (
                 <Button
@@ -4297,7 +4622,7 @@ export function ChannelMutateDrawer({
                 </Button>
               )}
             </div>
-          </SheetHeader>
+          </DialogHeader>
 
           {showProviderPicker && (
             <ChannelProviderPicker
@@ -4358,14 +4683,9 @@ export function ChannelMutateDrawer({
               id='channel-form'
               ref={channelFormRef}
               onSubmit={form.handleSubmit(onSubmit, onInvalid)}
-              className={sideDrawerFormClassName(
-                cn(
-                  'gap-5',
-                  (!isEditing ||
-                    (!isChannelDetailLoading && channelData?.data)) &&
-                    'overflow-hidden',
-                  showProviderPicker && 'hidden'
-                )
+              className={cn(
+                'flex min-h-0 flex-1 flex-col gap-5 overflow-hidden overscroll-contain px-4 py-4 sm:px-6 sm:py-5',
+                showProviderPicker && 'hidden'
               )}
               hidden={showProviderPicker}
             >
@@ -4373,7 +4693,7 @@ export function ChannelMutateDrawer({
             </form>
           </Form>
 
-          <SheetFooter className={sideDrawerFooterClassName()}>
+          <DialogFooter className='-mx-0 -mb-0 shrink-0 rounded-none px-4 py-3 sm:px-6'>
             {showProviderPicker && providerTarget ? (
               <Button
                 type='button'
@@ -4384,11 +4704,11 @@ export function ChannelMutateDrawer({
                 {t('Cancel')}
               </Button>
             ) : (
-              <SheetClose
+              <DialogClose
                 render={<Button variant='outline' disabled={isSubmitting} />}
               >
                 {t('Cancel')}
-              </SheetClose>
+              </DialogClose>
             )}
             {!showProviderPicker && (
               <Button
@@ -4406,9 +4726,9 @@ export function ChannelMutateDrawer({
                 {isEditing ? t('Update Channel') : t('Create Channel')}
               </Button>
             )}
-          </SheetFooter>
-        </SheetContent>
-      </Sheet>
+          </DialogFooter>
+        </DialogContent>
+      </DialogRoot>
 
       {open && modelConfiguration && (
         <ConfigureModelsDialog

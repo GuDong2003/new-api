@@ -164,6 +164,23 @@ beforeEach(() => {
     if (url === '/api/prefill_group') {
       return { data: { success: true, data: [] } }
     }
+    if (url === '/api/upstream-account/site-types') {
+      return {
+        data: {
+          success: true,
+          data: [
+            {
+              value: 'new_api',
+              label: 'New API',
+              auth_types: ['token'],
+              supports_checkin: true,
+              supports_balance: true,
+              external_only: false,
+            },
+          ],
+        },
+      }
+    }
     throw new Error(`Unexpected GET ${url}`)
   })
 })
@@ -173,6 +190,23 @@ afterEach(() => {
   client.clear()
   useAuthStore.setState({ auth: originalAuth })
   vi.restoreAllMocks()
+})
+
+test('keeps channel editing in a centered dialog with a dedicated check-in tab', async () => {
+  const user = userEvent.setup()
+  render(<ConfigurationHarness currentRow={editingChannel} />)
+
+  const dialog = await screen.findByRole('dialog')
+  expect(dialog).toHaveAttribute('data-slot', 'dialog-content')
+
+  const checkinTab = await screen.findByRole('tab', {
+    name: 'Automatic Check-in',
+  })
+  await user.click(checkinTab)
+
+  expect(
+    await screen.findByRole('switch', { name: 'Enable upstream account' })
+  ).toBeInTheDocument()
 })
 
 test('changing built-in providers updates server-provided URL placeholders without replacing the draft address', async () => {
@@ -541,7 +575,7 @@ test('configuration navigation retains its height when the form content overflow
     name: 'Channel configuration',
   })
   expect(navigation.parentElement).toHaveClass('shrink-0')
-  expect(screen.getByRole('dialog')).toHaveClass('sm:max-w-7xl')
+  expect(screen.getByRole('dialog')).toHaveClass('sm:max-w-[1400px]')
 })
 
 test('without plugin binding permission only built-in providers are offered', () => {
@@ -1107,7 +1141,7 @@ test('editing opens the shared configuration and omits an unchanged key on updat
   expect(await screen.findByDisplayValue('Existing channel')).toBeVisible()
   expect(screen.queryByLabelText('Type *')).not.toBeInTheDocument()
   expect(screen.getByRole('button', { name: 'Change provider' })).toBeVisible()
-  expect(screen.getAllByRole('tab')).toHaveLength(4)
+  expect(screen.getAllByRole('tab')).toHaveLength(5)
   expect(
     screen.getByRole('tab', { name: /Connection & Models/ })
   ).toHaveAccessibleName(/Ready/)
@@ -1876,52 +1910,15 @@ test('a background refresh updates untouched values without moving the selected 
   await waitFor(() => expect(screen.getByLabelText('Priority')).toHaveValue(5))
 })
 
-test('closing an edited channel retains its right exit direction after the parent clears the row', async () => {
-  const animation = deferredResponse<void>()
-  const originalGetAnimations = Object.getOwnPropertyDescriptor(
-    HTMLElement.prototype,
-    'getAnimations'
+test('closing an edited channel clears the row and allows it to be reopened', async () => {
+  const user = userEvent.setup()
+  render(<ConfigurationHarness currentRow={editingChannel} clearRowOnClose />)
+  await screen.findByDisplayValue('Existing channel')
+  await user.click(screen.getByRole('button', { name: 'Cancel' }))
+  await waitFor(() =>
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   )
-  Object.defineProperty(HTMLElement.prototype, 'getAnimations', {
-    configurable: true,
-    value(this: HTMLElement) {
-      return this.hasAttribute('data-ending-style')
-        ? [{ finished: animation.promise }]
-        : []
-    },
-  })
-  try {
-    const user = userEvent.setup()
-    const view = render(
-      <ConfigurationHarness currentRow={editingChannel} clearRowOnClose />
-    )
-    await screen.findByDisplayValue('Existing channel')
-    const drawer = screen.getByRole('dialog')
-    expect(drawer).toHaveAttribute('data-side', 'right')
-    await user.click(screen.getByRole('button', { name: 'Cancel' }))
-    await waitFor(() => expect(drawer).toHaveAttribute('data-ending-style'))
-    expect(drawer).toBeInTheDocument()
-    expect(drawer).toHaveAttribute('data-side', 'right')
-    expect(drawer).toHaveClass('right-0')
-    expect(drawer).not.toHaveClass('left-0')
-    await act(async () => {
-      animation.resolve()
-    })
-    await waitFor(() => expect(drawer).not.toBeInTheDocument())
 
-    view.rerender(<ConfigurationHarness clearRowOnClose />)
-    await user.click(screen.getByRole('button', { name: 'Open channel' }))
-    expect(screen.getByRole('dialog')).toHaveAttribute('data-side', 'right')
-  } finally {
-    animation.resolve()
-    if (originalGetAnimations) {
-      Object.defineProperty(
-        HTMLElement.prototype,
-        'getAnimations',
-        originalGetAnimations
-      )
-    } else {
-      Reflect.deleteProperty(HTMLElement.prototype, 'getAnimations')
-    }
-  }
+  await user.click(screen.getByRole('button', { name: 'Open channel' }))
+  expect(await screen.findByDisplayValue('Existing channel')).toBeVisible()
 })

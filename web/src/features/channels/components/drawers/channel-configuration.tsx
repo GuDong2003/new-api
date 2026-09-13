@@ -39,6 +39,7 @@ type ChannelConfigurationProps = {
   statuses: Record<ChannelConfigurationSection, ChannelConfigurationStatus>
   connection: ReactNode
   models: ReactNode
+  checkin: ReactNode
   routing: ReactNode
   request: ReactNode
   other: ReactNode
@@ -97,6 +98,7 @@ export function ChannelConfiguration(props: ChannelConfigurationProps) {
   }, [props.section])
   const sections = [
     { id: 'connection', label: t('Connection & Models') },
+    { id: 'checkin', label: t('Automatic Check-in') },
     { id: 'routing', label: t('Routing & Mapping') },
     { id: 'request', label: t('Request & Response') },
     { id: 'other', label: t('Other Settings') },
@@ -140,6 +142,13 @@ export function ChannelConfiguration(props: ChannelConfigurationProps) {
           <div className='flex min-w-0 flex-col gap-5'>{props.connection}</div>
           <div className='min-w-0'>{props.models}</div>
         </div>
+      </TabsContent>
+      <TabsContent
+        value='checkin'
+        keepMounted
+        className='-m-1 min-h-0 overflow-y-auto overscroll-contain p-1'
+      >
+        {props.checkin}
       </TabsContent>
       <TabsContent
         value='routing'

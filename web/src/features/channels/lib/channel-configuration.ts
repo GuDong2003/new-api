@@ -31,6 +31,7 @@ export type ChannelProviderTarget =
 
 export type ChannelConfigurationSection =
   | 'connection'
+  | 'checkin'
   | 'routing'
   | 'request'
   | 'other'
@@ -186,9 +187,29 @@ export function getChannelConfigurationState(
     ChannelConfigurationStatus
   > = {
     connection: 'idle',
+    checkin: 'idle',
     routing: 'idle',
     request: 'idle',
     other: 'idle',
+  }
+
+  const checkinFields = [
+    'upstream_account_enabled',
+    'upstream_account_site_type',
+    'upstream_account_auth_type',
+    'upstream_account_credential',
+    'upstream_account_auto_checkin',
+    'upstream_account_auto_balance',
+    'upstream_account_balance_interval',
+    'upstream_account_external_checkin_url',
+    'upstream_account_redeem_url',
+    'upstream_account_open_redeem_with_checkin',
+  ] as const
+  const checkinHasError = checkinFields.some((field) => Boolean(errors[field]))
+  if (checkinHasError) {
+    sections.checkin = 'error'
+  } else if (values.upstream_account_enabled) {
+    sections.checkin = 'configured'
   }
   for (const id of Object.keys(
     CONFIGURATION_BLOCKS
