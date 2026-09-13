@@ -25,7 +25,7 @@ export function ChannelUpstreamAccountSection(
   const { t } = useTranslation()
 
   return (
-    <SideDrawerSection>
+    <SideDrawerSection className='min-w-0'>
       <SideDrawerSectionHeader
         title={t('Automatic Check-in')}
         description={t('Use a pass token for balance and optional check-in.')}

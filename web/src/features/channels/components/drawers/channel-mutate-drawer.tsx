@@ -3052,18 +3052,18 @@ export function ChannelMutateDrawer({
   )
 
   const checkinSection = (
-    <div className='scroll-mt-4'>
+    <div className='min-w-0 scroll-mt-4'>
       <ChannelUpstreamAccountSection>
         <fieldset
           disabled={sensitiveLocked}
-          className='space-y-4 disabled:opacity-60'
+          className='min-w-0 space-y-4 disabled:opacity-60'
         >
           <FormField
             control={form.control}
             name='upstream_account_enabled'
             render={({ field }) => (
               <FormItem className={sideDrawerSwitchItemClassName()}>
-                <div className='flex flex-col gap-0.5'>
+                <div className='flex min-w-0 flex-col gap-0.5'>
                   <FormLabel>{t('Enable upstream account')}</FormLabel>
                   <FormDescription className='text-xs'>
                     {t(
@@ -3082,8 +3082,8 @@ export function ChannelMutateDrawer({
           />
 
           {currentUpstreamAccountEnabled && (
-            <div className='space-y-4'>
-              <div className='grid gap-4 sm:grid-cols-2'>
+            <div className='min-w-0 space-y-4'>
+              <div className='grid min-w-0 gap-4 sm:grid-cols-2'>
                 <FormField
                   control={form.control}
                   name='upstream_account_site_type'
@@ -3150,7 +3150,7 @@ export function ChannelMutateDrawer({
                         type='number'
                         min={0}
                         step={1}
-                        placeholder={t('Optional upstream user ID')}
+                        placeholder={t('Upstream user ID (optional)')}
                         value={field.value ?? ''}
                         onChange={(event) => {
                           const value = event.target.value.trim()
@@ -3192,13 +3192,13 @@ export function ChannelMutateDrawer({
                 )}
               />
 
-              <div className='grid gap-4 sm:grid-cols-2'>
+              <div className='grid min-w-0 gap-4 sm:grid-cols-2'>
                 <FormField
                   control={form.control}
                   name='upstream_account_auto_checkin'
                   render={({ field }) => (
                     <FormItem className={sideDrawerSwitchItemClassName()}>
-                      <div className='flex flex-col gap-0.5'>
+                      <div className='flex min-w-0 flex-col gap-0.5'>
                         <FormLabel>{t('Automatic check-in')}</FormLabel>
                         <FormDescription className='text-xs'>
                           {t(
@@ -3220,7 +3220,7 @@ export function ChannelMutateDrawer({
                   name='upstream_account_auto_balance'
                   render={({ field }) => (
                     <FormItem className={sideDrawerSwitchItemClassName()}>
-                      <div className='flex flex-col gap-0.5'>
+                      <div className='flex min-w-0 flex-col gap-0.5'>
                         <FormLabel>{t('Automatic balance refresh')}</FormLabel>
                         <FormDescription className='text-xs'>
                           {t('Refresh the stored balance on the schedule.')}
@@ -3266,7 +3266,7 @@ export function ChannelMutateDrawer({
                 )}
               />
 
-              <div className='grid gap-4 sm:grid-cols-2'>
+              <div className='grid min-w-0 gap-4 sm:grid-cols-2'>
                 <FormField
                   control={form.control}
                   name='upstream_account_external_checkin_url'

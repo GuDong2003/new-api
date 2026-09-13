@@ -209,6 +209,24 @@ test('keeps channel editing in a centered dialog with a dedicated check-in tab',
   ).toBeInTheDocument()
 })
 
+test('keeps the check-in panel within the dialog width and translates the upstream user ID placeholder', async () => {
+  const user = userEvent.setup()
+  render(<ConfigurationHarness currentRow={editingChannel} />)
+
+  await user.click(
+    await screen.findByRole('tab', { name: 'Automatic Check-in' })
+  )
+
+  const panel = screen.getByRole('tabpanel', { name: 'Automatic Check-in' })
+  expect(panel).toHaveClass('min-w-0', 'overflow-x-hidden')
+  await user.click(
+    await screen.findByRole('switch', { name: 'Enable upstream account' })
+  )
+  expect(
+    screen.getByRole('spinbutton', { name: 'Upstream user ID' })
+  ).toHaveAttribute('placeholder', 'Upstream user ID (optional)')
+})
+
 test('changing built-in providers updates server-provided URL placeholders without replacing the draft address', async () => {
   const user = userEvent.setup()
   render(<ConfigurationHarness />)
@@ -575,6 +593,7 @@ test('configuration navigation retains its height when the form content overflow
     name: 'Channel configuration',
   })
   expect(navigation.parentElement).toHaveClass('shrink-0')
+  expect(navigation.parentElement).toHaveClass('min-w-0', 'overflow-x-hidden')
   expect(screen.getByRole('dialog')).toHaveClass('sm:max-w-[1400px]')
 })
 

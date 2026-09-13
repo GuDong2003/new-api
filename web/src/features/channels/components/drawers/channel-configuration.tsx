@@ -110,13 +110,13 @@ export function ChannelConfiguration(props: ChannelConfigurationProps) {
       onValueChange={(value) =>
         props.onSectionChange(value as ChannelConfigurationSection)
       }
-      className='min-h-0 flex-1 gap-5'
+      className='min-h-0 min-w-0 flex-1 gap-5'
     >
-      <div className='-mt-1 shrink-0 overflow-x-auto py-1'>
+      <div className='-mt-1 min-w-0 shrink-0 overflow-x-hidden py-1'>
         <TabsList
           aria-label={t('Channel configuration')}
           variant='line'
-          className='min-w-full justify-start'
+          className='w-full min-w-0 flex-wrap justify-start'
         >
           {sections.map((section) => (
             <TabsTrigger
@@ -146,7 +146,7 @@ export function ChannelConfiguration(props: ChannelConfigurationProps) {
       <TabsContent
         value='checkin'
         keepMounted
-        className='-m-1 min-h-0 overflow-y-auto overscroll-contain p-1'
+        className='-m-1 min-h-0 min-w-0 overflow-x-hidden overflow-y-auto overscroll-contain p-1'
       >
         {props.checkin}
       </TabsContent>
