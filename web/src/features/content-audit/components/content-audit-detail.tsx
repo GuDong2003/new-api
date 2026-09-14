@@ -42,7 +42,6 @@ import {
   formatAuditTime,
 } from '../lib/labels'
 import type { ContentAuditDetail } from '../types'
-import { ContentAuditDeleteButton } from './content-audit-delete'
 import { ContentAuditOriginal } from './content-audit-original'
 
 type ContentAuditDetailProps = {
@@ -113,16 +112,6 @@ function ContentAuditDetailContent(props: ContentAuditDetailProps) {
           <Button variant='outline' onClick={props.onClose}>
             {t('Close')}
           </Button>
-          <ContentAuditDeleteButton
-            ids={[props.id]}
-            onRequested={props.onClose}
-            disabled={
-              query.isPending ||
-              query.isError ||
-              expired ||
-              query.data?.record.status === 'deleting'
-            }
-          />
         </>
       }
     >

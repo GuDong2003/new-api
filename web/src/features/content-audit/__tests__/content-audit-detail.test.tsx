@@ -32,22 +32,18 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 
 import { useAuthStore } from '@/stores/auth-store'
 
-import { ContentAuditAccessBoundary } from '../components/content-audit-access'
 import { ContentAuditDetailDialog } from '../components/content-audit-detail'
-import { ContentAuditRecords } from '../components/content-audit-records'
 import { useContentAuditExpiry } from '../hooks/use-content-audit-expiry'
 import {
   auditDetail,
   auditId,
   auditQueryClient,
-  AuditRouterProvider,
   auditSuccess,
   AuditTestProviders,
   installAuditTransport,
   installAuditOriginalTransport,
   secondAuditId,
   signInAuditRoot,
-  verificationReply,
 } from './fixtures'
 
 let transport: ReturnType<typeof installAuditTransport>
@@ -69,6 +65,25 @@ function DetailFixture(props: { id?: string }) {
     </AuditTestProviders>
   )
 }
+
+it('keeps destructive audit actions out of the detail footer', async () => {
+  transport = installAuditTransport((config) => ({
+    body:
+      config.responseType === 'blob'
+        ? new Blob(['jpeg'], { type: 'image/jpeg' })
+        : auditSuccess(auditDetail()),
+  }))
+  render(<DetailFixture />)
+  await screen.findByRole('img')
+  expect(
+    within(screen.getByRole('dialog')).queryByRole('button', {
+      name: 'Request deletion',
+    })
+  ).not.toBeInTheDocument()
+  expect(
+    screen.getAllByRole('button', { name: 'Close' }).length
+  ).toBeGreaterThan(0)
+})
 
 beforeEach(() => {
   signInAuditRoot()
@@ -513,214 +528,6 @@ it.each(['unmount', 'logout', 'role loss'] as const)(
   }
 )
 
-it.each([202, 503])(
-  'clears disclosed content after deletion returns %s while metadata refresh and navigation remain pending',
-  async (status) => {
-    const detail = auditDetail()
-    detail.payload.images = (detail.payload.images ?? []).map((image) => ({
-      ...image,
-      original_status: 'ready',
-    }))
-    const abortFile = vi.fn()
-    const writes: Uint8Array[] = []
-    originals = installAuditOriginalTransport(
-      (request) =>
-        new Response(
-          new ReadableStream<Uint8Array>({
-            start: (controller) => {
-              controller.enqueue(new Uint8Array([1]))
-              request.signal.addEventListener(
-                'abort',
-                () => controller.error(request.signal.reason),
-                { once: true }
-              )
-            },
-          }),
-          { headers: { 'Content-Type': 'image/png' } }
-        )
-    )
-    vi.stubGlobal(
-      'showSaveFilePicker',
-      vi.fn().mockResolvedValue({
-        createWritable: async () =>
-          new WritableStream<Uint8Array>({
-            write: (chunk) => {
-              writes.push(chunk)
-            },
-            abort: abortFile,
-          }),
-      })
-    )
-    const records = auditSuccess({
-      items: [detail.record],
-      total: 1,
-      page: 1,
-      page_size: 25,
-    })
-    let releaseRefresh!: (reply: { body: unknown }) => void
-    const refresh = new Promise<{ body: unknown }>((resolve) => {
-      releaseRefresh = resolve
-    })
-    let deletionAttempted = false
-    transport = installAuditTransport((config) => {
-      if (config.url?.startsWith('/api/verify')) {
-        return { body: verificationReply(config) }
-      }
-      if (config.url === '/api/content-audit/records/delete') {
-        deletionAttempted = true
-        return {
-          status,
-          body:
-            status === 202
-              ? auditSuccess({
-                  operation_id: 'delete-operation',
-                  ids: [auditId],
-                  status: 'deleting',
-                })
-              : { success: false, code: 'CONTENT_AUDIT_UNAVAILABLE' },
-        }
-      }
-      if (config.url === '/api/content-audit/records') {
-        return deletionAttempted ? refresh : { body: records }
-      }
-      return {
-        body:
-          config.responseType === 'blob'
-            ? new Blob(['jpeg'], { type: 'image/jpeg' })
-            : auditSuccess(detail),
-      }
-    })
-    const user = userEvent.setup()
-    const close = vi.fn()
-    render(
-      <AuditRouterProvider client={client}>
-        <ContentAuditAccessBoundary>
-          <ContentAuditRecords />
-          <ContentAuditDetailDialog id={auditId} onClose={close} />
-        </ContentAuditAccessBoundary>
-      </AuditRouterProvider>
-    )
-    try {
-      await screen.findByRole('img', { name: 'Audit thumbnail 1' })
-      await user.click(
-        screen.getByRole('button', { name: 'Download original' })
-      )
-      await waitFor(() => expect(writes).toHaveLength(1))
-      await user.click(
-        within(screen.getByRole('dialog')).getByRole('button', {
-          name: 'Request deletion',
-        })
-      )
-      await user.click(
-        within(screen.getByRole('alertdialog')).getByRole('button', {
-          name: 'Request deletion',
-        })
-      )
-      await user.type(
-        await screen.findByLabelText('Authenticator code or backup code'),
-        '123456'
-      )
-      await user.click(screen.getByRole('button', { name: 'Verify' }))
-      await waitFor(() =>
-        expect(
-          transport.requests.filter(
-            (request) => request.url === '/api/content-audit/records'
-          )
-        ).toHaveLength(2)
-      )
-      await waitFor(() =>
-        expect(
-          screen.queryByLabelText('Request content')
-        ).not.toBeInTheDocument()
-      )
-      expect(
-        screen.queryByLabelText('Response content')
-      ).not.toBeInTheDocument()
-      expect(screen.queryByRole('img')).not.toBeInTheDocument()
-      expect(revokeURL).toHaveBeenCalledWith('blob:audit-preview')
-      expect(close).toHaveBeenCalledOnce()
-      await waitFor(() => expect(abortFile).toHaveBeenCalledOnce())
-      expect(originals.requests[0].signal.aborted).toBe(true)
-      expect(
-        client
-          .getQueryCache()
-          .getAll()
-          .some((query) => query.queryKey.includes(auditId))
-      ).toBe(false)
-    } finally {
-      await act(async () => {
-        releaseRefresh({ body: records })
-        await refresh
-      })
-    }
-  }
-)
-
-it('does not trigger obsolete detail navigation when the user leaves during a deletion request', async () => {
-  let finishDeletion!: (reply: { body: unknown; status: number }) => void
-  const deletion = new Promise<{ body: unknown; status: number }>((resolve) => {
-    finishDeletion = resolve
-  })
-  transport = installAuditTransport((config) => {
-    if (config.url?.startsWith('/api/verify')) {
-      return { body: verificationReply(config) }
-    }
-    if (config.url === '/api/content-audit/records/delete') return deletion
-    return {
-      body:
-        config.responseType === 'blob'
-          ? new Blob(['jpeg'], { type: 'image/jpeg' })
-          : auditSuccess(auditDetail()),
-    }
-  })
-  const user = userEvent.setup()
-  const close = vi.fn()
-  const view = render(
-    <AuditTestProviders client={client}>
-      <ContentAuditDetailDialog id={auditId} onClose={close} />
-    </AuditTestProviders>
-  )
-  await screen.findByRole('img')
-  await user.click(screen.getByRole('button', { name: 'Request deletion' }))
-  await user.click(
-    within(screen.getByRole('alertdialog')).getByRole('button', {
-      name: 'Request deletion',
-    })
-  )
-  await user.type(
-    await screen.findByLabelText('Authenticator code or backup code'),
-    '123456'
-  )
-  await user.click(screen.getByRole('button', { name: 'Verify' }))
-  await waitFor(() =>
-    expect(
-      transport.requests.some(
-        (request) => request.url === '/api/content-audit/records/delete'
-      )
-    ).toBe(true)
-  )
-  view.rerender(
-    <AuditTestProviders client={client}>
-      <p>Settings page</p>
-    </AuditTestProviders>
-  )
-  await act(async () => {
-    finishDeletion({
-      status: 202,
-      body: auditSuccess({
-        operation_id: 'delete-operation',
-        ids: [auditId],
-        status: 'deleting',
-      }),
-    })
-    await deletion
-  })
-  await waitFor(() => expect(client.isMutating()).toBe(0))
-  expect(screen.getByText('Settings page')).toBeVisible()
-  expect(close).not.toHaveBeenCalled()
-  expect(revokeURL).toHaveBeenCalledWith('blob:audit-preview')
-})
-
 it('drops an outstanding old-record response after switching records and does not re-cache its prompt', async () => {
   let resolve!: (reply: { body: unknown }) => void
   const promise = new Promise<{ body: unknown }>((finish) => {
@@ -871,8 +678,10 @@ it.each([
       screen.queryByText('do not display server internals')
     ).not.toBeInTheDocument()
     expect(
-      screen.getByRole('button', { name: 'Request deletion' })
-    ).toBeDisabled()
+      within(screen.getByRole('dialog')).queryByRole('button', {
+        name: 'Request deletion',
+      })
+    ).not.toBeInTheDocument()
   }
 )
 

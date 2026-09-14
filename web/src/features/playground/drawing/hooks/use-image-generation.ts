@@ -29,7 +29,14 @@ import { imageSourceToAsset } from '../lib/image-assets'
 import { validateImageSettings } from '../lib/image-settings'
 import type { DrawingNode, ImageAsset, ImageSettings } from '../types'
 
-type ImageJob = { id: string; controller: AbortController; nodeIds: string[] }
+type ImageJob = {
+  id: string
+  controller: AbortController
+  nodeIds: string[]
+  cancelReason?: 'user' | 'lifecycle'
+  decodeController?: AbortController
+  finalResultReceived?: boolean
+}
 type GenerationInput = {
   job: ImageJob
   settings: ImageSettings
@@ -121,9 +128,12 @@ async function executeImageJob(
         )
       },
     })
+    input.job.finalResultReceived = true
     const state = useDrawingStore.getState()
     if (!isCurrentJob(input)) return
-    input.job.controller.signal.throwIfAborted()
+    if (input.job.cancelReason === 'user') {
+      input.job.controller.signal.throwIfAborted()
+    }
     for (const id of input.job.nodeIds) {
       const progress = state.nodes.find((node) => node.id === id)?.data.progress
       if (progress) {
@@ -134,18 +144,25 @@ async function executeImageJob(
         )
       }
     }
+    const decodeController = new AbortController()
+    input.job.decodeController = decodeController
     const assets = await Promise.allSettled(
-      result.images.map(async (image, index) =>
-        imageSourceToAsset(
-          image.src,
-          `${input.settings.model}-${index + 1}`,
-          image.mimeType,
-          input.job.controller.signal
-        )
-      )
+      result.images
+        .slice(0, input.job.nodeIds.length)
+        .map(async (image, index) => {
+          const asset = await imageSourceToAsset(
+            image.src,
+            `${input.settings.model}-${index + 1}`,
+            image.mimeType,
+            decodeController.signal
+          )
+          return asset
+        })
     )
     if (!isCurrentJob(input)) return
-    input.job.controller.signal.throwIfAborted()
+    if (input.job.cancelReason === 'user') {
+      input.job.controller.signal.throwIfAborted()
+    }
     for (const [index, id] of input.job.nodeIds.entries()) {
       const asset = assets[index]
       if (!asset) {
@@ -188,7 +205,9 @@ async function executeImageJob(
     }
   } catch (error) {
     if (!isCurrentJob(input)) return
-    const cancelled = input.job.controller.signal.aborted
+    const cancelled =
+      input.job.cancelReason === 'user' ||
+      (input.job.controller.signal.aborted && !input.job.finalResultReceived)
     const message =
       error instanceof Error
         ? error.message.slice(0, 10000)
@@ -215,6 +234,24 @@ function startImageJob(input: GenerationInput, translate: Translate) {
   activeJobs.set(input.job.id, input)
   notifyJobListeners()
   void executeImageJob(input, translate)
+}
+
+function abortImageJob(
+  job: ImageJob,
+  reason: NonNullable<ImageJob['cancelReason']>
+) {
+  job.cancelReason ??= reason
+  if (reason === 'lifecycle' && job.finalResultReceived) return
+  if (!job.controller.signal.aborted) {
+    job.controller.abort(
+      reason === 'user'
+        ? new DOMException('Image generation cancelled.', 'AbortError')
+        : new DOMException('Image generation lifecycle ended.', 'AbortError')
+    )
+  }
+  if (reason === 'user') {
+    job.decodeController?.abort(job.controller.signal.reason)
+  }
 }
 
 export function useImageGeneration() {
@@ -392,7 +429,7 @@ export function useImageGeneration() {
         input.sessionId === currentSessionId &&
         (!jobId || input.job.id === jobId)
       ) {
-        input.job.controller.abort()
+        abortImageJob(input.job, 'user')
       }
     }
   }
@@ -406,7 +443,7 @@ export function cancelImageGenerationJobs(
 ) {
   for (const input of activeJobs.values()) {
     if (input.userId === userId && input.sessionId === sessionId) {
-      input.job.controller.abort()
+      abortImageJob(input.job, 'lifecycle')
     }
   }
 }

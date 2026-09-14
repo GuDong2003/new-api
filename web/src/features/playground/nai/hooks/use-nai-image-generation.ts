@@ -29,6 +29,7 @@ type NaiImageJob = {
   id: string
   controller: AbortController
   nodeIds: string[]
+  cancelReason?: 'user' | 'lifecycle'
 }
 
 type NaiGenerationInput = {
@@ -74,13 +75,17 @@ async function executeJob(
   input: NaiGenerationInput,
   translate: (key: string) => string
 ) {
+  let finalResultReceived = false
   try {
     const result = await generateNaiImages({
       settings: input.settings,
       signal: input.job.controller.signal,
     })
+    finalResultReceived = true
     if (!isCurrentJob(input)) return
-    input.job.controller.signal.throwIfAborted()
+    if (input.job.cancelReason === 'user') {
+      input.job.controller.signal.throwIfAborted()
+    }
     const state = useNaiDrawingStore.getState()
     input.job.nodeIds.forEach((id, index) => {
       const asset = result.images[index]
@@ -103,7 +108,9 @@ async function executeJob(
     })
   } catch (error) {
     if (!isCurrentJob(input)) return
-    const cancelled = input.job.controller.signal.aborted
+    const cancelled =
+      input.job.cancelReason === 'user' ||
+      (input.job.controller.signal.aborted && !finalResultReceived)
     const message = cancelled
       ? undefined
       : getNaiGenerationError(error).slice(0, 10000)
@@ -131,6 +138,20 @@ function startJob(
   activeJobs.set(input.job.id, input)
   notify()
   void executeJob(input, translate)
+}
+
+function abortNaiJob(
+  job: NaiImageJob,
+  reason: NonNullable<NaiImageJob['cancelReason']>
+) {
+  job.cancelReason ??= reason
+  if (!job.controller.signal.aborted) {
+    job.controller.abort(
+      reason === 'user'
+        ? new DOMException('Image generation cancelled.', 'AbortError')
+        : new DOMException('Image generation lifecycle ended.', 'AbortError')
+    )
+  }
 }
 
 function createNodes(
@@ -245,7 +266,7 @@ export function useNaiImageGeneration() {
   const cancel = useCallback(() => {
     activeJobs.forEach((input) => {
       if (input.userId === userId && input.sessionId === sessionId) {
-        input.job.controller.abort()
+        abortNaiJob(input.job, 'user')
       }
     })
   }, [sessionId, userId])
@@ -259,7 +280,7 @@ export function cancelNaiGenerationJobs(
 ) {
   activeJobs.forEach((input) => {
     if (input.userId === userId && input.sessionId === sessionId) {
-      input.job.controller.abort()
+      abortNaiJob(input.job, 'lifecycle')
     }
   })
 }

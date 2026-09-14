@@ -36,6 +36,8 @@ import {
 } from '../lib/canvas-events'
 import {
   createCanvasProject,
+  discardCanvasChanges,
+  hasUnsavedCanvasChanges,
   openCanvasProject,
   reloadCanvasProject,
   renameCanvasProject,
@@ -55,6 +57,8 @@ import type {
 
 export {
   createCanvasProject,
+  discardCanvasChanges,
+  hasUnsavedCanvasChanges,
   openCanvasProject,
   reloadCanvasProject,
   renameCanvasProject,
@@ -159,9 +163,17 @@ export function useCanvasProjects(kind: CanvasKind) {
       openCanvasProject(identity, id, focusAssetId, kind),
     rename: (id: string, name: string) =>
       renameCanvasProject(identity, id, name),
+    hasUnsavedChanges: hasUnsavedCanvasChanges(identity, kind),
+    discard: () => discardCanvasChanges(identity, kind),
     save: async () => {
       await flushLocalEditors(identity)
-      if (current) await syncCanvas(identity, current.id, 'manual')
+      const latest = getCanvasEditorState(kind)
+      if (latest?.localStatus !== 'saved') {
+        throw new Error(latest?.error ?? 'Canvas storage is unavailable.')
+      }
+      if (latest.canvas?.localSavedAt) {
+        await syncCanvas(identity, latest.canvas.id, 'manual')
+      }
     },
     // Task 5 owns ConfirmDialog before calling these deliberate actions.
     deleteProject: (id: string) => deleteCanvasProject(identity, id),

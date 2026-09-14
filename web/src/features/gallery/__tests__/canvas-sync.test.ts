@@ -140,14 +140,30 @@ it('reopens the same canvas from its post-flush revision without losing pending 
   ).toMatchObject({ prompt: '尚未 debounce 的新提示词' })
 })
 
-it('deduplicates concurrent startup for the same owner session and editor kind', async () => {
+it('does not create a default canvas during concurrent startup', async () => {
   await Promise.all([
     startCanvasEditor(identity, 'drawing'),
     startCanvasEditor(identity, 'drawing'),
   ])
   expect(
     (await listLocalCanvases(813)).filter((canvas) => canvas.kind === 'drawing')
-  ).toHaveLength(1)
+  ).toHaveLength(0)
+})
+
+it('materializes the transient canvas only after its first editor change', async () => {
+  await startCanvasEditor(identity, 'drawing')
+  expect(await listLocalCanvases(813)).toHaveLength(0)
+
+  useDrawingStore.getState().updateSettings({ prompt: '第一次编辑' })
+  await flushLocalEditors(identity)
+
+  const canvases = (await listLocalCanvases(813)).filter(
+    (canvas) => canvas.kind === 'drawing'
+  )
+  expect(canvases).toHaveLength(1)
+  expect(canvases[0].document).toMatchObject({
+    settings: { prompt: '第一次编辑' },
+  })
 })
 
 it('opens an existing browser draft even when legacy migration cannot read its original', async () => {

@@ -36,6 +36,7 @@ import { exportCanvasProject } from '../lib/canvas-projects'
 import type { CanvasKind } from '../types'
 import { CanvasProjectDialog } from './canvas-project-dialog'
 import { CanvasSaveStatus } from './canvas-save-status'
+import { CanvasSwitchDialog } from './canvas-switch-dialog'
 
 export function CanvasEditorHeader(props: {
   kind: CanvasKind
@@ -49,6 +50,11 @@ export function CanvasEditorHeader(props: {
   const current = canvas.current
   const [createOpen, setCreateOpen] = useState(false)
   const [reloadOpen, setReloadOpen] = useState(false)
+  const [switchOpen, setSwitchOpen] = useState(false)
+  const [pendingCreate, setPendingCreate] = useState<{
+    name: string
+    kind: CanvasKind
+  } | null>(null)
   const [title, setTitle] = useState('')
   const [editingTitle, setEditingTitle] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -78,6 +84,46 @@ export function CanvasEditorHeader(props: {
         `new-api-${props.kind}-canvas.json`
       )
     )
+
+  const performCreate = async (name: string) => {
+    const created = await canvas.create(name)
+    await navigate({
+      to: props.kind === 'drawing' ? '/canvas/drawing' : '/canvas/nai',
+      search: { canvas: created.id },
+    })
+    setCreateOpen(false)
+  }
+
+  const submitCreate = (name: string, kind: CanvasKind) => {
+    if (canvas.hasUnsavedChanges) {
+      setCreateOpen(false)
+      setError(null)
+      setPendingCreate({ name, kind })
+      setSwitchOpen(true)
+      return
+    }
+    void run(() => performCreate(name))
+  }
+
+  const resolveSwitch = (decision: 'save' | 'discard') => {
+    if (!pendingCreate) return
+    const next = pendingCreate
+    void (async () => {
+      setError(null)
+      setBusy(true)
+      try {
+        if (decision === 'save') await canvas.save()
+        else await canvas.discard()
+        setSwitchOpen(false)
+        setPendingCreate(null)
+        await performCreate(next.name)
+      } catch (error) {
+        setError(error instanceof Error ? error.message : 'Request failed')
+      } finally {
+        setBusy(false)
+      }
+    })()
+  }
 
   const cancelTitleEdit = () => {
     setTitle(current?.name ?? '')
@@ -227,16 +273,20 @@ export function CanvasEditorHeader(props: {
         busy={busy}
         error={error}
         onOpenChange={setCreateOpen}
-        onSubmit={(name) =>
-          void run(async () => {
-            const created = await canvas.create(name)
-            await navigate({
-              to: props.kind === 'drawing' ? '/canvas/drawing' : '/canvas/nai',
-              search: { canvas: created.id },
-            })
-            setCreateOpen(false)
-          })
-        }
+        onSubmit={submitCreate}
+      />
+      <CanvasSwitchDialog
+        open={switchOpen}
+        busy={busy}
+        error={error}
+        onOpenChange={(open) => {
+          if (!open) {
+            setSwitchOpen(false)
+            setPendingCreate(null)
+          }
+        }}
+        onDiscard={() => resolveSwitch('discard')}
+        onSave={() => resolveSwitch('save')}
       />
       <ConfirmDialog
         open={reloadOpen}

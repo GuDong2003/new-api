@@ -51,6 +51,7 @@ import {
   openCanvasProject,
   startCanvasEditor,
 } from '../lib/canvas-projects'
+import * as canvasRepository from '../lib/canvas-repository'
 import {
   loadLocalCanvas,
   readCanvasAssets,
@@ -488,6 +489,122 @@ it('shows the canvas title as text until it is clicked', async () => {
   ).not.toBeInTheDocument()
 })
 
+it('guards gallery canvas switching until unsaved changes are resolved', async () => {
+  const current = await localImage()
+  const target = await createCanvasProject(identity, 'drawing', '目标画布')
+  await openCanvasProject(identity, current.id)
+  useDrawingStore.getState().updateSettings({ prompt: '未保存修改' })
+
+  renderGallery()
+  await userEvent.click(screen.getByRole('tab', { name: 'Canvases' }))
+  await userEvent.click(
+    await screen.findByRole('button', { name: 'Open canvas: 目标画布' })
+  )
+
+  const dialog = await screen.findByRole('alertdialog')
+  expect(dialog).toHaveTextContent('Unsaved canvas changes')
+  await userEvent.click(
+    within(dialog).getByRole('button', { name: 'Discard changes' })
+  )
+
+  await waitFor(() =>
+    expect(navigate).toHaveBeenCalledWith({
+      to: '/canvas/drawing',
+      search: { canvas: target.id, image: undefined },
+    })
+  )
+  expect(useDrawingStore.getState().settings.prompt).not.toBe('未保存修改')
+})
+
+it('closes the create dialog before showing the unsaved changes dialog', async () => {
+  const current = await localImage()
+  await openCanvasProject(identity, current.id)
+  useDrawingStore.getState().updateSettings({ prompt: '未保存修改' })
+
+  render(<CanvasEditorHeader kind='drawing' />)
+  await userEvent.click(screen.getByRole('button', { name: 'New canvas' }))
+  await userEvent.type(
+    screen.getByRole('textbox', { name: 'Canvas name' }),
+    '新的画布'
+  )
+  await userEvent.click(screen.getByRole('button', { name: 'Create canvas' }))
+
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  expect(await screen.findByRole('alertdialog')).toHaveTextContent(
+    'Unsaved canvas changes'
+  )
+})
+
+it('guards gallery switching when another canvas kind has unsaved changes', async () => {
+  const current = await localImage()
+  const target = await createCanvasProject(identity, 'nai', '目标 NAI 画布')
+  await openCanvasProject(identity, current.id)
+  useDrawingStore.getState().updateSettings({ prompt: '未保存修改' })
+
+  renderGallery()
+  await userEvent.click(screen.getByRole('tab', { name: 'Canvases' }))
+  await userEvent.click(
+    await screen.findByRole('button', { name: 'Open canvas: 目标 NAI 画布' })
+  )
+
+  const dialog = await screen.findByRole('alertdialog')
+  expect(dialog).toHaveTextContent('Unsaved canvas changes')
+  expect(navigate).not.toHaveBeenCalled()
+
+  await userEvent.click(
+    within(dialog).getByRole('button', { name: 'Discard changes' })
+  )
+  await waitFor(() =>
+    expect(navigate).toHaveBeenCalledWith({
+      to: '/canvas/nai',
+      search: { canvas: target.id, image: undefined },
+    })
+  )
+  expect(useDrawingStore.getState().settings.prompt).not.toBe('未保存修改')
+})
+
+it('keeps the switch dialog actionable after a save failure', async () => {
+  const current = await localImage()
+  const target = await createCanvasProject(identity, 'drawing', '目标画布')
+  await openCanvasProject(identity, current.id)
+  useDrawingStore.getState().updateSettings({ prompt: '未保存修改' })
+
+  const failure = vi
+    .spyOn(canvasRepository, 'saveLocalCanvas')
+    .mockRejectedValue(new Error('Canvas storage is unavailable.'))
+
+  renderGallery()
+  await userEvent.click(screen.getByRole('tab', { name: 'Canvases' }))
+  await userEvent.click(
+    await screen.findByRole('button', { name: 'Open canvas: 目标画布' })
+  )
+  const dialog = await screen.findByRole('alertdialog')
+  await userEvent.click(
+    within(dialog).getByRole('button', { name: 'Save and continue' })
+  )
+
+  await waitFor(() =>
+    expect(
+      within(screen.getByRole('alertdialog')).getByRole('button', {
+        name: 'Discard changes',
+      })
+    ).toBeEnabled()
+  )
+  failure.mockRestore()
+
+  await userEvent.click(
+    within(screen.getByRole('alertdialog')).getByRole('button', {
+      name: 'Discard changes',
+    })
+  )
+  await waitFor(() =>
+    expect(navigate).toHaveBeenCalledWith({
+      to: '/canvas/drawing',
+      search: { canvas: target.id, image: undefined },
+    })
+  )
+})
+
 it('saves a title edited from the text view with Enter', async () => {
   const canvas = await localImage()
   render(<CanvasEditorHeader kind='drawing' />)
@@ -555,6 +672,44 @@ it('routes the editor deletion confirmation through durable original deletion an
   await waitFor(() => expect(useDrawingStore.getState().nodes).toHaveLength(0))
   expect(useDrawingStore.getState().past).toEqual([])
   expect(await readCanvasAssets(813, canvas.id)).toEqual([])
+})
+
+it('closes the editor deletion confirmation before a remote deletion finishes', async () => {
+  const canvas = await localImage()
+  let release!: () => void
+  api.defaults.adapter = async (config) => {
+    if (
+      config.method === 'get' &&
+      config.url === `/api/gallery/canvases/${canvas.id}`
+    ) {
+      await new Promise<void>((resolve) => {
+        release = resolve
+      })
+    }
+    throw new AxiosError(
+      'remote deletion pending',
+      '',
+      config,
+      {},
+      { ...response(config, {}), status: 503 }
+    )
+  }
+  render(<DeleteHarness />)
+  await userEvent.click(
+    screen.getByRole('button', { name: 'Delete selected image' })
+  )
+  await userEvent.click(
+    within(screen.getByRole('alertdialog')).getByRole('button', {
+      name: 'Delete',
+    })
+  )
+
+  await waitFor(() =>
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+  )
+  expect(useDrawingStore.getState().nodes).toHaveLength(0)
+  expect(await readCanvasAssets(813, canvas.id)).toEqual([])
+  release()
 })
 
 describe('canvas project save status', () => {

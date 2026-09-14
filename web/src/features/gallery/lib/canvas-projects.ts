@@ -31,7 +31,6 @@ import type {
 import { decodeCanvas, encodeCanvas } from './canvas-document'
 import {
   bindEditor,
-  cancelEditorJobs,
   canvasOriginalReader,
   flushLocalEditors,
   getCanvasEditorState,
@@ -209,13 +208,15 @@ export async function openCanvasProject(
     throw new Error('Canvas type does not match this editor.')
   }
   const old = canvasEditors.get(canvas.kind)
+  let reopened = false
   if (old && sameIdentity(old.identity, identity)) {
     await old.flush()
     assertGalleryIdentity(identity)
     if (getCanvasEditorState(canvas.kind)?.localStatus !== 'saved') {
       throw new Error('Save or export the current canvas before switching.')
     }
-    if (old.canvasId === id) {
+    reopened = old.canvasId === id
+    if (reopened) {
       // The initial lookup predates flush: reopening this same project must
       // hydrate the committed latest editor revision, never that stale object.
       const latest = await loadLocalCanvas(galleryOwner(identity), id)
@@ -226,29 +227,40 @@ export async function openCanvasProject(
     if (canvasEditors.get(canvas.kind) !== old || !old.isLocallySaved()) {
       throw new Error('The canvas changed. Please try again.')
     }
-    cancelEditorJobs(canvas.kind, identity)
-    old.stop()
-    void syncCanvas(identity, old.canvasId, 'leave')
+    if (!reopened) {
+      old.stop()
+      void syncCanvas(identity, old.canvasId, 'leave')
+    }
   } else old?.stop()
-  const document = await decodeCanvas(
-    canvas,
-    await readCanvasAssets(galleryOwner(identity), id)
-  )
-  assertGalleryIdentity(identity)
-  if (canvas.kind === 'drawing') {
-    useDrawingStore
-      .getState()
-      .initialize(galleryOwner(identity), document as DrawingDocument)
-  } else {
-    useNaiDrawingStore
-      .getState()
-      .initialize(galleryOwner(identity), document as NaiCanvasDocument)
+  if (!reopened) {
+    const document = await decodeCanvas(
+      canvas,
+      await readCanvasAssets(galleryOwner(identity), id)
+    )
+    assertGalleryIdentity(identity)
+    if (canvas.kind === 'drawing') {
+      useDrawingStore
+        .getState()
+        .initialize(galleryOwner(identity), document as DrawingDocument)
+    } else {
+      useNaiDrawingStore
+        .getState()
+        .initialize(galleryOwner(identity), document as NaiCanvasDocument)
+    }
   }
   await updateCanvasUserState(galleryOwner(identity), (state) => ({
     ...state,
     lastOpened: { ...state.lastOpened, [canvas.kind]: id },
   }))
-  bindEditor(identity, canvas)
+  if (!reopened) bindEditor(identity, canvas)
+  else {
+    // Reopening the active canvas refreshes metadata such as conflict status
+    // after a cloud-state update without replacing the live editor document.
+    updateState(canvas.kind, {
+      canvas,
+      localStatus: getCanvasEditorState(canvas.kind)?.localStatus ?? 'saved',
+    })
+  }
   if (focusAssetId) {
     const node = storeFor(canvas.kind)
       .getState()
@@ -264,6 +276,75 @@ export async function openCanvasProject(
   void getCanvasRecord(identity, id)
     .then((remote) => reconcileCanvasRecord(identity, opened, remote))
     .catch(() => undefined)
+}
+
+export function hasUnsavedCanvasChanges(
+  identity: GalleryIdentity,
+  kind: CanvasKind
+): boolean {
+  const editor = canvasEditors.get(kind)
+  return Boolean(
+    editor &&
+    sameIdentity(editor.identity, identity) &&
+    !editor.isLocallySaved()
+  )
+}
+
+export function getUnsavedCanvasKind(
+  identity: GalleryIdentity
+): CanvasKind | null {
+  for (const kind of ['drawing', 'nai'] as const) {
+    if (hasUnsavedCanvasChanges(identity, kind)) return kind
+  }
+  return null
+}
+
+/** Restore the last committed browser snapshot without flushing the current editor. */
+export async function discardCanvasChanges(
+  identity: GalleryIdentity,
+  kind: CanvasKind
+): Promise<void> {
+  assertGalleryIdentity(identity)
+  const editor = canvasEditors.get(kind)
+  if (!editor || !sameIdentity(editor.identity, identity)) return
+  const id = editor.canvasId
+  editor.stop()
+  const canvas = await loadLocalCanvas(galleryOwner(identity), id)
+  assertGalleryIdentity(identity)
+  if (canvas && !canvas.deleted) {
+    const document = await decodeCanvas(
+      canvas,
+      await readCanvasAssets(galleryOwner(identity), canvas.id)
+    )
+    assertGalleryIdentity(identity)
+    if (kind === 'drawing') {
+      useDrawingStore
+        .getState()
+        .initialize(galleryOwner(identity), document as DrawingDocument)
+    } else {
+      useNaiDrawingStore
+        .getState()
+        .initialize(galleryOwner(identity), document as NaiCanvasDocument)
+    }
+    await updateCanvasUserState(galleryOwner(identity), (state) => ({
+      ...state,
+      lastOpened: { ...state.lastOpened, [kind]: canvas.id },
+    }))
+    bindEditor(identity, canvas)
+    return
+  }
+  const document = emptyDocument(kind)
+  const transient = initialCanvas(identity, kind, document)
+  if (kind === 'drawing') {
+    useDrawingStore
+      .getState()
+      .initialize(galleryOwner(identity), document as DrawingDocument)
+  } else {
+    useNaiDrawingStore
+      .getState()
+      .initialize(galleryOwner(identity), document as NaiCanvasDocument)
+  }
+  bindEditor(identity, transient)
 }
 export async function reloadCanvasProject(
   identity: GalleryIdentity,
@@ -367,9 +448,22 @@ async function startEditor(
     }
     const migrated = await migrate().catch(() => [])
     assertGalleryIdentity(identity)
-    const selected =
-      migrated.find((canvas) => canvas.kind === kind) ??
-      (await createCanvasProject(identity, kind))
+    const selected = migrated.find((canvas) => canvas.kind === kind)
+    if (!selected) {
+      const document = emptyDocument(kind)
+      const transient = initialCanvas(identity, kind, document)
+      if (kind === 'drawing') {
+        useDrawingStore
+          .getState()
+          .initialize(galleryOwner(identity), document as DrawingDocument)
+      } else {
+        useNaiDrawingStore
+          .getState()
+          .initialize(galleryOwner(identity), document as NaiCanvasDocument)
+      }
+      bindEditor(identity, transient)
+      return
+    }
     const binding = canvasEditors.get(kind)
     if (
       !binding ||

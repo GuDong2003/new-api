@@ -146,11 +146,14 @@ export function bindEditor(identity: GalleryIdentity, initial: LocalCanvas) {
     })
     try {
       for (let retry = 0; retry < 3; retry++) {
-        const current = await loadLocalCanvas(
-          galleryOwner(identity),
-          initial.id
-        )
-        if (!current || current.deleted || !active) return
+        let current = await loadLocalCanvas(galleryOwner(identity), initial.id)
+        if (!active) return
+        // A new editor starts with an in-memory canvas. Materialize that
+        // placeholder only when the first real editor change needs saving.
+        if (!current && initial.revision === 0 && initial.localSavedAt === 0) {
+          current = initial
+        }
+        if (!current || current.deleted) return
         const latestEditor = store.getState()
         const encoded = await encodeCanvas(kind, latestEditor, {
           existingAssets: await readCanvasAssets(

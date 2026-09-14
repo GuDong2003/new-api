@@ -36,6 +36,10 @@ import {
 } from './canvas-sync'
 import { galleryOwner, assertGalleryIdentity } from './session'
 
+function scheduleCanvasRemovalReplay(identity: GalleryIdentity) {
+  void replayCanvasRemovals(identity).catch(() => undefined)
+}
+
 export async function replayCanvasRemovals(
   identity: GalleryIdentity
 ): Promise<void> {
@@ -119,13 +123,13 @@ export async function deleteCanvasProject(
       ],
     }))
     notifyCanvasProjects()
-    await replayCanvasRemovals(identity)
+    scheduleCanvasRemovalReplay(identity)
     return
   }
   await removeLocalCanvas(galleryOwner(identity), canvasId)
   const canvas = await loadLocalCanvas(galleryOwner(identity), canvasId)
   if (canvas) await emitCanvasEvent({ identity, canvas })
-  await replayCanvasRemovals(identity)
+  scheduleCanvasRemovalReplay(identity)
 }
 /** Detaching a reference is not this operation: this deletes the shared original. */
 export async function deleteCanvasResource(
@@ -147,7 +151,7 @@ export async function deleteCanvasResource(
       ],
     }))
     notifyCanvasProjects()
-    await replayCanvasRemovals(identity)
+    scheduleCanvasRemovalReplay(identity)
     return
   }
   const canvas = await removeLocalCanvasAsset(
@@ -156,5 +160,5 @@ export async function deleteCanvasResource(
     assetId
   )
   await emitCanvasEvent({ identity, canvas, removedIds: [assetId] })
-  await replayCanvasRemovals(identity)
+  scheduleCanvasRemovalReplay(identity)
 }

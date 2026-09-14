@@ -47,6 +47,7 @@ import { deleteGalleryImage, getGalleryImages, listCanvasRecords } from './api'
 import { CanvasCard, type CanvasProjectView } from './components/canvas-card'
 import { CanvasProjectDialog } from './components/canvas-project-dialog'
 import { CanvasSaveStatus } from './components/canvas-save-status'
+import { CanvasSwitchDialog } from './components/canvas-switch-dialog'
 import { GalleryImageCard } from './components/gallery-image-card'
 import { GalleryPreview } from './components/gallery-preview'
 import { useCanvasProjects } from './hooks/use-canvas-projects'
@@ -55,6 +56,7 @@ import {
   getCanvasDeletionEvents,
   subscribeCanvasDeletions,
 } from './lib/canvas-events'
+import { getUnsavedCanvasKind } from './lib/canvas-projects'
 import { readCanvasAssets } from './lib/canvas-repository'
 import { checkCanvasCapacity, getCanvasGalleryUsage } from './lib/canvas-sync'
 import {
@@ -75,6 +77,16 @@ export { GallerySettingsSection } from './components/gallery-settings-section'
 const galleryDeletionCursors = new Map<string, number>()
 const galleryIdentityKey = (identity: GalleryIdentity) =>
   `${identity.userId}:${identity.sessionId}`
+
+type PendingCanvasAction =
+  | {
+      type: 'open'
+      id: string
+      kind: CanvasKind
+      image?: string
+      sourceKind: CanvasKind
+    }
+  | { type: 'create'; name: string; kind: CanvasKind; sourceKind: CanvasKind }
 
 export function Gallery() {
   const { t } = useTranslation()
@@ -119,6 +131,8 @@ function GalleryContent(props: { identity: GalleryIdentity }) {
   )
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [pendingCanvasAction, setPendingCanvasAction] =
+    useState<PendingCanvasAction | null>(null)
   const [removedImages, setRemovedImages] = useState<string[]>([])
   const [removedProjects, setRemovedProjects] = useState<string[]>([])
   const deletionVersion = useSyncExternalStore(
@@ -377,24 +391,52 @@ function GalleryContent(props: { identity: GalleryIdentity }) {
       )
     )
   }
+  const projectFor = (kind: CanvasKind) => (kind === 'drawing' ? drawing : nai)
+  const navigateToCanvas = async (
+    id: string,
+    kind: CanvasKind,
+    image?: string
+  ) => {
+    await navigate({
+      to: kind === 'drawing' ? '/canvas/drawing' : '/canvas/nai',
+      search: { canvas: id, image },
+    })
+  }
+  const openProjectNow = async (
+    id: string,
+    kind: CanvasKind,
+    image?: string
+  ) => {
+    await projectFor(kind).open(id, image)
+    await navigateToCanvas(id, kind, image)
+  }
+  const createProjectNow = async (name: string, kind: CanvasKind) => {
+    const canvas = await projectFor(kind).create(name)
+    setDialog(null)
+    await navigateToCanvas(canvas.id, kind)
+  }
   const openProject = (id: string, kind: CanvasKind, image?: string) => {
+    const sourceKind = getUnsavedCanvasKind(identity)
+    if (sourceKind) {
+      setError(null)
+      setPendingCanvasAction({ type: 'open', id, kind, image, sourceKind })
+      return
+    }
     void run(async () => {
-      await (kind === 'drawing' ? drawing : nai).open(id, image)
-      await navigate({
-        to: kind === 'drawing' ? '/canvas/drawing' : '/canvas/nai',
-        search: { canvas: id, image },
-      })
+      await openProjectNow(id, kind, image)
     })
   }
   const submitDialog = (name: string, kind: CanvasKind) => {
+    const sourceKind = getUnsavedCanvasKind(identity)
+    if (dialog === 'create' && sourceKind) {
+      setDialog(null)
+      setError(null)
+      setPendingCanvasAction({ type: 'create', name, kind, sourceKind })
+      return
+    }
     void run(async () => {
       if (dialog === 'create') {
-        const canvas = await (kind === 'drawing' ? drawing : nai).create(name)
-        setDialog(null)
-        await navigate({
-          to: kind === 'drawing' ? '/canvas/drawing' : '/canvas/nai',
-          search: { canvas: canvas.id },
-        })
+        await createProjectNow(name, kind)
       } else if (renameTarget) {
         await (renameTarget.kind === 'drawing' ? drawing : nai).rename(
           renameTarget.id,
@@ -405,6 +447,30 @@ function GalleryContent(props: { identity: GalleryIdentity }) {
       }
       await invalidate()
     })
+  }
+  const resolveCanvasAction = (decision: 'save' | 'discard') => {
+    if (!pendingCanvasAction) return
+    const action = pendingCanvasAction
+    const project = projectFor(action.sourceKind)
+    void (async () => {
+      setBusy(true)
+      setError(null)
+      try {
+        if (decision === 'save') await project.save()
+        else await project.discard()
+        if (action.type === 'open') {
+          await openProjectNow(action.id, action.kind, action.image)
+        } else {
+          await createProjectNow(action.name, action.kind)
+        }
+        setPendingCanvasAction(null)
+        await invalidate()
+      } catch (error) {
+        setError(error instanceof Error ? error.message : 'Request failed')
+      } finally {
+        setBusy(false)
+      }
+    })()
   }
   const confirmDelete = () => {
     if (!deleteTarget) return
@@ -713,6 +779,19 @@ function GalleryContent(props: { identity: GalleryIdentity }) {
           }
         }}
         onSubmit={submitDialog}
+      />
+      <CanvasSwitchDialog
+        open={pendingCanvasAction !== null}
+        busy={busy}
+        error={error}
+        onOpenChange={(open) => {
+          if (!open) {
+            setPendingCanvasAction(null)
+            setError(null)
+          }
+        }}
+        onDiscard={() => resolveCanvasAction('discard')}
+        onSave={() => resolveCanvasAction('save')}
       />
       <ConfirmDialog
         open={deleteTarget !== null}

@@ -41,6 +41,7 @@ import {
   createCanvasProject,
   startCanvasEditor,
   exportCanvasProject,
+  openCanvasProject,
 } from '../lib/canvas-projects'
 import {
   readCanvasAssets,
@@ -152,6 +153,80 @@ it('finishes URL generation before private original acquisition, and preserves g
   await flushLocalEditors(identity)
   expect(getCanvasEditorState('drawing')?.localStatus).toBe('error')
   expect(useDrawingStore.getState().nodes[0].data.status).toBe('complete')
+})
+
+it('keeps an in-flight generation alive when the current canvas is reopened', async () => {
+  const canvas = await createCanvasProject(identity, 'drawing')
+  await startCanvasEditor(identity, 'drawing')
+  let finish!: (value: unknown) => void
+  let signal: { aborted: boolean } | undefined
+  vi.spyOn(api, 'post').mockImplementation((_url, _data, config) => {
+    signal = config?.signal
+    return new Promise((resolve) => {
+      finish = resolve
+    })
+  })
+  const hook = renderHook(useImageGeneration)
+  act(() => {
+    hook.result.current.generate(
+      { ...DEFAULT_IMAGE_SETTINGS, model: 'gpt-image-1', prompt: 'A forest' },
+      { x: 0, y: 0 }
+    )
+  })
+  await waitFor(() => expect(signal).toBeDefined())
+
+  await openCanvasProject(identity, canvas.id)
+
+  expect(signal?.aborted).toBe(false)
+  expect(useDrawingStore.getState().nodes[0].data.status).toBe('pending')
+  await act(async () => {
+    finish({
+      headers: { 'content-type': 'application/json' },
+      data: new Response(JSON.stringify({ data: [{ b64_json: png }] })).body,
+    })
+  })
+  await waitFor(() =>
+    expect(useDrawingStore.getState().nodes[0].data.status).toBe('complete')
+  )
+})
+
+it('keeps a pending NAI generation alive while arranging the canvas', async () => {
+  await createCanvasProject(identity, 'nai')
+  await startCanvasEditor(identity, 'nai')
+  let signal: { aborted: boolean } | undefined
+  let finish!: (value: unknown) => void
+  vi.spyOn(api, 'post').mockImplementation((_url, _data, config) => {
+    signal = config?.signal
+    return new Promise((resolve) => {
+      finish = resolve
+    })
+  })
+  const hook = renderHook(useNaiImageGeneration)
+  act(() =>
+    hook.result.current.generate({
+      ...DEFAULT_NAI_SETTINGS,
+      model: 'nai-diffusion-4-5-full',
+      prompt: '一只狐狸',
+      n: 1,
+    })
+  )
+  await waitFor(() =>
+    expect(useNaiDrawingStore.getState().nodes).toHaveLength(1)
+  )
+  const node = useNaiDrawingStore.getState().nodes[0]
+  const jobId = node.data.jobId
+
+  act(() => useNaiDrawingStore.getState().arrange())
+
+  expect(signal?.aborted).toBe(false)
+  expect(useNaiDrawingStore.getState().nodes[0].data).toMatchObject({
+    status: 'pending',
+    jobId,
+  })
+  await act(async () => finish({ data: { data: [{ b64_json: png }] } }))
+  await waitFor(() =>
+    expect(useNaiDrawingStore.getState().nodes[0].data.status).toBe('complete')
+  )
 })
 
 it('discards a generation result arriving after explicit canvas deletion', async () => {

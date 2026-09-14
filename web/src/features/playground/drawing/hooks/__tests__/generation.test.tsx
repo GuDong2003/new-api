@@ -283,6 +283,7 @@ describe('Image generation jobs', () => {
       ),
     })
 
+    const decoderIndex = decoders.length
     act(() =>
       hook.result.current.generate(
         {
@@ -293,7 +294,6 @@ describe('Image generation jobs', () => {
         { x: 0, y: 0 }
       )
     )
-    const decoderIndex = decoders.length
     await waitFor(() => expect(decoders.length).toBeGreaterThan(decoderIndex))
     const imageId = useDrawingStore.getState().nodes[0].id
 
@@ -308,6 +308,85 @@ describe('Image generation jobs', () => {
       expect(useDrawingStore.getState().nodes[0].data.status).toBe('complete')
     )
     expect(useDrawingStore.getState().nodes[0].id).toBe(imageId)
+    client.clear()
+  })
+
+  it('keeps a final image complete when a lifecycle cancellation arrives during decoding', async () => {
+    const client = new QueryClient()
+    const hook = renderHook(useImageGeneration, {
+      wrapper: (props: { children: ReactNode }) => (
+        <QueryClientProvider client={client}>
+          {props.children}
+        </QueryClientProvider>
+      ),
+    })
+
+    const decoderIndex = decoders.length
+    act(() =>
+      hook.result.current.generate(
+        {
+          ...DEFAULT_IMAGE_SETTINGS,
+          model: 'gpt-image-1',
+          prompt: 'A final image',
+          n: 1,
+        },
+        { x: 0, y: 0 }
+      )
+    )
+    await waitFor(() => expect(decoders.length).toBeGreaterThan(decoderIndex))
+
+    cancelImageGenerationJobs(813, 'gallery-session')
+    await act(async () =>
+      decoders[decoderIndex].dispatchEvent(new Event('load'))
+    )
+
+    await waitFor(() => expect(hook.result.current.pendingCount).toBe(0))
+    expect(useDrawingStore.getState().nodes[0].data.status).toBe('complete')
+    hook.unmount()
+    client.clear()
+  })
+
+  it('keeps a pending drawing generation alive while arranging the canvas', async () => {
+    const client = new QueryClient()
+    const hook = renderHook(useImageGeneration, {
+      wrapper: (props: { children: ReactNode }) => (
+        <QueryClientProvider client={client}>
+          {props.children}
+        </QueryClientProvider>
+      ),
+    })
+    let signal: GenericAbortSignal | undefined
+    vi.mocked(api.post).mockImplementation((_url, _body, config) => {
+      signal = config?.signal
+      return Promise.resolve({
+        headers: { 'content-type': 'application/json' },
+        data: new Response(JSON.stringify({ data: [{ b64_json: 'YWJj' }] }))
+          .body,
+      })
+    })
+
+    act(() =>
+      hook.result.current.generate(
+        { ...DEFAULT_IMAGE_SETTINGS, model: 'gpt-image-1', prompt: 'A cup' },
+        { x: 0, y: 0 }
+      )
+    )
+    await waitFor(() => expect(decoders).toHaveLength(1))
+    const node = useDrawingStore.getState().nodes[0]
+    const jobId = node.data.jobId
+
+    act(() => useDrawingStore.getState().arrange())
+
+    expect(signal?.aborted).toBe(false)
+    expect(useDrawingStore.getState().nodes[0].data).toMatchObject({
+      status: 'pending',
+      jobId,
+    })
+    await act(async () => decoders[0].dispatchEvent(new Event('load')))
+    await waitFor(() =>
+      expect(useDrawingStore.getState().nodes[0].data.status).toBe('complete')
+    )
+    hook.unmount()
     client.clear()
   })
 
