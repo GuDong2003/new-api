@@ -30,10 +30,12 @@ import type React from 'react'
 
 import { IconCodeBuddy } from '@/assets/custom/icon-codebuddy'
 import { IconSub2api } from '@/assets/custom/icon-sub2api'
+import { IconWan } from '@/assets/custom/icon-wan'
 
 const CUSTOM_ICONS: Record<string, React.ComponentType<{ size?: number }>> = {
   CodeBuddy: IconCodeBuddy,
   Sub2API: IconSub2api,
+  Wan: IconWan,
 }
 
 /**
