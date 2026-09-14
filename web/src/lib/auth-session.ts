@@ -215,62 +215,72 @@ export function createRefreshRunner(
     kind: 'transient_error',
     error: new AuthRefreshSupersededError(),
   })
-  const run = async (
-    raceAttempt: number,
-    allowMismatchRetry: boolean
-  ): Promise<RefreshOutcome> => {
-    if (runtime.isCurrent && !runtime.isCurrent()) return superseded()
-    const response = await runtime.request(runtime.getExpectedSID())
-    if (runtime.isCurrent && !runtime.isCurrent()) return superseded()
-    const responseData = isRecord(response.data) ? response.data : undefined
-    const code =
-      typeof responseData?.code === 'string' ? responseData.code : undefined
-    const bundle = runtime.parseBundle(responseData?.data)
-    if (responseData?.success === true && bundle) {
-      runtime.acceptBundle(bundle)
-      return { kind: 'authenticated', bundle }
-    }
-
-    if (response.status === 409 && code === 'AUTH_REFRESH_RACE') {
-      const delay = refreshRaceDelays[raceAttempt]
-      if (delay !== undefined) {
-        await runtime.wait(delay)
-        return run(raceAttempt + 1, allowMismatchRetry)
+  return () => {
+    let retryWithoutExpectedSID = false
+    const run = async (
+      raceAttempt: number,
+      allowMismatchRetry: boolean
+    ): Promise<RefreshOutcome> => {
+      if (runtime.isCurrent && !runtime.isCurrent()) return superseded()
+      const response = await runtime.request(
+        retryWithoutExpectedSID ? undefined : runtime.getExpectedSID()
+      )
+      if (runtime.isCurrent && !runtime.isCurrent()) return superseded()
+      const responseData = isRecord(response.data) ? response.data : undefined
+      const code =
+        typeof responseData?.code === 'string' ? responseData.code : undefined
+      const bundle = runtime.parseBundle(responseData?.data)
+      if (responseData?.success === true && bundle) {
+        runtime.acceptBundle(bundle)
+        return { kind: 'authenticated', bundle }
       }
-      runtime.clear(false)
-      return { kind: 'out_of_sync', code }
-    }
 
-    if (response.status === 409 && code === 'AUTH_SESSION_MISMATCH') {
-      if (allowMismatchRetry) {
-        runtime.clear(false, 'idle')
-        return run(0, false)
+      if (response.status === 409 && code === 'AUTH_REFRESH_RACE') {
+        const delay = refreshRaceDelays[raceAttempt]
+        if (delay !== undefined) {
+          await runtime.wait(delay)
+          return run(raceAttempt + 1, allowMismatchRetry)
+        }
+        runtime.clear(false)
+        return { kind: 'out_of_sync', code }
       }
+
+      if (response.status === 409 && code === 'AUTH_SESSION_MISMATCH') {
+        if (allowMismatchRetry) {
+          retryWithoutExpectedSID = true
+          runtime.clear(false, 'idle')
+          return run(0, false)
+        }
+        runtime.clear(false)
+        return { kind: 'out_of_sync', code }
+      }
+
+      if (response.status === 401) {
+        runtime.clear(true)
+        return { kind: 'anonymous' }
+      }
+
+      if (
+        !response.status ||
+        response.status >= 500 ||
+        response.status === 429
+      ) {
+        runtime.markTransient()
+        return {
+          kind: 'transient_error',
+          error: response.error ?? response.data,
+        }
+      }
+
       runtime.clear(false)
-      return { kind: 'out_of_sync', code }
-    }
-
-    if (response.status === 401) {
-      runtime.clear(true)
-      return { kind: 'anonymous' }
-    }
-
-    if (!response.status || response.status >= 500 || response.status === 429) {
-      runtime.markTransient()
       return {
-        kind: 'transient_error',
-        error: response.error ?? response.data,
+        kind: 'out_of_sync',
+        code: code ?? 'AUTH_INVALID_REFRESH_RESPONSE',
       }
     }
 
-    runtime.clear(false)
-    return {
-      kind: 'out_of_sync',
-      code: code ?? 'AUTH_INVALID_REFRESH_RESPONSE',
-    }
+    return run(0, true)
   }
-
-  return () => run(0, true)
 }
 
 async function requestRefresh(
@@ -303,7 +313,10 @@ function runRefresh(refreshEpoch: number): Promise<RefreshOutcome> {
     acceptBundle: (bundle) => applyAuthBundle(bundle, false),
     clear: (synchronizeTabs, bootstrapState) => {
       if (!synchronizeTabs && bootstrapState === 'idle') {
-        useAuthStore.getState().auth.reset('idle')
+        // A session mismatch is retried without the stale SID. Keep the
+        // current identity mounted during that short retry window so long-
+        // running canvas jobs are not mistaken for a logout and cancelled.
+        useAuthStore.getState().auth.setBootstrapState('idle')
         return
       }
       clearAuthentication(synchronizeTabs, bootstrapState)

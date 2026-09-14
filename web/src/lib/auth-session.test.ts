@@ -67,7 +67,7 @@ describe('authentication session coordination', () => {
   })
 
   test('a session mismatch clears only local state and retries without the stale SID', async () => {
-    let expectedSID: string | undefined = bundle.session.sid
+    const expectedSID: string | undefined = bundle.session.sid
     const requestedSIDs: Array<string | undefined> = []
     const clears: Array<[boolean, string | undefined]> = []
     const accepted: AuthBundle[] = []
@@ -87,7 +87,6 @@ describe('authentication session coordination', () => {
       acceptBundle: (acceptedBundle) => accepted.push(acceptedBundle),
       clear: (synchronizeTabs, bootstrapState) => {
         clears.push([synchronizeTabs, bootstrapState])
-        expectedSID = undefined
       },
       markTransient: () => undefined,
       wait: async () => undefined,

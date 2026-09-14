@@ -26,7 +26,14 @@ import {
   RouterProvider,
   type ParsedLocation,
 } from '@tanstack/react-router'
-import { act, render, screen, waitFor, within } from '@testing-library/react'
+import {
+  act,
+  render,
+  renderHook,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -34,6 +41,8 @@ import { AuthenticatedLayout } from '@/components/layout/components/authenticate
 import { DirectionProvider } from '@/context/direction-provider'
 import { ThemeCustomizationProvider } from '@/context/theme-customization-provider'
 import { ThemeProvider } from '@/context/theme-provider'
+import { useNaiImageGeneration } from '@/features/playground/nai/hooks/use-nai-image-generation'
+import { DEFAULT_NAI_SETTINGS } from '@/features/playground/nai/lib/nai-settings'
 import { api } from '@/lib/api'
 import { useAuthStore } from '@/stores/auth-store'
 import { useDrawingStore } from '@/stores/drawing-store'
@@ -322,5 +331,38 @@ describe('Canvas workspace navigation', () => {
     expect(useNaiDrawingStore.getState().settings.prompt).toBe(
       'NAI draft stays'
     )
+  })
+
+  it('keeps an active NAI generation alive while leaving and returning to the canvas route', async () => {
+    const router = await openWorkspace('/canvas/drawing', true)
+    await waitFor(() => expect(useNaiDrawingStore.getState().ready).toBe(true))
+
+    let finish!: (value: unknown) => void
+    vi.spyOn(api, 'post').mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve
+        })
+    )
+    const hook = renderHook(useNaiImageGeneration)
+    act(() =>
+      hook.result.current.generate({
+        ...DEFAULT_NAI_SETTINGS,
+        model: 'nai-diffusion-4-5-full',
+        prompt: '一只狐狸',
+      })
+    )
+    await waitFor(() => expect(finish).toBeTypeOf('function'))
+
+    await act(() => router.navigate({ to: '/dashboard' }))
+    await act(() => router.navigate({ to: '/canvas/drawing' }))
+    await act(async () => finish({ data: { data: [{ b64_json: 'YWJj' }] } }))
+
+    await waitFor(() =>
+      expect(useNaiDrawingStore.getState().nodes[0]?.data.status).toBe(
+        'complete'
+      )
+    )
+    hook.unmount()
   })
 })
