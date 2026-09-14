@@ -12,7 +12,6 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
-	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -195,9 +194,7 @@ func TestOaiResponsesHandlerIncompleteStatusCommitsZeroImageGeneration(t *testin
 	assert.Equal(t, 0, info.ResponsesUsageInfo.BuiltInTools[dto.BuildInToolImageGeneration].CallCount)
 }
 
-// runResponsesStream feeds SSE events through OaiResponsesStreamHandler and
-// returns the usage the stream settles with.
-func runResponsesStream(t *testing.T, info *relaycommon.RelayInfo, events ...string) *dto.Usage {
+func runResponsesImageBillingStream(t *testing.T, events ...string) *relaycommon.RelayInfo {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	oldTimeout := constant.StreamingTimeout
@@ -217,29 +214,22 @@ func runResponsesStream(t *testing.T, info *relaycommon.RelayInfo, events ...str
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
-	c.Set(common.RequestIdKey, "responses-billing-test")
-	info.DisablePing = true
+	c.Set(common.RequestIdKey, "responses-image-billing-test")
+	info := &relaycommon.RelayInfo{
+		OriginModelName: "gpt-5.1",
+		DisablePing:     true,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			UpstreamModelName: "gpt-5.1",
+		},
+	}
 	resp := &http.Response{
 		StatusCode: http.StatusOK,
 		Body:       io.NopCloser(strings.NewReader(body.String())),
 		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
 	}
 
-	usage, apiErr := OaiResponsesStreamHandler(c, info, resp)
+	_, apiErr := OaiResponsesStreamHandler(c, info, resp)
 	require.Nil(t, apiErr)
-	require.NotNil(t, usage)
-	return usage
-}
-
-func runResponsesImageBillingStream(t *testing.T, events ...string) *relaycommon.RelayInfo {
-	t.Helper()
-	info := &relaycommon.RelayInfo{
-		OriginModelName: "gpt-5.1",
-		ChannelMeta: &relaycommon.ChannelMeta{
-			UpstreamModelName: "gpt-5.1",
-		},
-	}
-	runResponsesStream(t, info, events...)
 	require.NotNil(t, info.ResponsesUsageInfo)
 	require.Contains(t, info.ResponsesUsageInfo.BuiltInTools, dto.BuildInToolImageGeneration)
 	return info
@@ -274,111 +264,4 @@ func TestOaiResponsesStreamHandlerDoesNotCountPartialImageEvent(t *testing.T) {
 	)
 
 	assert.Equal(t, 0, info.ResponsesUsageInfo.BuiltInTools[dto.BuildInToolImageGeneration].CallCount)
-}
-
-func TestOaiResponsesStreamHandlerBillsUsageReportedOnEveryTerminalEvent(t *testing.T) {
-	for _, eventType := range []string{"response.completed", "response.done", "response.incomplete", "response.failed", "response.cancelled", "response.canceled"} {
-		t.Run(eventType, func(t *testing.T) {
-			info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "gpt-4o"}}
-			info.SetEstimatePromptTokens(100)
-			usage := runResponsesStream(t, info,
-				`{"type":"response.output_text.delta","delta":"partial output"}`,
-				`{"type":"`+eventType+`","response":{"usage":{"input_tokens":20,"output_tokens":5,"total_tokens":25,"input_tokens_details":{"cached_tokens":4}}}}`,
-			)
-
-			// The reported usage wins over the streamed-text and prompt estimates.
-			assert.Equal(t, 20, usage.PromptTokens)
-			assert.Equal(t, 5, usage.CompletionTokens)
-			assert.Equal(t, 25, usage.TotalTokens)
-			assert.Equal(t, 4, usage.PromptTokensDetails.CachedTokens)
-		})
-	}
-}
-
-func TestOaiResponsesStreamHandlerEstimatesMissingUsage(t *testing.T) {
-	const model = "gpt-4o"
-	const summary = "Inspect the repository before editing."
-	const arguments = `{"command":["bash","-lc","ls"]}`
-	inProgress := &dto.OpenAIResponsesResponse{Status: []byte(`"in_progress"`)}
-	for _, tc := range []struct {
-		name           string
-		events         []dto.ResponsesStreamResponse
-		wantPrompt     int
-		wantCompletion int
-	}{
-		{
-			name: "tool call stream cut before terminal usage",
-			events: []dto.ResponsesStreamResponse{
-				{Type: "response.created", Response: inProgress},
-				{Type: "response.reasoning_summary_text.delta", Delta: summary},
-				{Type: "response.function_call_arguments.delta", Delta: arguments},
-				{Type: dto.ResponsesOutputTypeItemDone, Item: &dto.ResponsesOutput{Type: dto.BuildInCallFunctionCall, Name: "shell"}},
-			},
-			wantPrompt:     100,
-			wantCompletion: service.CountTextToken(summary+arguments, model),
-		},
-		{
-			name: "created only then disconnect bills the prompt",
-			events: []dto.ResponsesStreamResponse{
-				{Type: "response.created", Response: inProgress},
-			},
-			wantPrompt: 100,
-		},
-		{
-			name: "incomplete without usage bills the prompt",
-			events: []dto.ResponsesStreamResponse{
-				{Type: "response.created", Response: inProgress},
-				{Type: "response.incomplete", Response: &dto.OpenAIResponsesResponse{Status: []byte(`"incomplete"`)}},
-			},
-			wantPrompt: 100,
-		},
-		{
-			name: "completed without usage estimates from terminal output",
-			events: []dto.ResponsesStreamResponse{
-				{Type: "response.completed", Response: &dto.OpenAIResponsesResponse{
-					Status: []byte(`"completed"`),
-					Output: []dto.ResponsesOutput{{
-						Type:    "message",
-						Role:    "assistant",
-						Content: []dto.ResponsesOutputContent{{Type: "output_text", Text: "final answer"}},
-					}},
-				}},
-			},
-			wantPrompt:     100,
-			wantCompletion: service.CountTextToken("final answer", model),
-		},
-		{
-			name: "explicit failure without usage bills nothing",
-			events: []dto.ResponsesStreamResponse{
-				{Type: "response.created", Response: inProgress},
-				{Type: "response.failed", Response: &dto.OpenAIResponsesResponse{Status: []byte(`"failed"`)}},
-			},
-		},
-		{
-			name: "flat error event bills nothing",
-			events: []dto.ResponsesStreamResponse{
-				{Type: "response.created", Response: inProgress},
-				{Type: "error", Code: "server_error"},
-			},
-		},
-		{
-			name: "no upstream events bills nothing",
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			events := make([]string, 0, len(tc.events))
-			for i := range tc.events {
-				encoded, err := common.Marshal(tc.events[i])
-				require.NoError(t, err)
-				events = append(events, string(encoded))
-			}
-			info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: model}}
-			info.SetEstimatePromptTokens(100)
-
-			usage := runResponsesStream(t, info, events...)
-			assert.Equal(t, tc.wantPrompt, usage.PromptTokens)
-			assert.Equal(t, tc.wantCompletion, usage.CompletionTokens)
-			assert.Equal(t, tc.wantPrompt+tc.wantCompletion, usage.TotalTokens)
-		})
-	}
 }

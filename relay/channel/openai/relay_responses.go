@@ -4,14 +4,13 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/relaykit/dto"
-	"github.com/QuantumNous/new-api/relaykit/relayconvert"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
 
@@ -39,7 +38,8 @@ func OaiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 	service.IOCopyBytesGracefully(c, resp, responseBody)
 
 	// compute usage
-	usage := relayconvert.NormalizeResponsesUsage(responsesResponse.Usage)
+	usage := &dto.Usage{}
+	service.ApplyResponsesUsage(usage, responsesResponse.Usage)
 	// Count actual tool invocations from Output (not tool declarations).
 	for _, output := range responsesResponse.Output {
 		switch output.Type {
@@ -72,12 +72,7 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 
 	defer service.CloseResponseBodyGracefully(resp)
 
-	var usage = &dto.Usage{}
-	var responseTextBuilder strings.Builder
-	imageCounter := &relaycommon.ImageGenerationCallCounter{}
-	imageCommitted := false
-	started := false
-	upstreamFailed := false
+	accumulator := service.NewResponsesUsageAccumulator(info)
 
 	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
 
@@ -89,88 +84,10 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 			return
 		}
 		sendResponsesStreamData(c, streamResponse, data)
-		started = true
-		var responseStatus string
-		if streamResponse.Response != nil {
-			_ = common.Unmarshal(streamResponse.Response.Status, &responseStatus)
-		}
-		// An error event or a failed response is an explicit upstream failure.
-		if streamResponse.Type == "error" || streamResponse.Type == "response.error" ||
-			streamResponse.Type == "response.failed" || responseStatus == "failed" {
-			upstreamFailed = true
-		}
-		switch streamResponse.Type {
-		case "response.completed", "response.done", "response.failed", "response.incomplete", "response.cancelled", "response.canceled":
-			// Failed, incomplete and cancelled terminals carry the usage upstream
-			// bills just like completed ones.
-			if streamResponse.Response != nil {
-				if streamResponse.Response.Usage != nil {
-					incomingUsage := relayconvert.NormalizeResponsesUsage(streamResponse.Response.Usage)
-					usage = dto.MergeUsageNonZero(usage, incomingUsage)
-				}
-				if responseTextBuilder.Len() == 0 {
-					// Some upstreams carry the output only on the terminal event.
-					responseTextBuilder.WriteString(relayconvert.ExtractOutputTextFromResponses(streamResponse.Response))
-				}
-			}
-			if imageCommitted {
-				return
-			}
-			completed := streamResponse.Type == "response.completed" || streamResponse.Type == "response.done"
-			if !completed || (streamResponse.Response != nil && relaycommon.IsNonBillableResponsesStatus(streamResponse.Response.Status)) {
-				imageCounter.Reset()
-			} else if streamResponse.Response != nil {
-				for i := range streamResponse.Response.Output {
-					imageCounter.Observe(&streamResponse.Response.Output[i], &i)
-				}
-			}
-			imageCounter.Commit(info)
-			imageCommitted = true
-		case "response.output_text.delta", "response.function_call_arguments.delta",
-			"response.reasoning_summary_text.delta", "response.reasoning_text.delta", "response.refusal.delta":
-			// Every delta kind here is generated output that upstream bills as
-			// output tokens, so all of them feed the missing-usage estimate.
-			responseTextBuilder.WriteString(streamResponse.Delta)
-		case dto.ResponsesOutputTypeItemDone:
-			if streamResponse.Item != nil {
-				switch streamResponse.Item.Type {
-				case dto.BuildInCallWebSearchCall:
-					info.CountBillableToolCall(dto.BuildInCallWebSearchCall, "")
-				case dto.BuildInCallFileSearchCall:
-					info.CountBillableToolCall(dto.BuildInCallFileSearchCall, "")
-				case dto.BuildInCallFunctionCall:
-					info.CountBillableToolCall(dto.BuildInCallFunctionCall, streamResponse.Item.Name)
-				case dto.ResponsesOutputTypeImageGenerationCall:
-					if !imageCommitted {
-						imageCounter.Observe(streamResponse.Item, streamResponse.OutputIndex)
-					}
-				}
-			}
-		}
+		accumulator.Observe(&streamResponse)
 	})
 
-	if usage.CompletionTokens == 0 {
-		// 计算输出文本的 token 数量
-		tempStr := responseTextBuilder.String()
-		if len(tempStr) > 0 {
-			// 非正常结束，使用输出文本的 token 数量
-			completionTokens := service.CountTextToken(tempStr, info.UpstreamModelName)
-			usage.CompletionTokens = completionTokens
-		}
-	}
-
-	// Upstream bills the prompt as soon as it starts generating, so a stream
-	// that produced any event but no usage still owes its input tokens unless
-	// upstream reported an explicit failure.
-	billsPrompt := usage.CompletionTokens != 0 || (started && !upstreamFailed)
-	if usage.PromptTokens == 0 && billsPrompt {
-		usage.PromptTokens = info.GetEstimatePromptTokens()
-	}
-
-	usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
-	if usage.BillingUsage != nil {
-		usage.BillingUsage = dto.CloneBillingUsageWithEstimatedCompletion(usage.BillingUsage, usage.CompletionTokens)
-	}
-
-	return usage, nil
+	// The model rate limiter judges success by this stream's protocol outcome.
+	common.SetContextKey(c, constant.ContextKeyResponseStreamStatus, info.StreamStatus)
+	return accumulator.Finish(), nil
 }
