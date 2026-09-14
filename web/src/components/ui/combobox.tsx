@@ -123,9 +123,9 @@ function OptionCombobox(props: LegacyComboboxProps) {
       onInputValueChange={(value, details) => {
         if (details.reason === 'input-change') setSearch(value)
       }}
-      onOpenChange={(nextOpen) => {
+      onOpenChange={(nextOpen, details) => {
         setOpen(nextOpen)
-        setSearch('')
+        if (details.reason !== 'input-change') setSearch('')
       }}
       onValueChange={(option) => {
         if (option) props.onValueChange?.(option.value)
@@ -147,7 +147,8 @@ function OptionCombobox(props: LegacyComboboxProps) {
           onBlur={props.onBlur}
           onKeyDown={props.onKeyDown}
           onFocus={() => {
-            if (props.openOnFocus !== false) setOpen(true)
+            // Dialog autofocus should not expand a select-style combobox.
+            if (props.openOnFocus) setOpen(true)
           }}
           aria-label={props['aria-label']}
           aria-labelledby={props['aria-labelledby']}
