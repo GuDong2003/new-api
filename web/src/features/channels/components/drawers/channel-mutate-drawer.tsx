@@ -136,6 +136,7 @@ import {
   ADD_MODE_OPTIONS,
   CHANNEL_STATUS_LABELS,
   CHANNEL_TYPE_NOVELAI,
+  CHANNEL_TYPE_OLLAMA,
   CHANNEL_TYPE_OPTIONS,
   CHANNEL_TYPE_TASK_PLUGIN,
   CHANNEL_TYPE_VLLM,
@@ -289,6 +290,7 @@ const SENSITIVE_FORM_FIELDS = [
   'allow_inference_geo',
   'allow_speed',
   'claude_beta_query',
+  'ollama_openai_chat',
   'disable_task_polling_sleep',
   'upstream_model_update_check_enabled',
   'upstream_model_update_auto_sync_enabled',
@@ -1687,6 +1689,32 @@ export function ChannelMutateDrawer({
             <Switch
               disabled={sensitiveLocked}
               checked={field.value}
+              onCheckedChange={field.onChange}
+            />
+          </FormControl>
+        </FormItem>
+      )}
+    />
+  )
+
+  const ollamaOpenAIChatFields = currentType === CHANNEL_TYPE_OLLAMA && (
+    <FormField
+      control={form.control}
+      name='ollama_openai_chat'
+      render={({ field }) => (
+        <FormItem className='flex items-center justify-between px-4 py-3'>
+          <div className='space-y-0.5'>
+            <FormLabel>{t('Use OpenAI-compatible Ollama chat API')}</FormLabel>
+            <FormDescription>
+              {t(
+                'Send chat completions to the OpenAI-compatible /v1/chat/completions instead of the native Ollama /api/chat'
+              )}
+            </FormDescription>
+          </div>
+          <FormControl>
+            <Switch
+              disabled={sensitiveLocked}
+              checked={field.value === true}
               onCheckedChange={field.onChange}
             />
           </FormControl>
@@ -4470,6 +4498,7 @@ export function ChannelMutateDrawer({
                   disabled={sensitiveLocked || isSubmitting}
                 />
                 {formatFields}
+                {ollamaOpenAIChatFields}
                 {thinkingFields}
                 {passthroughFields}
                 {systemPromptFields}
