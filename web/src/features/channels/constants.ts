@@ -36,6 +36,9 @@ export const CODE_BUDDY_BASE_URL_HELP =
 export const CHANNEL_TYPE_TASK_PLUGIN = 64
 export const CHANNEL_TYPE_NOVELAI = 65
 
+export const CHANNEL_TYPE_VLLM = 66
+export const CHANNEL_TYPE_SGLANG = 67
+
 export const CHANNEL_TYPES = {
   0: 'Unknown',
   1: 'OpenAI',
@@ -99,6 +102,8 @@ export const CHANNEL_TYPES = {
   63: 'Code Buddy',
   64: 'Task Plugin',
   65: 'NovelAI',
+  66: 'vLLM',
+  67: 'SGLang',
 } as const
 
 export type ChannelProviderPresentation = {
@@ -189,6 +194,8 @@ export const CHANNEL_PROVIDER_PRESENTATION: Partial<
     descriptionKey:
       'Connect to NovelAI image generation with a fixed catalogue',
   },
+  66: { descriptionKey: 'Connect to self-hosted models served by vLLM' },
+  67: { descriptionKey: 'Connect to self-hosted models served by SGLang' },
 } satisfies Record<
   Exclude<keyof typeof CHANNEL_TYPES, 0 | typeof CHANNEL_TYPE_TASK_PLUGIN>,
   ChannelProviderPresentation
@@ -196,8 +203,8 @@ export const CHANNEL_PROVIDER_PRESENTATION: Partial<
 
 const CHANNEL_TYPE_DISPLAY_ORDER: number[] = [
   1, 14, 24, 33, 43, 3, 41, 17, 45, 25, 26, 23, 48, 60, 58, 59, 61, 63, 62, 64,
-  65, 42, 34, 20, 4, 40, 27, 15, 46, 18, 31, 35, 49, 19, 47, 37, 38, 39, 11, 8,
-  57, 22, 21, 44, 2, 5, 36, 50, 51, 52, 53, 54, 55, 56,
+  65, 42, 34, 20, 4, 66, 40, 27, 15, 46, 18, 31, 35, 49, 19, 47, 37, 38, 39, 11,
+  8, 57, 22, 21, 44, 2, 5, 36, 50, 51, 52, 53, 54, 55, 56,
 ]
 
 export const CHANNEL_TYPE_OPTIONS: { value: number; label: string }[] = (() => {
@@ -536,8 +543,8 @@ export const MODEL_FETCHABLE_TYPES = new Set([
   62,
   63,
   CHANNEL_TYPE_NOVELAI,
-
-  CHANNEL_TYPE_NOVELAI,
+  CHANNEL_TYPE_VLLM,
+  CHANNEL_TYPE_SGLANG,
 ])
 
 export const FIELD_PASSTHROUGH_TYPES = new Set([
@@ -547,6 +554,8 @@ export const FIELD_PASSTHROUGH_TYPES = new Set([
   58,
   59,
   CHANNEL_TYPE_NEW_API,
+  CHANNEL_TYPE_VLLM,
+  CHANNEL_TYPE_SGLANG,
 ])
 
 export const OPENAI_FIELD_PASSTHROUGH_TYPES = new Set([
@@ -555,6 +564,8 @@ export const OPENAI_FIELD_PASSTHROUGH_TYPES = new Set([
   58,
   59,
   CHANNEL_TYPE_NEW_API,
+  CHANNEL_TYPE_VLLM,
+  CHANNEL_TYPE_SGLANG,
 ])
 
 export const CLAUDE_FIELD_PASSTHROUGH_TYPES = new Set([
@@ -562,6 +573,8 @@ export const CLAUDE_FIELD_PASSTHROUGH_TYPES = new Set([
   58,
   59,
   CHANNEL_TYPE_NEW_API,
+  CHANNEL_TYPE_VLLM,
+  CHANNEL_TYPE_SGLANG,
 ])
 
 export const TYPE_TO_KEY_PROMPT: Record<number, string> = {
@@ -578,6 +591,8 @@ export const TYPE_TO_KEY_PROMPT: Record<number, string> = {
   61: 'Enter API key for this channel',
   62: 'Enter API key for this channel',
   63: 'Enter API key for this channel',
+  66: 'vLLM API key, or EMPTY if authentication is disabled',
+  67: 'SGLang API key, or EMPTY if authentication is disabled',
 }
 
 export const CHANNEL_TYPE_WARNINGS: Record<number, string> = {

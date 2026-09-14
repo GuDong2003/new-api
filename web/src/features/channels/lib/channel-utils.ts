@@ -58,6 +58,8 @@ export function getChannelTypeIcon(type: number): string {
     63: 'CodeBuddy', // Code Buddy
     64: 'OpenAI', // Task Plugin
     65: 'NovelAI', // NovelAI
+    66: 'Vllm', // vLLM
+    67: 'SGLang', // SGLang
     3: 'Azure', // Azure
 
     // Anthropic

@@ -595,6 +595,12 @@ func validateChannel(channel *model.Channel, isAdd bool) error {
 		channel.Type == constant.ChannelTypeClaudeCode) && strings.TrimSpace(channel.GetBaseURL()) == "" {
 		return fmt.Errorf("%s channel base URL cannot be empty", constant.GetChannelTypeName(channel.Type))
 	}
+	if channel.Type == constant.ChannelTypeVLLM && strings.TrimSpace(channel.GetBaseURL()) == "" {
+		return fmt.Errorf("vLLM channel base URL cannot be empty")
+	}
+	if channel.Type == constant.ChannelTypeSGLang && strings.TrimSpace(channel.GetBaseURL()) == "" {
+		return fmt.Errorf("SGLang channel base URL cannot be empty")
+	}
 
 	// 如果是添加操作，检查 channel 和 key 是否为空
 	if isAdd {
