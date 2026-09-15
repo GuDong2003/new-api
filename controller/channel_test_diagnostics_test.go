@@ -142,6 +142,15 @@ func TestChannelProbeReportsLateStreamFailures(t *testing.T) {
 	})
 }
 
+func TestCoerceTestUsageEstimatesMissingNonStreamingUsage(t *testing.T) {
+	usage, err := coerceTestUsage(nil, false, 17)
+
+	require.NoError(t, err)
+	require.NotNil(t, usage)
+	assert.Equal(t, 17, usage.PromptTokens)
+	assert.Equal(t, 17, usage.TotalTokens)
+}
+
 func TestChannelProbeCountsDistinctToolCallsSeparately(t *testing.T) {
 	body := `{"choices":[{"message":{"tool_calls":[{"id":"a","function":{"name":"wrong","arguments":"{\"message\":\"ping\"}"}},{"id":"b","function":{"name":"channel_test_echo","arguments":"{\"message\":\"ping\"}"}}]}}]}`
 	diagnostics := &channelTestDiagnostics{EndpointType: "openai", TestType: "tool_call"}

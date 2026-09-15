@@ -366,270 +366,282 @@ function ChannelTestDialogContent(props: {
   )
 
   return (
-    <Dialog
-      open
-      onOpenChange={(open) => {
-        if (!open) probes.close()
-        props.onOpenChange(open)
-      }}
-    >
-      <DialogContent
-        showCloseButton={false}
-        className='flex h-dvh max-h-dvh w-screen max-w-none flex-col gap-0 overflow-hidden rounded-none p-0 sm:max-w-none md:h-[min(860px,90dvh)] md:max-h-[90dvh] md:w-[calc(100vw-3rem)] md:max-w-[1280px] md:rounded-xl'
+    <>
+      <Dialog
+        open
+        onOpenChange={(open) => {
+          if (!open) probes.close()
+          props.onOpenChange(open)
+        }}
       >
-        <DialogHeader className='shrink-0 px-4 pt-5 pr-14 pb-4 sm:px-6 sm:pr-16'>
-          <DialogTitle className='flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1 text-lg'>
-            <span>{t('Test Channel Connection')}</span>
-            <span className='text-muted-foreground' aria-hidden='true'>
-              ·
-            </span>
-            <span className='min-w-0 truncate'>{props.channel.name}</span>
-          </DialogTitle>
-          <DialogDescription>
-            {t(
-              'Compare model responses, streaming and tool calls in one place.'
-            )}
-          </DialogDescription>
-          <DialogClose
-            render={
-              <Button
-                variant='ghost'
-                size='icon-sm'
-                className='absolute top-4 right-4'
-                aria-label={t('Close')}
+        <DialogContent
+          showCloseButton={false}
+          className='flex h-dvh max-h-dvh w-screen max-w-none flex-col gap-0 overflow-hidden rounded-none p-0 sm:max-w-none md:h-[min(860px,90dvh)] md:max-h-[90dvh] md:w-[calc(100vw-3rem)] md:max-w-[1280px] md:rounded-xl'
+        >
+          <DialogHeader className='shrink-0 px-4 pt-5 pr-14 pb-4 sm:px-6 sm:pr-16'>
+            <DialogTitle className='flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1 text-lg'>
+              <span>{t('Test Channel Connection')}</span>
+              <span className='text-muted-foreground' aria-hidden='true'>
+                ·
+              </span>
+              <span className='min-w-0 truncate'>{props.channel.name}</span>
+            </DialogTitle>
+            <DialogDescription>
+              {t(
+                'Compare model responses, streaming and tool calls in one place.'
+              )}
+            </DialogDescription>
+            <DialogClose
+              render={
+                <Button
+                  variant='ghost'
+                  size='icon-sm'
+                  className='absolute top-4 right-4'
+                  aria-label={t('Close')}
+                />
+              }
+            >
+              <HugeiconsIcon icon={Cancel01Icon} aria-hidden='true' />
+            </DialogClose>
+          </DialogHeader>
+          <ChannelTestControls
+            selected={selectedProbes}
+            onSelectedChange={setSelectedProbes}
+            endpoint={endpoint}
+            onEndpointChange={setEndpoint}
+            message={message}
+            onMessageChange={setMessage}
+            disabled={busy}
+          />
+          <div className='flex shrink-0 flex-wrap items-center gap-2 px-4 py-3 sm:px-6'>
+            <div className='relative min-w-36 flex-1 sm:max-w-sm'>
+              <HugeiconsIcon
+                icon={Search01Icon}
+                className='text-muted-foreground pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2'
+                aria-hidden='true'
               />
-            }
-          >
-            <HugeiconsIcon icon={Cancel01Icon} aria-hidden='true' />
-          </DialogClose>
-        </DialogHeader>
-        <ChannelTestControls
-          selected={selectedProbes}
-          onSelectedChange={setSelectedProbes}
-          endpoint={endpoint}
-          onEndpointChange={setEndpoint}
-          message={message}
-          onMessageChange={setMessage}
-          disabled={busy}
-        />
-        <div className='flex shrink-0 flex-wrap items-center gap-2 px-4 py-3 sm:px-6'>
-          <div className='relative min-w-36 flex-1 sm:max-w-sm'>
-            <HugeiconsIcon
-              icon={Search01Icon}
-              className='text-muted-foreground pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2'
-              aria-hidden='true'
-            />
-            <Input
-              className='pl-9'
-              aria-label={t('Filter models...')}
-              placeholder={t('Filter models...')}
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-            />
-          </div>
-          <Select
-            items={filterItems}
-            value={filter}
-            onValueChange={(value) => {
-              if (value) setFilter(value)
-            }}
-          >
-            <SelectTrigger
-              className='w-40 max-sm:w-32'
-              aria-label={t('Filter test results')}
+              <Input
+                className='pl-9'
+                aria-label={t('Filter models...')}
+                placeholder={t('Filter models...')}
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+              />
+            </div>
+            <Select
+              items={filterItems}
+              value={filter}
+              onValueChange={(value) => {
+                if (value) setFilter(value)
+              }}
             >
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {filterItems.map((item) => (
-                <SelectItem key={item.value} value={item.value}>
-                  {item.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <div className='text-muted-foreground ml-auto flex items-center gap-2 text-xs'>
-            <span className='tabular-nums'>
-              {t('{{count}} models selected', { count: selectedModels.length })}
-            </span>
-            {selectedModels.length > 0 && (
-              <Button
-                variant='ghost'
-                size='icon-sm'
-                aria-label={t('Copy selected models')}
-                onClick={() => void copyToClipboard(selectedModels.join(','))}
+              <SelectTrigger
+                className='w-40 max-sm:w-32'
+                aria-label={t('Filter test results')}
               >
-                <HugeiconsIcon icon={Copy01Icon} aria-hidden='true' />
-              </Button>
-            )}
-            {selectedModels.length > 0 && (
-              <Button variant='ghost' size='sm' onClick={() => setSelected({})}>
-                {t('Clear selection')}
-              </Button>
-            )}
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {filterItems.map((item) => (
+                  <SelectItem key={item.value} value={item.value}>
+                    {item.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <div className='text-muted-foreground ml-auto flex items-center gap-2 text-xs'>
+              <span className='tabular-nums'>
+                {t('{{count}} models selected', {
+                  count: selectedModels.length,
+                })}
+              </span>
+              {selectedModels.length > 0 && (
+                <Button
+                  variant='ghost'
+                  size='icon-sm'
+                  aria-label={t('Copy selected models')}
+                  onClick={() => void copyToClipboard(selectedModels.join(','))}
+                >
+                  <HugeiconsIcon icon={Copy01Icon} aria-hidden='true' />
+                </Button>
+              )}
+              {selectedModels.length > 0 && (
+                <Button
+                  variant='ghost'
+                  size='sm'
+                  onClick={() => setSelected({})}
+                >
+                  {t('Clear selection')}
+                </Button>
+              )}
+            </div>
           </div>
-        </div>
-        <ChannelTestMatrix
-          models={filteredModels}
-          results={probes.results}
-          selected={selected}
-          onSelectedChange={setSelected}
-          endpointOverrides={endpointOverrides}
-          onEndpointChange={(model, value) =>
-            setEndpointOverrides((previous) => {
-              const next = { ...previous }
-              if (value === 'inherit') delete next[model]
-              else next[model] = value
-              return next
-            })
-          }
-          endpointForModel={endpointForModel}
-          configurationKey={configurationKey}
-          busy={busy}
-          defaultModel={props.channel.test_model ?? undefined}
-          onRun={runSingle}
-          onDetails={(model, probe, trigger) => {
-            detailTrigger.current = trigger
-            setDetail({ model, probe })
-          }}
-          emptyText={
-            models.length === 0
-              ? t('This channel has no configured models.')
-              : t('No models matched your search.')
-          }
-        />
-        <DialogFooter className='bg-muted/25 mx-0 mb-0 shrink-0 flex-col gap-3 rounded-none px-4 pb-[calc(env(safe-area-inset-bottom,0px)+1rem)] sm:px-6'>
-          <div className='flex flex-wrap items-center gap-x-4 gap-y-2'>
-            <div
-              className='mr-auto min-w-0 flex-1 text-xs'
-              role='status'
-              aria-live='polite'
-            >
-              {progress.total > 0 ? (
-                <div className='flex flex-col gap-1.5'>
-                  <div className='flex flex-wrap items-center gap-x-3 gap-y-1'>
-                    <span className='font-medium tabular-nums'>
-                      {t('{{completed}}/{{total}} completed', {
-                        completed: progress.completed,
-                        total: progress.total,
-                      })}
-                    </span>
-                    <span className='text-muted-foreground'>{summary}</span>
-                    {progress.cancelled > 0 && (
-                      <span className='text-muted-foreground'>
-                        {t('{{count}} stopped', { count: progress.cancelled })}
+          <ChannelTestMatrix
+            models={filteredModels}
+            results={probes.results}
+            selected={selected}
+            onSelectedChange={setSelected}
+            endpointOverrides={endpointOverrides}
+            onEndpointChange={(model, value) =>
+              setEndpointOverrides((previous) => {
+                const next = { ...previous }
+                if (value === 'inherit') delete next[model]
+                else next[model] = value
+                return next
+              })
+            }
+            endpointForModel={endpointForModel}
+            configurationKey={configurationKey}
+            busy={busy}
+            defaultModel={props.channel.test_model ?? undefined}
+            onRun={runSingle}
+            onDetails={(model, probe, trigger) => {
+              detailTrigger.current = trigger
+              setDetail({ model, probe })
+            }}
+            emptyText={
+              models.length === 0
+                ? t('This channel has no configured models.')
+                : t('No models matched your search.')
+            }
+          />
+          <DialogFooter className='bg-muted/25 mx-0 mb-0 shrink-0 flex-col gap-3 rounded-none px-4 pb-[calc(env(safe-area-inset-bottom,0px)+1rem)] sm:px-6'>
+            <div className='flex flex-wrap items-center gap-x-4 gap-y-2'>
+              <div
+                className='mr-auto min-w-0 flex-1 text-xs'
+                role='status'
+                aria-live='polite'
+              >
+                {progress.total > 0 ? (
+                  <div className='flex flex-col gap-1.5'>
+                    <div className='flex flex-wrap items-center gap-x-3 gap-y-1'>
+                      <span className='font-medium tabular-nums'>
+                        {t('{{completed}}/{{total}} completed', {
+                          completed: progress.completed,
+                          total: progress.total,
+                        })}
                       </span>
-                    )}
+                      <span className='text-muted-foreground'>{summary}</span>
+                      {progress.cancelled > 0 && (
+                        <span className='text-muted-foreground'>
+                          {t('{{count}} stopped', {
+                            count: progress.cancelled,
+                          })}
+                        </span>
+                      )}
+                    </div>
+                    <progress
+                      aria-label={t('Test progress')}
+                      value={finished}
+                      max={progress.total}
+                      className='[&::-webkit-progress-bar]:bg-muted [&::-webkit-progress-value]:bg-primary [&::-moz-progress-bar]:bg-primary h-1 w-full overflow-hidden rounded-full'
+                    />
                   </div>
-                  <progress
-                    aria-label={t('Test progress')}
-                    value={finished}
-                    max={progress.total}
-                    className='[&::-webkit-progress-bar]:bg-muted [&::-webkit-progress-value]:bg-primary [&::-moz-progress-bar]:bg-primary h-1 w-full overflow-hidden rounded-full'
-                  />
-                </div>
-              ) : (
-                <span className='text-muted-foreground'>
-                  {t('Select capabilities and models, then start testing.')}
-                </span>
-              )}
+                ) : (
+                  <span className='text-muted-foreground'>
+                    {t('Select capabilities and models, then start testing.')}
+                  </span>
+                )}
+              </div>
+              <span className='text-muted-foreground text-xs tabular-nums'>
+                {t('Estimated requests: {{count}}', {
+                  count: targetJobs.length,
+                })}
+              </span>
             </div>
-            <span className='text-muted-foreground text-xs tabular-nums'>
-              {t('Estimated requests: {{count}}', { count: targetJobs.length })}
-            </span>
-          </div>
-          <div className='flex flex-wrap items-center justify-between gap-2'>
-            <div className='flex flex-wrap gap-1'>
-              {successfulModels.length > 0 && (
-                <Button
-                  variant='ghost'
-                  size='sm'
-                  disabled={busy}
-                  onClick={() =>
-                    setSelected(
-                      Object.fromEntries(
-                        successfulModels.map((model) => [model, true])
+            <div className='flex flex-wrap items-center justify-between gap-2'>
+              <div className='flex flex-wrap gap-1'>
+                {successfulModels.length > 0 && (
+                  <Button
+                    variant='ghost'
+                    size='sm'
+                    disabled={busy}
+                    onClick={() =>
+                      setSelected(
+                        Object.fromEntries(
+                          successfulModels.map((model) => [model, true])
+                        )
                       )
-                    )
-                  }
-                >
-                  {t('Select successful models ({{count}})', {
-                    count: successfulModels.length,
-                  })}
-                </Button>
-              )}
-              {failedModels.length > 0 && (
-                <Button
-                  variant='ghost'
-                  size='sm'
-                  className='text-destructive'
-                  disabled={busy}
-                  onClick={() => setConfirmDelete(true)}
-                >
-                  {t('Delete failed models ({{count}})', {
-                    count: failedModels.length,
-                  })}
-                </Button>
-              )}
-            </div>
-            <div className='flex flex-wrap items-center justify-end gap-2 max-sm:w-full'>
-              {probes.isRunning ? (
-                <Button
-                  variant='outline'
-                  onClick={probes.stop}
-                  disabled={probes.isStopping}
-                >
-                  <HugeiconsIcon icon={StopIcon} aria-hidden='true' />
-                  {probes.isStopping
-                    ? t('Finishing active tests...')
-                    : t('Stop testing')}
-                </Button>
-              ) : (
-                <>
-                  {selectedModels.length > 0 && (
-                    <Button
-                      variant='ghost'
-                      size='sm'
-                      disabled={
-                        busy || jobsForModels(filteredModels).length === 0
-                      }
-                      onClick={() =>
-                        void probes.start(jobsForModels(filteredModels))
-                      }
-                    >
-                      {t('Test filtered models ({{count}})', {
-                        count: filteredModels.length,
-                      })}
-                    </Button>
-                  )}
+                    }
+                  >
+                    {t('Select successful models ({{count}})', {
+                      count: successfulModels.length,
+                    })}
+                  </Button>
+                )}
+                {failedModels.length > 0 && (
+                  <Button
+                    variant='ghost'
+                    size='sm'
+                    className='text-destructive'
+                    disabled={busy}
+                    onClick={() => setConfirmDelete(true)}
+                  >
+                    {t('Delete failed models ({{count}})', {
+                      count: failedModels.length,
+                    })}
+                  </Button>
+                )}
+              </div>
+              <div className='flex flex-wrap items-center justify-end gap-2 max-sm:w-full'>
+                {probes.isRunning ? (
                   <Button
                     variant='outline'
-                    disabled={busy || retryJobs.length === 0}
-                    onClick={() => void probes.start(retryJobs)}
+                    onClick={probes.stop}
+                    disabled={probes.isStopping}
                   >
-                    <HugeiconsIcon
-                      icon={ArrowReloadHorizontalIcon}
-                      aria-hidden='true'
-                    />
-                    {t('Retest failures')}
+                    <HugeiconsIcon icon={StopIcon} aria-hidden='true' />
+                    {probes.isStopping
+                      ? t('Finishing active tests...')
+                      : t('Stop testing')}
                   </Button>
-                  <Button
-                    disabled={busy || targetJobs.length === 0}
-                    onClick={() => void probes.start(targetJobs)}
-                  >
-                    <HugeiconsIcon icon={PlayIcon} aria-hidden='true' />
-                    {selectedModels.length > 0
-                      ? t('Test selected ({{count}})', {
-                          count: selectedModels.length,
-                        })
-                      : t('Start testing')}
-                  </Button>
-                </>
-              )}
+                ) : (
+                  <>
+                    {selectedModels.length > 0 && (
+                      <Button
+                        variant='ghost'
+                        size='sm'
+                        disabled={
+                          busy || jobsForModels(filteredModels).length === 0
+                        }
+                        onClick={() =>
+                          void probes.start(jobsForModels(filteredModels))
+                        }
+                      >
+                        {t('Test filtered models ({{count}})', {
+                          count: filteredModels.length,
+                        })}
+                      </Button>
+                    )}
+                    <Button
+                      variant='outline'
+                      disabled={busy || retryJobs.length === 0}
+                      onClick={() => void probes.start(retryJobs)}
+                    >
+                      <HugeiconsIcon
+                        icon={ArrowReloadHorizontalIcon}
+                        aria-hidden='true'
+                      />
+                      {t('Retest failures')}
+                    </Button>
+                    <Button
+                      disabled={busy || targetJobs.length === 0}
+                      onClick={() => void probes.start(targetJobs)}
+                    >
+                      <HugeiconsIcon icon={PlayIcon} aria-hidden='true' />
+                      {selectedModels.length > 0
+                        ? t('Test selected ({{count}})', {
+                            count: selectedModels.length,
+                          })
+                        : t('Start testing')}
+                    </Button>
+                  </>
+                )}
+              </div>
             </div>
-          </div>
-        </DialogFooter>
-      </DialogContent>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <ChannelProbeDetails
         open={detail !== null}
         onOpenChange={(open) => {
@@ -659,6 +671,6 @@ function ChannelTestDialogContent(props: {
         isLoading={deleting}
         disabled={busy || failedModels.length === 0}
       />
-    </Dialog>
+    </>
   )
 }

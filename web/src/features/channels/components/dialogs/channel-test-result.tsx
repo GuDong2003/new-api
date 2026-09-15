@@ -30,14 +30,14 @@ import { useTranslation } from 'react-i18next'
 import { StatusBadge } from '@/components/status-badge'
 import { Button } from '@/components/ui/button'
 import {
-  Sheet,
-  SheetClose,
-  SheetContent,
-  SheetDescription,
-  SheetFooter,
-  SheetHeader,
-  SheetTitle,
-} from '@/components/ui/sheet'
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { Spinner } from '@/components/ui/spinner'
 import { cn } from '@/lib/utils'
 
@@ -183,31 +183,31 @@ export function ChannelProbeDetails(props: {
   }
 
   return (
-    <Sheet onOpenChange={props.onOpenChange} open={props.open}>
-      <SheetContent
-        className='w-full sm:max-w-lg'
+    <Dialog onOpenChange={props.onOpenChange} open={props.open}>
+      <DialogContent
+        className='flex max-h-[min(720px,90dvh)] w-full max-w-lg flex-col gap-0 overflow-hidden p-0 sm:max-w-lg'
         showCloseButton={false}
         finalFocus={props.returnFocus}
       >
-        <SheetHeader className='border-b pr-14'>
-          <SheetTitle>{t('Test details')}</SheetTitle>
-          <SheetDescription className='font-mono break-all'>
+        <DialogHeader className='shrink-0 border-b px-4 pt-5 pr-14 pb-4 sm:px-6'>
+          <DialogTitle>{t('Test details')}</DialogTitle>
+          <DialogDescription className='font-mono break-all'>
             {props.model}
-          </SheetDescription>
-          <SheetClose
+          </DialogDescription>
+          <DialogClose
             render={
               <Button
                 aria-label={t('Close test details')}
-                className='absolute top-3 right-3'
+                className='absolute top-4 right-4'
                 size='icon-sm'
                 variant='ghost'
               />
             }
           >
             <HugeiconsIcon aria-hidden='true' icon={Cancel01Icon} />
-          </SheetClose>
-        </SheetHeader>
-        <div className='flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-4 pb-4'>
+          </DialogClose>
+        </DialogHeader>
+        <div className='flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-4 py-4 sm:px-6'>
           <div className='flex items-center justify-between gap-3'>
             <span className='font-medium'>{t(spec.labelKey)}</span>
             <ChannelProbeStatusLabel status={status} />
@@ -325,7 +325,7 @@ export function ChannelProbeDetails(props: {
             </p>
           )}
         </div>
-        <SheetFooter className='border-t'>
+        <DialogFooter className='mx-0 mb-0 shrink-0 rounded-none border-t px-4 py-3 sm:px-6'>
           <Button
             onClick={props.onRetry}
             disabled={props.busy || status === 'skipped'}
@@ -336,8 +336,8 @@ export function ChannelProbeDetails(props: {
             />
             {t('Retest this capability')}
           </Button>
-        </SheetFooter>
-      </SheetContent>
-    </Sheet>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }

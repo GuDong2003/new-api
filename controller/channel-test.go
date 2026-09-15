@@ -129,13 +129,17 @@ func testChannelWithOptions(ctx context.Context, channel *model.Channel, testUse
 		defer func() {
 			diagnostics.DurationMS = time.Since(started).Milliseconds()
 			outcome.diagnostics = diagnostics
-			// A transport or billing failure outranks whatever the response
-			// validator concluded from a partial body.
+			// Keep a valid protocol verdict when only response post-processing or
+			// usage extraction failed. The probe has already verified the complete
+			// body, so turning it into a failure misreports a usable upstream
+			// response. Transport and protocol failures still remain failed.
 			if outcome.localErr != nil || outcome.newAPIError != nil {
-				if diagnostics.Status == "passed" || diagnostics.Status == "degraded" {
-					diagnostics.Reason = "request_failed"
+				if diagnostics.Status != "passed" && diagnostics.Status != "degraded" {
+					diagnostics.Status = "failed"
+					if diagnostics.Reason == "" {
+						diagnostics.Reason = "request_failed"
+					}
 				}
-				diagnostics.Status = "failed"
 			}
 		}()
 	}
@@ -765,25 +769,19 @@ func buildTestLogOther(c *gin.Context, info *relaycommon.RelayInfo, priceData ho
 	return other
 }
 
-func coerceTestUsage(usageAny any, isStream bool, estimatePromptTokens int) (*dto.Usage, error) {
+func coerceTestUsage(usageAny any, _ bool, estimatePromptTokens int) (*dto.Usage, error) {
 	switch u := usageAny.(type) {
 	case *dto.Usage:
 		return u, nil
 	case dto.Usage:
 		return &u, nil
 	case nil:
-		if !isStream {
-			return nil, errors.New("usage is nil")
-		}
 		usage := &dto.Usage{
 			PromptTokens: estimatePromptTokens,
 		}
 		usage.TotalTokens = usage.PromptTokens
 		return usage, nil
 	default:
-		if !isStream {
-			return nil, fmt.Errorf("invalid usage type: %T", usageAny)
-		}
 		usage := &dto.Usage{
 			PromptTokens: estimatePromptTokens,
 		}

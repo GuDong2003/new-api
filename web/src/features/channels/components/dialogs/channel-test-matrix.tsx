@@ -109,6 +109,7 @@ export function ChannelTestMatrix(props: {
     rowSelection: props.selected,
     onRowSelectionChange: props.onSelectedChange,
     initialPagination: { pageIndex: 0, pageSize: 30 },
+    autoResetPageIndex: false,
   })
   const rows = table.getRowModel().rows
 

@@ -43,6 +43,37 @@ afterEach(async () => {
 })
 
 describe('channel test dialog workflow', () => {
+  it('uses the standard details dialog and closes it from the backdrop', async () => {
+    const user = userEvent.setup()
+    renderChannelTest()
+
+    const table = screen.getByRole('region', { name: 'Channel models' })
+    const basicCell = within(table).getByRole('button', {
+      name: 'gpt-4o · Non-streaming: Not tested',
+    })
+    await user.click(basicCell)
+    await waitFor(() => expect(api.requests).toHaveLength(1))
+
+    await act(async () => api.requests[0].reply('passed', '{"choices":[]}'))
+    await user.click(
+      within(table).getByRole('button', {
+        name: 'gpt-4o · Non-streaming: Passed',
+      })
+    )
+
+    const details = await screen.findByRole('dialog', { name: 'Test details' })
+    expect(details).toHaveAttribute('data-slot', 'dialog-content')
+
+    const overlays = document.querySelectorAll('[data-slot="dialog-overlay"]')
+    await user.click([...overlays].at(-1) as HTMLElement)
+
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('dialog', { name: 'Test details' })
+      ).not.toBeInTheDocument()
+    )
+  })
+
   it('moves the custom message into advanced settings and starts the selected probes', async () => {
     const user = userEvent.setup()
     renderChannelTest()
