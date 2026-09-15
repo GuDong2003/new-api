@@ -56,7 +56,7 @@ export function AuthenticatedLayout(props: AuthenticatedLayoutProps) {
   const previousPathname = useRef(pathname)
   useEffect(() => {
     if (previousPathname.current !== pathname) {
-      void flushCanvasSession({ userId, sessionId })
+      void flushCanvasSession({ userId, sessionId }, { syncCloud: false })
     }
     previousPathname.current = pathname
   }, [pathname, userId, sessionId])

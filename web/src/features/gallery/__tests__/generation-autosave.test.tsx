@@ -48,6 +48,7 @@ import {
   loadLocalCanvas,
   updateCanvasUserState,
 } from '../lib/canvas-repository'
+import { flushCanvasSession } from '../lib/canvas-sync'
 import { login, required, response, usage } from './fixtures'
 
 const identity = { userId: 813, sessionId: 'gallery-session' }
@@ -188,6 +189,47 @@ it('keeps an in-flight generation alive when the current canvas is reopened', as
   await waitFor(() =>
     expect(useDrawingStore.getState().nodes[0].data.status).toBe('complete')
   )
+})
+
+it('does not cloud-sync a canvas while its image generation is in flight', async () => {
+  const canvas = await createCanvasProject(identity, 'drawing')
+  await startCanvasEditor(identity, 'drawing')
+  const galleryRequests: string[] = []
+  api.defaults.adapter = async (config) => {
+    galleryRequests.push(required(config.url))
+    return response(config, usage)
+  }
+  let finish!: (value: unknown) => void
+  let signal: { aborted: boolean } | undefined
+  vi.spyOn(api, 'post').mockImplementation((_url, _data, config) => {
+    signal = config?.signal
+    return new Promise((resolve) => {
+      finish = resolve
+    })
+  })
+  const hook = renderHook(useImageGeneration)
+  act(() => {
+    hook.result.current.generate(
+      { ...DEFAULT_IMAGE_SETTINGS, model: 'gpt-image-1', prompt: 'A forest' },
+      { x: 0, y: 0 }
+    )
+  })
+  await waitFor(() => expect(signal).toBeDefined())
+
+  await flushCanvasSession(identity, { syncCloud: false })
+
+  expect(signal?.aborted).toBe(false)
+  expect(galleryRequests).not.toContain(`/api/gallery/canvases/${canvas.id}`)
+  await act(async () => {
+    finish({
+      headers: { 'content-type': 'application/json' },
+      data: new Response(JSON.stringify({ data: [{ b64_json: png }] })).body,
+    })
+  })
+  await waitFor(() =>
+    expect(useDrawingStore.getState().nodes[0].data.status).toBe('complete')
+  )
+  hook.unmount()
 })
 
 it('keeps a pending NAI generation alive while arranging the canvas', async () => {

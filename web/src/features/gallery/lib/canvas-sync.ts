@@ -506,7 +506,8 @@ export async function getCanvasGalleryUsage(
 }
 
 export async function flushCanvasSession(
-  identity: GalleryIdentity
+  identity: GalleryIdentity,
+  options: { syncCloud?: boolean } = {}
 ): Promise<void> {
   if (!isGalleryIdentityCurrent(identity)) return
   const local = Promise.all(
@@ -516,6 +517,7 @@ export async function flushCanvasSession(
   )
   const work = local
     .then(async () => {
+      if (options.syncCloud === false) return
       if ((await readCanvasUserState(galleryOwner(identity))).cloudPause) return
       for (const canvas of await listLocalCanvases(galleryOwner(identity))) {
         await syncCanvas(identity, canvas.id, 'leave')
