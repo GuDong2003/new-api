@@ -230,6 +230,7 @@ export interface AdvancedCustomRoute {
   converter?: AdvancedCustomConverter
   models?: string[]
   auth?: AdvancedCustomRouteAuth
+  pass_through_body_enabled?: boolean
 }
 
 export interface AdvancedCustomRouteAuth {
