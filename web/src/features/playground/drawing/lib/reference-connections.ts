@@ -21,6 +21,18 @@ import type { Connection } from '@xyflow/react'
 import type { DrawingNode } from '../types'
 import { getImageModelFamily } from './image-settings'
 
+export function getAvailableReferenceNodes(
+  nodes: DrawingNode[],
+  referenceIds: readonly string[]
+): DrawingNode[] {
+  return referenceIds.flatMap((id) => {
+    const node = nodes.find(
+      (item) => item.id === id && item.data.status === 'complete'
+    )
+    return node?.data.asset ? [node] : []
+  })
+}
+
 export function canConnectReference(
   nodes: DrawingNode[],
   connection: Pick<Connection, 'source' | 'target'>

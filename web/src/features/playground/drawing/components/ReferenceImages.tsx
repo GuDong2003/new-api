@@ -84,11 +84,6 @@ export function ReferenceImages(props: ReferenceImagesProps) {
           event.target.value = ''
         }}
       />
-      {references.length === 0 && (
-        <p className='text-muted-foreground rounded-lg border border-dashed p-3 text-xs leading-relaxed'>
-          {t('Upload an image or choose Use as reference on a canvas image.')}
-        </p>
-      )}
       <div className='grid grid-cols-4 gap-2'>
         {references.map(({ id, asset }, index) => (
           <div

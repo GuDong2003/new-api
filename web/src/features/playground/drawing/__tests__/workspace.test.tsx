@@ -129,6 +129,35 @@ describe('Drawing workspace', () => {
     client.clear()
   })
 
+  it('blocks image edits without a completed reference and shows the reason near the mode control', async () => {
+    const { client, view } = renderWorkspace(832)
+    await waitFor(() =>
+      expect(screen.getByText('Room for every idea')).toBeTruthy()
+    )
+
+    await userEvent.type(
+      screen.getByRole('textbox', { name: 'Prompt' }),
+      'A forest'
+    )
+    await userEvent.selectOptions(screen.getByLabelText('Mode'), 'edit')
+
+    const generate = await screen.findByRole('button', {
+      name: 'Generate edits',
+    })
+    expect(generate).toBeDisabled()
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Upload an image or choose Use as reference on a canvas image.'
+    )
+    expect(screen.getByText('Reference images', { exact: false })).toBeVisible()
+    const post = vi.spyOn(api, 'post')
+    await userEvent.click(generate)
+    expect(post).not.toHaveBeenCalled()
+    post.mockRestore()
+
+    view.unmount()
+    client.clear()
+  })
+
   it('renders the canvas save status only once', async () => {
     const { client, view } = renderWorkspace(811)
     await waitFor(() =>

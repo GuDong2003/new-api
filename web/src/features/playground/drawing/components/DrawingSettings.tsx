@@ -39,6 +39,7 @@ import {
   imageSettingsSchema,
   validateImageSettings,
 } from '../lib/image-settings'
+import { getAvailableReferenceNodes } from '../lib/reference-connections'
 import type { ImageAsset, ImageSettings } from '../types'
 import { ImageParameterFields } from './ImageParameterFields'
 import { ReferenceImages } from './ReferenceImages'
@@ -58,9 +59,12 @@ type DrawingSettingsProps = {
 export function DrawingSettings(props: DrawingSettingsProps) {
   const { t } = useTranslation()
   const settings = useDrawingStore((state) => state.settings)
-  const references = useDrawingStore((state) => state.referenceIds)
+  const nodes = useDrawingStore((state) => state.nodes)
+  const referenceIds = useDrawingStore((state) => state.referenceIds)
   const updateSettings = useDrawingStore((state) => state.updateSettings)
   const { groups, models, imageModels } = useImageOptions(props.userId)
+  const referenceCount = getAvailableReferenceNodes(nodes, referenceIds).length
+  const missingEditReference = settings.mode === 'edit' && referenceCount === 0
   const form = useForm({
     defaultValues: settings,
     resolver: zodResolver(imageSettingsSchema),
@@ -88,7 +92,7 @@ export function DrawingSettings(props: DrawingSettingsProps) {
           updateSettings(form.getValues())
         }}
         onSubmit={form.handleSubmit((values) => {
-          const error = validateImageSettings(values, references.length)
+          const error = validateImageSettings(values, referenceCount)
           if (error) {
             form.setError('root', { message: error })
             return
@@ -149,6 +153,15 @@ export function DrawingSettings(props: DrawingSettingsProps) {
               </NativeSelect>
             </div>
           </div>
+          {missingEditReference && (
+            <Alert variant='destructive' className='py-2'>
+              <AlertDescription>
+                {t(
+                  'Upload an image or choose Use as reference on a canvas image.'
+                )}
+              </AlertDescription>
+            </Alert>
+          )}
           <div className='space-y-1.5'>
             <Label htmlFor='drawing-model'>{t('Model')}</Label>
             <Combobox
@@ -242,7 +255,10 @@ export function DrawingSettings(props: DrawingSettingsProps) {
             type='submit'
             className='w-full'
             disabled={
-              unavailable || !settings.prompt.trim() || !settings.model.trim()
+              unavailable ||
+              !settings.prompt.trim() ||
+              !settings.model.trim() ||
+              missingEditReference
             }
           >
             <HugeiconsIcon
