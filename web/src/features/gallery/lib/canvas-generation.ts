@@ -1,0 +1,121 @@
+import type { DrawingDocument } from '../../playground/drawing/types'
+import type { NaiCanvasDocument } from '../../playground/nai/types'
+import { readRemoteCanvasOriginal } from '../api'
+import type { CanvasKind, GalleryIdentity } from '../types'
+import { decodeCanvas, encodeCanvas } from './canvas-document'
+import { notifyCanvasProjects } from './canvas-events'
+import {
+  loadLocalCanvas,
+  readCanvasAssets,
+  saveLocalCanvas,
+} from './canvas-repository'
+import {
+  assertGalleryIdentity,
+  galleryOwner,
+  isGalleryIdentityCurrent,
+} from './session'
+
+export type PersistedGenerationAsset = {
+  id: string
+  name: string
+  src: string
+  width: number
+  height: number
+  mimeType: string
+}
+
+export async function persistCanvasGenerationResult(options: {
+  identity: GalleryIdentity
+  kind: CanvasKind
+  canvasId: string
+  nodeIds: readonly string[]
+  assets: readonly (PersistedGenerationAsset | null)[]
+  errors?: readonly (string | undefined)[]
+  revisedPrompts?: readonly (string | undefined)[]
+  usage?: Record<string, unknown>
+}): Promise<boolean> {
+  if (!isGalleryIdentityCurrent(options.identity)) return false
+  const userId = galleryOwner(options.identity)
+  const canvas = await loadLocalCanvas(userId, options.canvasId)
+  if (!canvas || canvas.deleted || canvas.kind !== options.kind) return false
+
+  const document = await decodeCanvas(
+    canvas,
+    await readCanvasAssets(userId, canvas.id)
+  )
+  let changed = false
+  const nodes = document.nodes.map((node) => {
+    const index = options.nodeIds.indexOf(node.id)
+    if (index < 0) return node
+    changed = true
+    const asset = options.assets[index]
+    if (!asset) {
+      return {
+        ...node,
+        data: {
+          ...node.data,
+          status: 'error' as const,
+          progress: undefined,
+          error: options.errors?.[index] ?? 'The image could not be loaded.',
+        },
+      }
+    }
+    return {
+      ...node,
+      data: {
+        ...node.data,
+        asset,
+        status: 'complete' as const,
+        progress: undefined,
+        error: undefined,
+        ...(options.revisedPrompts?.[index]
+          ? { revisedPrompt: options.revisedPrompts[index] }
+          : {}),
+        ...(options.usage ? { usage: options.usage } : {}),
+      },
+    }
+  })
+  if (!changed || !isGalleryIdentityCurrent(options.identity)) return false
+
+  const nextDocument =
+    options.kind === 'drawing'
+      ? ({ ...document, nodes } as DrawingDocument)
+      : ({ ...document, nodes } as NaiCanvasDocument)
+  const existingAssets = await readCanvasAssets(userId, canvas.id)
+  const existingRoles = Object.fromEntries(
+    existingAssets.map((asset) => [
+      asset.id,
+      { role: asset.role, nodeId: asset.nodeId },
+    ])
+  )
+  const generatedRoles = Object.fromEntries(
+    options.assets.flatMap((asset, index) =>
+      asset
+        ? [
+            [
+              asset.id,
+              { role: 'generated' as const, nodeId: options.nodeIds[index] },
+            ],
+          ]
+        : []
+    )
+  )
+  const encoded = await encodeCanvas(options.kind, nextDocument, {
+    existingAssets,
+    roles: { ...existingRoles, ...generatedRoles },
+    readOriginal: (asset, signal) =>
+      readRemoteCanvasOriginal(options.identity, asset.src, signal),
+  })
+  assertGalleryIdentity(options.identity)
+  const saved = await saveLocalCanvas(
+    {
+      ...canvas,
+      document: encoded.document,
+      status: canvas.status === 'conflict' ? 'conflict' : 'pending',
+      needsExplicitSave: false,
+    },
+    encoded.assets
+  )
+  notifyCanvasProjects()
+  return saved.id === canvas.id
+}

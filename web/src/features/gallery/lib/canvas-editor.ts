@@ -75,11 +75,6 @@ export function updateState(
 export function storeFor(kind: CanvasKind) {
   return kind === 'drawing' ? useDrawingStore : useNaiDrawingStore
 }
-export function cancelEditorJobs(kind: CanvasKind, identity: GalleryIdentity) {
-  if (kind === 'drawing') {
-    cancelImageGenerationJobs(identity.userId, identity.sessionId)
-  } else cancelNaiGenerationJobs(identity.userId, identity.sessionId)
-}
 export const sameIdentity = (a: GalleryIdentity, b: GalleryIdentity) =>
   a.userId === b.userId && a.sessionId === b.sessionId
 export function canvasOriginalReader(
@@ -135,6 +130,11 @@ export function bindEditor(identity: GalleryIdentity, initial: LocalCanvas) {
   let timer: ReturnType<typeof setTimeout> | undefined
   let queue = Promise.resolve()
   const controller = new AbortController()
+  if (kind === 'drawing') {
+    useDrawingStore.setState({ canvasId: initial.id })
+  } else {
+    useNaiDrawingStore.setState({ canvasId: initial.id })
+  }
   updateState(kind, { canvas: initial, localStatus: 'saved' })
   const save = async () => {
     if (!active || !isGalleryIdentityCurrent(identity)) return
@@ -258,6 +258,10 @@ export function bindEditor(identity: GalleryIdentity, initial: LocalCanvas) {
     clearInterval(interval)
     window.removeEventListener('pagehide', leave)
     document.removeEventListener('visibilitychange', visibility)
+    if (store.getState().canvasId === initial.id) {
+      if (kind === 'drawing') useDrawingStore.setState({ canvasId: null })
+      else useNaiDrawingStore.setState({ canvasId: null })
+    }
     if (canvasEditors.get(kind)?.canvasId === initial.id) {
       canvasEditors.delete(kind)
       delete states[kind]
@@ -289,11 +293,9 @@ export function bindEditor(identity: GalleryIdentity, initial: LocalCanvas) {
       applying = true
       try {
         if (event.canvas.deleted) {
-          cancelEditorJobs(kind, identity)
           store.getState().initialize(galleryOwner(identity))
           stop()
         } else if (event.removedIds?.length) {
-          cancelEditorJobs(kind, identity)
           const state = store.getState()
           const removed = new Set(event.removedIds)
           const nodeIds = state.nodes

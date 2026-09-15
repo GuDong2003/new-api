@@ -20,6 +20,7 @@ import { useCallback, useSyncExternalStore } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
+import { persistCanvasGenerationResult } from '@/features/gallery/lib/canvas-generation'
 import { useAuthStore } from '@/stores/auth-store'
 import { useDrawingStore } from '@/stores/drawing-store'
 
@@ -27,6 +28,7 @@ import { generateImages } from '../api'
 import { positionGeneratedImageNodes } from '../lib/canvas-document'
 import { imageSourceToAsset } from '../lib/image-assets'
 import { validateImageSettings } from '../lib/image-settings'
+import { getAvailableReferenceNodes } from '../lib/reference-connections'
 import type { DrawingNode, ImageAsset, ImageSettings } from '../types'
 
 type ImageJob = {
@@ -44,6 +46,7 @@ type GenerationInput = {
   mask?: ImageAsset
   userId: number | null
   sessionId: string | null
+  canvasId: string | null
 }
 type Translate = (key: string) => string
 
@@ -129,14 +132,13 @@ async function executeImageJob(
       },
     })
     input.job.finalResultReceived = true
-    const state = useDrawingStore.getState()
-    if (!isCurrentJob(input)) return
     if (input.job.cancelReason === 'user') {
       input.job.controller.signal.throwIfAborted()
     }
+    const state = useDrawingStore.getState()
     for (const id of input.job.nodeIds) {
       const progress = state.nodes.find((node) => node.id === id)?.data.progress
-      if (progress) {
+      if (isCurrentJob(input) && progress) {
         state.updateNodeData(
           id,
           { progress: { ...progress, phase: 'decoding' } },
@@ -159,9 +161,54 @@ async function executeImageJob(
           return asset
         })
     )
-    if (!isCurrentJob(input)) return
     if (input.job.cancelReason === 'user') {
       input.job.controller.signal.throwIfAborted()
+    }
+    const visible = isCurrentJob(input)
+    const persistedAssets = input.job.nodeIds.map((_, index) => {
+      const asset = assets[index]
+      return asset?.status === 'fulfilled' ? asset.value : null
+    })
+    const persistedErrors = input.job.nodeIds.map((_, index) => {
+      const asset = assets[index]
+      if (!asset) return 'The server returned fewer images than requested.'
+      if (asset.status === 'rejected') {
+        return asset.reason instanceof Error
+          ? asset.reason.message.slice(0, 10000)
+          : 'The image could not be loaded.'
+      }
+      return undefined
+    })
+    if (!visible) {
+      if (input.job.cancelReason || !input.canvasId) return
+      try {
+        await persistCanvasGenerationResult({
+          identity: {
+            userId: input.userId,
+            sessionId: input.sessionId,
+          },
+          kind: 'drawing',
+          canvasId: input.canvasId,
+          nodeIds: input.job.nodeIds,
+          assets: persistedAssets,
+          errors: persistedErrors,
+          revisedPrompts: input.job.nodeIds.map((_, index) =>
+            result.images[index]?.revisedPrompt?.slice(0, 64000)
+          ),
+          usage: result.usage,
+        })
+      } catch (error) {
+        if (!(error instanceof DOMException && error.name === 'AbortError')) {
+          toast.error(
+            translate(
+              error instanceof Error
+                ? error.message
+                : 'Canvas storage is unavailable.'
+            )
+          )
+        }
+      }
+      return
     }
     for (const [index, id] of input.job.nodeIds.entries()) {
       const asset = assets[index]
@@ -204,7 +251,6 @@ async function executeImageJob(
       )
     }
   } catch (error) {
-    if (!isCurrentJob(input)) return
     const cancelled =
       input.job.cancelReason === 'user' ||
       (input.job.controller.signal.aborted && !input.job.finalResultReceived)
@@ -212,6 +258,37 @@ async function executeImageJob(
       error instanceof Error
         ? error.message.slice(0, 10000)
         : 'Image generation failed.'
+    if (!isCurrentJob(input)) {
+      if (!cancelled && !input.job.cancelReason && input.canvasId) {
+        try {
+          await persistCanvasGenerationResult({
+            identity: {
+              userId: input.userId,
+              sessionId: input.sessionId,
+            },
+            kind: 'drawing',
+            canvasId: input.canvasId,
+            nodeIds: input.job.nodeIds,
+            assets: input.job.nodeIds.map(() => null),
+            errors: input.job.nodeIds.map(() => message),
+          })
+        } catch (persistError) {
+          if (
+            !(persistError instanceof DOMException) ||
+            persistError.name !== 'AbortError'
+          ) {
+            toast.error(
+              translate(
+                persistError instanceof Error
+                  ? persistError.message
+                  : 'Canvas storage is unavailable.'
+              )
+            )
+          }
+        }
+      }
+      return
+    }
     for (const id of input.job.nodeIds) {
       useDrawingStore.getState().updateNodeData(
         id,
@@ -272,12 +349,10 @@ export function useImageGeneration() {
     mask?: ImageAsset
   ) => {
     const state = useDrawingStore.getState()
-    const referenceNodes = state.referenceIds.flatMap((id) => {
-      const node = state.nodes.find(
-        (item) => item.id === id && item.data.status === 'complete'
-      )
-      return node?.data.asset ? [node] : []
-    })
+    const referenceNodes = getAvailableReferenceNodes(
+      state.nodes,
+      state.referenceIds
+    )
     const references = referenceNodes.flatMap((node) =>
       node.data.asset ? [node.data.asset] : []
     )
@@ -348,6 +423,7 @@ export function useImageGeneration() {
         mask,
         userId: state.userId,
         sessionId: useAuthStore.getState().auth.session?.sid ?? null,
+        canvasId: state.canvasId,
       },
       t
     )
@@ -414,6 +490,7 @@ export function useImageGeneration() {
           mask: settings.mode === 'edit' ? node.data.mask : undefined,
           userId: state.userId,
           sessionId: useAuthStore.getState().auth.session?.sid ?? null,
+          canvasId: state.canvasId,
         },
         t
       )

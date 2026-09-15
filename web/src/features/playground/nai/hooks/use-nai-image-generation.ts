@@ -18,6 +18,7 @@ import { useCallback, useSyncExternalStore } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
+import { persistCanvasGenerationResult } from '@/features/gallery/lib/canvas-generation'
 import { useAuthStore } from '@/stores/auth-store'
 import { useNaiDrawingStore } from '@/stores/nai-drawing-store'
 
@@ -37,6 +38,7 @@ type NaiGenerationInput = {
   settings: NaiSettings
   userId: number | null
   sessionId: string | null
+  canvasId: string | null
 }
 
 const activeJobs = new Map<string, NaiGenerationInput>()
@@ -82,11 +84,33 @@ async function executeJob(
       signal: input.job.controller.signal,
     })
     finalResultReceived = true
-    if (!isCurrentJob(input)) return
     if (input.job.cancelReason === 'user') {
       input.job.controller.signal.throwIfAborted()
     }
     const state = useNaiDrawingStore.getState()
+    const visible = isCurrentJob(input)
+    if (!visible) {
+      if (input.job.cancelReason || !input.canvasId) return
+      await persistCanvasGenerationResult({
+        identity: {
+          userId: input.userId,
+          sessionId: input.sessionId,
+        },
+        kind: 'nai',
+        canvasId: input.canvasId,
+        nodeIds: input.job.nodeIds,
+        assets: input.job.nodeIds.map(
+          (_, index) => result.images[index] ?? null
+        ),
+        errors: input.job.nodeIds.map((_, index) =>
+          result.images[index]
+            ? undefined
+            : 'NovelAI returned fewer images than requested.'
+        ),
+        usage: result.usage,
+      })
+      return
+    }
     input.job.nodeIds.forEach((id, index) => {
       const asset = result.images[index]
       if (!asset) {
@@ -107,13 +131,45 @@ async function executeJob(
       )
     })
   } catch (error) {
-    if (!isCurrentJob(input)) return
     const cancelled =
       input.job.cancelReason === 'user' ||
       (input.job.controller.signal.aborted && !finalResultReceived)
     const message = cancelled
       ? undefined
       : getNaiGenerationError(error).slice(0, 10000)
+    if (!isCurrentJob(input)) {
+      if (!cancelled && !input.job.cancelReason && input.canvasId && message) {
+        try {
+          await persistCanvasGenerationResult({
+            identity: {
+              userId: input.userId,
+              sessionId: input.sessionId,
+            },
+            kind: 'nai',
+            canvasId: input.canvasId,
+            nodeIds: input.job.nodeIds,
+            assets: input.job.nodeIds.map(() => null),
+            errors: input.job.nodeIds.map(() => message),
+          })
+        } catch (persistError) {
+          if (
+            !(
+              persistError instanceof DOMException &&
+              persistError.name === 'AbortError'
+            )
+          ) {
+            toast.error(
+              translate(
+                persistError instanceof Error
+                  ? persistError.message
+                  : 'Canvas storage is unavailable.'
+              )
+            )
+          }
+        }
+      }
+      return
+    }
     input.job.nodeIds.forEach((id) => {
       useNaiDrawingStore.getState().updateNodeData(
         id,
@@ -219,6 +275,7 @@ export function useNaiImageGeneration() {
           settings,
           userId: state.userId,
           sessionId: useAuthStore.getState().auth.session?.sid ?? null,
+          canvasId: state.canvasId,
         },
         t
       )
@@ -255,6 +312,7 @@ export function useNaiImageGeneration() {
           settings,
           userId: state.userId,
           sessionId: useAuthStore.getState().auth.session?.sid ?? null,
+          canvasId: state.canvasId,
         },
         t
       )

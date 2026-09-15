@@ -48,6 +48,7 @@ type DrawingState = DrawingDocument & {
     { role: 'generated' | 'reference' | 'mask'; nodeId: string }
   >
   userId: number | null
+  canvasId: string | null
   ready: boolean
   revision: number
   past: CanvasSnapshot[]
@@ -89,6 +90,7 @@ export const useDrawingStore = create<DrawingState>((set, get) => ({
   viewport: { x: 40, y: 40, zoom: 1 },
   settings: DEFAULT_IMAGE_SETTINGS,
   userId: null,
+  canvasId: null,
   ready: false,
   revision: 0,
   past: [],
@@ -101,6 +103,7 @@ export const useDrawingStore = create<DrawingState>((set, get) => ({
     set({
       assetRoles: {},
       userId,
+      canvasId: null,
       ready: Boolean(document),
       revision: 0,
       past: [],

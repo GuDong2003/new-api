@@ -36,6 +36,7 @@ type NaiDrawingState = NaiCanvasDocument & {
     { role: 'generated' | 'reference' | 'mask'; nodeId: string }
   >
   userId: number | null
+  canvasId: string | null
   ready: boolean
   revision: number
   past: NaiSnapshot[]
@@ -81,6 +82,7 @@ export const useNaiDrawingStore = create<NaiDrawingState>((set, get) => ({
   viewport: defaultViewport,
   settings: DEFAULT_NAI_SETTINGS,
   userId: null,
+  canvasId: null,
   ready: false,
   revision: 0,
   past: [],
@@ -90,6 +92,7 @@ export const useNaiDrawingStore = create<NaiDrawingState>((set, get) => ({
     set({
       assetRoles: {},
       userId,
+      canvasId: null,
       ready: Boolean(document),
       revision: 0,
       past: [],

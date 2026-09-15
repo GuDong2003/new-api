@@ -24,7 +24,6 @@ import { useNaiDrawingStore } from '@/stores/nai-drawing-store'
 
 import { deleteCanvasResource } from '../lib/canvas-deletion'
 import {
-  cancelEditorJobs,
   flushLocalEditors,
   getCanvasEditorState,
   sameIdentity,
@@ -79,7 +78,6 @@ export async function deleteCanvasNodes(
   target = captureCanvasTarget(kind)
 ) {
   assertCanvasTarget(kind, target)
-  cancelEditorJobs(kind, target.identity)
   await flushLocalEditors(target.identity)
   assertCanvasTarget(kind, target)
   if (getCanvasEditorState(kind)?.localStatus !== 'saved') {
