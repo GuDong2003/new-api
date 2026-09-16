@@ -997,3 +997,41 @@ func TestUpdateBatchTasksPollClassification(t *testing.T) {
 		})
 	}
 }
+
+func TestFailInterruptedImageTasksOnlyClosesThisNodesTasks(t *testing.T) {
+	truncate(t)
+
+	const userID = 407
+	seedUser(t, userID, 10_000)
+
+	local := makeTask(userID, 0, 0, 0, BillingSourceWallet, 0)
+	local.TaskID = "task_local_image"
+	local.Platform = constant.TaskPlatformImage
+	local.PrivateData.NodeName = common.NodeName
+	require.NoError(t, model.DB.Create(local).Error)
+
+	remote := makeTask(userID, 0, 0, 0, BillingSourceWallet, 0)
+	remote.TaskID = "task_remote_image"
+	remote.Platform = constant.TaskPlatformImage
+	remote.PrivateData.NodeName = common.NodeName + "-other"
+	require.NoError(t, model.DB.Create(remote).Error)
+
+	video := makeTask(userID, 0, 0, 0, BillingSourceWallet, 0)
+	video.TaskID = "task_video_untouched"
+	video.Platform = constant.TaskPlatformSuno
+	video.PrivateData.NodeName = common.NodeName
+	require.NoError(t, model.DB.Create(video).Error)
+
+	FailInterruptedImageTasks(context.Background())
+
+	reload := func(id int64) *model.Task {
+		var task model.Task
+		require.NoError(t, model.DB.First(&task, id).Error)
+		return &task
+	}
+	assert.Equal(t, model.TaskStatus(model.TaskStatusFailure), reload(local.ID).Status)
+	assert.Equal(t, "100%", reload(local.ID).Progress)
+	assert.Contains(t, reload(local.ID).FailReason, "restart")
+	assert.Equal(t, model.TaskStatus(model.TaskStatusInProgress), reload(remote.ID).Status)
+	assert.Equal(t, model.TaskStatus(model.TaskStatusInProgress), reload(video.ID).Status)
+}

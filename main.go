@@ -336,6 +336,10 @@ func InitResources() error {
 
 	model.CheckSetup()
 
+	// Async image tasks run inside this process, so anything still unfinished
+	// belonged to the previous run and can never complete.
+	service.FailInterruptedImageTasks(context.Background())
+
 	// Initialize options, should after model.InitDB()
 	if common.IsMasterNode {
 		if err := model.MigrateRetiredFrontendOptions(); err != nil {

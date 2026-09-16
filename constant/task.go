@@ -5,9 +5,16 @@ type TaskPlatform string
 const (
 	TaskPlatformSuno       TaskPlatform = "suno"
 	TaskPlatformMidjourney              = "mj"
+	// TaskPlatformImage owns gateway-driven asynchronous image generation. These
+	// tasks have no upstream task handle: the gateway replays the ordinary image
+	// relay in the background and writes the result back itself, so the async
+	// poller must never try to fetch them from a provider.
+	TaskPlatformImage TaskPlatform = "image"
 )
 
 const (
+	TaskActionImageGeneration  = "image_generation"
+	TaskActionImageEdit        = "image_edit"
 	TaskActionImageToVideo     = "image_to_video"
 	TaskActionTextToVideo      = "text_to_video"
 	TaskActionFirstTailToVideo = "first_tail_to_video"

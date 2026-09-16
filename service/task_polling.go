@@ -117,6 +117,43 @@ func sweepTimedOutTasks(ctx context.Context) {
 	}
 }
 
+// maxInterruptedImageTaskSweep bounds one startup sweep. It is deliberately a
+// fixed number rather than constant.TaskQueryLimit, which is only populated once
+// the environment is loaded and would silently read zero rows before that.
+const maxInterruptedImageTaskSweep = 1000
+
+// FailInterruptedImageTasks closes out async image tasks this node was running
+// when it stopped. Their generation lived in the process, not upstream, so a
+// restart can never finish them; failing them right away lets the owner retry
+// instead of watching a task that will only expire hours later. Tasks owned by
+// other nodes are left alone.
+func FailInterruptedImageTasks(ctx context.Context) {
+	tasks := model.GetUnfinishedTasksForPlatform(constant.TaskPlatformImage, maxInterruptedImageTaskSweep)
+	now := time.Now().Unix()
+	interrupted := 0
+	for _, task := range tasks {
+		if task.PrivateData.NodeName != common.NodeName {
+			continue
+		}
+		fromStatus := task.Status
+		task.Status = model.TaskStatusFailure
+		task.Progress = "100%"
+		task.FinishTime = now
+		task.FailReason = "image generation was interrupted by a service restart"
+		won, err := task.UpdateWithStatus(fromStatus)
+		if err != nil {
+			logger.LogError(ctx, fmt.Sprintf("FailInterruptedImageTasks update error for task %s: %v", task.TaskID, err))
+			continue
+		}
+		if won {
+			interrupted++
+		}
+	}
+	if interrupted > 0 {
+		logger.LogInfo(ctx, fmt.Sprintf("FailInterruptedImageTasks: failed %d interrupted image tasks", interrupted))
+	}
+}
+
 // TaskPollSummary is the result recorded on an async_task_poll system task row,
 // summarizing one polling pass.
 type TaskPollSummary struct {
@@ -207,6 +244,11 @@ func DispatchPlatformUpdate(ctx context.Context, platform constant.TaskPlatform,
 	}
 	if platform == constant.TaskPlatformMidjourney {
 		// MJ 轮询由其自身处理，这里预留入口
+		return
+	}
+	if platform == constant.TaskPlatformImage {
+		// 异步图片任务由网关自身的后台重放推进，上游没有可查询的任务句柄。
+		// 卡住的任务仍由 sweepTimedOutTasks 兜底置为失败。
 		return
 	}
 	adaptor := GetTaskAdaptorFunc(platform)

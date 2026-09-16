@@ -416,6 +416,12 @@ func tasksToDto(tasks []*model.Task, fillUser bool, viewerRole int) []*dto.TaskD
 			}
 		}
 		item := relay.TaskModel2Dto(task)
+		if task.Platform == constant.TaskPlatformImage {
+			// An async image result carries the whole provider payload, including
+			// inline base64 images. Listings stay small; the image data is only
+			// served by the dedicated retrieval endpoint.
+			item.Data = nil
+		}
 		item.LegacyVideoAvailable = legacyVideoAvailable(task)
 		if task.Status == model.TaskStatusSuccess {
 			item.ResultURL = ""

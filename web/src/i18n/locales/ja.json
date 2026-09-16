@@ -7247,6 +7247,8 @@
     "Zoom": "ズーム",
     "Zoom in": "拡大",
     "Zoom level": "拡大率",
-    "Zoom out": "縮小"
+    "Zoom out": "縮小",
+    "Generate Image": "画像を生成",
+    "Edit Image": "画像を編集"
   }
 }

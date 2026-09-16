@@ -238,6 +238,15 @@ export function validateImageSettings(
   return null
 }
 
+// A streamed request is watched on its open connection and keeps returning
+// partial previews. Everything else is submitted as a durable gateway task, and
+// one task carries exactly one image.
+export function usesImageTask(
+  settings: z.infer<typeof imageSettingsSchema>
+): boolean {
+  return buildImagePayload(settings).stream !== true
+}
+
 export function buildImagePayload(
   settings: z.infer<typeof imageSettingsSchema>
 ): Record<string, string | number | boolean> {

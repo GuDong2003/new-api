@@ -119,6 +119,13 @@ func GenerateTextOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, m
 		other.SetPublic("is_system_prompt_overwritten", true)
 	}
 
+	// An async image relay runs detached from its caller; recording the task it
+	// belongs to keeps the consume log joinable with the task log.
+	if taskID := common.GetContextKeyString(ctx, constant.ContextKeyAsyncImageTaskID); taskID != "" {
+		other.SetPublic("async", true)
+		other.SetPublic("task_id", taskID)
+	}
+
 	AppendRelayLogAdminInfo(ctx, relayInfo, other)
 	appendRequestPath(ctx, relayInfo, other)
 	appendRequestConversionChain(relayInfo, other)

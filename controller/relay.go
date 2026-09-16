@@ -132,6 +132,16 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		return
 	}
 
+	// Async image generation is preferred but never required: when a task cannot
+	// be accepted the request continues below on the synchronous path.
+	if relayFormat == types.RelayFormatOpenAIImage {
+		if imageRequest, ok := request.(*dto.ImageRequest); ok && isAsyncImageRequest(c, imageRequest) {
+			if submitAsyncImageTask(c, relayInfo, imageRequest) {
+				return
+			}
+		}
+	}
+
 	needSensitiveCheck := setting.ShouldCheckPromptSensitive()
 	needCountToken := constant.CountToken
 	// Avoid building huge CombineText (strings.Join) when token counting and sensitive check are both disabled.

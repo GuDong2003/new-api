@@ -65,6 +65,10 @@ const (
 	// It is not returned to end users, but can be persisted into consume/error logs for debugging.
 	ContextKeyAdminRejectReason ContextKey = "admin_reject_reason"
 
+	// ContextKeyAsyncImageTaskID identifies the async image task a detached relay
+	// is finishing, so its consume log can be correlated with the task log.
+	ContextKeyAsyncImageTaskID ContextKey = "async_image_task_id"
+
 	// ContextKeyLanguage stores the user's language preference for i18n
 	ContextKeyLanguage ContextKey = "language"
 	ContextKeyIsStream ContextKey = "is_stream"

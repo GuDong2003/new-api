@@ -51,6 +51,7 @@ const nodeSchema = z.object({
     error: z.string().max(10000).optional(),
     revisedPrompt: z.string().max(64000).optional(),
     jobId: z.string().max(128).optional(),
+    taskId: z.string().max(128).optional(),
     createdAt: z.number().finite(),
     referenceIds: z.array(z.string()).max(16).optional(),
     mask: assetSchema.optional(),
@@ -133,7 +134,13 @@ export function parseDrawingDocument(input: unknown): DrawingDocument {
       data: {
         ...node.data,
         jobId: undefined,
-        status: node.data.status === 'pending' ? 'cancelled' : node.data.status,
+        // A pending node backed by an async task can be resumed: the gateway
+        // kept generating while the canvas was closed. Without a task there is
+        // nothing left to reattach to.
+        status:
+          node.data.status === 'pending' && !node.data.taskId
+            ? 'cancelled'
+            : node.data.status,
       },
     })),
   }

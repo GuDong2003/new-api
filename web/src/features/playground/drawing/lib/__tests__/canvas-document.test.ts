@@ -387,6 +387,25 @@ describe('Canvas documents', () => {
     expect(restored.nodes[0].data.status).toBe('cancelled')
     expect(restored.nodes[0].data.jobId).toBeUndefined()
   })
+  it('keeps a pending generation backed by an async task resumable', () => {
+    useDrawingStore.getState().addNodes([
+      {
+        ...image,
+        data: {
+          ...image.data,
+          status: 'pending',
+          jobId: 'job-a',
+          taskId: 'task_abc',
+        },
+      },
+    ])
+    const restored = parseDrawingDocument(
+      serializeDrawingDocument(useDrawingStore.getState())
+    )
+    expect(restored.nodes[0].data.status).toBe('pending')
+    expect(restored.nodes[0].data.taskId).toBe('task_abc')
+    expect(restored.nodes[0].data.jobId).toBeUndefined()
+  })
   it('keeps generated images recoverable when an unfinished numeric form field is invalid', () => {
     useDrawingStore.getState().addNodes([image])
     useDrawingStore

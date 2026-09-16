@@ -7354,6 +7354,8 @@
     "Zoom": "缩放",
     "Zoom in": "放大",
     "Zoom level": "缩放比例",
-    "Zoom out": "缩小"
+    "Zoom out": "缩小",
+    "Generate Image": "生成图片",
+    "Edit Image": "编辑图片"
   }
 }

@@ -38,6 +38,9 @@ export type ImageNodeData = {
   error?: string
   revisedPrompt?: string
   jobId?: string
+  // Identifies the gateway image task still producing this node, so a reload
+  // can reattach instead of reporting the generation as cancelled.
+  taskId?: string
   createdAt: number
   progress?: ImageGenerationProgress
   referenceIds?: string[]
@@ -70,4 +73,18 @@ export type ImageResponse = {
   output_format?: string
   usage?: Record<string, unknown>
   error?: { message?: string }
+}
+export type ImageTaskStatus =
+  | 'queued'
+  | 'in_progress'
+  | 'completed'
+  | 'failed'
+  | 'unknown'
+// A finished task carries the provider payload, so it parses like a direct
+// image response once the task fields are ignored.
+export type ImageTaskResponse = ImageResponse & {
+  task_id?: string
+  status?: ImageTaskStatus
+  progress?: number
+  status_url?: string
 }

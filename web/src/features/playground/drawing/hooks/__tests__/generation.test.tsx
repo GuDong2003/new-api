@@ -31,6 +31,7 @@ import { DEFAULT_IMAGE_SETTINGS } from '../../lib/image-settings'
 import type { DrawingNode } from '../../types'
 import {
   cancelImageGenerationJobs,
+  resumeImageGenerationJobs,
   useImageGeneration,
 } from '../use-image-generation'
 
@@ -567,6 +568,58 @@ describe('Image generation jobs', () => {
     expect(
       useDrawingStore.getState().nodes.map((node) => node.data.status)
     ).toEqual(['cancelled', 'cancelled'])
+    hook.unmount()
+    client.clear()
+  })
+  it('reattaches to an accepted image task after the canvas is reopened', async () => {
+    const client = new QueryClient()
+    const hook = renderHook(useImageGeneration, {
+      wrapper: (props: { children: ReactNode }) => (
+        <QueryClientProvider client={client}>
+          {props.children}
+        </QueryClientProvider>
+      ),
+    })
+    const poll = vi.spyOn(api, 'get').mockResolvedValue({
+      data: {
+        task_id: 'task_reopened',
+        status: 'completed',
+        data: [{ b64_json: 'YWJj' }],
+      },
+    })
+    act(() =>
+      useDrawingStore.getState().addNodes([
+        {
+          ...generationReference('reopened', { x: 0, y: 0 }),
+          data: {
+            ...generationReference('reopened', { x: 0, y: 0 }).data,
+            asset: undefined,
+            status: 'pending',
+            jobId: undefined,
+            taskId: 'task_reopened',
+          },
+        },
+      ])
+    )
+
+    const decoderIndex = decoders.length
+    act(() => resumeImageGenerationJobs((key: string) => key))
+
+    expect(hook.result.current.pendingCount).toBe(1)
+    await waitFor(() => expect(decoders.length).toBeGreaterThan(decoderIndex))
+    await act(async () =>
+      decoders[decoderIndex].dispatchEvent(new Event('load'))
+    )
+    await waitFor(() => expect(hook.result.current.pendingCount).toBe(0))
+
+    expect(poll).toHaveBeenCalledWith(
+      '/pg/images/generations/task_reopened',
+      expect.anything()
+    )
+    expect(api.post).not.toHaveBeenCalled()
+    const node = useDrawingStore.getState().nodes[0]
+    expect(node.data.status).toBe('complete')
+    expect(node.data.taskId).toBeUndefined()
     hook.unmount()
     client.clear()
   })

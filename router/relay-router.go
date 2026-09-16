@@ -73,6 +73,23 @@ func SetRelayRouter(router *gin.Engine) {
 		playgroundRouter.POST("/images/generations", controller.Playground)
 		playgroundRouter.POST("/images/edits", controller.Playground)
 	}
+
+	// Async image tasks are read straight from the gateway, so they skip channel
+	// distribution and the per-model request limit the generation routes apply.
+	playgroundTaskRouter := router.Group("/pg")
+	playgroundTaskRouter.Use(middleware.RouteTag("relay"))
+	playgroundTaskRouter.Use(middleware.UserAuth())
+	{
+		playgroundTaskRouter.GET("/images/generations/:task_id", controller.ImageTaskFetch)
+	}
+
+	imageTaskRouter := router.Group("/v1")
+	imageTaskRouter.Use(middleware.RouteTag("relay"))
+	imageTaskRouter.Use(middleware.TokenAuth())
+	{
+		imageTaskRouter.GET("/images/generations/:task_id", controller.ImageTaskFetch)
+	}
+
 	relayV1Router := router.Group("/v1")
 	relayV1Router.Use(middleware.RouteTag("relay"))
 	relayV1Router.Use(middleware.SystemPerformanceCheck())

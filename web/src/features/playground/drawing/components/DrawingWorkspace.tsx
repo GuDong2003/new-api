@@ -26,7 +26,7 @@ import {
   ReactFlow,
   useReactFlow,
 } from '@xyflow/react'
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
@@ -68,7 +68,10 @@ import { useDrawingStore } from '@/stores/drawing-store'
 import { ImageRetryContext } from '../context/image-retry-context'
 import { useCanvasFiles } from '../hooks/use-canvas-files'
 import { useDrawingPersistenceStatus } from '../hooks/use-drawing-persistence'
-import { useImageGeneration } from '../hooks/use-image-generation'
+import {
+  resumeImageGenerationJobs,
+  useImageGeneration,
+} from '../hooks/use-image-generation'
 import { useReferenceConnections } from '../hooks/use-reference-connections'
 import { imageFileToAsset } from '../lib/image-assets'
 import { canConnectReference } from '../lib/reference-connections'
@@ -98,6 +101,13 @@ export function DrawingWorkspace(props: { userId: number }) {
   const ready = useDrawingStore(
     (state) => state.ready && state.userId === props.userId
   )
+  const canvasId = useDrawingStore((state) => state.canvasId)
+  // Image tasks keep generating on the gateway while a canvas is closed, so a
+  // freshly loaded canvas reattaches to whatever is still running.
+  useEffect(() => {
+    if (!ready) return
+    resumeImageGenerationJobs(t)
+  }, [ready, canvasId, t])
   const nodes = useDrawingStore((state) => state.nodes)
   const edges = useDrawingStore((state) => state.edges)
   const canUndo = useDrawingStore((state) => state.past.length > 0)

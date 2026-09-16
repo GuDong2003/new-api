@@ -24,6 +24,7 @@ import { imageAssetToFile } from './lib/image-assets'
 import {
   buildImagePayload,
   getImageModelFamily,
+  usesImageTask,
   validateImageSettings,
 } from './lib/image-settings'
 import { parseImageResponse, readImageStream } from './lib/image-stream'
@@ -32,6 +33,7 @@ import type {
   ImageResponse,
   ImageResult,
   ImageSettings,
+  ImageTaskResponse,
 } from './types'
 
 export type GenerateImagesOptions = {
@@ -40,12 +42,34 @@ export type GenerateImagesOptions = {
   mask?: ImageAsset
   signal: AbortSignal
   onPartial: (result: ImageResult, index: number) => void
+  // Reports the accepted task so the canvas can resume it after a reload.
+  onTask?: (taskId: string) => void
+  // Resumes an already accepted task instead of submitting a new request.
+  taskId?: string
 }
 
-export async function generateImages(options: GenerateImagesOptions): Promise<{
+export type ImageGenerationResult = {
   images: ImageResult[]
   usage?: Record<string, unknown>
-}> {
+}
+
+// Async tasks are read back from the gateway, never from a provider URL, and
+// the edit endpoint shares the generation task namespace.
+const IMAGE_TASK_ENDPOINT = '/pg/images/generations'
+// The provider decides how long a queue takes, so polling backs off instead of
+// hammering the gateway for slow models.
+const IMAGE_TASK_POLL_DELAYS = [800, 1500, 2500, 4000]
+
+export async function generateImages(
+  options: GenerateImagesOptions
+): Promise<ImageGenerationResult> {
+  const outputFormat =
+    getImageModelFamily(options.settings.model) === 'gpt-image'
+      ? options.settings.outputFormat
+      : 'png'
+  if (options.taskId) {
+    return await pollImageTask(options.taskId, outputFormat, options.signal)
+  }
   const validation = validateImageSettings(
     options.settings,
     options.references.length
@@ -93,13 +117,13 @@ export async function generateImages(options: GenerateImagesOptions): Promise<{
   }
   options.signal.throwIfAborted()
   const endpoint =
-    options.settings.mode === 'edit'
-      ? '/pg/images/edits'
-      : '/pg/images/generations'
-  const outputFormat =
-    getImageModelFamily(options.settings.model) === 'gpt-image'
-      ? options.settings.outputFormat
-      : 'png'
+    options.settings.mode === 'edit' ? '/pg/images/edits' : IMAGE_TASK_ENDPOINT
+  if (usesImageTask(options.settings)) {
+    // Without live previews there is nothing to watch on the connection, so the
+    // request becomes a durable task: it survives reloads, proxy idle timeouts
+    // and long provider queues.
+    return await runImageTask(endpoint, body, outputFormat, options)
+  }
   try {
     // The shared client supplies account authentication, rotation and credentials.
     const response = await api.post<ReadableStream<Uint8Array>>(
@@ -139,4 +163,114 @@ export async function generateImages(options: GenerateImagesOptions): Promise<{
     }
     throw error
   }
+}
+
+async function runImageTask(
+  endpoint: string,
+  body: Record<string, string | number | boolean> | FormData,
+  outputFormat: string,
+  options: GenerateImagesOptions
+): Promise<ImageGenerationResult> {
+  let accepted: ImageTaskResponse
+  try {
+    // The shared client supplies account authentication, rotation and credentials.
+    const response = await api.post<ReadableStream<Uint8Array>>(
+      endpoint,
+      body,
+      {
+        params: { async: 'true' },
+        adapter: 'fetch',
+        responseType: 'stream',
+        signal: options.signal,
+        skipErrorHandler: true,
+        skipBusinessError: true,
+      }
+    )
+    accepted = (await new Response(response.data).json()) as ImageTaskResponse
+  } catch (error) {
+    if (options.signal.aborted) throw options.signal.reason
+    if (
+      isAxiosError<ReadableStream<Uint8Array>>(error) &&
+      error.response?.data
+    ) {
+      const data = (await new Response(error.response.data)
+        .json()
+        .catch(() => null)) as ImageResponse | null
+      throw new Error(data?.error?.message || 'Image generation failed.')
+    }
+    throw error
+  }
+  if (!accepted.task_id) {
+    // A gateway without async image support answers with the image itself.
+    options.signal.throwIfAborted()
+    return {
+      images: parseImageResponse(accepted, outputFormat),
+      usage: accepted.usage,
+    }
+  }
+  options.onTask?.(accepted.task_id)
+  return await pollImageTask(accepted.task_id, outputFormat, options.signal)
+}
+
+async function pollImageTask(
+  taskId: string,
+  outputFormat: string,
+  signal: AbortSignal
+): Promise<ImageGenerationResult> {
+  for (let attempt = 0; ; attempt++) {
+    signal.throwIfAborted()
+    let task: ImageTaskResponse
+    try {
+      // The task is addressed by id on our own endpoint; a status URL returned
+      // by the gateway is never used as the request target.
+      const response = await api.get<ImageTaskResponse>(
+        `${IMAGE_TASK_ENDPOINT}/${encodeURIComponent(taskId)}`,
+        { signal, skipErrorHandler: true, skipBusinessError: true }
+      )
+      task = response.data
+    } catch (error) {
+      throw imageTaskError(error, signal)
+    }
+    if (task.status === 'completed') {
+      return {
+        images: parseImageResponse(task, outputFormat),
+        usage: task.usage,
+      }
+    }
+    if (task.status === 'failed') {
+      throw new Error(task.error?.message || 'Image generation failed.')
+    }
+    await waitBeforeNextPoll(
+      IMAGE_TASK_POLL_DELAYS[
+        Math.min(attempt, IMAGE_TASK_POLL_DELAYS.length - 1)
+      ],
+      signal
+    )
+  }
+}
+
+function waitBeforeNextPoll(
+  milliseconds: number,
+  signal: AbortSignal
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const abort = () => {
+      clearTimeout(timer)
+      reject(signal.reason)
+    }
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', abort)
+      resolve()
+    }, milliseconds)
+    signal.addEventListener('abort', abort, { once: true })
+  })
+}
+
+function imageTaskError(error: unknown, signal: AbortSignal): unknown {
+  if (signal.aborted) return signal.reason
+  if (isAxiosError<ImageTaskResponse>(error)) {
+    const message = error.response?.data?.error?.message
+    if (message) return new Error(message)
+  }
+  return error
 }

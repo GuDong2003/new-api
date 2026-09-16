@@ -360,6 +360,22 @@ func GetTimedOutUnfinishedTasks(cutoffUnix int64, limit int) []*Task {
 	return tasks
 }
 
+// GetUnfinishedTasksForPlatform returns this platform's tasks that never
+// reached a terminal state. Gateway-driven platforms use it at startup, where
+// an unfinished task means the process that owned it went away.
+func GetUnfinishedTasksForPlatform(platform constant.TaskPlatform, limit int) []*Task {
+	var tasks []*Task
+	err := DB.Where("platform = ?", platform).
+		Where("status NOT IN ?", []string{TaskStatusFailure, TaskStatusSuccess}).
+		Order("id").
+		Limit(limit).
+		Find(&tasks).Error
+	if err != nil {
+		return nil
+	}
+	return tasks
+}
+
 func GetAllUnFinishSyncTasks(limit int) []*Task {
 	var tasks []*Task
 	var err error
