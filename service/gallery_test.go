@@ -226,6 +226,7 @@ func TestGalleryCanvasDocumentSettingsBoundaries(t *testing.T) {
 		{"nai", "n", float64(9)},
 		{"nai", "sampler", "unsupported"},
 		{"nai", "qualityToggle", "false"},
+		{"drawing", "quality", "ultra"},
 		{"drawing", "n", float64(11)},
 		{"drawing", "outputCompression", float64(-1)},
 		{"drawing", "partialImages", float64(4)},
@@ -247,6 +248,16 @@ func TestGalleryCanvasDocumentSettingsBoundaries(t *testing.T) {
 	assert.Equal(t, settings, info.Document["settings"])
 	// Persistence mirrors the schema; generation-time model compatibility is
 	// enforced by the editor/request layer, not by saving a historical document.
+
+	// GPT Image 2.5 adds two steps above "high". Saving a canvas that selected
+	// one must keep it rather than reject the document or fall back to "auto".
+	for _, quality := range []string{"xhigh", "max"} {
+		canvas := galleryCanvasDocument(t, "drawing")
+		canvas["settings"].(map[string]any)["quality"] = quality
+		saved, err := service.NormalizeGalleryCanvasDocument("drawing", canvas)
+		require.NoError(t, err)
+		assert.Equal(t, quality, saved.Document["settings"].(map[string]any)["quality"])
+	}
 }
 
 func TestGalleryCanvasMigrationAndTotals(t *testing.T) {

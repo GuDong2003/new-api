@@ -104,6 +104,34 @@ describe('Image parameter fields', () => {
     expect(screen.getByRole('option', { name: '透明' })).toBeVisible()
   })
 
+  it('lists the quality steps best first for GPT Image 2.5', () => {
+    render(<ResolutionForm />)
+    const options = within(screen.getByLabelText('Image quality')).getAllByRole(
+      'option'
+    )
+    expect(options.map((option) => option.textContent)).toEqual([
+      'Auto',
+      'Maximum',
+      'Extra high',
+      'High',
+      'Medium',
+      'Low',
+    ])
+  })
+
+  it('omits the extended quality steps for GPT Image 1', () => {
+    render(<ResolutionForm settings={{ model: 'gpt-image-1' }} />)
+    const quality = screen.getByLabelText('Image quality')
+    expect(
+      within(quality).queryByRole('option', { name: 'Maximum' })
+    ).toBeNull()
+    expect(
+      within(quality)
+        .getAllByRole('option')
+        .map((option) => option.textContent)
+    ).toEqual(['Auto', 'High', 'Medium', 'Low'])
+  })
+
   it('starts with a 1K square and does not deselect an active preset', async () => {
     const onSubmit = vi.fn()
     render(<ResolutionForm onSubmit={onSubmit} />)

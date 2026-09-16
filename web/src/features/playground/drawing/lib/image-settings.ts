@@ -39,7 +39,7 @@ export const imageSettingsSchema = z.object({
   prompt: z.string().max(32000).default(''),
   size: z.string().default('1024x1024'),
   quality: z
-    .enum(['auto', 'low', 'medium', 'high', 'standard', 'hd'])
+    .enum(['auto', 'low', 'medium', 'high', 'xhigh', 'max', 'standard', 'hd'])
     .default('auto'),
   n: z.number().int().min(1).max(10).default(1),
   background: z.enum(['auto', 'transparent', 'opaque']).default('auto'),
@@ -83,10 +83,22 @@ export function getImageSizes(model: string): string[] {
   return ['auto', '1024x1024', '1536x1024', '1024x1536']
 }
 
+/**
+ * GPT Image 1 and the ChatGPT alias accept only the original fixed sizes and
+ * the low/medium/high ladder. GPT Image 2.5 and later add custom dimensions
+ * together with the xhigh and max quality steps, so both capabilities ask the
+ * same question about the model generation. Names may carry a vendor prefix
+ * such as `openai/`, which must not promote a legacy model.
+ */
+function isLegacyGptImageModel(model: string): boolean {
+  return /(^|[/.:_-])(?:gpt-image-1(?:[.-]|$)|chatgpt-image-latest$)/.test(
+    model.trim().toLowerCase()
+  )
+}
+
 export function supportsCustomImageSize(model: string): boolean {
   return (
-    getImageModelFamily(model) === 'gpt-image' &&
-    !/^(gpt-image-1(?:[.-]|$)|chatgpt-image-latest$)/.test(model)
+    getImageModelFamily(model) === 'gpt-image' && !isLegacyGptImageModel(model)
   )
 }
 
@@ -135,7 +147,11 @@ export function getImageQualities(model: string): string[] {
   if (family === 'dall-e-3') return ['standard', 'hd']
   if (family === 'imagen' || family === 'flux') return ['standard', 'hd']
   if (family === 'seedream') return ['standard']
-  return ['auto', 'low', 'medium', 'high']
+  // Listed best first, after `auto`, which stays the default for every family.
+  if (family === 'gpt-image' && !isLegacyGptImageModel(model)) {
+    return ['auto', 'max', 'xhigh', 'high', 'medium', 'low']
+  }
+  return ['auto', 'high', 'medium', 'low']
 }
 
 export function settingsForImageModel(
@@ -208,7 +224,7 @@ export function validateImageSettings(
     family === 'gpt-image' &&
     !getImageSizes(settings.model).includes(settings.size)
   ) {
-    if (/^(gpt-image-1(?:[.-]|$)|chatgpt-image-latest$)/.test(settings.model)) {
+    if (isLegacyGptImageModel(settings.model)) {
       return 'Choose a size supported by this model.'
     }
     const [width, height] = settings.size.split('x').map(Number)

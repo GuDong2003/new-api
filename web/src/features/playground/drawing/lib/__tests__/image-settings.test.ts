@@ -162,6 +162,45 @@ describe('OpenAI image parameters', () => {
     }
   )
 
+  it('offers the extended quality ladder on GPT Image 2.5 and later', () => {
+    expect(getImageQualities('gpt-image-2.5-flare')).toEqual([
+      'auto',
+      'max',
+      'xhigh',
+      'high',
+      'medium',
+      'low',
+    ])
+    expect(getImageQualities('openai/gpt-image-2.5-sunburst')).toContain('max')
+    const next = settingsForImageModel(
+      { ...settings, quality: 'max' },
+      'gpt-image-2.5-flare'
+    )
+    expect(next.quality).toBe('max')
+    expect(validateImageSettings(next, 0)).toBeNull()
+    expect(buildImagePayload(normalizeStoredImageSettings(next)).quality).toBe(
+      'max'
+    )
+  })
+
+  it.each(['gpt-image-1', 'openai/gpt-image-1', 'chatgpt-image-latest'])(
+    'keeps the original quality ladder for %s',
+    (model) => {
+      expect(getImageQualities(model)).toEqual([
+        'auto',
+        'high',
+        'medium',
+        'low',
+      ])
+      expect(
+        validateImageSettings({ ...settings, model, quality: 'max' }, 0)
+      ).toBe('Choose a quality supported by this model.')
+      expect(
+        settingsForImageModel({ ...settings, quality: 'max' }, model).quality
+      ).toBe('auto')
+    }
+  )
+
   it('uses provider-specific image families and safe defaults', () => {
     expect(getImageModelFamily('imagen-4.0-generate-001')).toBe('imagen')
     expect(getImageModelFamily('black-forest-labs/flux-1.1-pro')).toBe('flux')

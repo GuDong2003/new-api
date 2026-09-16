@@ -69,9 +69,11 @@ export function ImageParameterFields(props: {
   const family = getImageModelFamily(settings.model)
   const qualityLabels: Record<string, string> = {
     auto: 'Auto',
-    low: 'Low',
-    medium: 'Medium',
+    max: 'Maximum',
+    xhigh: 'Extra high',
     high: 'High',
+    medium: 'Medium',
+    low: 'Low',
     standard: 'Standard',
     hd: 'High definition',
   }
