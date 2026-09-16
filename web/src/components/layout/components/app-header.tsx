@@ -27,6 +27,7 @@ import { useTopNavLinks } from '@/hooks/use-top-nav-links'
 import { defaultTopNavLinks } from '../config/top-nav.config'
 import type { TopNavLink } from '../types'
 import { Header } from './header'
+import { MobileSiteNav } from './mobile-site-nav'
 import { SystemBrand } from './system-brand'
 import { TopNav } from './top-nav'
 
@@ -148,11 +149,9 @@ export function AppHeader({
           <LanguageSwitcher />
           {showConfigDrawer && <ConfigDrawer />}
           {showProfileDropdown && <ProfileDropdown />}
-          {/* Narrow screens keep site navigation reachable from the same spot
-              the public pages use: right of the avatar. */}
-          {showTopNav && (
-            <TopNav links={links} variant='compact' className='lg:hidden' />
-          )}
+          {/* Narrow screens reach the rest of the site through the same
+              trigger and menu the public pages use, right of the avatar. */}
+          {showTopNav && <MobileSiteNav links={links} className='lg:hidden' />}
         </div>
       )}
     </Header>

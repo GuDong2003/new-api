@@ -36,12 +36,11 @@ import type { TopNavLink } from '../types'
 type TopNavProps = React.HTMLAttributes<HTMLElement> & {
   links: TopNavLink[]
   /**
-   * Which form to render. "responsive" swaps between them at the lg breakpoint.
-   * The single-form variants let a header put the collapsed trigger and the
-   * expanded links in different slots, which is how the console and canvas
-   * headers keep their trigger next to the avatar like the public pages do.
+   * Which form to render. "responsive" swaps between them at the lg breakpoint;
+   * "expanded" renders only the link row, for a header that places its narrow
+   * screen navigation elsewhere.
    */
-  variant?: 'responsive' | 'compact' | 'expanded'
+  variant?: 'responsive' | 'expanded'
 }
 
 /**
@@ -114,14 +113,6 @@ export function TopNav({
       </DropdownMenuContent>
     </DropdownMenu>
   )
-
-  if (variant === 'compact') {
-    return (
-      <div className={className} {...props}>
-        {collapsedMenu}
-      </div>
-    )
-  }
 
   const expandedNav = (
     <nav

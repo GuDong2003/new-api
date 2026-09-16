@@ -297,10 +297,10 @@ describe('Canvas workspace navigation', () => {
     const menu = screen.getByRole('button', { name: 'Toggle navigation menu' })
     expect(menu.closest('.hidden')).toBeNull()
     await userEvent.click(menu)
-    const consoleEntry = await screen.findByRole('menuitem', {
-      name: 'Console',
-    })
-    await userEvent.click(consoleEntry)
+    const siteNav = screen.getByRole('navigation', { name: 'Site navigation' })
+    await userEvent.click(
+      within(siteNav).getByRole('link', { name: 'Console' })
+    )
     expect(await screen.findByText('dashboard page')).toBeVisible()
     expect(
       screen.getAllByRole('button', { name: 'Toggle Sidebar' }).length
@@ -317,10 +317,13 @@ describe('Canvas workspace navigation', () => {
     // at narrow widths instead of being hidden with the desktop link row.
     expect(menu.closest('.hidden')).toBeNull()
     expect(within(banner).getAllByRole('button').at(-1)).toBe(menu)
+    expect(menu).toHaveAttribute('aria-expanded', 'false')
 
     await userEvent.click(menu)
+    expect(menu).toHaveAttribute('aria-expanded', 'true')
+    const siteNav = screen.getByRole('navigation', { name: 'Site navigation' })
     await userEvent.click(
-      await screen.findByRole('menuitem', { name: 'Infinite Canvas' })
+      within(siteNav).getByRole('link', { name: 'Infinite Canvas' })
     )
     expect(await screen.findByText('drawing page')).toBeVisible()
   })
