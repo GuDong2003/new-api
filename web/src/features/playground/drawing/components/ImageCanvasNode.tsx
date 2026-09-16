@@ -172,10 +172,10 @@ export const ImageCanvasNode = memo(function ImageCanvasNode(
                   }
                 }
               />
-              {imageFailed && <p>{t('The image could not be loaded.')}</p>}
+              {imageFailed && !asset && <p>{t('The image could not be loaded.')}</p>}
             </div>
           )}
-          {!pending && (!asset || imageFailed || !complete) && (
+          {!pending && (!asset || !complete) && (
             <div className='bg-background/75 absolute inset-0 flex flex-col items-center justify-center gap-2 p-5 text-center text-xs'>
               {props.data.status === 'error' && (
                 <p
@@ -194,7 +194,7 @@ export const ImageCanvasNode = memo(function ImageCanvasNode(
               {props.data.status === 'cancelled' && (
                 <p>{t('Generation stopped')}</p>
               )}
-              {imageFailed && <p>{t('The image could not be loaded.')}</p>}
+              {imageFailed && !asset && <p>{t('The image could not be loaded.')}</p>}
             </div>
           )}
         </div>

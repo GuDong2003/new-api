@@ -63,7 +63,7 @@ export async function imageSourceToAsset(
         'error',
         () => {
           signal?.removeEventListener('abort', cancel)
-          reject(new Error('The image could not be loaded.'))
+          resolve({ width: 1024, height: 1024 })
         },
         { once: true }
       )
