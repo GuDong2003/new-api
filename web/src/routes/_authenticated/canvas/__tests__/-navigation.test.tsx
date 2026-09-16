@@ -307,6 +307,24 @@ describe('Canvas workspace navigation', () => {
     ).toBeGreaterThan(0)
   })
 
+  it('offers the site menu next to the avatar in the console shell', async () => {
+    await openWorkspace('/dashboard', true)
+    const banner = screen.getByRole('banner')
+    const menu = within(banner).getByRole('button', {
+      name: 'Toggle navigation menu',
+    })
+    // The console keeps its own sidebar, so site navigation must stay reachable
+    // at narrow widths instead of being hidden with the desktop link row.
+    expect(menu.closest('.hidden')).toBeNull()
+    expect(within(banner).getAllByRole('button').at(-1)).toBe(menu)
+
+    await userEvent.click(menu)
+    await userEvent.click(
+      await screen.findByRole('menuitem', { name: 'Infinite Canvas' })
+    )
+    expect(await screen.findByText('drawing page')).toBeVisible()
+  })
+
   it('keeps both drawing persistence sessions alive while route tabs change', async () => {
     const router = await openWorkspace('/canvas/drawing', true)
     await waitFor(() =>

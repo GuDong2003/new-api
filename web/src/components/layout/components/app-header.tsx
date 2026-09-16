@@ -126,8 +126,8 @@ export function AppHeader({
       {rightContent ?? (
         <div className='ms-auto flex shrink-0 items-center gap-1 sm:gap-2'>
           {showTopNav && (
-            <div className={showSidebar ? 'me-1 hidden lg:block' : 'me-1'}>
-              <TopNav links={links} />
+            <div className='me-1 hidden lg:block'>
+              <TopNav links={links} variant='expanded' />
             </div>
           )}
           {showSearch && (
@@ -148,6 +148,11 @@ export function AppHeader({
           <LanguageSwitcher />
           {showConfigDrawer && <ConfigDrawer />}
           {showProfileDropdown && <ProfileDropdown />}
+          {/* Narrow screens keep site navigation reachable from the same spot
+              the public pages use: right of the avatar. */}
+          {showTopNav && (
+            <TopNav links={links} variant='compact' className='lg:hidden' />
+          )}
         </div>
       )}
     </Header>
