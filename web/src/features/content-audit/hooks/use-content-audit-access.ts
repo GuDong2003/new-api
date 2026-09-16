@@ -19,8 +19,8 @@ For commercial licensing, please contact support@quantumnous.com
 import { createContext, useContext } from 'react'
 
 export const contentAuditQueryOptions = {
-  gcTime: 0,
-  staleTime: 0,
+  gcTime: 5 * 60 * 1000,
+  staleTime: 60 * 1000,
   retry: false,
   refetchOnWindowFocus: false,
   refetchOnReconnect: false,

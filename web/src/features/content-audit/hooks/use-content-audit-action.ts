@@ -33,10 +33,36 @@ import {
 import { contentAuditErrorMessage } from '../lib/labels'
 import type {
   ContentAuditDeletion,
+  ContentAuditList,
   ContentAuditResetResult,
   ContentAuditStatus,
 } from '../types'
 import { useContentAuditAccess } from './use-content-audit-access'
+
+function markRecordsDeleting(
+  client: ReturnType<typeof useQueryClient>,
+  queryKey: readonly ['content-audit', string],
+  ids?: readonly string[]
+) {
+  const selected = ids ? new Set(ids) : null
+  client.setQueriesData<ContentAuditList>(
+    { queryKey: [...queryKey, 'records'] },
+    (data) => {
+      if (!data) return data
+      return {
+        ...data,
+        items: data.items.map((record) => {
+          const matches = selected ? selected.has(record.id) : true
+          const canDelete =
+            record.status !== 'pending' && record.status !== 'deleting'
+          return matches && canDelete
+            ? { ...record, status: 'deleting', error_code: '' }
+            : record
+        }),
+      }
+    }
+  )
+}
 
 export function useContentAuditAction(options?: {
   onDeletionSettled?: () => void
@@ -111,10 +137,13 @@ export function useContentAuditAction(options?: {
     onSuccess: (result, operation) => {
       if (!result) return
       if (operation.scope === 'content_audit.delete') {
+        const deletion = result as ContentAuditDeletion
+        markRecordsDeleting(client, access.queryKey, deletion.ids)
         toast.success(
           t('Deletion requested. Physical cleanup is still pending.')
         )
       } else if (operation.scope === 'content_audit.reset') {
+        markRecordsDeleting(client, access.queryKey)
         toast.success(
           t('Content audit clear requested. Physical cleanup is still pending.')
         )
@@ -126,9 +155,10 @@ export function useContentAuditAction(options?: {
     onError: (error) => {
       toast.error(contentAuditErrorMessage(error, t))
     },
-    // Even a failed write can have committed. Refetch before accepting another
-    // operation; a retry always obtains a fresh, context-bound proof.
+    // Successful writes update the mounted cache locally. A failed write may
+    // still have reached the server, so refresh once before another attempt.
     onSettled: async (result, error, operation) => {
+      if (!operation) return
       const destructive =
         operation.scope === 'content_audit.delete' ||
         operation.scope === 'content_audit.reset'
@@ -139,12 +169,18 @@ export function useContentAuditAction(options?: {
         await client.cancelQueries({ queryKey: [...access.queryKey, 'record'] })
         client.removeQueries({ queryKey: [...access.queryKey, 'record'] })
       }
-      await client.invalidateQueries({
-        queryKey: [...access.queryKey, 'status'],
-      })
-      await client.invalidateQueries({
-        queryKey: [...access.queryKey, 'records'],
-      })
+      if (error) {
+        await client.invalidateQueries({
+          queryKey: [...access.queryKey, 'status'],
+        })
+        await client.invalidateQueries({
+          queryKey: [...access.queryKey, 'records'],
+        })
+      } else if (destructive && result) {
+        await client.invalidateQueries({
+          queryKey: [...access.queryKey, 'status'],
+        })
+      }
     },
   })
 
