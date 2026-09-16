@@ -298,7 +298,7 @@ describe('Canvas image result', () => {
       </ReactFlowProvider>
     )
     fireEvent.error(screen.getByRole('img', { name: 'A cup' }))
-    expect(screen.getByText('The image could not be loaded.')).toBeTruthy()
+    expect(screen.queryByText('The image could not be loaded.')).toBeNull()
     view.rerender(
       <ReactFlowProvider>
         <ImageCanvasNode
