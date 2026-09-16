@@ -24,10 +24,16 @@ describe('drawing image model classification', () => {
     ['openai/dall-e-2', 'dall-e-2'],
     ['gpt-image-1', 'gpt-image'],
     ['chatgpt-image-latest', 'gpt-image'],
+    ['grok-imagine', 'grok-imagine'],
+    ['grok/grok-imagine-edit', 'grok-imagine'],
+    ['nano-banana', 'nano-banana'],
     ['imagen-4.0-generate-001', 'imagen'],
     ['google/imagen-4.0-generate-001', 'imagen'],
     ['black-forest-labs/flux-1.1-pro', 'flux'],
     ['doubao-seedream-4-0-250828', 'seedream'],
+    ['recraft-v3', 'recraft'],
+    ['kolors', 'kolors'],
+    ['janus-pro', 'janus'],
   ])('recognizes %s as a %s model', (model, family) => {
     expect(getImageModelFamily(model)).toBe(family)
   })
@@ -35,21 +41,33 @@ describe('drawing image model classification', () => {
   it('does not treat NAI or text models as generic drawing models', () => {
     expect(getImageModelFamily('nai-diffusion-4-5-full')).toBeNull()
     expect(getImageModelFamily('gpt-5.6')).toBeNull()
+    expect(getImageModelFamily('grok-imagine-video')).toBeNull()
   })
 
   it('filters the drawing selector to supported image model families', () => {
     const models = [
       { label: 'gpt-5.6', value: 'gpt-5.6' },
       { label: 'gpt-image-1', value: 'gpt-image-1' },
+      { label: 'Grok Imagine', value: 'grok-imagine' },
+      { label: 'Grok Video', value: 'grok-imagine-video' },
+      { label: 'Nano Banana', value: 'nano-banana' },
       { label: 'Imagen 4', value: 'imagen-4.0-generate-001' },
       { label: 'Flux', value: 'black-forest-labs/flux-1.1-pro' },
+      { label: 'Recraft', value: 'recraft-v3' },
+      { label: 'Kolors', value: 'kolors' },
+      { label: 'Janus', value: 'janus-pro' },
       { label: 'NAI', value: 'nai-diffusion-4-5-full' },
     ]
 
     expect(filterImageModels(models).map((model) => model.value)).toEqual([
       'gpt-image-1',
+      'grok-imagine',
+      'nano-banana',
       'imagen-4.0-generate-001',
       'black-forest-labs/flux-1.1-pro',
+      'recraft-v3',
+      'kolors',
+      'janus-pro',
     ])
   })
 })

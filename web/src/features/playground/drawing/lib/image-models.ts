@@ -20,9 +20,14 @@ export type ImageModelFamily =
   | 'dall-e-2'
   | 'dall-e-3'
   | 'gpt-image'
+  | 'grok-imagine'
+  | 'nano-banana'
   | 'imagen'
   | 'flux'
   | 'seedream'
+  | 'recraft'
+  | 'kolors'
+  | 'janus'
 
 /**
  * Classify models that can be sent through the generic image-generation
@@ -45,11 +50,21 @@ export function getImageModelFamily(model: string): ImageModelFamily | null {
   if (/(^|[/.:_-])(?:gpt-image|chatgpt-image)(?:[/.:_-]|$)/.test(normalized)) {
     return 'gpt-image'
   }
+  if (
+    !/video/i.test(normalized) &&
+    /(^|[/.:_-])grok-imagine(?:[/.:_-]|$)/.test(normalized)
+  ) {
+    return 'grok-imagine'
+  }
+  if (/nano-banana/.test(normalized)) return 'nano-banana'
   if (/(^|[/.:_-])imagen(?:[/.:_-]|$)/.test(normalized)) return 'imagen'
   if (/(^|[/._-])flux(?:[/._-]|$)/.test(normalized)) return 'flux'
   if (/(^|[/._-])seedream(?:[/._-]|$)/.test(normalized)) {
     return 'seedream'
   }
+  if (/(^|[/._-])recraft(?:[/._-]|$)/.test(normalized)) return 'recraft'
+  if (/(^|[/._-])kolors(?:[/._-]|$)/.test(normalized)) return 'kolors'
+  if (/(^|[/._-])janus(?:[/._-]|$)/.test(normalized)) return 'janus'
 
   return null
 }
