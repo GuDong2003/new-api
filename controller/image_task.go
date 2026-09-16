@@ -283,13 +283,16 @@ func submitAsyncImageTask(c *gin.Context, info *relaycommon.RelayInfo, request *
 		return false
 	}
 
+	// Distribution has selected the channel in the context, but ChannelMeta
+	// stays nil until ImageHelper runs. Keep it that way so a synchronous
+	// fallback still uses the selected channel as its first attempt.
 	now := time.Now().Unix()
 	task := &model.Task{
 		TaskID:     model.GenerateTaskID(),
 		Platform:   constant.TaskPlatformImage,
 		UserId:     info.UserId,
 		Group:      info.UsingGroup,
-		ChannelId:  info.ChannelId,
+		ChannelId:  common.GetContextKeyInt(c, constant.ContextKeyChannelId),
 		Action:     imageTaskAction(info.RelayMode),
 		Status:     model.TaskStatusInProgress,
 		Progress:   "0%",
@@ -298,7 +301,7 @@ func submitAsyncImageTask(c *gin.Context, info *relaycommon.RelayInfo, request *
 		Properties: model.Properties{
 			Input:             request.Prompt,
 			OriginModelName:   info.OriginModelName,
-			UpstreamModelName: info.UpstreamModelName,
+			UpstreamModelName: info.OriginModelName,
 		},
 		// Quota stays zero on purpose. The detached relay pre-consumes, settles
 		// and refunds through the ordinary consume-log path, so the task timeout

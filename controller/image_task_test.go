@@ -1,19 +1,224 @@
 package controller
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
+	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relaykit/dto"
+	"github.com/QuantumNous/new-api/relaykit/types"
+	"github.com/QuantumNous/new-api/setting"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/gin-gonic/gin"
+	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
+
+func TestImageTaskSubmissionUsesAutomaticallySelectedChannel(t *testing.T) {
+	previousDB := model.DB
+	previousDatabase := common.MainDatabaseType()
+	previousCountToken, previousSensitive := constant.CountToken, setting.CheckSensitiveEnabled
+	previousMaxBody := constant.MaxRequestBodyMB
+	previousLog, previousBatch := common.LogConsumeEnabled, common.BatchUpdateEnabled
+	previousFreePreConsume := operation_setting.GetQuotaSetting().EnableFreeModelPreConsume
+	previousPrices := ratio_setting.ModelPrice2JSONString()
+	constant.CountToken, setting.CheckSensitiveEnabled = false, false
+	constant.MaxRequestBodyMB = 128
+	common.LogConsumeEnabled, common.BatchUpdateEnabled = false, false
+	operation_setting.GetQuotaSetting().EnableFreeModelPreConsume = false
+	common.SetMainDatabaseType(common.DatabaseTypeSQLite)
+	require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(`{"async-image-test":0}`))
+	t.Cleanup(func() {
+		model.DB = previousDB
+		common.SetMainDatabaseType(previousDatabase)
+		constant.CountToken, setting.CheckSensitiveEnabled = previousCountToken, previousSensitive
+		constant.MaxRequestBodyMB = previousMaxBody
+		common.LogConsumeEnabled, common.BatchUpdateEnabled = previousLog, previousBatch
+		operation_setting.GetQuotaSetting().EnableFreeModelPreConsume = previousFreePreConsume
+		require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(previousPrices))
+	})
+
+	for _, test := range []struct {
+		name                    string
+		edit, async, failInsert bool
+	}{
+		{name: "async generation", async: true},
+		{name: "async multipart edit", edit: true, async: true},
+		{name: "synchronous generation"},
+		{name: "synchronous multipart edit", edit: true},
+		{name: "generation falls back when task insert fails", async: true, failInsert: true},
+		{name: "edit falls back when task insert fails", edit: true, async: true, failInsert: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			database, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+			require.NoError(t, err)
+			connection, err := database.DB()
+			require.NoError(t, err)
+			connection.SetMaxOpenConns(1)
+			t.Cleanup(func() { require.NoError(t, connection.Close()) })
+			require.NoError(t, database.AutoMigrate(&model.Task{}, &model.User{}, &model.Channel{}))
+			model.DB = database
+			require.NoError(t, database.Create(&model.User{Id: 7, Username: "image-owner", Group: "default"}).Error)
+			completed := make(chan error, 1)
+			require.NoError(t, database.Callback().Update().After("gorm:commit_or_rollback_transaction").Register("test:image-task-completed", func(tx *gorm.DB) {
+				task, ok := tx.Statement.Dest.(*model.Task)
+				if ok && (task.Status == model.TaskStatusSuccess || task.Status == model.TaskStatusFailure) {
+					completed <- tx.Error
+				}
+			}))
+			if test.failInsert {
+				require.NoError(t, database.Callback().Create().Before("gorm:create").Register("test:image-task-insert-failure", func(tx *gorm.DB) {
+					if _, ok := tx.Statement.Dest.(*model.Task); ok {
+						tx.AddError(errors.New("task storage unavailable"))
+					}
+				}))
+			}
+
+			type upstreamRequest struct {
+				body        []byte
+				contentType string
+				path        string
+				err         error
+			}
+			requests := make(chan upstreamRequest, 2)
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				body, err := io.ReadAll(r.Body)
+				requests <- upstreamRequest{body, r.Header.Get("Content-Type"), r.URL.Path, err}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(w, `{"created":1,"data":[{"url":"https://example.com/generated.png"}],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`)
+			}))
+			t.Cleanup(upstream.Close)
+			channel := &model.Channel{
+				Id: 73, Name: "automatically selected", Type: constant.ChannelTypeOpenAI,
+				Key: "test-key", BaseURL: &upstream.URL, Status: common.ChannelStatusEnabled,
+				ModelMapping: common.GetPointer(`{"async-image-test":"upstream-image"}`),
+			}
+			require.NoError(t, database.Create(channel).Error)
+
+			var body bytes.Buffer
+			path, contentType := "/pg/images/generations", "application/json"
+			if test.edit {
+				path = "/pg/images/edits"
+				writer := multipart.NewWriter(&body)
+				for key, value := range map[string]string{
+					"model": "async-image-test", "prompt": "remove text", "group": "default",
+					"n": "1", "quality": "high", "stream": "false",
+				} {
+					require.NoError(t, writer.WriteField(key, value))
+				}
+				file, err := writer.CreateFormFile("image", "reference.png")
+				require.NoError(t, err)
+				_, err = io.WriteString(file, "reference-image")
+				require.NoError(t, err)
+				require.NoError(t, writer.Close())
+				contentType = writer.FormDataContentType()
+			} else {
+				body.WriteString(`{"model":"async-image-test","prompt":"remove text","group":"default","n":1,"quality":"high","stream":false}`)
+			}
+			target := path
+			if test.async {
+				target += "?async=true"
+			}
+			recorder := httptest.NewRecorder()
+			engine := gin.New()
+			engine.POST(path, middleware.RelayPanicRecover(), middleware.BodyStorageCleanup(), func(c *gin.Context) {
+				c.Set("id", 7)
+				c.Set("group", "default")
+				c.Set("user_group", "default")
+				// This is the context populated by automatic channel distribution;
+				// no channel selector is sent by the client.
+				require.Nil(t, middleware.SetupContextForSelectedChannel(c, channel, "async-image-test"))
+				Relay(c, types.RelayFormatOpenAIImage)
+			})
+			request := httptest.NewRequest(http.MethodPost, target, &body)
+			request.Header.Set("Content-Type", contentType)
+			engine.ServeHTTP(recorder, request)
+
+			var result struct {
+				TaskID    string          `json:"task_id"`
+				Status    string          `json:"status"`
+				StatusURL string          `json:"status_url"`
+				Data      []dto.ImageData `json:"data"`
+			}
+			require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &result))
+			if test.async && !test.failInsert {
+				require.Equal(t, http.StatusAccepted, recorder.Code, recorder.Body.String())
+				require.NotEmpty(t, result.TaskID)
+				assert.Equal(t, "in_progress", result.Status)
+				assert.Equal(t, "/pg/images/generations/"+result.TaskID, result.StatusURL)
+				select {
+				case err := <-completed:
+					require.NoError(t, err)
+				case <-time.After(5 * time.Second):
+					t.Fatal("background image task did not finish")
+				}
+				task, exists, err := model.GetByTaskId(7, result.TaskID)
+				require.NoError(t, err)
+				require.True(t, exists)
+				require.Equal(t, model.TaskStatus(model.TaskStatusSuccess), task.Status, task.FailReason)
+				assert.Equal(t, 73, task.ChannelId)
+				assert.Equal(t, "async-image-test", task.Properties.OriginModelName)
+				assert.Equal(t, "https://example.com/generated.png", task.PrivateData.ResultURL)
+				fetch := httptest.NewRecorder()
+				c, _ := gin.CreateTestContext(fetch)
+				c.Request = httptest.NewRequest(http.MethodGet, result.StatusURL, nil)
+				c.Set("id", 7)
+				c.Params = gin.Params{{Key: "task_id", Value: result.TaskID}}
+				ImageTaskFetch(c)
+				require.Equal(t, http.StatusOK, fetch.Code)
+				require.NoError(t, common.Unmarshal(fetch.Body.Bytes(), &result))
+				assert.Equal(t, "completed", result.Status)
+			} else {
+				require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+				assert.Empty(t, result.TaskID)
+				var count int64
+				require.NoError(t, database.Model(&model.Task{}).Count(&count).Error)
+				assert.Zero(t, count)
+			}
+			require.Len(t, result.Data, 1)
+			assert.Equal(t, "https://example.com/generated.png", result.Data[0].Url)
+			require.Len(t, requests, 1, "the selected upstream must receive exactly one generation")
+			received := <-requests
+			require.NoError(t, received.err)
+			assert.Equal(t, strings.Replace(path, "/pg/", "/v1/", 1), received.path)
+			if test.edit {
+				forwarded := httptest.NewRequest(http.MethodPost, received.path, bytes.NewReader(received.body))
+				forwarded.Header.Set("Content-Type", received.contentType)
+				require.NoError(t, forwarded.ParseMultipartForm(1<<20))
+				t.Cleanup(func() { require.NoError(t, forwarded.MultipartForm.RemoveAll()) })
+				assert.Equal(t, "upstream-image", forwarded.PostForm.Get("model"))
+				assert.Equal(t, "remove text", forwarded.PostForm.Get("prompt"))
+				assert.False(t, forwarded.PostForm.Has("group"))
+				file, _, err := forwarded.FormFile("image")
+				require.NoError(t, err)
+				defer file.Close()
+				reference, err := io.ReadAll(file)
+				require.NoError(t, err)
+				assert.Equal(t, "reference-image", string(reference))
+			} else {
+				var payload map[string]any
+				require.NoError(t, common.Unmarshal(received.body, &payload))
+				assert.Equal(t, "upstream-image", payload["model"])
+				assert.Equal(t, "remove text", payload["prompt"])
+				assert.NotContains(t, payload, "group")
+			}
+		})
+	}
+}
 
 func TestImageTaskStatus(t *testing.T) {
 	tests := []struct {
