@@ -55,10 +55,10 @@ export function GalleryImageCard(props: {
           date: new Date(props.image.expires_at * 1000).toLocaleDateString(),
         })
   return (
-    <article className='flex min-w-0 flex-col gap-1.5'>
+    <article className='flex h-full min-w-0 flex-col gap-1.5'>
       <Button
         variant='ghost'
-        className='bg-muted/40 h-auto w-full overflow-hidden rounded-md p-0'
+        className='bg-muted/40 h-auto min-h-0 w-full flex-1 overflow-hidden rounded-md p-0'
         onClick={props.onPreview}
         aria-label={t('Preview original')}
       >
@@ -67,10 +67,10 @@ export function GalleryImageCard(props: {
             src={imageUrl}
             alt={props.image.prompt}
             loading='lazy'
-            className='aspect-square w-full rounded-md object-contain'
+            className='size-full rounded-md object-contain'
           />
         ) : (
-          <div className='bg-muted flex aspect-square w-full items-center justify-center rounded-md p-2 text-xs'>
+          <div className='bg-muted flex size-full items-center justify-center rounded-md p-2 text-xs'>
             {props.image.has_thumbnail && file.isPending ? (
               <Skeleton className='size-full' />
             ) : (
@@ -79,9 +79,9 @@ export function GalleryImageCard(props: {
           </div>
         )}
       </Button>
-      <div className='flex min-w-0 items-start gap-1'>
+      <div className='flex min-w-0 shrink-0 items-start gap-1'>
         <div className='min-w-0 flex-1 text-xs'>
-          <p className='line-clamp-2 break-words' title={props.image.prompt}>
+          <p className='line-clamp-3 break-words' title={props.image.prompt}>
             {props.image.prompt}
           </p>
           <p className='text-muted-foreground truncate'>

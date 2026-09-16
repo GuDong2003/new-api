@@ -88,8 +88,13 @@ it('shows combined usage, filters sources and paginates server results', async (
       <Gallery />
     </QueryClientProvider>
   )
-  expect(await screen.findByText('2 / 100 images')).toBeVisible()
-  expect(screen.getByText('1.00 / 200.00 MiB')).toBeVisible()
+  expect(
+    await screen.findByRole('progressbar', { name: 'Images' })
+  ).toHaveAttribute('aria-valuetext', '2 / 100')
+  expect(screen.getByRole('progressbar', { name: 'Storage' })).toHaveAttribute(
+    'aria-valuetext',
+    '1.0 / 200 MiB'
+  )
   await userEvent.click(screen.getByRole('combobox', { name: 'Source' }))
   await userEvent.click(screen.getByRole('option', { name: 'NAI Canvas' }))
   await waitFor(() => expect(lists).toContainEqual({ page: 1, page_size: 24 }))
@@ -211,7 +216,12 @@ it('requires confirmation before deletion and refreshes list and usage after del
   await userEvent.click(
     within(confirmation).getByRole('button', { name: 'Delete' })
   )
-  expect(await screen.findByText('0 / 100 images')).toBeVisible()
+  await waitFor(() =>
+    expect(screen.getByRole('progressbar', { name: 'Images' })).toHaveAttribute(
+      'aria-valuetext',
+      '0 / 100'
+    )
+  )
   expect(await screen.findByText('No saved images')).toBeVisible()
 })
 
@@ -232,5 +242,7 @@ it('replaces failed loading with a retry action and keeps thumbnails private aft
   fireEvent.click(retry)
   await waitFor(() => expect(screen.getByText('No saved images')).toBeVisible())
   act(() => useAuthStore.getState().auth.reset())
-  expect(screen.queryByText('2 / 100 images')).not.toBeInTheDocument()
+  expect(
+    screen.queryByRole('progressbar', { name: 'Images' })
+  ).not.toBeInTheDocument()
 })

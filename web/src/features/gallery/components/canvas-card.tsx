@@ -59,10 +59,10 @@ export function CanvasCard(props: {
     ? new Date(project.updatedAt * 1000).toLocaleString()
     : t('Not synced')
   return (
-    <article className='bg-background flex min-w-0 flex-col overflow-hidden rounded-xl border'>
+    <article className='bg-background flex h-full min-w-0 flex-col overflow-hidden rounded-xl border'>
       <Button
         variant='ghost'
-        className='h-32 w-full rounded-none p-0'
+        className='h-auto min-h-0 w-full flex-1 rounded-none p-0'
         onClick={props.onOpen}
         aria-label={t('Open canvas: {{name}}', { name: project.name })}
       >
@@ -86,7 +86,7 @@ export function CanvasCard(props: {
           )}
         </div>
       </Button>
-      <div className='flex min-w-0 flex-col gap-0.5 p-3'>
+      <div className='flex min-w-0 shrink-0 flex-col gap-0.5 p-3'>
         <div className='flex min-w-0 items-center justify-between gap-1'>
           <h3
             className='min-w-0 truncate text-sm font-medium'

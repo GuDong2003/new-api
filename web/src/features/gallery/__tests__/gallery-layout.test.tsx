@@ -24,6 +24,11 @@ import { api } from '@/lib/api'
 import { useAuthStore } from '@/stores/auth-store'
 
 import { CanvasCard } from '../components/canvas-card'
+import { GalleryUsageMeters } from '../components/gallery-usage-meters'
+import {
+  GALLERY_FALLBACK_PAGE_SIZE,
+  calculateGalleryGrid,
+} from '../hooks/use-gallery-grid'
 import { Gallery } from '../index'
 import { galleryImage, login, response, usage } from './fixtures'
 
@@ -77,7 +82,9 @@ function renderGallery(items: unknown[]) {
 it('drops the page title and description the canvas tabs already carry', async () => {
   renderGallery([galleryImage])
 
-  expect(await screen.findByText('2 / 100 images')).toBeVisible()
+  expect(
+    await screen.findByRole('progressbar', { name: 'Images' })
+  ).toHaveAttribute('aria-valuetext', '2 / 100')
   expect(
     screen.queryByRole('heading', { name: 'My Gallery' })
   ).not.toBeInTheDocument()
@@ -89,7 +96,9 @@ it('drops the page title and description the canvas tabs already carry', async (
 it('reveals the storage rules only after the usage hint is opened', async () => {
   renderGallery([galleryImage])
 
-  expect(await screen.findByText('2 / 100 images')).toBeVisible()
+  expect(
+    await screen.findByRole('progressbar', { name: 'Images' })
+  ).toHaveAttribute('aria-valuetext', '2 / 100')
   expect(screen.queryByText(/New images expire after/)).not.toBeInTheDocument()
   await userEvent.click(screen.getByRole('button', { name: 'Learn more' }))
 
@@ -98,7 +107,42 @@ it('reveals the storage rules only after the usage hint is opened', async () => 
   ).toBeVisible()
 })
 
-it('lays out image cards on a larger auto-fill track', async () => {
+it('fills a desktop window with two rows of large cards', () => {
+  const grid = calculateGalleryGrid(1440, 700)
+
+  expect(grid.rows).toBe(2)
+  expect(grid.columns).toBe(6)
+  expect(grid.pageSize).toBe(12)
+})
+
+it('shrinks cards so a short window still fits two rows', () => {
+  const roomy = calculateGalleryGrid(1024, 900)
+  const short = calculateGalleryGrid(1024, 480)
+
+  expect(short.rows).toBe(2)
+  expect(short.columns).toBeGreaterThan(roomy.columns)
+})
+
+it('keeps phone captions readable with two columns', () => {
+  const phone = calculateGalleryGrid(390, 740)
+
+  expect(phone.columns).toBe(2)
+})
+
+it('keeps a single row when not even two fit', () => {
+  const landscape = calculateGalleryGrid(844, 300)
+
+  expect(landscape.rows).toBe(1)
+})
+
+it('reports the fallback page size before the grid has a size', () => {
+  const unmeasured = calculateGalleryGrid(0, 0)
+
+  expect(unmeasured.measured).toBe(false)
+  expect(unmeasured.pageSize).toBe(GALLERY_FALLBACK_PAGE_SIZE)
+})
+
+it('falls back to an auto-fill track while the grid cannot be measured', async () => {
   renderGallery([galleryImage, { ...galleryImage, id: 'image-2' }])
 
   const cards = await screen.findAllByRole('article')
@@ -107,11 +151,11 @@ it('lays out image cards on a larger auto-fill track', async () => {
   expect(cards[0].parentElement).toHaveClass(
     'grid-cols-2',
     'gap-4',
-    'sm:grid-cols-[repeat(auto-fill,minmax(15rem,1fr))]'
+    'sm:grid-cols-[repeat(auto-fill,minmax(14rem,1fr))]'
   )
 })
 
-it('renders the canvas cover at the compact card height', () => {
+it('lets the canvas cover absorb the height a row has to spare', () => {
   render(
     <CanvasCard
       identity={{ userId: 813, sessionId: 'gallery-session' }}
@@ -133,5 +177,49 @@ it('renders the canvas cover at the compact card height', () => {
 
   expect(
     screen.getByRole('button', { name: 'Open canvas: 本地画布' })
-  ).toHaveClass('h-32')
+  ).toHaveClass('flex-1', 'min-h-0')
+})
+
+it('colors each usage meter by how full that quota is', () => {
+  render(
+    <GalleryUsageMeters
+      usage={{
+        used_images: 95,
+        max_images: 100,
+        used_bytes: 80,
+        max_bytes: 100,
+        retention_days: 30,
+        enabled: true,
+        can_save: true,
+        reason: '',
+      }}
+    />
+  )
+
+  const fill = (name: string) =>
+    screen.getByRole('progressbar', { name }).firstElementChild
+
+  expect(fill('Images')).toHaveClass('bg-destructive')
+  expect(fill('Storage')).toHaveClass('bg-warning')
+})
+
+it('keeps a quota with room to spare on the calm color', () => {
+  render(
+    <GalleryUsageMeters
+      usage={{
+        used_images: 10,
+        max_images: 100,
+        used_bytes: 10,
+        max_bytes: 100,
+        retention_days: 30,
+        enabled: true,
+        can_save: true,
+        reason: '',
+      }}
+    />
+  )
+
+  expect(
+    screen.getByRole('progressbar', { name: 'Images' }).firstElementChild
+  ).toHaveClass('bg-success')
 })

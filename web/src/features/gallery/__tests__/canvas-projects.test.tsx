@@ -262,7 +262,7 @@ it('filters and paginates local canvases using the same title, source and sort c
   const longName = `特别的 NAI 画布${'很长的名称'.repeat(20)}`
   await createCanvasProject(identity, 'nai', longName)
   renderGallery()
-  await userEvent.click(screen.getByRole('tab', { name: 'Canvases' }))
+  await userEvent.click(screen.getByRole('tab', { name: /^Canvases/ }))
   await waitFor(() =>
     expect(
       screen.getAllByRole('button', { name: /^Open canvas:/ })
@@ -297,7 +297,7 @@ it('creates the user-entered canvas name and confirms image and whole-canvas del
   )
   await waitFor(() => expect(useDrawingStore.getState().nodes).toHaveLength(0))
   expect(await readCanvasAssets(813, canvas.id)).toHaveLength(0)
-  await userEvent.click(await screen.findByRole('tab', { name: 'Canvases' }))
+  await userEvent.click(await screen.findByRole('tab', { name: /^Canvases/ }))
   await userEvent.click(
     await screen.findByRole('button', { name: 'Delete canvas' })
   )
@@ -337,7 +337,7 @@ it('removes cached gallery images when their canvas is deleted', async () => {
   ]
   renderGallery()
   expect(await screen.findByText(galleryImage.prompt)).toBeVisible()
-  await userEvent.click(screen.getByRole('tab', { name: 'Canvases' }))
+  await userEvent.click(screen.getByRole('tab', { name: /^Canvases/ }))
   await userEvent.click(
     await screen.findByRole('button', { name: 'Delete canvas' })
   )
@@ -496,7 +496,7 @@ it('guards gallery canvas switching until unsaved changes are resolved', async (
   useDrawingStore.getState().updateSettings({ prompt: '未保存修改' })
 
   renderGallery()
-  await userEvent.click(screen.getByRole('tab', { name: 'Canvases' }))
+  await userEvent.click(screen.getByRole('tab', { name: /^Canvases/ }))
   await userEvent.click(
     await screen.findByRole('button', { name: 'Open canvas: 目标画布' })
   )
@@ -542,7 +542,7 @@ it('guards gallery switching when another canvas kind has unsaved changes', asyn
   useDrawingStore.getState().updateSettings({ prompt: '未保存修改' })
 
   renderGallery()
-  await userEvent.click(screen.getByRole('tab', { name: 'Canvases' }))
+  await userEvent.click(screen.getByRole('tab', { name: /^Canvases/ }))
   await userEvent.click(
     await screen.findByRole('button', { name: 'Open canvas: 目标 NAI 画布' })
   )
@@ -574,7 +574,7 @@ it('keeps the switch dialog actionable after a save failure', async () => {
     .mockRejectedValue(new Error('Canvas storage is unavailable.'))
 
   renderGallery()
-  await userEvent.click(screen.getByRole('tab', { name: 'Canvases' }))
+  await userEvent.click(screen.getByRole('tab', { name: /^Canvases/ }))
   await userEvent.click(
     await screen.findByRole('button', { name: 'Open canvas: 目标画布' })
   )

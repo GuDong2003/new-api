@@ -22,9 +22,9 @@ import { useTranslation } from 'react-i18next'
 import { ConfirmDialog } from '@/components/confirm-dialog'
 import { EmptyState } from '@/components/empty-state'
 import { ErrorState } from '@/components/error-state'
-import { LearnMore } from '@/components/learn-more'
 import { LoadingState } from '@/components/loading-state'
 import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
@@ -50,7 +50,9 @@ import { CanvasSaveStatus } from './components/canvas-save-status'
 import { CanvasSwitchDialog } from './components/canvas-switch-dialog'
 import { GalleryImageCard } from './components/gallery-image-card'
 import { GalleryPreview } from './components/gallery-preview'
+import { GalleryUsageMeters } from './components/gallery-usage-meters'
 import { useCanvasProjects } from './hooks/use-canvas-projects'
+import { useGalleryGrid } from './hooks/use-gallery-grid'
 import {
   canvasDeletionVersion,
   getCanvasDeletionEvents,
@@ -114,6 +116,7 @@ function GalleryContent(props: { identity: GalleryIdentity }) {
     }),
     [props.identity.sessionId, props.identity.userId]
   )
+  const { gridRef, metrics } = useGalleryGrid()
   const [view, setView] = useState('images')
   const [source, setSource] = useState('all')
   const [search, setSearch] = useState('')
@@ -366,9 +369,9 @@ function GalleryContent(props: { identity: GalleryIdentity }) {
     )
   const activeQuery = view === 'images' ? images : canvases
   const total = view === 'images' ? imageItems.length : projects.length
-  const pages = Math.max(1, Math.ceil(total / 24))
+  const pages = Math.max(1, Math.ceil(total / metrics.pageSize))
   const currentPage = Math.min(page, pages)
-  const offset = (currentPage - 1) * 24
+  const offset = (currentPage - 1) * metrics.pageSize
   const status = drawing.statusText || nai.statusText
   const run = async (action: () => Promise<unknown>) => {
     setBusy(true)
@@ -520,7 +523,7 @@ function GalleryContent(props: { identity: GalleryIdentity }) {
   return (
     <main
       id='content'
-      className='flex h-full min-h-0 flex-col gap-3 overflow-y-auto p-4 sm:px-6 sm:pb-6'
+      className='flex h-full min-h-0 flex-col gap-3 p-4 sm:px-6 sm:pb-6'
     >
       {error ? (
         <Alert variant='destructive'>
@@ -534,18 +537,33 @@ function GalleryContent(props: { identity: GalleryIdentity }) {
         />
       ) : null}
       <Tabs
+        className='flex min-h-0 flex-1 flex-col gap-3'
         value={view}
         onValueChange={(value) => {
           setView(value)
           setPage(1)
         }}
       >
-        <div className='flex flex-wrap items-center justify-between gap-2'>
-          <TabsList>
-            <TabsTrigger value='images'>{t('Images')}</TabsTrigger>
-            <TabsTrigger value='canvases'>{t('Canvases')}</TabsTrigger>
+        <div className='flex shrink-0 flex-wrap items-center gap-3'>
+          <TabsList className='group-data-horizontal/tabs:h-11'>
+            <TabsTrigger value='images' className='gap-2 px-5 text-base'>
+              {t('Images')}
+              <Badge variant='secondary'>{imageItems.length}</Badge>
+            </TabsTrigger>
+            <TabsTrigger value='canvases' className='gap-2 px-5 text-base'>
+              {t('Canvases')}
+              <Badge variant='secondary'>{projects.length}</Badge>
+            </TabsTrigger>
           </TabsList>
-          <div className='flex min-w-0 flex-wrap items-center gap-2'>
+          {usage.data ? <GalleryUsageMeters usage={usage.data} /> : null}
+          {status ? (
+            <CanvasSaveStatus
+              localStatus='saved'
+              cloudStatus='full'
+              statusText={status}
+            />
+          ) : null}
+          <div className='ms-auto flex min-w-0 flex-wrap items-center gap-2'>
             <Input
               className='w-full sm:w-56'
               value={search}
@@ -626,109 +644,105 @@ function GalleryContent(props: { identity: GalleryIdentity }) {
             </Button>
           </div>
         </div>
-        {usage.data || status ? (
-          <div className='flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1'>
-            {usage.data ? (
-              <section
-                aria-label={t('Gallery usage')}
-                className='text-muted-foreground flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs'
+        <div ref={gridRef} className='min-h-0 flex-1 overflow-hidden'>
+          <TabsContent value='images' className='h-full'>
+            {loading && <LoadingState />}
+            {!loading && imageItems.length > 0 && (
+              <div
+                className={
+                  metrics.measured
+                    ? 'grid gap-4'
+                    : 'grid grid-cols-2 gap-4 sm:grid-cols-[repeat(auto-fill,minmax(14rem,1fr))]'
+                }
+                style={
+                  metrics.measured
+                    ? {
+                        gridTemplateColumns: `repeat(${metrics.columns}, minmax(0, 1fr))`,
+                        gridAutoRows: `${metrics.rowHeight}px`,
+                      }
+                    : undefined
+                }
               >
-                <span>
-                  {t('{{used}} / {{max}} images', {
-                    used: usage.data.used_images,
-                    max: usage.data.max_images,
-                  })}
-                </span>
-                <span aria-hidden='true'>·</span>
-                <span>
-                  {(usage.data.used_bytes / 1048576).toFixed(2)} /{' '}
-                  {(usage.data.max_bytes / 1048576).toFixed(2)} MiB
-                </span>
-                <LearnMore contentProps={{ className: 'text-xs' }}>
-                  <p>
-                    {t(
-                      'New images expire after {{days}} days. Originals, thumbnails and metadata all count toward storage.',
-                      { days: usage.data.retention_days }
-                    )}
-                  </p>
-                  <p className='mt-1'>
-                    {t(
-                      'References count as originals. Thumbnails, masks and canvas documents share the byte quota. Cloud expiry keeps local drafts.'
-                    )}
-                  </p>
-                </LearnMore>
-              </section>
-            ) : null}
-            {status ? (
-              <CanvasSaveStatus
-                localStatus='saved'
-                cloudStatus='full'
-                statusText={status}
+                {imageItems
+                  .slice(offset, offset + metrics.pageSize)
+                  .map((image) => (
+                    <GalleryImageCard
+                      key={image.id}
+                      image={image}
+                      identity={props.identity}
+                      onPreview={() => setPreview(image)}
+                      onDelete={() => setImageDeleteTarget(image)}
+                      onOpenCanvas={
+                        image.canvas_id
+                          ? () => {
+                              if (image.canvas_id) {
+                                openProject(
+                                  image.canvas_id,
+                                  image.source,
+                                  image.id
+                                )
+                              }
+                            }
+                          : undefined
+                      }
+                    />
+                  ))}
+              </div>
+            )}
+            {!loading && !imageItems.length && !activeQuery.isError && (
+              <EmptyState
+                title={t('No saved images')}
+                description={t(
+                  'New final canvas images will appear here automatically.'
+                )}
               />
-            ) : null}
-          </div>
-        ) : null}
-        <TabsContent value='images'>
-          {loading && <LoadingState />}
-          {!loading && imageItems.length > 0 && (
-            <div className='grid grid-cols-2 gap-4 sm:grid-cols-[repeat(auto-fill,minmax(15rem,1fr))]'>
-              {imageItems.slice(offset, offset + 24).map((image) => (
-                <GalleryImageCard
-                  key={image.id}
-                  image={image}
-                  identity={props.identity}
-                  onPreview={() => setPreview(image)}
-                  onDelete={() => setImageDeleteTarget(image)}
-                  onOpenCanvas={
-                    image.canvas_id
-                      ? () => {
-                          if (image.canvas_id) {
-                            openProject(image.canvas_id, image.source, image.id)
-                          }
-                        }
-                      : undefined
-                  }
-                />
-              ))}
-            </div>
-          )}
-          {!loading && !imageItems.length && !activeQuery.isError && (
-            <EmptyState
-              title={t('No saved images')}
-              description={t(
-                'New final canvas images will appear here automatically.'
-              )}
-            />
-          )}
-        </TabsContent>
-        <TabsContent value='canvases'>
-          {loading && <LoadingState />}
-          {!loading && projects.length > 0 && (
-            <div className='grid grid-cols-1 gap-3 sm:grid-cols-[repeat(auto-fill,minmax(15rem,1fr))]'>
-              {projects.slice(offset, offset + 24).map((project) => (
-                <CanvasCard
-                  key={project.id}
-                  identity={props.identity}
-                  project={project}
-                  onOpen={() => openProject(project.id, project.kind)}
-                  onRename={() => {
-                    setRenameTarget(project)
-                    setDialog('rename')
-                  }}
-                  onDelete={() => setDeleteTarget(project)}
-                />
-              ))}
-            </div>
-          )}
-          {!loading && !projects.length && !activeQuery.isError && (
-            <EmptyState
-              title={t('No canvases')}
-              description={t('Create a canvas to start saving your work.')}
-            />
-          )}
-        </TabsContent>
+            )}
+          </TabsContent>
+          <TabsContent value='canvases' className='h-full'>
+            {loading && <LoadingState />}
+            {!loading && projects.length > 0 && (
+              <div
+                className={
+                  metrics.measured
+                    ? 'grid gap-4'
+                    : 'grid grid-cols-2 gap-4 sm:grid-cols-[repeat(auto-fill,minmax(14rem,1fr))]'
+                }
+                style={
+                  metrics.measured
+                    ? {
+                        gridTemplateColumns: `repeat(${metrics.columns}, minmax(0, 1fr))`,
+                        gridAutoRows: `${metrics.rowHeight}px`,
+                      }
+                    : undefined
+                }
+              >
+                {projects
+                  .slice(offset, offset + metrics.pageSize)
+                  .map((project) => (
+                    <CanvasCard
+                      key={project.id}
+                      identity={props.identity}
+                      project={project}
+                      onOpen={() => openProject(project.id, project.kind)}
+                      onRename={() => {
+                        setRenameTarget(project)
+                        setDialog('rename')
+                      }}
+                      onDelete={() => setDeleteTarget(project)}
+                    />
+                  ))}
+              </div>
+            )}
+            {!loading && !projects.length && !activeQuery.isError && (
+              <EmptyState
+                title={t('No canvases')}
+                description={t('Create a canvas to start saving your work.')}
+              />
+            )}
+          </TabsContent>
+        </div>
       </Tabs>
-      <Pagination aria-label={t('Pagination')}>
+      <Pagination className='shrink-0' aria-label={t('Pagination')}>
         <PaginationContent>
           <PaginationItem>
             <Button
