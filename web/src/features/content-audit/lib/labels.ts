@@ -118,7 +118,7 @@ export function contentAuditCodeLabel(code: string, t: TFunction): string {
     case 'image_base64':
     case 'image_url':
     case 'preview_unavailable':
-      return t('Thumbnail unavailable')
+      return t('Thumbnail unavailable, original image available')
     case 'image_unavailable':
       return t('Image unavailable')
     case 'resource_busy':

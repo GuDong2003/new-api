@@ -80,6 +80,14 @@ export function ContentAuditThumbnail(props: {
       {image.status !== 'ready' && (
         <p>{contentAuditCodeLabel(image.status, t)}</p>
       )}
+      {image.status === 'preview_unavailable' &&
+        image.original_status === 'ready' && (
+          <div role='status' className='text-sm'>
+            {t(
+              'Thumbnail generation failed, but the original image is available. Open the original image below.'
+            )}
+          </div>
+        )}
       {image.status === 'ready' && query.isPending && (
         <LoadingState size='sm' />
       )}
