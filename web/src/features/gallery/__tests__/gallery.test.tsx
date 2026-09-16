@@ -135,6 +135,47 @@ it('fetches private thumbnails with authentication and revokes blob URLs on disp
   expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:private-gallery')
 })
 
+it('reuses a cached thumbnail after leaving and reopening the gallery', async () => {
+  let thumbnailRequests = 0
+  api.defaults.adapter = async (config) => {
+    if (config.url?.endsWith('/usage')) return response(config, usage)
+    if (config.url?.endsWith('/file')) {
+      thumbnailRequests += 1
+      return {
+        ...response(config, {}),
+        data: new Blob(['private-thumbnail'], { type: 'image/jpeg' }),
+      }
+    }
+    return response(config, {
+      items: [galleryImage],
+      total: 1,
+      page: 1,
+      page_size: 24,
+    })
+  }
+
+  const first = render(
+    <QueryClientProvider client={client}>
+      <Gallery />
+    </QueryClientProvider>
+  )
+  expect(
+    await first.findByRole('img', { name: 'A quiet forest' })
+  ).toBeVisible()
+  first.unmount()
+  client.clear()
+
+  render(
+    <QueryClientProvider client={client}>
+      <Gallery />
+    </QueryClientProvider>
+  )
+  expect(
+    await screen.findByRole('img', { name: 'A quiet forest' })
+  ).toBeVisible()
+  expect(thumbnailRequests).toBe(1)
+})
+
 it('falls back to the private original without a thumbnail, and preview reuses it', async () => {
   const files: unknown[] = []
   api.defaults.adapter = async (config) => {

@@ -1,0 +1,60 @@
+/*
+Copyright (C) 2023-2026 QuantumNous
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+*/
+import { IDBFactory } from 'fake-indexeddb'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+
+import {
+  galleryThumbnailFingerprint,
+  readGalleryThumbnail,
+  removeGalleryThumbnail,
+  writeGalleryThumbnail,
+} from '../lib/gallery-thumbnail-cache'
+
+beforeEach(() => {
+  vi.stubGlobal('indexedDB', new IDBFactory())
+})
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+})
+
+it('only reuses a thumbnail when its image fingerprint is unchanged', async () => {
+  const image = {
+    id: 'image-1',
+    bytes: 2048,
+    mime_type: 'image/png',
+    created_at: 1700000000,
+    expires_at: 9999999999,
+    has_thumbnail: true,
+  }
+  const fingerprint = galleryThumbnailFingerprint(image)
+  const blob = new Blob(['thumbnail'], { type: 'image/jpeg' })
+  await writeGalleryThumbnail(813, image.id, fingerprint, blob)
+
+  expect(await readGalleryThumbnail(813, image.id, fingerprint)).not.toBeNull()
+  expect(
+    await readGalleryThumbnail(813, image.id, `${fingerprint}:changed`)
+  ).toBeNull()
+})
+
+it('removes a thumbnail from the persistent cache', async () => {
+  const blob = new Blob(['thumbnail'], { type: 'image/jpeg' })
+  await writeGalleryThumbnail(813, 'image-1', 'fingerprint', blob)
+  await removeGalleryThumbnail(813, 'image-1')
+
+  expect(await readGalleryThumbnail(813, 'image-1', 'fingerprint')).toBeNull()
+})

@@ -66,6 +66,7 @@ import {
   localGalleryImages,
   mergeGalleryImages,
 } from './lib/gallery-collection'
+import { removeGalleryThumbnail } from './lib/gallery-thumbnail-cache'
 import { galleryOwner } from './lib/session'
 import type {
   CanvasKind,
@@ -478,8 +479,18 @@ function GalleryContent(props: { identity: GalleryIdentity }) {
   const confirmDelete = () => {
     if (!deleteTarget) return
     const target = deleteTarget
+    const userId = props.identity.userId
     void run(async () => {
       await (target.kind === 'drawing' ? drawing : nai).deleteProject(target.id)
+      if (userId !== null) {
+        await Promise.all(
+          imageItems
+            .filter((image) => image.canvas_id === target.id)
+            .map((image) =>
+              removeGalleryThumbnail(userId, image.id).catch(() => undefined)
+            )
+        )
+      }
       setRemovedProjects((ids) => [...ids, target.id])
       setDeleteTarget(null)
       await Promise.all(
@@ -499,6 +510,7 @@ function GalleryContent(props: { identity: GalleryIdentity }) {
   const confirmImageDelete = () => {
     if (!imageDeleteTarget) return
     const image = imageDeleteTarget
+    const userId = props.identity.userId
     void run(async () => {
       if (image.canvas_id) {
         await (image.source === 'drawing' ? drawing : nai).deleteResource(
@@ -508,6 +520,9 @@ function GalleryContent(props: { identity: GalleryIdentity }) {
       } else {
         await deleteGalleryImage(props.identity, image.id)
         await checkCanvasCapacity(props.identity, true)
+      }
+      if (userId !== null) {
+        await removeGalleryThumbnail(userId, image.id).catch(() => undefined)
       }
       setRemovedImages((ids) => [...ids, image.id])
       setImageDeleteTarget(null)

@@ -18,15 +18,26 @@ import { useQuery } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 
 import { getGalleryFile } from '../api'
+import {
+  readGalleryThumbnail,
+  writeGalleryThumbnail,
+} from '../lib/gallery-thumbnail-cache'
 import type { GalleryIdentity } from '../types'
+
+type GalleryFileOptions = {
+  blob?: Blob
+  only?: boolean
+  cacheFingerprint?: string
+}
 
 export function useGalleryFile(
   identity: GalleryIdentity,
   id: string,
   thumbnail: boolean,
   enabled = true,
-  local?: { blob?: Blob; only?: boolean }
+  local?: GalleryFileOptions
 ) {
+  const cacheFingerprint = local?.cacheFingerprint
   const query = useQuery({
     queryKey: [
       'gallery',
@@ -35,11 +46,36 @@ export function useGalleryFile(
       'file',
       id,
       thumbnail,
+      cacheFingerprint,
     ],
-    queryFn: ({ signal }) => getGalleryFile(identity, id, thumbnail, signal),
+    queryFn: async ({ signal }) => {
+      if (thumbnail && cacheFingerprint && identity.userId !== null) {
+        let cached: Blob | null = null
+        try {
+          cached = await readGalleryThumbnail(
+            identity.userId,
+            id,
+            cacheFingerprint
+          )
+        } catch {
+          // A browser storage failure must not make a server thumbnail fail.
+        }
+        if (cached) return cached
+      }
+      const blob = await getGalleryFile(identity, id, thumbnail, signal)
+      if (thumbnail && cacheFingerprint && identity.userId !== null) {
+        await writeGalleryThumbnail(
+          identity.userId,
+          id,
+          cacheFingerprint,
+          blob
+        ).catch(() => undefined)
+      }
+      return blob
+    },
     enabled: enabled && !local?.blob && !local?.only,
     retry: false,
-    gcTime: 0,
+    gcTime: 30 * 60 * 1000,
     staleTime: Infinity,
   })
   const [resource, setResource] = useState<{ blob: Blob; url: string }>()
