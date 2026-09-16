@@ -68,6 +68,9 @@ const (
 	// ContextKeyAsyncImageTaskID identifies the async image task a detached relay
 	// is finishing, so its consume log can be correlated with the task log.
 	ContextKeyAsyncImageTaskID ContextKey = "async_image_task_id"
+	// ContextKeyAsyncImageQuota carries the final billed quota from the detached
+	// image relay back to the task finalizer.
+	ContextKeyAsyncImageQuota ContextKey = "async_image_quota"
 
 	// ContextKeyLanguage stores the user's language preference for i18n
 	ContextKeyLanguage ContextKey = "language"

@@ -2,6 +2,7 @@ package controller
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -457,6 +458,49 @@ func TestAsyncImageResult(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "ended before generation completed")
 	})
+}
+
+func TestFinishAsyncImageTaskPersistsBillingQuota(t *testing.T) {
+	previousDB := model.DB
+	database, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	connection, err := database.DB()
+	require.NoError(t, err)
+	connection.SetMaxOpenConns(1)
+	t.Cleanup(func() {
+		model.DB = previousDB
+		require.NoError(t, connection.Close())
+	})
+	model.DB = database
+	require.NoError(t, database.AutoMigrate(&model.Task{}))
+
+	task := &model.Task{
+		TaskID:     "task_billed",
+		Platform:   constant.TaskPlatformImage,
+		Status:     model.TaskStatusInProgress,
+		Progress:   "0%",
+		SubmitTime: 1700000000,
+	}
+	require.NoError(t, task.Insert())
+	run := &asyncImageRun{
+		keys: map[string]any{
+			string(constant.ContextKeyAsyncImageQuota): 5_000_000,
+		},
+	}
+	recorder := &asyncImageResponseRecorder{
+		header: make(http.Header),
+		limit:  maxAsyncImageResultBytes(),
+	}
+	recorder.WriteHeader(http.StatusOK)
+	_, err = recorder.Write([]byte(`{"created":1,"data":[{"url":"https://cdn.example/image.png"}]}`))
+	require.NoError(t, err)
+
+	finishAsyncImageTask(context.Background(), task, run, recorder)
+
+	var stored model.Task
+	require.NoError(t, database.Where("task_id = ?", task.TaskID).First(&stored).Error)
+	assert.Equal(t, model.TaskStatus(model.TaskStatusSuccess), stored.Status)
+	assert.Equal(t, 5_000_000, stored.Quota)
 }
 
 func TestBuildImageTaskPayload(t *testing.T) {

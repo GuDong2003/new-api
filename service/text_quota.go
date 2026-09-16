@@ -458,6 +458,9 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 		model.UpdateUserUsedQuotaAndRequestCount(relayInfo.UserId, summary.Quota)
 		model.UpdateChannelUsedQuota(relayInfo.ChannelId, summary.Quota)
 	}
+	if common.GetContextKeyString(ctx, constant.ContextKeyAsyncImageTaskID) != "" {
+		common.SetContextKey(ctx, constant.ContextKeyAsyncImageQuota, summary.Quota)
+	}
 
 	if err := SettleBilling(ctx, relayInfo, summary.Quota); err != nil {
 		logger.LogError(ctx, "error settling billing: "+err.Error())

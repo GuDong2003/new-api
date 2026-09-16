@@ -166,6 +166,7 @@ func asyncImageEngine() *gin.Engine {
 				Relay(c, types.RelayFormatOpenAIImage)
 				if run := asyncImageRunFromRequest(c); run != nil {
 					run.channelID = c.GetInt("channel_id")
+					run.keys[string(constant.ContextKeyAsyncImageQuota)] = common.GetContextKeyInt(c, constant.ContextKeyAsyncImageQuota)
 				}
 			},
 		)
@@ -423,6 +424,11 @@ func finishAsyncImageTask(ctx context.Context, task *model.Task, run *asyncImage
 	task.FinishTime = time.Now().Unix()
 	if run.channelID != 0 {
 		task.ChannelId = run.channelID
+	}
+	if run != nil {
+		if quota, ok := run.keys[string(constant.ContextKeyAsyncImageQuota)].(int); ok && quota >= 0 {
+			task.Quota = quota
+		}
 	}
 
 	result, err := asyncImageResult(recorder)
