@@ -309,7 +309,10 @@ async function executeImageJob(
         {
           status: cancelled ? 'cancelled' : 'error',
           progress: undefined,
-          taskId: undefined,
+          // Cancelling only stops watching: the task keeps generating and is
+          // still billed, so the node keeps its handle and the paid result can
+          // be collected later.
+          taskId: cancelled ? input.taskId : undefined,
           error: cancelled ? undefined : message,
         },
         input.job.id
@@ -515,6 +518,21 @@ export function useImageGeneration() {
     [t]
   )
 
+  // A cancelled generation was still billed, so its image stays collectable
+  // until the node is regenerated.
+  const collect = useCallback(
+    (nodeId: string): boolean => {
+      const node = useDrawingStore
+        .getState()
+        .nodes.find((item) => item.id === nodeId)
+      const taskId = node?.data.taskId
+      if (!node || node.data.status !== 'cancelled' || !taskId) return false
+      reattachToImageTask([node], taskId, t)
+      return true
+    },
+    [t]
+  )
+
   const cancel = (jobId?: string) => {
     for (const input of activeJobs.values()) {
       if (
@@ -527,7 +545,7 @@ export function useImageGeneration() {
     }
   }
 
-  return { generate, retry, cancel, pendingCount }
+  return { generate, retry, collect, cancel, pendingCount }
 }
 
 export function cancelImageGenerationJobs(
@@ -541,47 +559,58 @@ export function cancelImageGenerationJobs(
   }
 }
 
+// Polls a task the gateway already accepted and returns its images to the given
+// nodes. Nodes of one task are reattached together, because a task produces all
+// of its images at once.
+function reattachToImageTask(
+  nodes: DrawingNode[],
+  taskId: string,
+  translate: Translate
+) {
+  const state = useDrawingStore.getState()
+  const job: ImageJob = {
+    id: crypto.randomUUID(),
+    controller: new AbortController(),
+    nodeIds: nodes.map((node) => node.id),
+  }
+  for (const node of nodes) {
+    state.updateNodeData(node.id, {
+      status: 'pending',
+      jobId: job.id,
+      error: undefined,
+      progress: {
+        startedAt: node.data.progress?.startedAt ?? node.data.createdAt,
+        phase: 'generating',
+        previewCount: node.data.progress?.previewCount ?? 0,
+      },
+    })
+  }
+  startImageJob(
+    {
+      job,
+      settings: { ...nodes[0].data.settings, prompt: nodes[0].data.prompt },
+      references: [],
+      userId: state.userId,
+      sessionId: useAuthStore.getState().auth.session?.sid ?? null,
+      canvasId: state.canvasId,
+      taskId,
+    },
+    translate
+  )
+}
+
 // Reattaches to image tasks the gateway already accepted. Generation continues
 // server-side while the canvas is closed, so a pending node that still knows its
-// task is polled again instead of being reported as cancelled. Nodes of the same
-// task share one job, because one task produces all of its images together.
+// task is polled again instead of being reported as cancelled.
 export function resumeImageGenerationJobs(translate: Translate) {
-  const state = useDrawingStore.getState()
   const nodesByTask = new Map<string, DrawingNode[]>()
-  for (const node of state.nodes) {
+  for (const node of useDrawingStore.getState().nodes) {
     const taskId = node.data.taskId
     if (node.data.status !== 'pending' || !taskId) continue
     if (node.data.jobId && activeJobs.has(node.data.jobId)) continue
     nodesByTask.set(taskId, [...(nodesByTask.get(taskId) ?? []), node])
   }
-  const sessionId = useAuthStore.getState().auth.session?.sid ?? null
   for (const [taskId, nodes] of nodesByTask) {
-    const job: ImageJob = {
-      id: crypto.randomUUID(),
-      controller: new AbortController(),
-      nodeIds: nodes.map((node) => node.id),
-    }
-    for (const node of nodes) {
-      state.updateNodeData(node.id, {
-        jobId: job.id,
-        progress: {
-          startedAt: node.data.progress?.startedAt ?? node.data.createdAt,
-          phase: 'generating',
-          previewCount: node.data.progress?.previewCount ?? 0,
-        },
-      })
-    }
-    startImageJob(
-      {
-        job,
-        settings: { ...nodes[0].data.settings, prompt: nodes[0].data.prompt },
-        references: [],
-        userId: state.userId,
-        sessionId,
-        canvasId: state.canvasId,
-        taskId,
-      },
-      translate
-    )
+    reattachToImageTask(nodes, taskId, translate)
   }
 }

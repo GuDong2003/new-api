@@ -7249,6 +7249,8 @@
     "Zoom level": "拡大率",
     "Zoom out": "縮小",
     "Generate Image": "画像を生成",
-    "Edit Image": "画像を編集"
+    "Edit Image": "画像を編集",
+    "Collect result": "結果を取得",
+    "This image was already charged and can be collected.": "この画像はすでに課金済みで、取得できます。"
   }
 }

@@ -7356,6 +7356,8 @@
     "Zoom level": "缩放比例",
     "Zoom out": "缩小",
     "Generate Image": "生成图片",
-    "Edit Image": "编辑图片"
+    "Edit Image": "编辑图片",
+    "Collect result": "取回结果",
+    "This image was already charged and can be collected.": "这张图已计费，可以取回。"
   }
 }

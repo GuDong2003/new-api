@@ -36,6 +36,7 @@ import { useCanvasNodeDeletionRequest } from '@/features/gallery/components/canv
 import { cn } from '@/lib/utils'
 import { useDrawingStore } from '@/stores/drawing-store'
 
+import { ImageCollectContext } from '../context/image-collect-context'
 import { ImageRetryContext } from '../context/image-retry-context'
 import { downloadBlob, imageAssetToFile } from '../lib/image-assets'
 import { getImageModelFamily } from '../lib/image-settings'
@@ -47,6 +48,7 @@ export const ImageCanvasNode = memo(function ImageCanvasNode(
 ) {
   const { t } = useTranslation()
   const retry = useContext(ImageRetryContext)
+  const collect = useContext(ImageCollectContext)
   const requestDeletion = useCanvasNodeDeletionRequest()
   const reference = useDrawingStore((state) =>
     state.referenceIds.includes(props.id)
@@ -59,6 +61,10 @@ export const ImageCanvasNode = memo(function ImageCanvasNode(
   const pending = props.data.status === 'pending'
   const complete = props.data.status === 'complete'
   const failed = props.data.status === 'error'
+  // A cancelled generation was still billed, so its finished image stays
+  // available until the node is regenerated.
+  const collectable =
+    props.data.status === 'cancelled' && Boolean(props.data.taskId)
   const canReceive =
     props.isConnectable &&
     !pending &&
@@ -172,7 +178,9 @@ export const ImageCanvasNode = memo(function ImageCanvasNode(
                   }
                 }
               />
-              {imageFailed && !asset && <p>{t('The image could not be loaded.')}</p>}
+              {imageFailed && !asset && (
+                <p>{t('The image could not be loaded.')}</p>
+              )}
             </div>
           )}
           {!pending && (!asset || !complete) && (
@@ -192,9 +200,20 @@ export const ImageCanvasNode = memo(function ImageCanvasNode(
                 </p>
               )}
               {props.data.status === 'cancelled' && (
-                <p>{t('Generation stopped')}</p>
+                <p>
+                  {t('Generation stopped')}
+                  {collectable && (
+                    <span className='mt-1 block'>
+                      {t(
+                        'This image was already charged and can be collected.'
+                      )}
+                    </span>
+                  )}
+                </p>
               )}
-              {imageFailed && !asset && <p>{t('The image could not be loaded.')}</p>}
+              {imageFailed && !asset && (
+                <p>{t('The image could not be loaded.')}</p>
+              )}
             </div>
           )}
         </div>
@@ -226,7 +245,25 @@ export const ImageCanvasNode = memo(function ImageCanvasNode(
                 <span className='truncate'>{t('Retry')}</span>
               </Button>
             )}
-            {!failed && (
+            {collectable && (
+              <Button
+                type='button'
+                size='sm'
+                variant='outline'
+                disabled={!collect}
+                title={t('Collect result')}
+                className='min-w-0 flex-1 text-xs'
+                onClick={() => collect?.(props.id)}
+              >
+                <HugeiconsIcon
+                  icon={Download04Icon}
+                  size={14}
+                  aria-hidden='true'
+                />
+                <span className='truncate'>{t('Collect result')}</span>
+              </Button>
+            )}
+            {!failed && !collectable && (
               <Button
                 type='button'
                 size='sm'

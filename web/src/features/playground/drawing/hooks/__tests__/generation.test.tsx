@@ -623,4 +623,70 @@ describe('Image generation jobs', () => {
     hook.unmount()
     client.clear()
   })
+  it('keeps a cancelled generation collectable and returns the paid image', async () => {
+    const client = new QueryClient()
+    const hook = renderHook(useImageGeneration, {
+      wrapper: (props: { children: ReactNode }) => (
+        <QueryClientProvider client={client}>
+          {props.children}
+        </QueryClientProvider>
+      ),
+    })
+    vi.mocked(api.post).mockImplementation(async () => ({
+      headers: { 'content-type': 'application/json' },
+      data: new Response(
+        JSON.stringify({ task_id: 'task_paid', status: 'queued' })
+      ).body,
+    }))
+    const poll = vi.spyOn(api, 'get').mockResolvedValue({
+      data: { task_id: 'task_paid', status: 'in_progress' },
+    })
+
+    act(() =>
+      hook.result.current.generate(
+        {
+          ...DEFAULT_IMAGE_SETTINGS,
+          model: 'gpt-image-1',
+          prompt: 'A paid cup',
+          n: 1,
+        },
+        { x: 0, y: 0 }
+      )
+    )
+    await waitFor(() =>
+      expect(useDrawingStore.getState().nodes[0].data.taskId).toBe('task_paid')
+    )
+
+    act(() => hook.result.current.cancel())
+    await waitFor(() => expect(hook.result.current.pendingCount).toBe(0))
+
+    const cancelled = useDrawingStore.getState().nodes[0]
+    expect(cancelled.data.status).toBe('cancelled')
+    expect(cancelled.data.taskId).toBe('task_paid')
+
+    poll.mockResolvedValue({
+      data: {
+        task_id: 'task_paid',
+        status: 'completed',
+        data: [{ b64_json: 'YWJj' }],
+      },
+    })
+    const decoderIndex = decoders.length
+    act(() => {
+      expect(hook.result.current.collect(cancelled.id)).toBe(true)
+    })
+    await waitFor(() => expect(decoders.length).toBeGreaterThan(decoderIndex))
+    await act(async () =>
+      decoders[decoderIndex].dispatchEvent(new Event('load'))
+    )
+    await waitFor(() => expect(hook.result.current.pendingCount).toBe(0))
+
+    const collected = useDrawingStore.getState().nodes[0]
+    expect(collected.data.status).toBe('complete')
+    expect(collected.data.taskId).toBeUndefined()
+    // Collecting reuses the paid task instead of generating again.
+    expect(api.post).toHaveBeenCalledTimes(1)
+    hook.unmount()
+    client.clear()
+  })
 })

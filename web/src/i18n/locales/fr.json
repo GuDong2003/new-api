@@ -7249,6 +7249,8 @@
     "Zoom level": "Niveau de zoom",
     "Zoom out": "Zoom arrière",
     "Generate Image": "Générer une image",
-    "Edit Image": "Modifier l'image"
+    "Edit Image": "Modifier l'image",
+    "Collect result": "Récupérer le résultat",
+    "This image was already charged and can be collected.": "Cette image a déjà été facturée et peut être récupérée."
   }
 }

@@ -7249,6 +7249,8 @@
     "Zoom level": "Уровень масштаба",
     "Zoom out": "Уменьшить",
     "Generate Image": "Создать изображение",
-    "Edit Image": "Редактировать изображение"
+    "Edit Image": "Редактировать изображение",
+    "Collect result": "Получить результат",
+    "This image was already charged and can be collected.": "Это изображение уже оплачено и может быть получено."
   }
 }

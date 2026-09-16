@@ -7249,6 +7249,8 @@
     "Zoom level": "Mức thu phóng",
     "Zoom out": "Thu nhỏ",
     "Generate Image": "Tạo hình ảnh",
-    "Edit Image": "Chỉnh sửa hình ảnh"
+    "Edit Image": "Chỉnh sửa hình ảnh",
+    "Collect result": "Lấy kết quả",
+    "This image was already charged and can be collected.": "Hình ảnh này đã được tính phí và có thể lấy về."
   }
 }

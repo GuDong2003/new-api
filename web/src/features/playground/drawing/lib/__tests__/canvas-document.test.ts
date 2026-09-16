@@ -387,6 +387,24 @@ describe('Canvas documents', () => {
     expect(restored.nodes[0].data.status).toBe('cancelled')
     expect(restored.nodes[0].data.jobId).toBeUndefined()
   })
+  it('keeps a cancelled generation collectable after reopening', () => {
+    useDrawingStore.getState().addNodes([
+      {
+        ...image,
+        data: {
+          ...image.data,
+          asset: undefined,
+          status: 'cancelled',
+          taskId: 'task_paid',
+        },
+      },
+    ])
+    const restored = parseDrawingDocument(
+      serializeDrawingDocument(useDrawingStore.getState())
+    )
+    expect(restored.nodes[0].data.status).toBe('cancelled')
+    expect(restored.nodes[0].data.taskId).toBe('task_paid')
+  })
   it('keeps a pending generation backed by an async task resumable', () => {
     useDrawingStore.getState().addNodes([
       {
