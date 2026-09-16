@@ -630,7 +630,9 @@ test('plugin loading failure can be retried while built-in providers remain sele
     return originalGet?.(url, config)
   })
   render(<ConfigurationHarness />)
-  expect(await screen.findByText('Failed to load plugins')).toBeVisible()
+  await waitFor(() =>
+    expect(screen.getByText('Failed to load plugins')).toBeVisible()
+  )
   expect(screen.getByRole('option', { name: /^OpenAI / })).toBeVisible()
   await userEvent.click(screen.getByRole('button', { name: 'Retry' }))
   expect(await screen.findByRole('option', { name: /Video A/ })).toBeVisible()
@@ -901,7 +903,9 @@ test('retrying extension metadata preserves the editable built-in draft and sele
   const user = userEvent.setup()
   render(<ConfigurationHarness currentRow={editingChannel} />)
   await screen.findByDisplayValue('Existing channel')
-  expect(await screen.findByText('Failed to load plugins')).toBeVisible()
+  await waitFor(() =>
+    expect(screen.getByText('Failed to load plugins')).toBeVisible()
+  )
   expect(
     screen.queryByRole('group', { name: 'Plugin extensions' })
   ).not.toBeInTheDocument()
