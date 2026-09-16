@@ -63,7 +63,14 @@ export async function imageSourceToAsset(
         'error',
         () => {
           signal?.removeEventListener('abort', cancel)
-          resolve({ width: 1024, height: 1024 })
+          if (/^https?:\/\//i.test(source)) {
+            // A remote result may be valid while the browser cannot probe it
+            // because of CDN hotlink/CORS policy. Keep the result usable and
+            // let the image element or download path perform the real read.
+            resolve({ width: 1024, height: 1024 })
+          } else {
+            reject(new Error('The image could not be loaded.'))
+          }
         },
         { once: true }
       )
