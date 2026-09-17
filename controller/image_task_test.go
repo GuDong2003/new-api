@@ -32,6 +32,7 @@ import (
 func TestImageTaskSubmissionUsesAutomaticallySelectedChannel(t *testing.T) {
 	previousDB := model.DB
 	previousDatabase := common.MainDatabaseType()
+	previousRedisEnabled := common.RedisEnabled
 	previousCountToken, previousSensitive := constant.CountToken, setting.CheckSensitiveEnabled
 	previousMaxBody := constant.MaxRequestBodyMB
 	previousLog, previousBatch := common.LogConsumeEnabled, common.BatchUpdateEnabled
@@ -42,10 +43,12 @@ func TestImageTaskSubmissionUsesAutomaticallySelectedChannel(t *testing.T) {
 	common.LogConsumeEnabled, common.BatchUpdateEnabled = false, false
 	operation_setting.GetQuotaSetting().EnableFreeModelPreConsume = false
 	common.SetMainDatabaseType(common.DatabaseTypeSQLite)
-	require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(`{"async-image-test":0}`))
+	common.RedisEnabled = false
+	require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(`{"async-image-test":0.02}`))
 	t.Cleanup(func() {
 		model.DB = previousDB
 		common.SetMainDatabaseType(previousDatabase)
+		common.RedisEnabled = previousRedisEnabled
 		constant.CountToken, setting.CheckSensitiveEnabled = previousCountToken, previousSensitive
 		constant.MaxRequestBodyMB = previousMaxBody
 		common.LogConsumeEnabled, common.BatchUpdateEnabled = previousLog, previousBatch
@@ -71,9 +74,9 @@ func TestImageTaskSubmissionUsesAutomaticallySelectedChannel(t *testing.T) {
 			require.NoError(t, err)
 			connection.SetMaxOpenConns(1)
 			t.Cleanup(func() { require.NoError(t, connection.Close()) })
-			require.NoError(t, database.AutoMigrate(&model.Task{}, &model.User{}, &model.Channel{}))
+			require.NoError(t, database.AutoMigrate(&model.Task{}, &model.User{}, &model.Channel{}, &model.UserSubscription{}))
 			model.DB = database
-			require.NoError(t, database.Create(&model.User{Id: 7, Username: "image-owner", Group: "default"}).Error)
+			require.NoError(t, database.Create(&model.User{Id: 7, Username: "image-owner", Group: "default", Quota: 100_000_000}).Error)
 			completed := make(chan error, 1)
 			require.NoError(t, database.Callback().Update().After("gorm:commit_or_rollback_transaction").Register("test:image-task-completed", func(tx *gorm.DB) {
 				task, ok := tx.Statement.Dest.(*model.Task)
@@ -173,6 +176,7 @@ func TestImageTaskSubmissionUsesAutomaticallySelectedChannel(t *testing.T) {
 				require.Equal(t, model.TaskStatus(model.TaskStatusSuccess), task.Status, task.FailReason)
 				assert.Equal(t, 73, task.ChannelId)
 				assert.Equal(t, "async-image-test", task.Properties.OriginModelName)
+				assert.Greater(t, task.Quota, 0)
 				assert.Equal(t, "https://example.com/generated.png", task.PrivateData.ResultURL)
 				fetch := httptest.NewRecorder()
 				c, _ := gin.CreateTestContext(fetch)

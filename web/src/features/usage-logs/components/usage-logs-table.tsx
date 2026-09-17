@@ -38,8 +38,9 @@ import {
 } from '../constants'
 import { useColumnsByCategory } from '../lib/columns'
 import { parseLogOther } from '../lib/format'
+import { shouldPollTaskLogs } from '../lib/task-logs'
 import { fetchLogsByCategory } from '../lib/utils'
-import type { LogCategory } from '../types'
+import type { LogCategory, TaskLog } from '../types'
 import { CommonLogsFilterBar } from './common-logs-filter-bar'
 import { TaskLogsFilterBar } from './task-logs-filter-bar'
 import { UsageLogsMobileList } from './usage-logs-mobile-card'
@@ -151,6 +152,12 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
       }
 
       return result.data || DEFAULT_LOGS_DATA
+    },
+    refetchInterval: (query) => {
+      if (logCategory !== 'task' || !query.state.data?.items) return false
+      return shouldPollTaskLogs(query.state.data.items as TaskLog[])
+        ? 2000
+        : false
     },
     placeholderData: (previousData, previousQuery) => {
       if (
