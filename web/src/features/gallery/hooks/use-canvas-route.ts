@@ -23,6 +23,11 @@ import { storeFor } from '../lib/canvas-editor'
 import { openCanvasProject, startCanvasEditor } from '../lib/canvas-projects'
 import type { CanvasKind } from '../types'
 
+export type CanvasRouteState = {
+  loading: boolean
+  error: string | null
+}
+
 export function useCanvasRoute(
   kind: CanvasKind,
   canvasId?: string,
@@ -31,39 +36,69 @@ export function useCanvasRoute(
   const userId = useAuthStore((state) => state.auth.user?.id ?? null)
   const sessionId = useAuthStore((state) => state.auth.session?.sid ?? null)
   const flow = useReactFlow()
-  const [error, setError] = useState<string | null>(null)
+  const [attempt, setAttempt] = useState(0)
+  const [route, setRoute] = useState<CanvasRouteState>(() => ({
+    loading: Boolean(canvasId),
+    error: null,
+  }))
   useEffect(() => {
-    if (!canvasId || userId === null || sessionId === null) return
+    if (!canvasId || userId === null || sessionId === null) {
+      setRoute({ loading: false, error: null })
+      return
+    }
     let active = true
-    setError(null)
+    setRoute({ loading: true, error: null })
     void (async () => {
-      const identity = { userId, sessionId }
-      await startCanvasEditor(identity, kind)
-      if (!active) return
-      await openCanvasProject(identity, canvasId, focusAssetId, kind)
-      if (!active) return
-      const node = storeFor(kind)
-        .getState()
-        .nodes.find((node) => node.data.asset?.id === focusAssetId)
-      if (node) {
-        requestAnimationFrame(() => {
-          if (active) {
-            void flow.fitView({
-              nodes: [{ id: node.id }],
-              padding: 0.3,
-              maxZoom: 1,
+      try {
+        const identity = { userId, sessionId }
+        await startCanvasEditor(identity, kind)
+        if (!active) return
+        await openCanvasProject(identity, canvasId, focusAssetId, kind)
+        if (!active) return
+        const node = storeFor(kind)
+          .getState()
+          .nodes.find((node) => node.data.asset?.id === focusAssetId)
+        if (node) {
+          await new Promise<void>((resolve, reject) => {
+            requestAnimationFrame(() => {
+              if (!active) {
+                resolve()
+                return
+              }
+              void Promise.resolve(
+                flow.fitView({
+                  nodes: [{ id: node.id }],
+                  padding: 0.3,
+                  maxZoom: 1,
+                })
+              )
+                .then(() => resolve())
+                .catch(reject)
             })
-          }
-        })
-      } else void flow.setViewport(storeFor(kind).getState().viewport)
-    })().catch((error: unknown) => {
-      if (active) {
-        setError(error instanceof Error ? error.message : 'Request failed')
+          })
+        } else {
+          await flow.setViewport(storeFor(kind).getState().viewport)
+        }
+      } catch (error: unknown) {
+        if (active) {
+          setRoute({
+            loading: false,
+            error: error instanceof Error ? error.message : 'Request failed',
+          })
+        }
+        return
       }
-    })
+      if (active) setRoute({ loading: false, error: null })
+    })()
     return () => {
       active = false
     }
-  }, [canvasId, focusAssetId, kind, userId, sessionId, flow])
-  return error
+  }, [attempt, canvasId, focusAssetId, kind, userId, sessionId, flow])
+  return {
+    ...route,
+    retry: () => {
+      setRoute({ loading: true, error: null })
+      setAttempt((value) => value + 1)
+    },
+  }
 }

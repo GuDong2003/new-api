@@ -19,7 +19,8 @@ For commercial licensing, please contact support@quantumnous.com
 import { ReactFlowProvider } from '@xyflow/react'
 import { useTranslation } from 'react-i18next'
 
-import { Alert, AlertDescription } from '@/components/ui/alert'
+import { ErrorState } from '@/components/error-state'
+import { LoadingState } from '@/components/loading-state'
 import { useCanvasRoute } from '@/features/gallery/hooks/use-canvas-route'
 import { useAuthStore } from '@/stores/auth-store'
 
@@ -43,15 +44,17 @@ function DrawingEntry(props: {
   focusAssetId?: string
 }) {
   const { t } = useTranslation()
-  const error = useCanvasRoute('drawing', props.canvasId, props.focusAssetId)
+  const route = useCanvasRoute('drawing', props.canvasId, props.focusAssetId)
   return (
     <>
-      {error ? (
-        <Alert variant='destructive'>
-          <AlertDescription>{t(error)}</AlertDescription>
-        </Alert>
+      {route.error ? (
+        <ErrorState description={t(route.error)} onRetry={route.retry} />
       ) : null}
-      <DrawingWorkspace userId={props.userId} />
+      {route.loading ? (
+        <LoadingState message={t('Loading canvas…')} />
+      ) : (
+        <DrawingWorkspace userId={props.userId} />
+      )}
     </>
   )
 }

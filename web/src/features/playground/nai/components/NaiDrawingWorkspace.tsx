@@ -28,6 +28,8 @@ import { useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
+import { ErrorState } from '@/components/error-state'
+import { LoadingState } from '@/components/loading-state'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import {
@@ -88,15 +90,17 @@ function NaiDrawingEntry(props: {
   focusAssetId?: string
 }) {
   const { t } = useTranslation()
-  const error = useCanvasRoute('nai', props.canvasId, props.focusAssetId)
+  const route = useCanvasRoute('nai', props.canvasId, props.focusAssetId)
   return (
     <>
-      {error ? (
-        <Alert variant='destructive'>
-          <AlertDescription>{t(error)}</AlertDescription>
-        </Alert>
+      {route.error ? (
+        <ErrorState description={t(route.error)} onRetry={route.retry} />
       ) : null}
-      <NaiDrawingWorkspace userId={props.userId} />
+      {route.loading ? (
+        <LoadingState message={t('Loading NAI canvas…')} />
+      ) : (
+        <NaiDrawingWorkspace userId={props.userId} />
+      )}
     </>
   )
 }
