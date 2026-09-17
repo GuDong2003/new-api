@@ -138,6 +138,22 @@ describe('local billing expression evaluation', () => {
       formatBillingCondition(`!(${peakCondition})`, translations.t, 'zh')
     ).toBe('周一至周五 09:00至12:00或14:00至18:00以外的时段（Asia/Shanghai）')
   })
+  test.each([
+    ['weekday("UTC") == 1', '週一 (UTC)'],
+    ['len > 32000', 'Full input length > 32,000'],
+  ])(
+    'formats %s for Traditional Chinese without an invalid locale error',
+    async (source, expected) => {
+      const translations = createInstance()
+      await translations.init({
+        lng: 'en',
+        resources: { en: { translation: {} } },
+      })
+      expect(formatBillingCondition(source, translations.t, 'zhTW')).toBe(
+        expected
+      )
+    }
+  )
   test('keeps log prices tied to the recorded tier regardless of the current time', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-09-07T10:00:00+08:00'))
