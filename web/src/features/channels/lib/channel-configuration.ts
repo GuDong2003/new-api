@@ -24,6 +24,7 @@ import {
   OPENAI_FIELD_PASSTHROUGH_TYPES,
 } from '../constants'
 import { channelFormSchema, type ChannelFormValues } from './channel-form'
+import { supportsResponsesWebSocket } from './responses-websocket'
 
 export type ChannelProviderTarget =
   | { kind: 'builtin'; type: number }
@@ -150,7 +151,7 @@ export function getChannelConfigurationState(
       (values.type === 1 && values.force_format) ||
       values.thinking_to_content ||
       values.pass_through_body_enabled ||
-      ((values.type === 1 || values.type === 57) &&
+      (supportsResponsesWebSocket(values.type) &&
         values.responses_websocket_enabled) ||
       values.system_prompt?.trim() ||
       values.system_prompt_override

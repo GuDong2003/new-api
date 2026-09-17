@@ -23,6 +23,7 @@ For commercial licensing, please contact support@quantumnous.com
 
 export const CHANNEL_TYPE_OPENAI = 1
 export const CHANNEL_TYPE_ANTHROPIC = 14
+export const CHANNEL_TYPE_SUB2API = 59
 export const CHANNEL_TYPE_NEW_API = 60
 export const CHANNEL_TYPE_CODEX_LEGACY = 57
 export const CHANNEL_TYPE_CODEX = 61
