@@ -143,6 +143,19 @@ async function persistCanvas(
   const binaries = await Promise.all(
     assets.map(async (asset) => {
       const bytes = await asset.blob.arrayBuffer()
+      if (asset.previewOnly) {
+        if (!bytes.byteLength) {
+          throw new Error('Canvas thumbnail is unavailable.')
+        }
+        return {
+          id: asset.id,
+          blob: new Blob([bytes], { type: asset.blob.type }),
+          role: asset.role,
+          nodeId: asset.nodeId,
+          sha256: asset.sha256,
+          previewOnly: true,
+        } satisfies CanvasBinary
+      }
       const digest = await crypto.subtle.digest('SHA-256', bytes)
       const checksum = Array.from(new Uint8Array(digest), (byte) =>
         byte.toString(16).padStart(2, '0')
@@ -156,7 +169,7 @@ async function persistCanvas(
         role: asset.role,
         nodeId: asset.nodeId,
         sha256: asset.sha256,
-      }
+      } satisfies CanvasBinary
     })
   )
   return transact('readwrite', async (tx) => {
@@ -219,7 +232,11 @@ async function persistCanvas(
       if (previous && previous.sha256 !== binary.sha256) {
         throw new Error('Canvas original is immutable.')
       }
-      tx.objectStore('assets').put(previous ?? binary, [
+      const nextBinary =
+        previous && !(previous.previewOnly && !binary.previewOnly)
+          ? previous
+          : binary
+      tx.objectStore('assets').put(nextBinary, [
         canvas.userId,
         canvas.id,
         binary.id,
@@ -545,8 +562,9 @@ export async function acknowledgeCanvasSave(
         !source ||
         !remote ||
         source.sha256 !== remote.sha256 ||
-        source.blob.size !== remote.bytes ||
-        source.blob.type !== remote.mime_type
+        (!source.previewOnly &&
+          (source.blob.size !== remote.bytes ||
+            source.blob.type !== remote.mime_type))
       ) {
         throw new Error('Canonical original checksum mismatch.')
       }
@@ -592,8 +610,9 @@ export async function acknowledgeCanvasSave(
       if (
         !original ||
         original.sha256 !== remote.sha256 ||
-        original.blob.size !== remote.bytes ||
-        original.blob.type !== remote.mime_type
+        (!original.previewOnly &&
+          (original.blob.size !== remote.bytes ||
+            original.blob.type !== remote.mime_type))
       ) {
         throw new Error('Acknowledged original checksum mismatch.')
       }

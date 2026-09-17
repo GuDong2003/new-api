@@ -28,6 +28,8 @@ export type NaiImageAsset = {
   width: number
   height: number
   mimeType: string
+  /** Runtime-only marker for a gallery thumbnail awaiting its original. */
+  previewOnly?: boolean
 }
 
 export type NaiImageNodeData = {

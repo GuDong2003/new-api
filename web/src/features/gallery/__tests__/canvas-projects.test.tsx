@@ -48,6 +48,7 @@ import { deleteCanvasResource } from '../lib/canvas-deletion'
 import { flushLocalEditors, stopCanvasEditors } from '../lib/canvas-editor'
 import {
   createCanvasProject,
+  exportCanvasProject,
   openCanvasProject,
   startCanvasEditor,
 } from '../lib/canvas-projects'
@@ -59,7 +60,7 @@ import {
   updateCanvasCloudState,
 } from '../lib/canvas-repository'
 import { cancelCanvasSession } from '../lib/canvas-sync'
-import type { GalleryImage } from '../types'
+import type { CanvasRecord, GalleryImage } from '../types'
 import { galleryImage, login, response, usage, required } from './fixtures'
 
 const navigate = vi.hoisted(() => vi.fn())
@@ -81,6 +82,7 @@ const adapter = api.defaults.adapter
 let client: QueryClient
 let remoteImages: GalleryImage[]
 let fileReads: string[]
+let fileParams: unknown[]
 let usageReads: number
 beforeEach(() => {
   vi.stubGlobal('indexedDB', new IDBFactory())
@@ -97,6 +99,7 @@ beforeEach(() => {
   navigate.mockReset()
   remoteImages = []
   fileReads = []
+  fileParams = []
   usageReads = 0
   client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   api.defaults.adapter = async (config) => {
@@ -117,6 +120,7 @@ beforeEach(() => {
     }
     if (config.url?.endsWith('/file')) {
       fileReads.push(config.url)
+      fileParams.push(config.params)
       return {
         ...response(config, {}),
         data: new Blob(['remote'], { type: 'image/png' }),
@@ -214,6 +218,98 @@ it('deduplicates linked images, previews the local original and navigates with t
     useDrawingStore.getState().nodes.find((node) => node.id === 'precise-node')
       ?.selected
   ).toBe(true)
+})
+
+it('opens a remote canvas from thumbnails and reads originals only when exporting', async () => {
+  const canvasId = '22222222-2222-4222-8222-222222222222'
+  const remoteAssetId = '33333333-3333-4333-8333-333333333333'
+  await startCanvasEditor(identity, 'drawing')
+  const settings = useDrawingStore.getState().settings
+  const remote: CanvasRecord = {
+    id: canvasId,
+    kind: 'drawing',
+    name: '远程缩略图画布',
+    revision: 3,
+    state: 'ready',
+    updated_at: 100,
+    expires_at: 200,
+    document: {
+      version: 1,
+      nodes: [
+        {
+          id: 'remote-node',
+          type: 'image',
+          position: { x: 0, y: 0 },
+          data: {
+            prompt: '远程图片',
+            settings,
+            status: 'complete',
+            createdAt: 100,
+            asset: {
+              id: remoteAssetId,
+              name: 'remote.png',
+              width: 1,
+              height: 1,
+              mimeType: 'image/png',
+            },
+          },
+        },
+      ],
+      edges: [],
+      viewport: { x: 0, y: 0, zoom: 1 },
+      settings,
+      referenceIds: [],
+      mask: null,
+    },
+    removed_asset_ids: [],
+    assets: [
+      {
+        id: remoteAssetId,
+        role: 'generated',
+        node_id: 'remote-node',
+        sha256: 'remote-original-sha',
+        bytes: 12,
+        width: 1,
+        height: 1,
+        mime_type: 'image/png',
+        has_thumbnail: true,
+      },
+    ],
+    asset_id_map: {},
+  }
+  api.defaults.adapter = async (config) => {
+    if (config.url?.endsWith(`/canvases/${canvasId}`)) {
+      return response(config, remote)
+    }
+    if (config.url?.endsWith('/file')) {
+      fileParams.push(config.params)
+      const thumbnail = (config.params as { thumbnail?: boolean } | undefined)
+        ?.thumbnail
+      return {
+        ...response(config, {}),
+        data: new Blob([thumbnail ? 'thumbnail' : 'original'], {
+          type: thumbnail ? 'image/jpeg' : 'image/png',
+        }),
+      }
+    }
+    throw new AxiosError(
+      'not found',
+      '',
+      config,
+      {},
+      { ...response(config, {}), status: 404 }
+    )
+  }
+
+  await openCanvasProject(identity, canvasId, undefined, 'drawing')
+  expect(fileParams).toEqual([{ thumbnail: true }])
+  expect(useDrawingStore.getState().nodes[0]?.data.asset?.src).toContain(
+    'data:image/jpeg;base64'
+  )
+  expect((await readCanvasAssets(813, canvasId))[0]?.previewOnly).toBe(true)
+
+  await exportCanvasProject(identity, 'drawing')
+  expect(fileParams).toEqual([{ thumbnail: true }, undefined])
 })
 
 it('marks an unuploaded image in a synced canvas local-only until its exact asset appears remotely', async () => {

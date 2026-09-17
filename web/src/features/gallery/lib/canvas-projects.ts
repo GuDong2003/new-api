@@ -165,7 +165,8 @@ async function downloadCloudCanvas(
       role: asset.role,
       nodeId: asset.node_id,
       sha256: asset.sha256,
-      blob: await getGalleryFile(identity, asset.id, false),
+      previewOnly: asset.has_thumbnail,
+      blob: await getGalleryFile(identity, asset.id, asset.has_thumbnail),
     }))
   )
   assertGalleryIdentity(identity)

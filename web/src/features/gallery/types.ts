@@ -127,6 +127,8 @@ export type CanvasBinary = {
   role: CanvasAssetRole
   nodeId: string
   sha256: string
+  /** The blob is a preview and must be replaced by the original before upload. */
+  previewOnly?: boolean
 }
 export type LocalCanvas = {
   id: string

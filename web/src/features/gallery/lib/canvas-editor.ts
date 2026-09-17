@@ -25,7 +25,7 @@ import { useAuthStore } from '@/stores/auth-store'
 import { useDrawingStore } from '@/stores/drawing-store'
 import { useNaiDrawingStore } from '@/stores/nai-drawing-store'
 
-import { readRemoteCanvasOriginal } from '../api'
+import { getGalleryFile, readRemoteCanvasOriginal } from '../api'
 import type { CanvasKind, GalleryIdentity, LocalCanvas } from '../types'
 import { replayCanvasRemovals } from './canvas-deletion'
 import {
@@ -80,8 +80,17 @@ export const sameIdentity = (a: GalleryIdentity, b: GalleryIdentity) =>
 export function canvasOriginalReader(
   identity: GalleryIdentity
 ): NonNullable<CanvasCodecContext['readOriginal']> {
-  return async (asset, signal) => {
+  return async (asset, signal, source) => {
     assertGalleryIdentity(identity)
+    if (source === 'gallery-preview') {
+      const blob = await getGalleryFile(identity, asset.id, false, signal)
+      assertGalleryIdentity(identity)
+      signal?.throwIfAborted()
+      if (!blob.size || blob.type !== asset.mimeType) {
+        throw new Error('Canvas original is unavailable.')
+      }
+      return blob
+    }
     const blob = await readRemoteCanvasOriginal(identity, asset.src, signal)
     assertGalleryIdentity(identity)
     signal?.throwIfAborted()

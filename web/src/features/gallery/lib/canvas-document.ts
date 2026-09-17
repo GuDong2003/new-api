@@ -45,7 +45,11 @@ export type CanvasCodecContext = {
   roles?: Readonly<Record<string, { role: CanvasAssetRole; nodeId: string }>>
   existingAssets?: readonly CanvasBinary[]
   // Task 4 captures the session and safe-download policy; no global auth lookup.
-  readOriginal?: (asset: ImageAsset, signal?: AbortSignal) => Promise<Blob>
+  readOriginal?: (
+    asset: ImageAsset,
+    signal?: AbortSignal,
+    source?: 'gallery-preview'
+  ) => Promise<Blob>
   signal?: AbortSignal
 }
 
@@ -219,8 +223,14 @@ export async function encodeCanvas(
       throw new Error('Canvas original role is required.')
     }
     let blob: Blob
-    if (existing) {
+    if (existing && !existing.previewOnly) {
       blob = existing.blob
+    } else if (existing?.previewOnly && context.readOriginal) {
+      blob = await context.readOriginal(
+        source.asset,
+        context.signal,
+        'gallery-preview'
+      )
     } else if (
       source.asset.src.startsWith('data:') &&
       isSafeImageSource(source.asset.src)
@@ -291,7 +301,13 @@ export async function decodeCanvas(
   return mapDocumentAssets(parsed, (asset) => {
     const src = sources.get(asset.id)
     if (!src) throw new Error('Canvas original is unavailable.')
-    return { ...asset, src }
+    return {
+      ...asset,
+      src,
+      ...(assets.find((item) => item.id === asset.id)?.previewOnly
+        ? { previewOnly: true }
+        : {}),
+    }
   }) as EditorDocument
 }
 

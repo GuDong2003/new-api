@@ -1,6 +1,6 @@
 import type { DrawingDocument } from '../../playground/drawing/types'
 import type { NaiCanvasDocument } from '../../playground/nai/types'
-import { readRemoteCanvasOriginal } from '../api'
+import { getGalleryFile, readRemoteCanvasOriginal } from '../api'
 import type { CanvasKind, GalleryIdentity } from '../types'
 import { decodeCanvas, encodeCanvas } from './canvas-document'
 import { notifyCanvasProjects } from './canvas-events'
@@ -103,8 +103,10 @@ export async function persistCanvasGenerationResult(options: {
   const encoded = await encodeCanvas(options.kind, nextDocument, {
     existingAssets,
     roles: { ...existingRoles, ...generatedRoles },
-    readOriginal: (asset, signal) =>
-      readRemoteCanvasOriginal(options.identity, asset.src, signal),
+    readOriginal: (asset, signal, source) =>
+      source === 'gallery-preview'
+        ? getGalleryFile(options.identity, asset.id, false, signal)
+        : readRemoteCanvasOriginal(options.identity, asset.src, signal),
   })
   assertGalleryIdentity(options.identity)
   const saved = await saveLocalCanvas(
