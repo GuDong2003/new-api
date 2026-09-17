@@ -22,16 +22,6 @@ import {
   FormLabel,
   FormMessage,
 } from '@/components/ui/form'
-import { Input } from '@/components/ui/input'
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
-import { Separator } from '@/components/ui/separator'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 
@@ -44,36 +34,15 @@ import { SettingsPageFormActions } from '../components/settings-page-context'
 import { SettingsSection } from '../components/settings-section'
 import { useResetForm } from '../hooks/use-reset-form'
 import { useUpdateOption } from '../hooks/use-update-option'
-import { safeNumberFieldProps } from '../utils/numeric-field'
 
-const channelTestModes = [
-  'scheduled_all',
-  'auto_ban_only',
-  'passive_recovery',
-] as const
-type ChannelTestMode = (typeof channelTestModes)[number]
-const MAX_CHANNEL_TEST_CONCURRENCY = 32
-
+// Scheduled tests, their mode, concurrency and interval, and re-enabling on
+// success are channel health settings under Request policies. This section
+// keeps the request a channel test sends.
 const channelTestSchema = z.object({
-  AutomaticEnableChannelEnabled: z.boolean(),
   monitor_setting: z.object({
     channel_test_message: z.string().max(4096),
     channel_test_use_channel_style: z.boolean(),
     channel_test_show_response_preview: z.boolean(),
-    auto_test_channel_enabled: z.boolean(),
-    auto_test_channel_minutes: z.coerce
-      .number()
-      .int()
-      .min(1, 'Interval must be at least 1 minute'),
-    channel_test_concurrency: z.coerce
-      .number()
-      .int()
-      .min(1, 'Channel test concurrency must be between 1 and 32')
-      .max(
-        MAX_CHANNEL_TEST_CONCURRENCY,
-        'Channel test concurrency must be between 1 and 32'
-      ),
-    channel_test_mode: z.enum(channelTestModes),
   }),
 })
 
@@ -81,25 +50,13 @@ type ChannelTestFormInput = z.input<typeof channelTestSchema>
 type ChannelTestFormValues = z.output<typeof channelTestSchema>
 
 type FlatChannelTestDefaults = {
-  AutomaticEnableChannelEnabled: boolean
   'monitor_setting.channel_test_message': string
   'monitor_setting.channel_test_use_channel_style': boolean
   'monitor_setting.channel_test_show_response_preview': boolean
-  'monitor_setting.auto_test_channel_enabled': boolean
-  'monitor_setting.auto_test_channel_minutes': number
-  'monitor_setting.channel_test_concurrency': number
-  'monitor_setting.channel_test_mode': ChannelTestMode
 }
 
 type ChannelTestSectionProps = {
   defaultValues: FlatChannelTestDefaults
-}
-
-function normalizeChannelTestMode(value?: string): ChannelTestMode {
-  if (value === 'auto_ban_only' || value === 'passive_recovery') {
-    return value
-  }
-  return 'scheduled_all'
 }
 
 function normalizeMessage(value: string) {
@@ -110,7 +67,6 @@ function normalizeDefaults(
   defaults: FlatChannelTestDefaults
 ): FlatChannelTestDefaults {
   return {
-    AutomaticEnableChannelEnabled: defaults.AutomaticEnableChannelEnabled,
     'monitor_setting.channel_test_message': normalizeMessage(
       defaults['monitor_setting.channel_test_message'] ?? ''
     ),
@@ -118,15 +74,6 @@ function normalizeDefaults(
       defaults['monitor_setting.channel_test_use_channel_style'] ?? true,
     'monitor_setting.channel_test_show_response_preview':
       defaults['monitor_setting.channel_test_show_response_preview'] ?? false,
-    'monitor_setting.auto_test_channel_enabled':
-      defaults['monitor_setting.auto_test_channel_enabled'],
-    'monitor_setting.auto_test_channel_minutes':
-      defaults['monitor_setting.auto_test_channel_minutes'] ?? 10,
-    'monitor_setting.channel_test_concurrency':
-      defaults['monitor_setting.channel_test_concurrency'] ?? 1,
-    'monitor_setting.channel_test_mode': normalizeChannelTestMode(
-      defaults['monitor_setting.channel_test_mode']
-    ),
   }
 }
 
@@ -135,22 +82,12 @@ function buildFormDefaults(
 ): ChannelTestFormInput {
   const normalized = normalizeDefaults(defaults)
   return {
-    AutomaticEnableChannelEnabled: normalized.AutomaticEnableChannelEnabled,
     monitor_setting: {
       channel_test_message: normalized['monitor_setting.channel_test_message'],
       channel_test_use_channel_style:
         normalized['monitor_setting.channel_test_use_channel_style'],
       channel_test_show_response_preview:
         normalized['monitor_setting.channel_test_show_response_preview'],
-      auto_test_channel_enabled:
-        normalized['monitor_setting.auto_test_channel_enabled'],
-      auto_test_channel_minutes:
-        normalized['monitor_setting.auto_test_channel_minutes'],
-      channel_test_concurrency:
-        normalized['monitor_setting.channel_test_concurrency'],
-      channel_test_mode: normalized[
-        'monitor_setting.channel_test_mode'
-      ] as ChannelTestMode,
     },
   }
 }
@@ -159,7 +96,6 @@ function normalizeFormValues(
   values: ChannelTestFormValues
 ): FlatChannelTestDefaults {
   return {
-    AutomaticEnableChannelEnabled: values.AutomaticEnableChannelEnabled,
     'monitor_setting.channel_test_message': normalizeMessage(
       values.monitor_setting.channel_test_message
     ),
@@ -167,14 +103,6 @@ function normalizeFormValues(
       values.monitor_setting.channel_test_use_channel_style,
     'monitor_setting.channel_test_show_response_preview':
       values.monitor_setting.channel_test_show_response_preview,
-    'monitor_setting.auto_test_channel_enabled':
-      values.monitor_setting.auto_test_channel_enabled,
-    'monitor_setting.auto_test_channel_minutes':
-      values.monitor_setting.auto_test_channel_minutes,
-    'monitor_setting.channel_test_concurrency':
-      values.monitor_setting.channel_test_concurrency,
-    'monitor_setting.channel_test_mode':
-      values.monitor_setting.channel_test_mode,
   }
 }
 
@@ -206,29 +134,6 @@ export function ChannelTestSection({ defaultValues }: ChannelTestSectionProps) {
     baselineRef.current = normalized
     baselineSerializedRef.current = serialized
   }, [defaultValues])
-
-  const channelTestMode = form.watch('monitor_setting.channel_test_mode')
-  let channelTestModeLabel: string
-  let channelTestModeDescription: string
-  switch (channelTestMode) {
-    case 'auto_ban_only':
-      channelTestModeLabel = t('Actively check auto-disable-enabled channels')
-      channelTestModeDescription = t(
-        'Periodically checks only channels with auto-disable enabled, excluding manually disabled channels.'
-      )
-      break
-    case 'passive_recovery':
-      channelTestModeLabel = t('Passive recovery only')
-      channelTestModeDescription = t(
-        'Only recheck channels disabled after real request failures.'
-      )
-      break
-    default:
-      channelTestModeLabel = t('Scheduled full test')
-      channelTestModeDescription = t(
-        'Check all channels that are not manually disabled.'
-      )
-  }
 
   const onSubmit = async (values: ChannelTestFormValues) => {
     const normalized = normalizeFormValues(values)
@@ -314,141 +219,6 @@ export function ChannelTestSection({ defaultValues }: ChannelTestSectionProps) {
                       <FormDescription>
                         {t(
                           'Show a short, sanitized response preview in detailed test results.'
-                        )}
-                      </FormDescription>
-                    </SettingsSwitchContent>
-                    <FormControl>
-                      <Switch
-                        checked={field.value}
-                        onCheckedChange={field.onChange}
-                      />
-                    </FormControl>
-                  </SettingsSwitchItem>
-                )}
-              />
-            </div>
-          </div>
-
-          <Separator />
-
-          <div className='flex min-w-0 flex-col gap-4'>
-            <div className='flex flex-col gap-1'>
-              <h4 className='text-sm font-medium'>
-                {t('Channel health checks')}
-              </h4>
-              <p className='text-muted-foreground text-xs'>
-                {t('Set how the system checks channels in the background.')}
-              </p>
-            </div>
-            <div className='grid min-w-0 gap-6 lg:grid-cols-3'>
-              <FormField
-                control={form.control}
-                name='monitor_setting.auto_test_channel_enabled'
-                render={({ field }) => (
-                  <SettingsSwitchItem>
-                    <SettingsSwitchContent>
-                      <FormLabel>{t('Scheduled channel tests')}</FormLabel>
-                      <FormDescription>
-                        {t('Automatically probe channels in the background.')}
-                      </FormDescription>
-                    </SettingsSwitchContent>
-                    <FormControl>
-                      <Switch
-                        checked={field.value}
-                        onCheckedChange={field.onChange}
-                      />
-                    </FormControl>
-                  </SettingsSwitchItem>
-                )}
-              />
-              <FormField
-                control={form.control}
-                name='monitor_setting.channel_test_mode'
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>{t('Channel test mode')}</FormLabel>
-                    <Select value={field.value} onValueChange={field.onChange}>
-                      <FormControl>
-                        <SelectTrigger>
-                          <SelectValue>{channelTestModeLabel}</SelectValue>
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent alignItemWithTrigger={false}>
-                        <SelectGroup>
-                          <SelectItem value='scheduled_all'>
-                            {t('Scheduled full test')}
-                          </SelectItem>
-                          <SelectItem value='auto_ban_only'>
-                            {t('Actively check auto-disable-enabled channels')}
-                          </SelectItem>
-                          <SelectItem value='passive_recovery'>
-                            {t('Passive recovery only')}
-                          </SelectItem>
-                        </SelectGroup>
-                      </SelectContent>
-                    </Select>
-                    <FormDescription>
-                      {channelTestModeDescription}
-                    </FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
-                name='monitor_setting.channel_test_concurrency'
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>{t('Channel test concurrency')}</FormLabel>
-                    <FormControl>
-                      <Input
-                        type='number'
-                        min={1}
-                        max={MAX_CHANNEL_TEST_CONCURRENCY}
-                        step={1}
-                        {...safeNumberFieldProps(field)}
-                      />
-                    </FormControl>
-                    <FormDescription>
-                      {t(
-                        'Maximum number of channels tested at the same time (1-32)'
-                      )}
-                    </FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
-                name='monitor_setting.auto_test_channel_minutes'
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>{t('Test interval (minutes)')}</FormLabel>
-                    <FormControl>
-                      <Input
-                        type='number'
-                        min={1}
-                        step={1}
-                        {...safeNumberFieldProps(field)}
-                      />
-                    </FormControl>
-                    <FormDescription>
-                      {t('How often the system runs channel tests.')}
-                    </FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
-                name='AutomaticEnableChannelEnabled'
-                render={({ field }) => (
-                  <SettingsSwitchItem>
-                    <SettingsSwitchContent>
-                      <FormLabel>{t('Re-enable on success')}</FormLabel>
-                      <FormDescription>
-                        {t(
-                          'Bring channels back online after a successful check.'
                         )}
                       </FormDescription>
                     </SettingsSwitchContent>

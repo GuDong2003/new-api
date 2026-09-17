@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestShouldRetryAfterResponseWritten(t *testing.T) {
+func TestDecideRelayRetryAfterResponseWritten(t *testing.T) {
 	originalRanges := operation_setting.AutomaticRetryStatusCodeRanges
 	t.Cleanup(func() {
 		operation_setting.AutomaticRetryStatusCodeRanges = originalRanges
@@ -32,9 +32,11 @@ func TestShouldRetryAfterResponseWritten(t *testing.T) {
 	_, err := writtenContext.Writer.WriteString("data: partial response\n\n")
 	require.NoError(t, err)
 	require.True(t, writtenContext.Writer.Written())
-	require.False(t, shouldRetry(writtenContext, retryableError, 1))
+	decision := decideRelayRetry(writtenContext, retryableError, 1)
+	require.Equal(t, "stop", decision.Action)
+	require.Equal(t, "response_written", decision.Reason)
 
 	unwrittenContext, _ := gin.CreateTestContext(httptest.NewRecorder())
 	require.False(t, unwrittenContext.Writer.Written())
-	require.True(t, shouldRetry(unwrittenContext, retryableError, 1))
+	require.Equal(t, "retry", decideRelayRetry(unwrittenContext, retryableError, 1).Action)
 }
