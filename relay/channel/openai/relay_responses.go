@@ -89,5 +89,6 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 
 	// The model rate limiter judges success by this stream's protocol outcome.
 	common.SetContextKey(c, constant.ContextKeyResponseStreamStatus, info.StreamStatus)
+	info.StreamStatus.RequireTerminal()
 	return accumulator.Finish(), nil
 }

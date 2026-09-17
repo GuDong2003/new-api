@@ -26,7 +26,7 @@ func TestResponsesUsageAccumulatorTerminalAccounting(t *testing.T) {
 		{eventType: "response.canceled"},
 	} {
 		t.Run(tc.eventType, func(t *testing.T) {
-			info := &relaycommon.RelayInfo{OriginModelName: "gpt-5.1"}
+			info := &relaycommon.RelayInfo{OriginModelName: "gpt-5.1", StreamStatus: relaycommon.NewStreamStatus()}
 			accumulator := NewResponsesUsageAccumulator(info)
 			for _, item := range []dto.ResponsesOutput{
 				{Type: dto.BuildInCallWebSearchCall},
@@ -49,6 +49,8 @@ func TestResponsesUsageAccumulatorTerminalAccounting(t *testing.T) {
 			accumulator.Observe(terminal)
 			accumulator.Observe(terminal)
 			usage := accumulator.Finish()
+			assert.Equal(t, tc.eventType == "response.failed", info.StreamStatus.ResponseFailed())
+			assert.NotEmpty(t, info.StreamStatus.ResponseOutcome())
 
 			assert.Equal(t, 20, usage.PromptTokens)
 			assert.Equal(t, 5, usage.CompletionTokens)
@@ -137,7 +139,7 @@ func TestObserveResponsesOutcomeRecordsProtocolFacts(t *testing.T) {
 }
 
 func TestResponsesUsageAccumulatorDisconnectBillsCompletedImage(t *testing.T) {
-	info := &relaycommon.RelayInfo{OriginModelName: "gpt-5.1"}
+	info := &relaycommon.RelayInfo{OriginModelName: "gpt-5.1", StreamStatus: relaycommon.NewStreamStatus()}
 	accumulator := NewResponsesUsageAccumulator(info)
 	accumulator.Observe(&dto.ResponsesStreamResponse{
 		Type: dto.ResponsesOutputTypeItemDone,
