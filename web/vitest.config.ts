@@ -37,7 +37,10 @@ export default defineConfig({
     setupFiles: ['./src/test-setup.ts'],
     clearMocks: true,
     restoreMocks: true,
-    include: ['src/**/*.{test,spec}.{ts,tsx}'],
+    include: [
+      'src/**/*.{test,spec}.{ts,tsx}',
+      'scripts/oxlint/__tests__/*.test.ts',
+    ],
     // Drawer/table suites render enough to sit near the 5s default when the
     // machine is loaded (CI runners, parallel files). A genuinely stuck test
     // still fails, just later; a merely slow one stops being a coin flip.

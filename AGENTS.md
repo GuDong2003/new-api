@@ -163,6 +163,7 @@ Tasks that touch none of these (for example unrelated frontend work, authenticat
   - `bun run i18n:*` for i18n tooling
 - Frontend UI text must support English and Simplified Chinese with `i18next`/`react-i18next`. Use flat JSON locale files in `web/src/i18n/locales/{en,zh}.json`, with English source strings as keys. Do not add new strings to archived locales.
 - In React components, use `useTranslation()` and call `t('English key')` for user-facing text.
+- **Number formatting and Intl locales (mandatory):** Reuse `@/lib/format` for ordinary number/compact-number display and `@/lib/currency` for monetary values; preserve each formatter's precision and unit semantics. Interface language codes such as `zhCN` / `zhTW` are NOT valid Intl locales. Any interface language passed to `Intl.*`, `toLocaleString` / `toLocaleDateString` / `toLocaleTimeString`, or a locale-aware formatting helper MUST first pass through `toIntlLocale` from `@/i18n/languages`. Do not duplicate language mappings or pass raw language codes through aliases. Follow `web/AGENTS.md` for the lint rule and regression requirements.
 - Follow `web/AGENTS.md` for detailed frontend conventions, including TypeScript, component structure, styling, accessibility, testing, and build checks.
 
 ### Project Governance

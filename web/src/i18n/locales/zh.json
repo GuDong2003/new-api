@@ -2255,6 +2255,8 @@
     "Download latest": "下载最新备份",
     "Drag {{group}} to reorder": "拖动 {{group}} 以重新排序",
     "Drag to another image’s reference input": "拖到另一张图片的参考输入端",
+    "Drag to move": "拖动以移动",
+    "Drag to resize": "拖动以调整大小",
     "Draw": "绘图",
     "Drawing": "绘图",
     "Drawing logs": "绘制日志",
