@@ -139,17 +139,19 @@ describe('local billing expression evaluation', () => {
     ).toBe('周一至周五 09:00至12:00或14:00至18:00以外的时段（Asia/Shanghai）')
   })
   test.each([
-    ['weekday("UTC") == 1', '週一 (UTC)'],
-    ['len > 32000', 'Full input length > 32,000'],
+    ['zhCN', 'weekday("UTC") == 1', '周一 (UTC)'],
+    ['zhTW', 'weekday("UTC") == 1', '週一 (UTC)'],
+    ['zhCN', 'len > 32000', 'Full input length > 32,000'],
+    ['zhTW', 'len > 32000', 'Full input length > 32,000'],
   ])(
-    'formats %s for Traditional Chinese without an invalid locale error',
-    async (source, expected) => {
+    'formats %s condition %s without falling back to source',
+    async (language, source, expected) => {
       const translations = createInstance()
       await translations.init({
         lng: 'en',
         resources: { en: { translation: {} } },
       })
-      expect(formatBillingCondition(source, translations.t, 'zhTW')).toBe(
+      expect(formatBillingCondition(source, translations.t, language)).toBe(
         expected
       )
     }
