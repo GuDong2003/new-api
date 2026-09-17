@@ -568,3 +568,14 @@ func TestProcessHeaderOverride_NonClaudeCodePreservesExistingBehavior(t *testing
 	require.Equal(t, "trace-123", headers["x-client"])
 	require.Equal(t, "channel-key", headers["x-channel-key"])
 }
+
+func TestToWebSocketURL(t *testing.T) {
+	for input, want := range map[string]string{
+		"https://api.openai.com/v1/responses":             "wss://api.openai.com/v1/responses",
+		"http://127.0.0.1:3000/v1/responses":              "ws://127.0.0.1:3000/v1/responses",
+		"wss://chatgpt.com/backend-api/codex/responses":   "wss://chatgpt.com/backend-api/codex/responses",
+		"ws://127.0.0.1:3000/backend-api/codex/responses": "ws://127.0.0.1:3000/backend-api/codex/responses",
+	} {
+		assert.Equal(t, want, toWebSocketURL(input), input)
+	}
+}
