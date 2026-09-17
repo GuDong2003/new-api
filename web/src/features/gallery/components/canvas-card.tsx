@@ -74,7 +74,7 @@ export function CanvasCard(props: {
                   key={id}
                   identity={props.identity}
                   id={id}
-                  blob={project.coverBlobs?.[id]}
+                  blob={project.localOnly ? project.coverBlobs?.[id] : undefined}
                   localOnly={project.localOnly}
                 />
               ))}
