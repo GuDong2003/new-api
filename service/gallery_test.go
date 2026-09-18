@@ -407,7 +407,7 @@ func TestSaveTaskGalleryImageStoresOriginalAndThumbnail(t *testing.T) {
 func TestTaskGalleryImageIsReusedWhenCanvasIsSaved(t *testing.T) {
 	galleryFixture(t, sqlite.Open(filepath.Join(t.TempDir(), "gallery.db")))
 	original := galleryPNG(t)
-	taskImage, err := service.SaveTaskGalleryImage(context.Background(), 41, "task_canvas", "image-0", "gpt-image-1", "fox", "image/png", bytes.NewReader(original))
+	taskImage, err := service.SaveTaskGalleryImageWithSource(context.Background(), 41, "task_canvas", "image-0", "drawing", "gpt-image-1", "fox", "image/png", bytes.NewReader(original))
 	require.NoError(t, err)
 
 	saved, err := saveCanvasMetadata(t, 41, canvasSaveMetadata(t), []string{"file:" + canvasFixtureAsset, string(original)})
@@ -418,6 +418,33 @@ func TestTaskGalleryImageIsReusedWhenCanvasIsSaved(t *testing.T) {
 	var linked model.GalleryImage
 	require.NoError(t, model.DB.Where("id = ?", taskImage.ID).First(&linked).Error)
 	assert.Equal(t, saved.ID, linked.CanvasID)
+}
+
+func TestCanvasDoesNotReuseApiTaskGalleryImage(t *testing.T) {
+	galleryFixture(t, sqlite.Open(filepath.Join(t.TempDir(), "gallery.db")))
+	original := galleryPNG(t)
+	taskImage, err := service.SaveTaskGalleryImage(context.Background(), 41, "task_api", "image-0", "gpt-image-1", "fox", "image/png", bytes.NewReader(original))
+	require.NoError(t, err)
+
+	saved, err := saveCanvasMetadata(t, 41, canvasSaveMetadata(t), []string{"file:" + canvasFixtureAsset, string(original)})
+	require.NoError(t, err)
+	assert.NotEqual(t, taskImage.ID, saved.AssetIDMap[canvasFixtureAsset])
+	assert.Len(t, saved.Assets, 1)
+}
+
+func TestTaskGalleryImageReusesExistingCanvasAssetBySourceAndChecksum(t *testing.T) {
+	galleryFixture(t, sqlite.Open(filepath.Join(t.TempDir(), "gallery.db")))
+	original := galleryPNG(t)
+	saved, err := saveCanvasMetadata(t, 41, canvasSaveMetadata(t), []string{"file:" + canvasFixtureAsset, string(original)})
+	require.NoError(t, err)
+
+	taskImage, err := service.SaveTaskGalleryImageWithSource(context.Background(), 41, "task_canvas", "image-0", "drawing", "gpt-image-1", "fox", "image/png", bytes.NewReader(original))
+	require.NoError(t, err)
+	assert.Equal(t, saved.Assets[0].ID, taskImage.ID)
+
+	var count int64
+	require.NoError(t, model.DB.Model(&model.GalleryImage{}).Where("user_id = ?", 41).Count(&count).Error)
+	assert.EqualValues(t, 1, count)
 }
 
 const canvasFixtureID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"

@@ -473,6 +473,21 @@ func saveTaskGalleryImage(ctx context.Context, user int, metadata GalleryMetadat
 	if err != nil {
 		return nil, err
 	}
+	var duplicate model.GalleryImage
+	duplicateErr := model.DB.WithContext(ctx).
+		Where("user_id = ? AND source = ? AND sha256 = ? AND state = ? AND expires_at > ? AND (role = '' OR role IS NULL OR role = ?)", user, metadata.Source, record.SHA256, "ready", now, "generated").
+		Order("CASE WHEN canvas_id = '' OR canvas_id IS NULL THEN 1 ELSE 0 END, created_at ASC, id ASC").
+		First(&duplicate).Error
+	if duplicateErr == nil {
+		if err = removeGalleryRecord(context.Background(), root, record); err != nil {
+			return nil, err
+		}
+		published = true
+		return &duplicate, nil
+	}
+	if !errors.Is(duplicateErr, gorm.ErrRecordNotFound) {
+		return nil, model.ErrGalleryUnavailable
+	}
 	thumbnail, err := makeGalleryThumbnail(ctx, root, record)
 	if err != nil {
 		return nil, err
