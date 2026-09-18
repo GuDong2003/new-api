@@ -76,6 +76,8 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 	var responseTextBuilder strings.Builder
 	imageCounter := &relaycommon.ImageGenerationCallCounter{}
 	imageCommitted := false
+	started := false
+	upstreamFailed := false
 
 	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
 
@@ -87,13 +89,29 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 			return
 		}
 		sendResponsesStreamData(c, streamResponse, data)
+		started = true
+		var responseStatus string
+		if streamResponse.Response != nil {
+			_ = common.Unmarshal(streamResponse.Response.Status, &responseStatus)
+		}
+		// An error event or a failed response is an explicit upstream failure.
+		if streamResponse.Type == "error" || streamResponse.Type == "response.error" ||
+			streamResponse.Type == "response.failed" || responseStatus == "failed" {
+			upstreamFailed = true
+		}
 		switch streamResponse.Type {
 		case "response.completed", "response.done", "response.failed", "response.incomplete", "response.cancelled", "response.canceled":
 			// Failed, incomplete and cancelled terminals carry the usage upstream
 			// bills just like completed ones.
-			if streamResponse.Response != nil && streamResponse.Response.Usage != nil {
-				incomingUsage := relayconvert.NormalizeResponsesUsage(streamResponse.Response.Usage)
-				usage = dto.MergeUsageNonZero(usage, incomingUsage)
+			if streamResponse.Response != nil {
+				if streamResponse.Response.Usage != nil {
+					incomingUsage := relayconvert.NormalizeResponsesUsage(streamResponse.Response.Usage)
+					usage = dto.MergeUsageNonZero(usage, incomingUsage)
+				}
+				if responseTextBuilder.Len() == 0 {
+					// Some upstreams carry the output only on the terminal event.
+					responseTextBuilder.WriteString(relayconvert.ExtractOutputTextFromResponses(streamResponse.Response))
+				}
 			}
 			if imageCommitted {
 				return
@@ -108,8 +126,10 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 			}
 			imageCounter.Commit(info)
 			imageCommitted = true
-		case "response.output_text.delta":
-			// 处理输出文本
+		case "response.output_text.delta", "response.function_call_arguments.delta",
+			"response.reasoning_summary_text.delta", "response.reasoning_text.delta", "response.refusal.delta":
+			// Every delta kind here is generated output that upstream bills as
+			// output tokens, so all of them feed the missing-usage estimate.
 			responseTextBuilder.WriteString(streamResponse.Delta)
 		case dto.ResponsesOutputTypeItemDone:
 			if streamResponse.Item != nil {
@@ -139,7 +159,11 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 		}
 	}
 
-	if usage.PromptTokens == 0 && usage.CompletionTokens != 0 {
+	// Upstream bills the prompt as soon as it starts generating, so a stream
+	// that produced any event but no usage still owes its input tokens unless
+	// upstream reported an explicit failure.
+	billsPrompt := usage.CompletionTokens != 0 || (started && !upstreamFailed)
+	if usage.PromptTokens == 0 && billsPrompt {
 		usage.PromptTokens = info.GetEstimatePromptTokens()
 	}
 
