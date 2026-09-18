@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { createFileRoute, redirect } from '@tanstack/react-router'
 
 import { ContentAudit } from '@/features/content-audit'
+import { contentAuditSearchSchema } from '@/features/content-audit/lib/schema'
 import { ROLE } from '@/lib/roles'
 import { useAuthStore } from '@/stores/auth-store'
 
@@ -34,5 +35,6 @@ export const Route = createFileRoute('/_authenticated/content-audit')({
       throw redirect({ to: '/403' })
     }
   },
+  validateSearch: contentAuditSearchSchema,
   component: ContentAudit,
 })

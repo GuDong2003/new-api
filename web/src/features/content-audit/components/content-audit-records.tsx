@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useQuery } from '@tanstack/react-query'
-import { Link } from '@tanstack/react-router'
+import { Link, useNavigate, useSearch } from '@tanstack/react-router'
 import type { ColumnDef, RowSelectionState } from '@tanstack/react-table'
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -34,7 +34,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 
 import { listContentAudits } from '../api'
 import {
-  contentAuditQueryOptions,
+  contentAuditRecordsQueryOptions,
   useContentAuditAccess,
 } from '../hooks/use-content-audit-access'
 import {
@@ -45,6 +45,7 @@ import {
 import {
   defaultContentAuditFilters,
   type ContentAuditFilterValues,
+  type ContentAuditSearch,
 } from '../lib/schema'
 import type { ContentAuditFilters, ContentAuditRecord } from '../types'
 import { ContentAuditDeleteButton } from './content-audit-delete'
@@ -55,16 +56,53 @@ const emptyRecords: ContentAuditRecord[] = []
 export function ContentAuditRecords() {
   const { t } = useTranslation()
   const access = useContentAuditAccess()
-  const [initialValues] = useState(defaultContentAuditFilters)
-  const [filters, setFilters] = useState<ContentAuditFilters>(() => ({
-    start: Math.floor(initialValues.range.start.getTime() / 1000),
-    end: Math.floor(initialValues.range.end.getTime() / 1000),
-    page: 1,
-    page_size: 25,
-  }))
+  const search = useSearch({ strict: false }) as ContentAuditSearch
+  const navigate = useNavigate()
+  const [fallbackInitialValues] = useState(defaultContentAuditFilters)
+  const initialValues = useMemo<ContentAuditFilterValues>(() => {
+    const defaultStart = Math.floor(
+      fallbackInitialValues.range.start.getTime() / 1000
+    )
+    const defaultEnd = Math.floor(
+      fallbackInitialValues.range.end.getTime() / 1000
+    )
+    return {
+      range: {
+        start: new Date((search.start ?? defaultStart) * 1000),
+        end: new Date((search.end ?? defaultEnd) * 1000),
+      },
+      user_id: search.user_id ? String(search.user_id) : '',
+      channel_id: search.channel_id ? String(search.channel_id) : '',
+      model: search.model ?? '',
+      request_id: search.request_id ?? '',
+      kind: search.kind ?? '',
+      integrity: search.integrity ?? '',
+      http_status: search.http_status ? String(search.http_status) : '',
+    }
+  }, [fallbackInitialValues, search])
+  const filters = useMemo<ContentAuditFilters>(
+    () => ({
+      start:
+        search.start ??
+        Math.floor(fallbackInitialValues.range.start.getTime() / 1000),
+      end:
+        search.end ??
+        Math.floor(fallbackInitialValues.range.end.getTime() / 1000),
+      user_id: search.user_id,
+      channel_id: search.channel_id,
+      model: search.model || undefined,
+      request_id: search.request_id || undefined,
+      kind: search.kind,
+      integrity: search.integrity,
+      http_status: search.http_status,
+      page: search.page ?? 1,
+      page_size: search.page_size ?? 25,
+    }),
+    [fallbackInitialValues, search]
+  )
   const [selection, setSelection] = useState<RowSelectionState>({})
   const query = useQuery({
-    ...contentAuditQueryOptions,
+    ...contentAuditRecordsQueryOptions,
     queryKey: [...access.queryKey, 'records', filters],
     queryFn: ({ signal }) =>
       access.run(
@@ -171,6 +209,7 @@ export function ContentAuditRecords() {
               className={buttonVariants({ variant: 'ghost', size: 'sm' })}
               to='/content-audit/$id'
               params={{ id: row.original.id }}
+              search={(previous) => previous}
               preload={false}
             >
               {t('Details')}
@@ -218,11 +257,14 @@ export function ContentAuditRecords() {
       const next = typeof updater === 'function' ? updater(old) : updater
       if (next.pageIndex >= 10000 || next.pageSize > 100) return
       setSelection({})
-      setFilters((previous) => ({
-        ...previous,
-        page: next.pageSize === previous.page_size ? next.pageIndex + 1 : 1,
-        page_size: next.pageSize,
-      }))
+      navigate({
+        to: '/content-audit',
+        search: (previous) => ({
+          ...previous,
+          page: next.pageSize === filters.page_size ? next.pageIndex + 1 : 1,
+          page_size: next.pageSize,
+        }),
+      })
     },
   })
   const apply = (values: ContentAuditFilterValues) => {
@@ -241,8 +283,26 @@ export function ContentAuditRecords() {
       page: 1,
       page_size: filters.page_size,
     }
-    if (JSON.stringify(next) === JSON.stringify(filters)) void query.refetch()
-    else setFilters(next)
+    if (JSON.stringify(next) === JSON.stringify(filters)) {
+      void query.refetch()
+      return
+    }
+    navigate({
+      to: '/content-audit',
+      search: {
+        start: next.start,
+        end: next.end,
+        user_id: next.user_id,
+        channel_id: next.channel_id,
+        model: next.model,
+        request_id: next.request_id,
+        kind: next.kind,
+        integrity: next.integrity,
+        http_status: next.http_status,
+        page: next.page,
+        page_size: next.page_size,
+      },
+    })
   }
   return (
     <div className='flex h-full min-h-0 flex-col gap-3'>

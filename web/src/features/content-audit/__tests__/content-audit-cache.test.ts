@@ -18,11 +18,16 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { describe, expect, it } from 'vitest'
 
-import { contentAuditQueryOptions } from '../hooks/use-content-audit-access'
+import { contentAuditRecordsQueryOptions } from '../hooks/use-content-audit-access'
 
 describe('content audit query cache', () => {
   it('keeps the root session data briefly instead of refetching on every action', () => {
-    expect(contentAuditQueryOptions.staleTime).toBeGreaterThanOrEqual(30_000)
-    expect(contentAuditQueryOptions.gcTime).toBeGreaterThanOrEqual(5 * 60_000)
+    expect(contentAuditRecordsQueryOptions.staleTime).toBeGreaterThanOrEqual(
+      30_000
+    )
+    expect(contentAuditRecordsQueryOptions.gcTime).toBeGreaterThanOrEqual(
+      5 * 60_000
+    )
+    expect(contentAuditRecordsQueryOptions.refetchOnMount).toBe(false)
   })
 })

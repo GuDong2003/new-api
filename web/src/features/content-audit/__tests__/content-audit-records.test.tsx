@@ -24,6 +24,7 @@ import {
   createRouter,
   Outlet,
   RouterProvider,
+  useNavigate,
   useParams,
 } from '@tanstack/react-router'
 import {
@@ -72,11 +73,17 @@ function RecordsLayout() {
 }
 function RecordRoute() {
   const params = useParams({ strict: false })
+  const navigate = useNavigate()
   return (
     <ContentAuditDetailDialog
       key={params.id}
       id={params.id ?? auditId}
-      onClose={() => undefined}
+      onClose={() =>
+        void navigate({
+          to: '/content-audit',
+          search: (previous) => previous,
+        })
+      }
     />
   )
 }
@@ -86,12 +93,14 @@ function renderRecords(path = '/content-audit') {
     getParentRoute: () => root,
     path: 'content-audit',
     component: RecordsLayout,
+    validateSearch: (search) => search,
     beforeLoad: () => (ContentAuditRoute.options.beforeLoad as () => void)(),
   })
   const detail = createRoute({
     getParentRoute: () => audit,
     path: '$id',
     component: RecordRoute,
+    validateSearch: (search) => search,
   })
   const forbidden = createRoute({
     getParentRoute: () => root,
@@ -102,11 +111,12 @@ function renderRecords(path = '/content-audit') {
     routeTree: root.addChildren([audit.addChildren([detail]), forbidden]),
     history: createMemoryHistory({ initialEntries: [path] }),
   })
-  return render(
+  const view = render(
     <QueryClientProvider client={client}>
       <RouterProvider router={router} />
     </QueryClientProvider>
   )
+  return { ...view, router }
 }
 
 function NavigationFixture() {
@@ -233,6 +243,61 @@ it('paginates metadata, applies typed exact filters from page one, and loads bod
   expect(transport.requests.at(-1)?.url).toBe(
     `/api/content-audit/records/${auditId}`
   )
+})
+
+it('keeps the applied filters and does not refetch the list when details open and close', async () => {
+  const detail = auditDetail()
+  detail.payload.images = []
+  transport = installAuditTransport((config) => {
+    if (config.url === '/api/content-audit/records') {
+      return {
+        body: auditSuccess({
+          items: [detail.record],
+          total: 1,
+          page: config.params.page,
+          page_size: config.params.page_size,
+        }),
+      }
+    }
+    return { body: auditSuccess(detail) }
+  })
+  const user = userEvent.setup()
+  renderRecords()
+  await screen.findByText('inference-user (#7)')
+  await user.click(screen.getByRole('button', { name: 'Expand' }))
+  const model = screen.getByRole('textbox', { name: 'Model' })
+  await user.type(model, 'test-model')
+  await user.click(screen.getByRole('button', { name: 'Search' }))
+  await waitFor(() =>
+    expect(
+      transport.requests.filter(
+        (request) => request.url === '/api/content-audit/records'
+      )
+    ).toHaveLength(2)
+  )
+  await user.click(screen.getByRole('link', { name: 'Details' }))
+  expect(await screen.findByLabelText('Request content')).toBeVisible()
+  expect(
+    transport.requests.filter(
+      (request) => request.url === '/api/content-audit/records'
+    )
+  ).toHaveLength(2)
+  await user.click(
+    within(screen.getByRole('dialog')).getAllByRole('button', {
+      name: 'Close',
+    })[0]
+  )
+  await waitFor(() =>
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  )
+  expect(screen.getByRole('textbox', { name: 'Model' })).toHaveValue(
+    'test-model'
+  )
+  expect(
+    transport.requests.filter(
+      (request) => request.url === '/api/content-audit/records'
+    )
+  ).toHaveLength(2)
 })
 
 it('rejects a reversed or overlong date range before querying', async () => {

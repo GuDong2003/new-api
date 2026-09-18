@@ -18,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { zodResolver } from '@hookform/resolvers/zod'
 import type { Table } from '@tanstack/react-table'
+import { useEffect } from 'react'
 import { useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 
@@ -52,6 +53,9 @@ export function ContentAuditFilterBar(props: {
     resolver: zodResolver(contentAuditFilterSchema),
     defaultValues: props.initialValues,
   })
+  useEffect(() => {
+    form.reset(props.initialValues)
+  }, [form, props.initialValues])
   const submit = form.handleSubmit(props.onApply)
   const inputs = [
     { name: 'user_id', label: t('User ID'), numeric: true },

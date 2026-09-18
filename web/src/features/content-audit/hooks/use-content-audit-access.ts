@@ -27,6 +27,11 @@ export const contentAuditQueryOptions = {
   meta: { sensitive: true },
 } as const
 
+export const contentAuditRecordsQueryOptions = {
+  ...contentAuditQueryOptions,
+  refetchOnMount: false,
+} as const
+
 export type ContentAuditAccess = {
   queryKey: readonly ['content-audit', string]
   run: <T>(

@@ -88,6 +88,22 @@ export const contentAuditFilterSchema = z.object({
 
 export type ContentAuditFilterValues = z.infer<typeof contentAuditFilterSchema>
 
+export const contentAuditSearchSchema = z.object({
+  start: z.number().int().positive().optional(),
+  end: z.number().int().positive().optional(),
+  user_id: z.number().int().positive().optional(),
+  channel_id: z.number().int().positive().optional(),
+  model: z.string().optional().catch(''),
+  request_id: z.string().optional().catch(''),
+  kind: z.enum(['text', 'image']).optional(),
+  integrity: z.enum(['complete', 'partial']).optional(),
+  http_status: z.number().int().min(100).max(599).optional(),
+  page: z.number().int().positive().optional().catch(1),
+  page_size: z.number().int().min(1).max(100).optional().catch(25),
+})
+
+export type ContentAuditSearch = z.infer<typeof contentAuditSearchSchema>
+
 export function defaultContentAuditFilters(): ContentAuditFilterValues & {
   range: { start: Date; end: Date }
 } {

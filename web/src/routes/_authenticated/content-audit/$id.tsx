@@ -36,7 +36,12 @@ function ContentAuditDetailRoute() {
     <ContentAuditDetailDialog
       key={id}
       id={id}
-      onClose={() => void navigate({ to: '/content-audit' })}
+      onClose={() =>
+        void navigate({
+          to: '/content-audit',
+          search: (previous) => previous,
+        })
+      }
     />
   )
 }
