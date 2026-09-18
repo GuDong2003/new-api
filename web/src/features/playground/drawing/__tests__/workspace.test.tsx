@@ -129,8 +129,30 @@ describe('Drawing workspace', () => {
     client.clear()
   })
 
-  it('blocks image edits without a completed reference and shows the reason near the mode control', async () => {
+  it('keeps text-to-image mode automatic when no reference image is selected', async () => {
     const { client, view } = renderWorkspace(832)
+    await waitFor(() =>
+      expect(screen.getByText('Room for every idea')).toBeTruthy()
+    )
+
+    await userEvent.type(
+      screen.getByRole('textbox', { name: 'Prompt' }),
+      'A forest'
+    )
+    expect(screen.getByLabelText('Mode')).toHaveValue('generate')
+    const generate = await screen.findByRole('button', {
+      name: 'Generate images',
+    })
+    expect(generate).not.toBeDisabled()
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(screen.getByText('Reference images', { exact: false })).toBeVisible()
+
+    view.unmount()
+    client.clear()
+  })
+
+  it('keeps the mode selector available for a manual edit selection', async () => {
+    const { client, view } = renderWorkspace(833)
     await waitFor(() =>
       expect(screen.getByText('Room for every idea')).toBeTruthy()
     )
@@ -148,11 +170,6 @@ describe('Drawing workspace', () => {
     expect(screen.getByRole('alert')).toHaveTextContent(
       'Upload an image or choose Use as reference on a canvas image.'
     )
-    expect(screen.getByText('Reference images', { exact: false })).toBeVisible()
-    const post = vi.spyOn(api, 'post')
-    await userEvent.click(generate)
-    expect(post).not.toHaveBeenCalled()
-    post.mockRestore()
 
     view.unmount()
     client.clear()

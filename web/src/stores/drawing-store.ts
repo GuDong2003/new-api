@@ -73,6 +73,7 @@ type DrawingState = DrawingDocument & {
   setViewport: (viewport: Viewport) => void
   toggleReference: (id: string) => void
   setReferences: (ids: string[]) => void
+  reorderReferences: (sourceId: string, targetId: string) => void
   setMask: (mask: DrawingMask | null) => void
   setPreview: (id: string | null) => void
   undo: () => void
@@ -80,6 +81,20 @@ type DrawingState = DrawingDocument & {
   arrange: () => void
   clear: () => void
   replaceDocument: (document: DrawingDocument) => void
+}
+
+function syncModeAfterReferenceChange(
+  settings: ImageSettings,
+  previousCount: number,
+  nextCount: number
+): ImageSettings {
+  if (previousCount === 0 && nextCount > 0) {
+    return { ...settings, mode: 'edit' }
+  }
+  if (previousCount > 0 && nextCount === 0) {
+    return { ...settings, mode: 'generate' }
+  }
+  return settings
 }
 
 export const useDrawingStore = create<DrawingState>((set, get) => ({
@@ -153,13 +168,19 @@ export const useDrawingStore = create<DrawingState>((set, get) => ({
     set((state) => {
       const nodes = applyNodeChanges(changes, state.nodes)
       const ids = new Set(nodes.map((node) => node.id))
+      const referenceIds = state.referenceIds.filter((id) => ids.has(id))
       return {
         nodes,
         edges: state.edges.filter(
           (edge) => ids.has(edge.source) && ids.has(edge.target)
         ),
-        referenceIds: state.referenceIds.filter((id) => ids.has(id)),
+        referenceIds,
         mask: state.mask && ids.has(state.mask.referenceId) ? state.mask : null,
+        settings: syncModeAfterReferenceChange(
+          state.settings,
+          state.referenceIds.length,
+          referenceIds.length
+        ),
         revision:
           state.revision +
           (changes.some((change) => change.type !== 'select') ? 1 : 0),
@@ -276,16 +297,26 @@ export const useDrawingStore = create<DrawingState>((set, get) => ({
   removeNodes: (ids) => {
     get().checkpoint()
     const removed = new Set(ids)
-    set((state) => ({
-      nodes: state.nodes.filter((node) => !removed.has(node.id)),
-      edges: state.edges.filter(
-        (edge) => !removed.has(edge.source) && !removed.has(edge.target)
-      ),
-      referenceIds: state.referenceIds.filter((id) => !removed.has(id)),
-      mask:
-        state.mask && !removed.has(state.mask.referenceId) ? state.mask : null,
-      revision: state.revision + 1,
-    }))
+    set((state) => {
+      const referenceIds = state.referenceIds.filter((id) => !removed.has(id))
+      return {
+        nodes: state.nodes.filter((node) => !removed.has(node.id)),
+        edges: state.edges.filter(
+          (edge) => !removed.has(edge.source) && !removed.has(edge.target)
+        ),
+        referenceIds,
+        mask:
+          state.mask && !removed.has(state.mask.referenceId)
+            ? state.mask
+            : null,
+        settings: syncModeAfterReferenceChange(
+          state.settings,
+          state.referenceIds.length,
+          referenceIds.length
+        ),
+        revision: state.revision + 1,
+      }
+    })
   },
   updateNodeData: (id, data, jobId) =>
     set((state) => {
@@ -341,9 +372,15 @@ export const useDrawingStore = create<DrawingState>((set, get) => ({
   toggleReference: (id) =>
     set((state) => {
       if (state.referenceIds.includes(id)) {
+        const referenceIds = state.referenceIds.filter((value) => value !== id)
         return {
-          referenceIds: state.referenceIds.filter((value) => value !== id),
+          referenceIds,
           mask: state.mask?.referenceId === id ? null : state.mask,
+          settings: syncModeAfterReferenceChange(
+            state.settings,
+            state.referenceIds.length,
+            referenceIds.length
+          ),
           revision: state.revision + 1,
         }
       }
@@ -358,7 +395,11 @@ export const useDrawingStore = create<DrawingState>((set, get) => ({
       }
       return {
         referenceIds: [...state.referenceIds, id],
-        settings: { ...state.settings, mode: 'edit' },
+        settings: syncModeAfterReferenceChange(
+          state.settings,
+          state.referenceIds.length,
+          state.referenceIds.length + 1
+        ),
         revision: state.revision + 1,
       }
     }),
@@ -377,6 +418,27 @@ export const useDrawingStore = create<DrawingState>((set, get) => ({
       return {
         referenceIds,
         mask: state.mask?.referenceId === referenceIds[0] ? state.mask : null,
+        settings: syncModeAfterReferenceChange(
+          state.settings,
+          state.referenceIds.length,
+          referenceIds.length
+        ),
+        revision: state.revision + 1,
+      }
+    }),
+  reorderReferences: (sourceId, targetId) =>
+    set((state) => {
+      const sourceIndex = state.referenceIds.indexOf(sourceId)
+      const targetIndex = state.referenceIds.indexOf(targetId)
+      if (sourceIndex < 0 || targetIndex < 0 || sourceIndex === targetIndex) {
+        return state
+      }
+      const referenceIds = [...state.referenceIds]
+      referenceIds.splice(sourceIndex, 1)
+      referenceIds.splice(targetIndex, 0, sourceId)
+      return {
+        referenceIds,
+        mask: state.mask?.referenceId === referenceIds[0] ? state.mask : null,
         revision: state.revision + 1,
       }
     }),
@@ -388,6 +450,11 @@ export const useDrawingStore = create<DrawingState>((set, get) => ({
       if (!snapshot) return state
       return {
         ...snapshot,
+        settings: syncModeAfterReferenceChange(
+          state.settings,
+          state.referenceIds.length,
+          snapshot.referenceIds.length
+        ),
         past: state.past.slice(0, -1),
         future: [
           {
@@ -407,6 +474,11 @@ export const useDrawingStore = create<DrawingState>((set, get) => ({
       if (!snapshot) return state
       return {
         ...snapshot,
+        settings: syncModeAfterReferenceChange(
+          state.settings,
+          state.referenceIds.length,
+          snapshot.referenceIds.length
+        ),
         future: state.future.slice(1),
         past: [
           ...state.past,
@@ -434,6 +506,11 @@ export const useDrawingStore = create<DrawingState>((set, get) => ({
       edges: [],
       referenceIds: [],
       mask: null,
+      settings: syncModeAfterReferenceChange(
+        state.settings,
+        state.referenceIds.length,
+        0
+      ),
       revision: state.revision + 1,
     }))
   },
@@ -441,6 +518,7 @@ export const useDrawingStore = create<DrawingState>((set, get) => ({
     get().checkpoint()
     set((state) => ({
       ...document,
+      settings: document.settings,
       previewId: null,
       revision: state.revision + 1,
     }))

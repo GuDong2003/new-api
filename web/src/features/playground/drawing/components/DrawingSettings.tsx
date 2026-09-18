@@ -19,7 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { zodResolver } from '@hookform/resolvers/zod'
 import { MagicWand01Icon, StopIcon } from '@hugeicons/core-free-icons'
 import { HugeiconsIcon } from '@hugeicons/react'
-import { useEffect } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { FormProvider, useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 
@@ -40,6 +40,7 @@ import {
   validateImageSettings,
 } from '../lib/image-settings'
 import { getAvailableReferenceNodes } from '../lib/reference-connections'
+import { formatReferenceMention } from '../lib/reference-mentions'
 import type { ImageAsset, ImageSettings } from '../types'
 import { ImageParameterFields } from './ImageParameterFields'
 import { ReferenceImages } from './ReferenceImages'
@@ -63,8 +64,16 @@ export function DrawingSettings(props: DrawingSettingsProps) {
   const referenceIds = useDrawingStore((state) => state.referenceIds)
   const updateSettings = useDrawingStore((state) => state.updateSettings)
   const { groups, models, imageModels } = useImageOptions(props.userId)
-  const referenceCount = getAvailableReferenceNodes(nodes, referenceIds).length
+  const references = getAvailableReferenceNodes(nodes, referenceIds).flatMap(
+    (node) => (node.data.asset ? [{ id: node.id, asset: node.data.asset }] : [])
+  )
+  const referenceCount = references.length
   const missingEditReference = settings.mode === 'edit' && referenceCount === 0
+  const promptRef = useRef<HTMLTextAreaElement | null>(null)
+  const promptSelection = useRef({ start: 0, end: 0 })
+  const mentionRange = useRef<{ start: number; end: number } | null>(null)
+  const [mentionOpen, setMentionOpen] = useState(false)
+  const [mentionQuery, setMentionQuery] = useState('')
   const form = useForm({
     defaultValues: settings,
     resolver: zodResolver(imageSettingsSchema),
@@ -81,6 +90,64 @@ export function DrawingSettings(props: DrawingSettingsProps) {
     groups.isError ||
     models.isError ||
     !groups.data?.length
+  const promptField = form.register('prompt')
+  const mentionOptions = references.filter(({ asset }) =>
+    asset.name.toLowerCase().includes(mentionQuery.trim().toLowerCase())
+  )
+
+  const rememberPromptSelection = (element: HTMLTextAreaElement) => {
+    promptSelection.current = {
+      start: element.selectionStart,
+      end: element.selectionEnd,
+    }
+  }
+
+  const updateMentionState = (value: string, cursor: number) => {
+    const beforeCursor = value.slice(0, cursor)
+    const atIndex = beforeCursor.lastIndexOf('@')
+    const preceding = atIndex > 0 ? beforeCursor[atIndex - 1] : ''
+    const query = beforeCursor.slice(atIndex + 1)
+    if (
+      references.length > 0 &&
+      atIndex >= 0 &&
+      (atIndex === 0 || /\s/.test(preceding)) &&
+      !/\s/.test(query)
+    ) {
+      mentionRange.current = { start: atIndex, end: cursor }
+      setMentionQuery(query)
+      setMentionOpen(true)
+      return
+    }
+    mentionRange.current = null
+    setMentionOpen(false)
+  }
+
+  const insertReferenceMention = (referenceId: string) => {
+    const referenceIndex = references.findIndex(
+      (reference) => reference.id === referenceId
+    )
+    if (referenceIndex < 0) return
+    const reference = references[referenceIndex]
+    const current = form.getValues('prompt') || ''
+    const range = mentionRange.current || promptSelection.current
+    const start = Math.min(range.start, current.length)
+    const end = Math.min(Math.max(range.end, start), current.length)
+    const text = formatReferenceMention(referenceIndex, reference.asset.name)
+    const next = `${current.slice(0, start)}${text}${current.slice(end)}`
+    form.setValue('prompt', next, { shouldDirty: true })
+    updateSettings({ prompt: next })
+    mentionRange.current = null
+    setMentionOpen(false)
+    setMentionQuery('')
+    requestAnimationFrame(() => {
+      const textarea = promptRef.current
+      if (!textarea) return
+      const cursor = start + text.length
+      textarea.focus()
+      textarea.setSelectionRange(cursor, cursor)
+      promptSelection.current = { start: cursor, end: cursor }
+    })
+  }
 
   return (
     <FormProvider {...form}>
@@ -208,35 +275,112 @@ export function DrawingSettings(props: DrawingSettingsProps) {
           )}
           <div className='space-y-1.5'>
             <Label htmlFor='drawing-prompt'>{t('Prompt')}</Label>
-            <Textarea
-              id='drawing-prompt'
-              className='min-h-32 resize-y text-sm leading-relaxed'
-              maxLength={32000}
-              placeholder={t(
-                'Describe your image, including subject, composition, lighting and style.'
-              )}
-              {...form.register('prompt')}
-              onKeyDown={(event) => {
-                if (
-                  (event.ctrlKey || event.metaKey) &&
-                  event.key === 'Enter' &&
-                  !event.nativeEvent.isComposing
-                ) {
-                  event.preventDefault()
-                  event.currentTarget.form?.requestSubmit()
+            <div className='relative'>
+              <Textarea
+                id='drawing-prompt'
+                className='min-h-32 resize-y text-sm leading-relaxed'
+                maxLength={32000}
+                placeholder={t(
+                  'Describe your image, including subject, composition, lighting and style.'
+                )}
+                {...promptField}
+                ref={(element) => {
+                  promptField.ref(element)
+                  promptRef.current = element
+                }}
+                onChange={(event) => {
+                  void promptField.onChange(event)
+                  rememberPromptSelection(event.currentTarget)
+                  updateMentionState(
+                    event.currentTarget.value,
+                    event.currentTarget.selectionStart
+                  )
+                }}
+                onSelect={(event) =>
+                  rememberPromptSelection(event.currentTarget)
                 }
-              }}
-            />
+                onClick={(event) =>
+                  rememberPromptSelection(event.currentTarget)
+                }
+                onKeyUp={(event) =>
+                  rememberPromptSelection(event.currentTarget)
+                }
+                onDragOver={(event) => {
+                  if (
+                    event.dataTransfer.types.includes(
+                      'application/x-new-api-reference'
+                    )
+                  ) {
+                    event.preventDefault()
+                    event.dataTransfer.dropEffect = 'copy'
+                  }
+                }}
+                onDrop={(event) => {
+                  const referenceId = event.dataTransfer.getData(
+                    'application/x-new-api-reference'
+                  )
+                  if (!referenceId) return
+                  event.preventDefault()
+                  insertReferenceMention(referenceId)
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === 'Escape' && mentionOpen) {
+                    event.preventDefault()
+                    setMentionOpen(false)
+                    mentionRange.current = null
+                    return
+                  }
+                  if (
+                    (event.ctrlKey || event.metaKey) &&
+                    event.key === 'Enter' &&
+                    !event.nativeEvent.isComposing
+                  ) {
+                    event.preventDefault()
+                    event.currentTarget.form?.requestSubmit()
+                  }
+                }}
+              />
+              {mentionOpen && mentionOptions.length > 0 && (
+                <div
+                  className='bg-popover text-popover-foreground absolute top-full left-0 z-20 mt-1 flex max-h-48 w-full flex-col overflow-y-auto rounded-lg border p-1 shadow-md'
+                  role='listbox'
+                  aria-label={t('Reference images')}
+                >
+                  {mentionOptions.map(({ id, asset }) => (
+                    <button
+                      key={id}
+                      type='button'
+                      role='option'
+                      className='hover:bg-accent flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm'
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => insertReferenceMention(id)}
+                    >
+                      <img
+                        src={asset.src}
+                        alt=''
+                        className='size-7 rounded object-cover'
+                      />
+                      <span className='truncate'>
+                        {formatReferenceMention(
+                          references.findIndex(
+                            (reference) => reference.id === id
+                          ),
+                          asset.name
+                        )}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
-          {settings.mode === 'edit' && (
-            <ReferenceImages
-              onUpload={props.onUploadReferences}
-              mask={props.mask}
-              onMaskUpload={props.onMaskUpload}
-              onClearMask={props.onClearMask}
-              onDrawMask={props.onDrawMask}
-            />
-          )}
+          <ReferenceImages
+            onUpload={props.onUploadReferences}
+            mask={props.mask}
+            onMaskUpload={props.onMaskUpload}
+            onClearMask={props.onClearMask}
+            onDrawMask={props.onDrawMask}
+          />
           <Separator />
           <ImageParameterFields
             onSizeChange={(size) => updateSettings({ size })}

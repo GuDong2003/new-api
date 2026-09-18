@@ -58,6 +58,40 @@ function imageNode(
 beforeEach(() => useDrawingStore.getState().initialize(818))
 
 describe('Image reference connections', () => {
+  it('automatically switches the sidebar mode when references are selected or cleared', () => {
+    const store = useDrawingStore.getState()
+    store.addNodes([imageNode('A')])
+
+    store.setReferences(['A'])
+    expect(useDrawingStore.getState().settings.mode).toBe('edit')
+
+    store.setReferences([])
+    expect(useDrawingStore.getState().settings.mode).toBe('generate')
+  })
+
+  it('reorders selected references without changing the selected set', () => {
+    const store = useDrawingStore.getState()
+    store.addNodes([imageNode('A'), imageNode('B'), imageNode('C')])
+    store.setReferences(['A', 'B', 'C'])
+
+    store.reorderReferences('C', 'A')
+
+    expect(useDrawingStore.getState().referenceIds).toEqual(['C', 'A', 'B'])
+    expect(useDrawingStore.getState().settings.mode).toBe('edit')
+  })
+
+  it('keeps a manually selected mode while the reference set remains non-empty', () => {
+    const store = useDrawingStore.getState()
+    store.addNodes([imageNode('A'), imageNode('B')])
+    store.setReferences(['A'])
+    store.updateSettings({ mode: 'generate' })
+
+    store.setReferences(['A', 'B'])
+    store.reorderReferences('B', 'A')
+
+    expect(useDrawingStore.getState().settings.mode).toBe('generate')
+  })
+
   it('connects a completed image to a failed result without starting generation and preserves the relation across save and undo', () => {
     const store = useDrawingStore.getState()
     store.addNodes([imageNode('A'), imageNode('B', 'error')])

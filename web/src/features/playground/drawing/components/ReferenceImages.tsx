@@ -46,6 +46,7 @@ export function ReferenceImages(props: ReferenceImagesProps) {
   const nodes = useDrawingStore((state) => state.nodes)
   const ids = useDrawingStore((state) => state.referenceIds)
   const toggleReference = useDrawingStore((state) => state.toggleReference)
+  const reorderReferences = useDrawingStore((state) => state.reorderReferences)
   const references = ids.flatMap((id) => {
     const node = nodes.find(
       (item) => item.id === id && item.data.status === 'complete'
@@ -84,16 +85,46 @@ export function ReferenceImages(props: ReferenceImagesProps) {
           event.target.value = ''
         }}
       />
-      <div className='grid grid-cols-4 gap-2'>
+      <div
+        className='flex max-w-full gap-2 overflow-x-auto pb-1'
+        role='list'
+        aria-label={t('Reference images')}
+      >
         {references.map(({ id, asset }, index) => (
           <div
             key={id}
-            className='group bg-muted relative aspect-square overflow-hidden rounded-lg border'
+            className='group bg-muted relative aspect-square w-24 shrink-0 cursor-grab overflow-hidden rounded-lg border active:cursor-grabbing'
+            draggable
+            role='listitem'
+            aria-label={`${t('Reference images')} ${index + 1}: ${asset.name}`}
+            onDragStart={(event) => {
+              event.dataTransfer.effectAllowed = 'move'
+              event.dataTransfer.setData('application/x-new-api-reference', id)
+              event.dataTransfer.setData('text/plain', id)
+            }}
+            onDragOver={(event) => {
+              if (
+                event.dataTransfer.types.includes(
+                  'application/x-new-api-reference'
+                )
+              ) {
+                event.preventDefault()
+                event.dataTransfer.dropEffect = 'move'
+              }
+            }}
+            onDrop={(event) => {
+              event.preventDefault()
+              const sourceId = event.dataTransfer.getData(
+                'application/x-new-api-reference'
+              )
+              if (sourceId) reorderReferences(sourceId, id)
+            }}
           >
             <img
               src={asset.src}
               alt={asset.name}
-              className='size-full object-cover'
+              className='pointer-events-none size-full object-cover'
+              draggable={false}
             />
             <span className='bg-background/90 absolute bottom-0 left-0 px-1 text-[10px]'>
               {index + 1}
