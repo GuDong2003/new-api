@@ -15,7 +15,7 @@ You should have received a copy of the GNU Affero General Public License
 along with this program. If not, see <https://www.gnu.org/licenses/>.
 */
 import { useQuery } from '@tanstack/react-query'
-import { useEffect, useState } from 'react'
+import { useLayoutEffect, useState } from 'react'
 
 import { getGalleryFile } from '../api'
 import {
@@ -28,6 +28,28 @@ type GalleryFileOptions = {
   blob?: Blob
   only?: boolean
   cacheFingerprint?: string
+}
+
+const galleryThumbnailConcurrency = 6
+let activeThumbnailRequests = 0
+const pendingThumbnailRequests: Array<() => void> = []
+
+async function requestGalleryThumbnail(
+  identity: GalleryIdentity,
+  id: string,
+  signal?: AbortSignal
+): Promise<Blob> {
+  while (activeThumbnailRequests >= galleryThumbnailConcurrency) {
+    await new Promise<void>((resolve) => pendingThumbnailRequests.push(resolve))
+    signal?.throwIfAborted()
+  }
+  activeThumbnailRequests++
+  try {
+    return await getGalleryFile(identity, id, true, signal)
+  } finally {
+    activeThumbnailRequests--
+    pendingThumbnailRequests.shift()?.()
+  }
 }
 
 export function useGalleryFile(
@@ -62,7 +84,9 @@ export function useGalleryFile(
         }
         if (cached) return cached
       }
-      const blob = await getGalleryFile(identity, id, thumbnail, signal)
+      const blob = thumbnail
+        ? await requestGalleryThumbnail(identity, id, signal)
+        : await getGalleryFile(identity, id, false, signal)
       if (thumbnail && cacheFingerprint && identity.userId !== null) {
         await writeGalleryThumbnail(
           identity.userId,
@@ -80,7 +104,7 @@ export function useGalleryFile(
   })
   const [resource, setResource] = useState<{ blob: Blob; url: string }>()
   const blob = local?.blob ?? query.data
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!blob || !enabled) return
     const url = URL.createObjectURL(blob)
     setResource({ blob, url })

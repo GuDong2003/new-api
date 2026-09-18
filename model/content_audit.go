@@ -793,6 +793,18 @@ func ListContentAudits(ctx context.Context, filter ContentAuditFilter) ([]Conten
 	if filter.Integrity != "" {
 		query = query.Where("integrity = ?", filter.Integrity)
 	}
+	// An async image submission returns HTTP 202 before any image exists. It
+	// creates an audit envelope but no committed image descriptor, so hide that
+	// intermediate task record from the image list; the completed poll result is
+	// audited separately when it contains the actual image.
+	query = query.Where(`NOT (
+		kind = ? AND http_status = ? AND format_version = ? AND NOT EXISTS (
+			SELECT 1 FROM content_audit_images AS image
+			WHERE image.audit_id = content_audits.audit_id
+			  AND image.attempt = content_audits.attempt
+			  AND image.committed = ?
+		)
+	)`, "image", 202, 2, true)
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
 		return nil, 0, err

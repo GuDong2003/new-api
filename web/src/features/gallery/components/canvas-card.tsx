@@ -19,8 +19,10 @@ import { HugeiconsIcon } from '@hugeicons/react'
 import { useTranslation } from 'react-i18next'
 
 import { Button } from '@/components/ui/button'
+import { Skeleton } from '@/components/ui/skeleton'
 
 import { useGalleryFile } from '../hooks/use-gallery-file'
+import { galleryCanvasThumbnailFingerprint } from '../lib/gallery-thumbnail-cache'
 import type { GalleryIdentity } from '../types'
 
 export type CanvasProjectView = {
@@ -74,8 +76,15 @@ export function CanvasCard(props: {
                   key={id}
                   identity={props.identity}
                   id={id}
-                  blob={project.localOnly ? project.coverBlobs?.[id] : undefined}
+                  blob={
+                    project.localOnly ? project.coverBlobs?.[id] : undefined
+                  }
                   localOnly={project.localOnly}
+                  cacheFingerprint={galleryCanvasThumbnailFingerprint(
+                    project.id,
+                    project.revision,
+                    id
+                  )}
                 />
               ))}
             </div>
@@ -131,13 +140,15 @@ function CanvasCover(props: {
   id: string
   blob?: Blob
   localOnly?: boolean
+  cacheFingerprint: string
 }) {
   const { t } = useTranslation()
   const file = useGalleryFile(
     props.identity,
     props.id,
     true,
-    !props.blob && !props.localOnly
+    !props.blob && !props.localOnly,
+    { cacheFingerprint: props.cacheFingerprint }
   )
   const original = useGalleryFile(
     props.identity,
@@ -147,6 +158,7 @@ function CanvasCover(props: {
     { blob: props.blob, only: props.localOnly }
   )
   const url = file.url ?? original.url
+  const loading = file.isPending || original.isPending
   return url ? (
     <img
       src={url}
@@ -155,8 +167,10 @@ function CanvasCover(props: {
     />
   ) : (
     <div
-      className='bg-background aspect-video rounded-md border'
+      className='bg-background relative aspect-video rounded-md border'
       aria-label={t('Canvas cover')}
-    />
+    >
+      {loading ? <Skeleton className='absolute inset-0 size-full' /> : null}
+    </div>
   )
 }

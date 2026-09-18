@@ -63,6 +63,14 @@ export function galleryThumbnailFingerprint(image: {
   ].join(':')
 }
 
+export function galleryCanvasThumbnailFingerprint(
+  canvasId: string,
+  revision: number,
+  assetId: string
+): string {
+  return `canvas:${canvasId}:${revision}:${assetId}`
+}
+
 export async function readGalleryThumbnail(
   userId: number,
   imageId: string,

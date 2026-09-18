@@ -85,6 +85,24 @@ it('keeps destructive audit actions out of the detail footer', async () => {
   ).toBeGreaterThan(0)
 })
 
+it('explains an image timeout when no image result was captured', async () => {
+  const detail = auditDetail()
+  detail.record.kind = 'image'
+  detail.record.http_status = 524
+  detail.record.integrity = 'partial'
+  detail.payload.images = []
+  detail.payload.image_total = 0
+  transport = installAuditTransport(() => ({ body: auditSuccess(detail) }))
+
+  render(<DetailFixture />)
+
+  expect(
+    await screen.findByText(
+      'Image capture was incomplete; no usable image result was saved.'
+    )
+  ).toBeVisible()
+})
+
 beforeEach(() => {
   signInAuditRoot()
   client = auditQueryClient()

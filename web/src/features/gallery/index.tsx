@@ -181,6 +181,13 @@ function GalleryContent(props: { identity: GalleryIdentity }) {
     enabled: view === 'canvases',
     staleTime: Infinity,
   })
+  const canvasCount = useQuery({
+    queryKey: [...key, 'canvas-count'],
+    queryFn: ({ signal }) =>
+      listCanvasRecords(props.identity, { page: 1, page_size: 1 }, signal),
+    retry: false,
+    staleTime: Infinity,
+  })
   const local = useQuery({
     queryKey: [
       ...key,
@@ -200,7 +207,7 @@ function GalleryContent(props: { identity: GalleryIdentity }) {
     enabled: !drawing.loading && !nai.loading,
     retry: false,
     staleTime: Infinity,
-    gcTime: 0,
+    gcTime: 30 * 60 * 1000,
   })
   useEffect(() => {
     const identityKey = galleryIdentityKey(identity)
@@ -262,6 +269,14 @@ function GalleryContent(props: { identity: GalleryIdentity }) {
         }),
         client.invalidateQueries({
           queryKey: ['gallery', identity.userId, identity.sessionId, 'usage'],
+        }),
+        client.invalidateQueries({
+          queryKey: [
+            'gallery',
+            identity.userId,
+            identity.sessionId,
+            'canvas-count',
+          ],
         }),
       ])
     }
@@ -369,6 +384,15 @@ function GalleryContent(props: { identity: GalleryIdentity }) {
             : b.updatedAt - a.updatedAt) || a.id.localeCompare(b.id)
     )
   const activeQuery = view === 'images' ? images : canvases
+  const imageBadgeCount = images.data ? imageItems.length : null
+  const localOnlyCanvasCount = localProjects.filter(
+    (canvas) => !canvas.cloudRevision || canvas.needsExplicitSave
+  ).length
+  let canvasBadgeCount: number | null = null
+  if (canvases.data) canvasBadgeCount = projects.length
+  else if (canvasCount.data) {
+    canvasBadgeCount = canvasCount.data.total + localOnlyCanvasCount
+  }
   const total = view === 'images' ? imageItems.length : projects.length
   const pages = Math.max(1, Math.ceil(total / metrics.pageSize))
   const currentPage = Math.min(page, pages)
@@ -386,11 +410,16 @@ function GalleryContent(props: { identity: GalleryIdentity }) {
     }
   }
   const refresh = async () => {
-    await Promise.all([usage.refetch(), activeQuery.refetch(), local.refetch()])
+    await Promise.all([
+      usage.refetch(),
+      activeQuery.refetch(),
+      local.refetch(),
+      canvasCount.refetch(),
+    ])
   }
   const invalidate = async () => {
     await Promise.all(
-      ['images', 'canvases', 'usage'].map((part) =>
+      ['images', 'canvases', 'usage', 'canvas-count'].map((part) =>
         client.invalidateQueries({ queryKey: [...key, part] })
       )
     )
@@ -545,7 +574,10 @@ function GalleryContent(props: { identity: GalleryIdentity }) {
           <AlertDescription>{t(error)}</AlertDescription>
         </Alert>
       ) : null}
-      {activeQuery.isError || usage.isError || local.isError ? (
+      {activeQuery.isError ||
+      usage.isError ||
+      local.isError ||
+      canvasCount.isError ? (
         <ErrorState
           description={t('Gallery could not be loaded.')}
           onRetry={() => void run(refresh)}
@@ -563,11 +595,11 @@ function GalleryContent(props: { identity: GalleryIdentity }) {
           <TabsList className='group-data-horizontal/tabs:h-11'>
             <TabsTrigger value='images' className='gap-2 px-5 text-base'>
               {t('Images')}
-              <Badge variant='secondary'>{imageItems.length}</Badge>
+              <Badge variant='secondary'>{imageBadgeCount ?? '…'}</Badge>
             </TabsTrigger>
             <TabsTrigger value='canvases' className='gap-2 px-5 text-base'>
               {t('Canvases')}
-              <Badge variant='secondary'>{projects.length}</Badge>
+              <Badge variant='secondary'>{canvasBadgeCount ?? '…'}</Badge>
             </TabsTrigger>
           </TabsList>
           {usage.data ? <GalleryUsageMeters usage={usage.data} /> : null}

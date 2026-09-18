@@ -15,7 +15,7 @@ You should have received a copy of the GNU Affero General Public License
 along with this program. If not, see <https://www.gnu.org/licenses/>.
 */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { IDBFactory } from 'fake-indexeddb'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
@@ -178,6 +178,59 @@ it('lets the canvas cover absorb the height a row has to spare', () => {
   expect(
     screen.getByRole('button', { name: 'Open canvas: 本地画布' })
   ).toHaveClass('flex-1', 'min-h-0')
+})
+
+it('reuses a cached remote canvas cover after the query cache is cleared', async () => {
+  let fileRequests = 0
+  api.defaults.adapter = async (config) => {
+    if (config.url?.endsWith('/file')) {
+      fileRequests++
+      return {
+        ...response(config, {}),
+        data: new Blob(['cover'], { type: 'image/jpeg' }),
+      }
+    }
+    return response(config, { items: [], total: 0, page: 1, page_size: 24 })
+  }
+  const project = {
+    id: 'canvas-1',
+    kind: 'drawing' as const,
+    name: '远程画布',
+    revision: 4,
+    state: 'ready' as const,
+    updatedAt: 1700000000,
+    expiresAt: 0,
+    coverAssetIds: ['asset-1'],
+  }
+  const first = render(
+    <QueryClientProvider client={client}>
+      <CanvasCard
+        identity={{ userId: 813, sessionId: 'gallery-session' }}
+        project={project}
+        onOpen={vi.fn()}
+        onRename={vi.fn()}
+        onDelete={vi.fn()}
+      />
+    </QueryClientProvider>
+  )
+  await waitFor(() => expect(first.container.querySelector('img')).toBeTruthy())
+  expect(fileRequests).toBe(1)
+  first.unmount()
+  client.removeQueries()
+
+  render(
+    <QueryClientProvider client={client}>
+      <CanvasCard
+        identity={{ userId: 813, sessionId: 'gallery-session' }}
+        project={project}
+        onOpen={vi.fn()}
+        onRename={vi.fn()}
+        onDelete={vi.fn()}
+      />
+    </QueryClientProvider>
+  )
+  await waitFor(() => expect(document.querySelector('img')).toBeTruthy())
+  expect(fileRequests).toBe(1)
 })
 
 it('colors each usage meter by how full that quota is', () => {

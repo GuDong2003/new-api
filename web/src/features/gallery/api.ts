@@ -87,7 +87,13 @@ export function getCanvasRecord(
 }
 export function listCanvasRecords(
   identity: GalleryIdentity,
-  params: { page?: number; source?: string; search?: string; sort?: string },
+  params: {
+    page?: number
+    page_size?: number
+    source?: string
+    search?: string
+    sort?: string
+  },
   signal?: AbortSignal
 ) {
   return request<{

@@ -103,6 +103,34 @@ it('shows combined usage, filters sources and paginates server results', async (
   expect(screen.getByText('2 / 3')).toBeVisible()
 })
 
+it('shows the remote canvas total before opening the canvases tab', async () => {
+  api.defaults.adapter = async (config) => {
+    if (config.url?.endsWith('/usage')) return response(config, usage)
+    if (config.url?.endsWith('/canvases')) {
+      return response(config, {
+        items: [],
+        total: 7,
+        page: 1,
+        page_size: 1,
+      })
+    }
+    return response(config, {
+      items: [galleryImage],
+      total: 1,
+      page: 1,
+      page_size: 24,
+    })
+  }
+  render(
+    <QueryClientProvider client={client}>
+      <Gallery />
+    </QueryClientProvider>
+  )
+
+  const canvasesTab = await screen.findByRole('tab', { name: /Canvases/ })
+  await waitFor(() => expect(within(canvasesTab).getByText('7')).toBeVisible())
+})
+
 it('fetches private thumbnails with authentication and revokes blob URLs on disposal', async () => {
   const privateRequests: string[] = []
   api.defaults.adapter = async (config) => {

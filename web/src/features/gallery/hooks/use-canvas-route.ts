@@ -15,7 +15,7 @@ You should have received a copy of the GNU Affero General Public License
 along with this program. If not, see <https://www.gnu.org/licenses/>.
 */
 import { useReactFlow } from '@xyflow/react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import { useAuthStore } from '@/stores/auth-store'
 
@@ -36,6 +36,8 @@ export function useCanvasRoute(
   const userId = useAuthStore((state) => state.auth.user?.id ?? null)
   const sessionId = useAuthStore((state) => state.auth.session?.sid ?? null)
   const flow = useReactFlow()
+  const flowRef = useRef(flow)
+  flowRef.current = flow
   const [attempt, setAttempt] = useState(0)
   const [route, setRoute] = useState<CanvasRouteState>(() => ({
     loading: Boolean(canvasId),
@@ -66,7 +68,7 @@ export function useCanvasRoute(
                 return
               }
               void Promise.resolve(
-                flow.fitView({
+                flowRef.current.fitView({
                   nodes: [{ id: node.id }],
                   padding: 0.3,
                   maxZoom: 1,
@@ -77,7 +79,7 @@ export function useCanvasRoute(
             })
           })
         } else {
-          await flow.setViewport(storeFor(kind).getState().viewport)
+          await flowRef.current.setViewport(storeFor(kind).getState().viewport)
         }
       } catch (error: unknown) {
         if (active) {
@@ -93,7 +95,7 @@ export function useCanvasRoute(
     return () => {
       active = false
     }
-  }, [attempt, canvasId, focusAssetId, kind, userId, sessionId, flow])
+  }, [attempt, canvasId, focusAssetId, kind, userId, sessionId])
   return {
     ...route,
     retry: () => {

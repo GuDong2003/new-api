@@ -57,6 +57,13 @@ import {
 } from './session'
 
 type EditorDocument = DrawingDocument | NaiCanvasDocument
+
+const openingCanvasProjects = new Map<string, Promise<void>>()
+
+function canvasOpenKey(identity: GalleryIdentity, id: string) {
+  return `${identity.userId}:${identity.sessionId}:${id}`
+}
+
 export async function exportCanvasProject(
   identity: GalleryIdentity,
   kind: CanvasKind
@@ -190,7 +197,30 @@ async function downloadCloudCanvas(
     assets: remote.assets,
   })
 }
-export async function openCanvasProject(
+export function openCanvasProject(
+  identity: GalleryIdentity,
+  id: string,
+  focusAssetId?: string,
+  expectedKind?: CanvasKind
+): Promise<void> {
+  const key = canvasOpenKey(identity, id)
+  const existing = openingCanvasProjects.get(key)
+  if (existing) return existing
+  const pending = openCanvasProjectInternal(
+    identity,
+    id,
+    focusAssetId,
+    expectedKind
+  ).finally(() => {
+    if (openingCanvasProjects.get(key) === pending) {
+      openingCanvasProjects.delete(key)
+    }
+  })
+  openingCanvasProjects.set(key, pending)
+  return pending
+}
+
+async function openCanvasProjectInternal(
   identity: GalleryIdentity,
   id: string,
   focusAssetId?: string,
@@ -209,6 +239,25 @@ export async function openCanvasProject(
     throw new Error('Canvas type does not match this editor.')
   }
   const old = canvasEditors.get(canvas.kind)
+  if (
+    old &&
+    sameIdentity(old.identity, identity) &&
+    old.canvasId === id &&
+    canvas.status !== 'conflict' &&
+    getCanvasEditorState(canvas.kind)?.localStatus === 'saved'
+  ) {
+    if (focusAssetId) {
+      const node = storeFor(canvas.kind)
+        .getState()
+        .nodes.find((item) => item.data.asset?.id === focusAssetId)
+      if (node) {
+        storeFor(canvas.kind)
+          .getState()
+          .changeNodes([{ id: node.id, type: 'select', selected: true }])
+      }
+    }
+    return
+  }
   let reopened = false
   if (old && sameIdentity(old.identity, identity)) {
     await old.flush()

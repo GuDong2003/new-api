@@ -103,6 +103,31 @@ func contentAuditTestPNG(t *testing.T) []byte {
 	return data.Bytes()
 }
 
+func TestListContentAuditsHidesEmptyAsyncImageSubmission(t *testing.T) {
+	contentAuditTestRuntime(t)
+	now := time.Now().Unix()
+	rows := []model.ContentAudit{
+		{AuditID: contentAuditRandomID(), Attempt: contentAuditRandomID(), CreatedAt: now, ExpiresAt: now + 600, Kind: "image", HTTPStatus: 202, Integrity: "complete", FormatVersion: 2, Status: model.ContentAuditReady},
+		{AuditID: contentAuditRandomID(), Attempt: contentAuditRandomID(), CreatedAt: now - 1, ExpiresAt: now + 600, Kind: "image", HTTPStatus: 200, Integrity: "complete", FormatVersion: 2, Status: model.ContentAuditReady},
+		{AuditID: contentAuditRandomID(), Attempt: contentAuditRandomID(), CreatedAt: now - 2, ExpiresAt: now + 600, Kind: "image", HTTPStatus: 524, Integrity: "partial", FormatVersion: 2, Status: model.ContentAuditReady},
+	}
+	for index := range rows {
+		require.NoError(t, model.DB.Create(&rows[index]).Error)
+	}
+	// The successful image has one committed descriptor and must remain visible.
+	require.NoError(t, model.DB.Create(&model.ContentAuditImage{
+		AuditID: rows[1].AuditID, Attempt: rows[1].Attempt, ImageIndex: 0, Committed: true,
+	}).Error)
+
+	records, total, err := model.ListContentAudits(context.Background(), model.ContentAuditFilter{
+		Start: now - 10, End: now + 10, Kind: "image", Page: 1, PageSize: 25,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), total)
+	assert.Len(t, records, 2)
+	assert.NotContains(t, records, rows[0])
+}
+
 func contentAuditTestLargePNG(t *testing.T) []byte {
 	t.Helper()
 	picture := contentAuditTestPNG(t)

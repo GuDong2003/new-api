@@ -108,11 +108,9 @@ function ContentAuditDetailContent(props: ContentAuditDetailProps) {
       )}
       contentClassName='sm:max-w-5xl'
       footer={
-        <>
-          <Button variant='outline' onClick={props.onClose}>
-            {t('Close')}
-          </Button>
-        </>
+        <Button variant='outline' onClick={props.onClose}>
+          {t('Close')}
+        </Button>
       }
     >
       {expired && (
@@ -194,6 +192,20 @@ function ContentAuditPayload(props: { detail: ContentAuditDetail }) {
       value: payload.response_text,
     })
   }
+  let imageResultNotice: string | null = null
+  if (record.kind === 'image' && payload.image_total === 0) {
+    if (record.http_status === 202) {
+      imageResultNotice = t(
+        'Asynchronous image task submitted; no image result was captured in this record.'
+      )
+    } else if (record.integrity === 'partial' || record.http_status >= 500) {
+      imageResultNotice = t(
+        'Image capture was incomplete; no usable image result was saved.'
+      )
+    } else {
+      imageResultNotice = t('No image result was captured in this record.')
+    }
+  }
   return (
     <div className='min-w-0 space-y-4'>
       <div className='flex flex-wrap gap-2'>
@@ -237,6 +249,11 @@ function ContentAuditPayload(props: { detail: ContentAuditDetail }) {
           <AlertDescription>
             {contentAuditCodeLabel(record.error_code, t)}
           </AlertDescription>
+        </Alert>
+      )}
+      {imageResultNotice && (
+        <Alert>
+          <AlertDescription>{imageResultNotice}</AlertDescription>
         </Alert>
       )}
       <dl className='grid min-w-0 gap-3 text-sm sm:grid-cols-2 lg:grid-cols-3'>

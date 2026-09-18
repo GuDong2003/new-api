@@ -22,6 +22,8 @@ tiktoken_cache
 .eslintcache
 .gocache
 .gomodcache/
+.tmp/
+/node_modules/
 .cache
 .plans
 .claude
