@@ -368,6 +368,58 @@ func gallerySave(t *testing.T, user int, source, id string, data []byte) (*model
 	return service.SaveGalleryImage(context.Background(), user, galleryMultipart(t, string(metadata), []string{"file", string(data)}))
 }
 
+func TestSaveTaskGalleryImageStoresOriginalAndThumbnail(t *testing.T) {
+	galleryFixture(t, sqlite.Open(filepath.Join(t.TempDir(), "gallery.db")))
+	original := galleryPNG(t)
+
+	saved, err := service.SaveTaskGalleryImage(
+		context.Background(),
+		7,
+		"task_gallery",
+		"image-0",
+		"gpt-image-1",
+		"a white fox",
+		"image/png",
+		bytes.NewReader(original),
+	)
+	require.NoError(t, err)
+	assert.Equal(t, "api", saved.Source)
+	assert.Equal(t, "task_gallery:image-0", saved.SourceID)
+	assert.True(t, saved.HasThumbnail)
+
+	file, _, err := service.OpenGalleryImage(context.Background(), 7, saved.ID, false)
+	require.NoError(t, err)
+	storedOriginal, err := io.ReadAll(file)
+	file.Close()
+	require.NoError(t, err)
+	assert.Equal(t, original, storedOriginal)
+
+	thumbnail, _, err := service.OpenGalleryImage(context.Background(), 7, saved.ID, true)
+	require.NoError(t, err)
+	thumbnailBytes, err := io.ReadAll(thumbnail)
+	thumbnail.Close()
+	require.NoError(t, err)
+	_, format, err := image.Decode(bytes.NewReader(thumbnailBytes))
+	require.NoError(t, err)
+	assert.Equal(t, "jpeg", format)
+}
+
+func TestTaskGalleryImageIsReusedWhenCanvasIsSaved(t *testing.T) {
+	galleryFixture(t, sqlite.Open(filepath.Join(t.TempDir(), "gallery.db")))
+	original := galleryPNG(t)
+	taskImage, err := service.SaveTaskGalleryImage(context.Background(), 41, "task_canvas", "image-0", "gpt-image-1", "fox", "image/png", bytes.NewReader(original))
+	require.NoError(t, err)
+
+	saved, err := saveCanvasMetadata(t, 41, canvasSaveMetadata(t), []string{"file:" + canvasFixtureAsset, string(original)})
+	require.NoError(t, err)
+	assert.Equal(t, taskImage.ID, saved.AssetIDMap[canvasFixtureAsset])
+	assert.Equal(t, taskImage.ID, saved.Assets[0].ID)
+
+	var linked model.GalleryImage
+	require.NoError(t, model.DB.Where("id = ?", taskImage.ID).First(&linked).Error)
+	assert.Equal(t, saved.ID, linked.CanvasID)
+}
+
 const canvasFixtureID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 const canvasFixtureAsset = "11111111-1111-4111-8111-111111111111"
 

@@ -3,7 +3,9 @@ package controller
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"net/http"
@@ -43,6 +45,7 @@ const (
 	imageTaskStatusCompleted  = "completed"
 	imageTaskStatusFailed     = "failed"
 	imageTaskStatusUnknown    = "unknown"
+	imageTaskArtifactMaxBytes = 10 << 20
 )
 
 // asyncImageRequestTimeout bounds one detached generation. constant.TaskTimeoutMinutes
@@ -191,6 +194,32 @@ type asyncImageResponseRecorder struct {
 	overflow bool
 }
 
+// imageResponseCaptureWriter mirrors a synchronous image response to the
+// client while retaining a bounded copy for creating the completed task row.
+type imageResponseCaptureWriter struct {
+	gin.ResponseWriter
+	body     bytes.Buffer
+	limit    int
+	overflow bool
+}
+
+func (w *imageResponseCaptureWriter) Write(data []byte) (int, error) {
+	remaining := w.limit - w.body.Len()
+	if remaining <= 0 {
+		w.overflow = true
+	} else if len(data) > remaining {
+		_, _ = w.body.Write(data[:remaining])
+		w.overflow = true
+	} else {
+		_, _ = w.body.Write(data)
+	}
+	return w.ResponseWriter.Write(data)
+}
+
+func (w *imageResponseCaptureWriter) WriteString(value string) (int, error) {
+	return w.Write([]byte(value))
+}
+
 func (r *asyncImageResponseRecorder) Header() http.Header {
 	return r.header
 }
@@ -251,6 +280,23 @@ func imageTaskAction(relayMode int) string {
 	return constant.TaskActionImageGeneration
 }
 
+func imageTaskGallerySource(info *relaycommon.RelayInfo, request *dto.ImageRequest) string {
+	if info == nil || !info.IsPlayground {
+		return "api"
+	}
+	modelName := ""
+	if request != nil {
+		modelName = request.Model
+	}
+	if modelName == "" {
+		modelName = info.OriginModelName
+	}
+	if strings.Contains(strings.ToLower(modelName), "nai") {
+		return "nai"
+	}
+	return "drawing"
+}
+
 // asyncImageStorable reports whether a finished result can be kept on a task
 // row. Inline base64 is the only image payload that grows large, and MySQL's
 // default max_allowed_packet (4 MB on 5.7) bounds one row, so a base64 batch is
@@ -309,6 +355,7 @@ func submitAsyncImageTask(c *gin.Context, info *relaycommon.RelayInfo, request *
 		// sweeper must never issue a second refund for the same request.
 		PrivateData: model.TaskPrivateData{NodeName: common.NodeName},
 	}
+	task.PrivateData.GallerySource = imageTaskGallerySource(info, request)
 
 	run := &asyncImageRun{keys: make(map[string]any, len(c.Keys)+3)}
 	maps.Copy(run.keys, c.Keys)
@@ -437,8 +484,19 @@ func finishAsyncImageTask(ctx context.Context, task *model.Task, run *asyncImage
 		task.FailReason = truncateAsyncImageText(err.Error())
 	} else {
 		task.Status = model.TaskStatusSuccess
-		task.Data = result
-		task.PrivateData.ResultURL = firstAsyncImageURL(result)
+		storedResult, imageIDs, persistErr := persistImageTaskArtifacts(ctx, task, result)
+		if persistErr != nil {
+			// Gallery storage is an optional durable copy. Keep the generated
+			// response available when storage is disabled or full; the task still
+			// represents a successful upstream generation.
+			logger.LogWarn(ctx, fmt.Sprintf("persist async image artifacts for task %s failed: %v", task.TaskID, persistErr))
+			task.Data = stripImageTaskBase64(result)
+			task.PrivateData.ResultURL = firstAsyncImageURL(result)
+		} else {
+			task.Data = storedResult
+			task.PrivateData.GalleryImageIDs = imageIDs
+			task.PrivateData.ResultURL = firstAsyncImageURL(storedResult)
+		}
 	}
 
 	won, updateErr := task.UpdateWithStatus(fromStatus)
@@ -449,6 +507,112 @@ func finishAsyncImageTask(ctx context.Context, task *model.Task, run *asyncImage
 	if !won {
 		logger.LogInfo(ctx, fmt.Sprintf("async image task %s already transitioned, skip result write", task.TaskID))
 	}
+}
+
+func persistImageTaskArtifacts(ctx context.Context, task *model.Task, result json.RawMessage) (json.RawMessage, map[string]string, error) {
+	if task == nil || task.UserId <= 0 {
+		return nil, nil, errors.New("image task owner is invalid")
+	}
+	var response dto.ImageResponse
+	if err := common.Unmarshal(result, &response); err != nil {
+		return nil, nil, fmt.Errorf("decode image result: %w", err)
+	}
+	if len(response.Data) == 0 {
+		return nil, nil, errors.New("image result contains no images")
+	}
+
+	imageIDs := make(map[string]string, len(response.Data))
+	gallerySource := task.PrivateData.GallerySource
+	if gallerySource == "" {
+		gallerySource = "api"
+	}
+	published := false
+	defer func() {
+		if published {
+			return
+		}
+		for _, imageID := range imageIDs {
+			_ = service.DeleteGalleryImage(context.Background(), task.UserId, imageID)
+		}
+	}()
+
+	sanitized := make([]dto.ImageData, len(response.Data))
+	for index, item := range response.Data {
+		artifactKey := fmt.Sprintf("image-%d", index)
+		var galleryImage *model.GalleryImage
+		var err error
+		if strings.TrimSpace(item.B64Json) != "" {
+			data, decodeErr := decodeAsyncImageBase64(item.B64Json)
+			if decodeErr != nil {
+				return nil, nil, decodeErr
+			}
+			galleryImage, err = service.SaveTaskGalleryImageWithSource(ctx, task.UserId, task.TaskID, artifactKey, gallerySource, task.Properties.OriginModelName, task.Properties.Input, "", bytes.NewReader(data))
+		} else if strings.TrimSpace(item.Url) != "" {
+			if data, isDataURL, decodeErr := decodeAsyncImageDataURL(item.Url); isDataURL {
+				if decodeErr != nil {
+					return nil, nil, decodeErr
+				}
+				galleryImage, err = service.SaveTaskGalleryImageWithSource(ctx, task.UserId, task.TaskID, artifactKey, gallerySource, task.Properties.OriginModelName, task.Properties.Input, "", bytes.NewReader(data))
+			} else {
+				galleryImage, err = service.SaveTaskGalleryImageFromURLWithSource(ctx, task.UserId, task.TaskID, artifactKey, gallerySource, task.Properties.OriginModelName, task.Properties.Input, item.Url)
+			}
+		} else {
+			return nil, nil, fmt.Errorf("image result %s has no image data", artifactKey)
+		}
+		if err != nil {
+			return nil, nil, fmt.Errorf("save %s: %w", artifactKey, err)
+		}
+		imageIDs[artifactKey] = galleryImage.ID
+		contentURL, urlErr := service.BuildTaskArtifactContentURL(task.TaskID, artifactKey)
+		if urlErr != nil {
+			return nil, nil, urlErr
+		}
+		sanitized[index] = dto.ImageData{Url: contentURL, RevisedPrompt: item.RevisedPrompt}
+	}
+
+	encodedData, err := common.Marshal(sanitized)
+	if err != nil {
+		return nil, nil, err
+	}
+	sanitizedResult, err := sjson.SetRawBytes(bytes.Clone(result), "data", encodedData)
+	if err != nil {
+		return nil, nil, err
+	}
+	for index := range sanitized {
+		sanitizedResult, err = sjson.DeleteBytes(sanitizedResult, "data."+strconv.Itoa(index)+".b64_json")
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	published = true
+	return json.RawMessage(sanitizedResult), imageIDs, nil
+}
+
+func decodeAsyncImageBase64(value string) ([]byte, error) {
+	value = strings.TrimSpace(value)
+	if value == "" || len(value) > ((imageTaskArtifactMaxBytes+2)/3)*4+4 {
+		return nil, errors.New("base64 image exceeds the gallery size limit")
+	}
+	data, err := base64.StdEncoding.DecodeString(value)
+	if err != nil {
+		data, err = base64.RawStdEncoding.DecodeString(value)
+	}
+	if err != nil || len(data) == 0 || len(data) > imageTaskArtifactMaxBytes {
+		return nil, errors.New("invalid base64 image data")
+	}
+	return data, nil
+}
+
+func decodeAsyncImageDataURL(value string) ([]byte, bool, error) {
+	if !strings.HasPrefix(strings.ToLower(value), "data:") {
+		return nil, false, nil
+	}
+	header, payload, ok := strings.Cut(value, ",")
+	if !ok || !strings.HasPrefix(strings.ToLower(header), "data:image/") || !strings.HasSuffix(strings.ToLower(header), ";base64") {
+		return nil, true, errors.New("unsupported image data URL")
+	}
+	data, err := decodeAsyncImageBase64(payload)
+	return data, true, err
 }
 
 func failAsyncImageTask(ctx context.Context, task *model.Task, reason string) {
@@ -479,6 +643,80 @@ func asyncImageResult(r *asyncImageResponseRecorder) (json.RawMessage, error) {
 		return collapseAsyncImageStream(body)
 	}
 	return nil, fmt.Errorf("upstream returned an unsupported async image response")
+}
+
+func synchronousImageResult(w *imageResponseCaptureWriter) (json.RawMessage, error) {
+	recorder := &asyncImageResponseRecorder{
+		header:   w.Header().Clone(),
+		body:     w.body,
+		status:   w.Status(),
+		limit:    w.limit,
+		overflow: w.overflow,
+	}
+	return asyncImageResult(recorder)
+}
+
+func persistSynchronousImageTask(c *gin.Context, info *relaycommon.RelayInfo, request *dto.ImageRequest, result json.RawMessage) (*model.Task, error) {
+	now := time.Now().Unix()
+	task := &model.Task{
+		TaskID:     model.GenerateTaskID(),
+		Platform:   constant.TaskPlatformImage,
+		UserId:     info.UserId,
+		Group:      info.UsingGroup,
+		ChannelId:  info.GetChannelID(),
+		Action:     imageTaskAction(info.RelayMode),
+		Status:     model.TaskStatusSuccess,
+		Progress:   "100%",
+		SubmitTime: now,
+		StartTime:  now,
+		FinishTime: now,
+		Properties: model.Properties{Input: request.Prompt, OriginModelName: info.OriginModelName, UpstreamModelName: info.UpstreamModelName},
+		PrivateData: model.TaskPrivateData{
+			NodeName: common.NodeName,
+		},
+		Quota: common.GetContextKeyInt(c, constant.ContextKeyAsyncImageQuota),
+	}
+	if task.Properties.UpstreamModelName == "" {
+		task.Properties.UpstreamModelName = info.OriginModelName
+	}
+	task.PrivateData.GallerySource = imageTaskGallerySource(info, request)
+	storedResult, imageIDs, err := persistImageTaskArtifacts(c.Request.Context(), task, result)
+	if err != nil {
+		logger.LogWarn(c, fmt.Sprintf("persist synchronous image artifacts for task %s failed: %v", task.TaskID, err))
+		task.Data = stripImageTaskBase64(result)
+	} else {
+		task.Data = storedResult
+		task.PrivateData.GalleryImageIDs = imageIDs
+		task.PrivateData.ResultURL = firstAsyncImageURL(storedResult)
+	}
+	if err = task.InsertWithContext(c.Request.Context()); err != nil {
+		for _, imageID := range imageIDs {
+			_ = service.DeleteGalleryImage(context.Background(), task.UserId, imageID)
+		}
+		return nil, err
+	}
+	return task, nil
+}
+
+func stripImageTaskBase64(result json.RawMessage) json.RawMessage {
+	var response dto.ImageResponse
+	if err := common.Unmarshal(result, &response); err != nil {
+		return json.RawMessage(`{"data":[]}`)
+	}
+	for index := range response.Data {
+		response.Data[index].B64Json = ""
+	}
+	encoded, err := common.Marshal(response)
+	if err != nil {
+		return json.RawMessage(`{"data":[]}`)
+	}
+	for index := range response.Data {
+		encoded, err = sjson.DeleteBytes(encoded, "data."+strconv.Itoa(index)+".b64_json")
+		if err != nil {
+			return json.RawMessage(`{"data":[]}`)
+		}
+	}
+	return json.RawMessage(encoded)
 }
 
 // collapseAsyncImageStream folds a streamed image response into the same object

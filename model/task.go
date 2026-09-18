@@ -109,9 +109,11 @@ func (m Properties) Value() (driver.Value, error) {
 }
 
 type TaskPrivateData struct {
-	Key            string `json:"key,omitempty"`
-	UpstreamTaskID string `json:"upstream_task_id,omitempty"` // 上游真实 task ID
-	ResultURL      string `json:"result_url,omitempty"`       // 任务成功后的结果 URL（视频地址等）
+	Key             string            `json:"key,omitempty"`
+	UpstreamTaskID  string            `json:"upstream_task_id,omitempty"`  // 上游真实 task ID
+	ResultURL       string            `json:"result_url,omitempty"`        // 任务成功后的结果 URL（视频地址等）
+	GalleryImageIDs map[string]string `json:"gallery_image_ids,omitempty"` // 异步生图制品对应的图库图片 ID
+	GallerySource   string            `json:"gallery_source,omitempty"`    // 生图来源：api、drawing 或 nai
 	// Execution records safe, immutable request provenance. It lives next to
 	// other private task state so public task DTOs cannot expose it by accident.
 	Execution *TaskExecutionSnapshot `json:"execution,omitempty"`
@@ -199,7 +201,7 @@ func (p *TaskPrivateData) Scan(val any) error {
 }
 
 func (p TaskPrivateData) Value() (driver.Value, error) {
-	if p.Key == "" && p.UpstreamTaskID == "" && p.ResultURL == "" &&
+	if p.Key == "" && p.UpstreamTaskID == "" && p.ResultURL == "" && len(p.GalleryImageIDs) == 0 && p.GallerySource == "" &&
 		p.Execution == nil && p.BillingSource == "" && p.SubscriptionId == 0 &&
 		p.TokenId == 0 && p.NodeName == "" && p.BillingContext == nil &&
 		!p.ResponsesBackground && len(p.PluginState) == 0 && p.PollFailures == 0 {

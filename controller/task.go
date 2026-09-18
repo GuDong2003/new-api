@@ -1,12 +1,15 @@
 package controller
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -19,6 +22,7 @@ import (
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 type taskArtifactResponse struct {
@@ -26,6 +30,7 @@ type taskArtifactResponse struct {
 	Type       string `json:"type"`
 	MimeType   string `json:"mime_type,omitempty"`
 	ContentURL string `json:"content_url"`
+	PreviewURL string `json:"preview_url,omitempty"`
 }
 
 var (
@@ -91,7 +96,18 @@ func GetDashboardTaskArtifacts(c *gin.Context) {
 
 func writeTaskArtifacts(c *gin.Context, task *model.Task, dashboard bool) {
 	c.Header("Cache-Control", "private, no-store")
-	artifacts, err := projectTaskArtifacts(task)
+	imageArtifacts, err := projectImageTaskArtifacts(task)
+	if err != nil {
+		writeTaskArtifactProjectionError(c, err)
+		return
+	}
+	pluginArtifacts, err := projectTaskArtifacts(task)
+	if err != nil {
+		writeTaskArtifactProjectionError(c, err)
+		return
+	}
+	artifacts := append(imageArtifacts, pluginArtifacts...)
+	artifacts, err = validateProjectedTaskArtifacts(artifacts)
 	if err != nil {
 		writeTaskArtifactProjectionError(c, err)
 		return
@@ -103,12 +119,20 @@ func writeTaskArtifacts(c *gin.Context, task *model.Task, dashboard bool) {
 			writeTaskArtifactError(c, http.StatusInternalServerError, "artifact_url_error", "Failed to build artifact content URL")
 			return
 		}
-		items = append(items, taskArtifactResponse{
+		item := taskArtifactResponse{
 			Key:        artifact.Key,
 			Type:       artifact.Type,
 			MimeType:   artifact.MimeType,
 			ContentURL: contentURL,
-		})
+		}
+		if _, ok := task.PrivateData.GalleryImageIDs[artifact.Key]; ok && artifact.Type == "image" {
+			item.PreviewURL, buildErr = service.BuildTaskArtifactPreviewURL(task.TaskID, artifact.Key)
+			if buildErr != nil {
+				writeTaskArtifactError(c, http.StatusInternalServerError, "artifact_url_error", "Failed to build artifact preview URL")
+				return
+			}
+		}
+		items = append(items, item)
 	}
 	response := gin.H{"task_id": task.TaskID, "artifacts": items}
 	if legacyVideoAvailable(task) {
@@ -124,6 +148,33 @@ func writeTaskArtifacts(c *gin.Context, task *model.Task, dashboard bool) {
 		return
 	}
 	c.JSON(http.StatusOK, response)
+}
+
+func projectImageTaskArtifacts(task *model.Task) ([]relaychannel.TaskArtifact, error) {
+	if task == nil || task.Status != model.TaskStatusSuccess || len(task.PrivateData.GalleryImageIDs) == 0 {
+		return []relaychannel.TaskArtifact{}, nil
+	}
+	keys := make([]string, 0, len(task.PrivateData.GalleryImageIDs))
+	for key := range task.PrivateData.GalleryImageIDs {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	artifacts := make([]relaychannel.TaskArtifact, 0, len(keys))
+	for _, key := range keys {
+		imageID := strings.TrimSpace(task.PrivateData.GalleryImageIDs[key])
+		if !taskArtifactKeyPattern.MatchString(key) || imageID == "" {
+			return nil, fmt.Errorf("%w: invalid image artifact reference", errTaskArtifactPlugin)
+		}
+		mimeType := ""
+		record, err := model.OwnedGalleryImage(context.Background(), task.UserId, imageID, time.Now().Unix())
+		if err == nil {
+			mimeType = record.MIMEType
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("%w: gallery image unavailable", errTaskArtifactPlugin)
+		}
+		artifacts = append(artifacts, relaychannel.TaskArtifact{Key: key, Type: "image", MimeType: mimeType})
+	}
+	return validateProjectedTaskArtifacts(artifacts)
 }
 
 func projectTaskArtifacts(task *model.Task) ([]relaychannel.TaskArtifact, error) {
@@ -293,6 +344,33 @@ func TaskArtifactContent(c *gin.Context) {
 	}
 	if task.Status != model.TaskStatusSuccess {
 		writeTaskArtifactError(c, http.StatusConflict, "artifact_not_ready", "Task artifacts are not ready")
+		return
+	}
+	if imageID, ok := task.PrivateData.GalleryImageIDs[artifactKey]; ok {
+		variant := c.Query("variant")
+		if variant != "" && variant != "thumbnail" {
+			writeTaskArtifactError(c, http.StatusNotFound, "artifact_not_found", "Task or artifact not found")
+			return
+		}
+		file, record, openErr := service.OpenGalleryImage(c.Request.Context(), task.UserId, imageID, variant == "thumbnail")
+		if openErr != nil {
+			writeTaskArtifactError(c, http.StatusNotFound, "artifact_not_found", "Task or artifact not found")
+			return
+		}
+		defer file.Close()
+		info, statErr := file.Stat()
+		if statErr != nil {
+			writeTaskArtifactError(c, http.StatusNotFound, "artifact_not_found", "Task or artifact not found")
+			return
+		}
+		mimeType := record.MIMEType
+		if variant == "thumbnail" && record.HasThumbnail {
+			mimeType = "image/jpeg"
+		}
+		c.Header("Cache-Control", "private, no-store")
+		c.Header("X-Content-Type-Options", "nosniff")
+		c.Header("Content-Disposition", `inline; filename="`+artifactKey+`"`)
+		c.DataFromReader(http.StatusOK, info.Size(), mimeType, file, nil)
 		return
 	}
 	if !taskHasPluginExecution(task) {

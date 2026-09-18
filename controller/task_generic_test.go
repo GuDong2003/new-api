@@ -1,7 +1,10 @@
 package controller
 
 import (
+	"bytes"
 	"context"
+	"image"
+	"image/png"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -356,6 +359,69 @@ func TestProjectedTaskArtifactValidationRejectsAmbiguousIdentity(t *testing.T) {
 		_, err := validateProjectedTaskArtifacts(artifacts)
 		assert.ErrorIs(t, err, errTaskArtifactPlugin)
 	}
+}
+
+func TestImageTaskArtifactsUseGalleryPreviewAndOriginal(t *testing.T) {
+	task := setupGenericTaskTest(t)
+	require.NoError(t, model.MigrateGallery(model.DB))
+	t.Setenv("GALLERY_STORAGE_DIR", t.TempDir())
+	previousSecret := common.CryptoSecret
+	previousAddress := system_setting.ServerAddress
+	common.CryptoSecret = "image-artifact-test-secret"
+	system_setting.ServerAddress = "https://gateway.example"
+	t.Cleanup(func() {
+		common.CryptoSecret = previousSecret
+		system_setting.ServerAddress = previousAddress
+	})
+
+	var original bytes.Buffer
+	require.NoError(t, png.Encode(&original, image.NewRGBA(image.Rect(0, 0, 16, 8))))
+	saved, err := service.SaveTaskGalleryImage(context.Background(), task.UserId, task.TaskID, "image-0", "gpt-image-1", "a fox", "image/png", bytes.NewReader(original.Bytes()))
+	require.NoError(t, err)
+	task.PrivateData.GalleryImageIDs = map[string]string{"image-0": saved.ID}
+	require.NoError(t, model.DB.Save(task).Error)
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Set("id", task.UserId)
+	c.Set("role", common.RoleCommonUser)
+	c.Params = gin.Params{{Key: "task_id", Value: task.TaskID}}
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/task/"+task.TaskID+"/artifacts", nil)
+	GetDashboardTaskArtifacts(c)
+
+	assert.Equal(t, http.StatusOK, recorder.Code)
+	var response struct {
+		Success bool `json:"success"`
+		Data    struct {
+			Artifacts []taskArtifactResponse `json:"artifacts"`
+		} `json:"data"`
+	}
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+	require.True(t, response.Success)
+	require.Len(t, response.Data.Artifacts, 1)
+	artifact := response.Data.Artifacts[0]
+	assert.Equal(t, "image-0", artifact.Key)
+	assert.Contains(t, artifact.PreviewURL, "variant=thumbnail")
+	assert.NotEqual(t, artifact.ContentURL, artifact.PreviewURL)
+
+	previewRecorder := httptest.NewRecorder()
+	previewContext, _ := gin.CreateTestContext(previewRecorder)
+	previewContext.Set(middleware.TaskArtifactAccessContextKey, true)
+	previewContext.Params = gin.Params{{Key: "key", Value: task.TaskID}, {Key: "artifact_key", Value: "image-0"}}
+	previewContext.Request = httptest.NewRequest(http.MethodGet, artifact.PreviewURL, nil)
+	TaskArtifactContent(previewContext)
+	assert.Equal(t, http.StatusOK, previewRecorder.Code)
+	assert.Equal(t, "image/jpeg", previewRecorder.Header().Get("Content-Type"))
+
+	originalRecorder := httptest.NewRecorder()
+	originalContext, _ := gin.CreateTestContext(originalRecorder)
+	originalContext.Set(middleware.TaskArtifactAccessContextKey, true)
+	originalContext.Params = gin.Params{{Key: "key", Value: task.TaskID}, {Key: "artifact_key", Value: "image-0"}}
+	originalContext.Request = httptest.NewRequest(http.MethodGet, artifact.ContentURL, nil)
+	TaskArtifactContent(originalContext)
+	assert.Equal(t, http.StatusOK, originalRecorder.Code)
+	assert.Equal(t, "image/png", originalRecorder.Header().Get("Content-Type"))
+	assert.Equal(t, original.Bytes(), originalRecorder.Body.Bytes())
 }
 
 func TestProxyTaskMediaForwardsRangeAndFiltersResponseHeaders(t *testing.T) {

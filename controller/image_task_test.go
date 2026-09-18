@@ -3,8 +3,11 @@ package controller
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"image"
+	"image/png"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -17,11 +20,15 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
+	"github.com/QuantumNous/new-api/setting/system_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
@@ -75,6 +82,7 @@ func TestImageTaskSubmissionUsesAutomaticallySelectedChannel(t *testing.T) {
 			connection.SetMaxOpenConns(1)
 			t.Cleanup(func() { require.NoError(t, connection.Close()) })
 			require.NoError(t, database.AutoMigrate(&model.Task{}, &model.User{}, &model.Channel{}, &model.UserSubscription{}))
+			require.NoError(t, model.MigrateGallery(database))
 			model.DB = database
 			require.NoError(t, database.Create(&model.User{Id: 7, Username: "image-owner", Group: "default", Quota: 100_000_000}).Error)
 			completed := make(chan error, 1)
@@ -192,7 +200,11 @@ func TestImageTaskSubmissionUsesAutomaticallySelectedChannel(t *testing.T) {
 				assert.Empty(t, result.TaskID)
 				var count int64
 				require.NoError(t, database.Model(&model.Task{}).Count(&count).Error)
-				assert.Zero(t, count)
+				if test.failInsert {
+					assert.Zero(t, count)
+				} else {
+					assert.Equal(t, int64(1), count)
+				}
 			}
 			require.Len(t, result.Data, 1)
 			assert.Equal(t, "https://example.com/generated.png", result.Data[0].Url)
@@ -505,6 +517,117 @@ func TestFinishAsyncImageTaskPersistsBillingQuota(t *testing.T) {
 	require.NoError(t, database.Where("task_id = ?", task.TaskID).First(&stored).Error)
 	assert.Equal(t, model.TaskStatus(model.TaskStatusSuccess), stored.Status)
 	assert.Equal(t, 5_000_000, stored.Quota)
+}
+
+func TestFinishAsyncImageTaskPersistsGalleryArtifactsWithoutBase64TaskData(t *testing.T) {
+	previousDB := model.DB
+	previousSecret := common.CryptoSecret
+	previousServerAddress := system_setting.ServerAddress
+	database, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	connection, err := database.DB()
+	require.NoError(t, err)
+	connection.SetMaxOpenConns(1)
+	t.Setenv("GALLERY_STORAGE_DIR", t.TempDir())
+	t.Cleanup(func() {
+		model.DB = previousDB
+		common.CryptoSecret = previousSecret
+		system_setting.ServerAddress = previousServerAddress
+		require.NoError(t, connection.Close())
+	})
+	common.CryptoSecret = "image-task-test-secret"
+	system_setting.ServerAddress = "https://gateway.example"
+	model.DB = database
+	require.NoError(t, database.AutoMigrate(&model.Task{}))
+	require.NoError(t, model.MigrateGallery(database))
+
+	var picture bytes.Buffer
+	require.NoError(t, png.Encode(&picture, image.NewRGBA(image.Rect(0, 0, 8, 4))))
+	task := &model.Task{
+		TaskID:     "task_gallery_artifacts",
+		Platform:   constant.TaskPlatformImage,
+		UserId:     7,
+		Status:     model.TaskStatusInProgress,
+		Progress:   "0%",
+		SubmitTime: 1700000000,
+		Properties: model.Properties{OriginModelName: "gpt-image-1", Input: "a fox"},
+	}
+	require.NoError(t, task.Insert())
+	run := &asyncImageRun{keys: map[string]any{}}
+	recorder := &asyncImageResponseRecorder{header: make(http.Header), limit: maxAsyncImageResultBytes()}
+	recorder.WriteHeader(http.StatusOK)
+	result := `{"created":1,"data":[{"b64_json":"` + base64.StdEncoding.EncodeToString(picture.Bytes()) + `"}]}`
+	_, err = recorder.Write([]byte(result))
+	require.NoError(t, err)
+
+	finishAsyncImageTask(context.Background(), task, run, recorder)
+
+	var stored model.Task
+	require.NoError(t, database.Where("task_id = ?", task.TaskID).First(&stored).Error)
+	require.Equal(t, model.TaskStatus(model.TaskStatusSuccess), stored.Status)
+	require.NotEmpty(t, stored.PrivateData.GalleryImageIDs["image-0"])
+	assert.NotContains(t, string(stored.Data), "b64_json")
+	imageFile, _, err := service.OpenGalleryImage(context.Background(), 7, stored.PrivateData.GalleryImageIDs["image-0"], true)
+	require.NoError(t, err)
+	_, _, err = image.Decode(imageFile)
+	imageFile.Close()
+	require.NoError(t, err)
+}
+
+func TestPersistSynchronousImageTaskCreatesGalleryArtifacts(t *testing.T) {
+	previousDB := model.DB
+	previousSecret := common.CryptoSecret
+	previousServerAddress := system_setting.ServerAddress
+	database, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	connection, err := database.DB()
+	require.NoError(t, err)
+	connection.SetMaxOpenConns(1)
+	t.Setenv("GALLERY_STORAGE_DIR", t.TempDir())
+	t.Cleanup(func() {
+		model.DB = previousDB
+		common.CryptoSecret = previousSecret
+		system_setting.ServerAddress = previousServerAddress
+		require.NoError(t, connection.Close())
+	})
+	model.DB = database
+	common.CryptoSecret = "sync-image-task-test-secret"
+	system_setting.ServerAddress = "https://gateway.example"
+	require.NoError(t, database.AutoMigrate(&model.Task{}))
+	require.NoError(t, model.MigrateGallery(database))
+
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/pg/images/generations", nil)
+	c.Set("id", 7)
+	c.Set("group", "default")
+	common.SetContextKey(c, constant.ContextKeyAsyncImageQuota, 12345)
+	info := &relaycommon.RelayInfo{
+		UserId:          7,
+		UsingGroup:      "default",
+		OriginModelName: "gpt-image-1",
+		RelayMode:       relayconstant.RelayModeImagesGenerations,
+		ChannelMeta:     &relaycommon.ChannelMeta{ChannelId: 73},
+	}
+	request := &dto.ImageRequest{Prompt: "a white fox"}
+	var picture bytes.Buffer
+	require.NoError(t, png.Encode(&picture, image.NewRGBA(image.Rect(0, 0, 8, 4))))
+	result := json.RawMessage(`{"created":1,"data":[{"url":"","b64_json":"` + base64.StdEncoding.EncodeToString(picture.Bytes()) + `"}]}`)
+
+	task, err := persistSynchronousImageTask(c, info, request, result)
+	require.NoError(t, err)
+	require.NotNil(t, task)
+	assert.Equal(t, model.TaskStatus(model.TaskStatusSuccess), task.Status)
+	assert.Equal(t, 12345, task.Quota)
+	assert.NotEmpty(t, task.PrivateData.GalleryImageIDs["image-0"])
+	assert.NotContains(t, string(task.Data), "b64_json")
+}
+
+func TestImageTaskGallerySourceSeparatesAPIAndCanvasGeneration(t *testing.T) {
+	request := &dto.ImageRequest{Model: "gpt-image-1"}
+	assert.Equal(t, "api", imageTaskGallerySource(&relaycommon.RelayInfo{}, request))
+	assert.Equal(t, "drawing", imageTaskGallerySource(&relaycommon.RelayInfo{IsPlayground: true}, request))
+	request.Model = "nai-diffusion-4-full"
+	assert.Equal(t, "nai", imageTaskGallerySource(&relaycommon.RelayInfo{IsPlayground: true}, request))
 }
 
 func TestBuildImageTaskPayload(t *testing.T) {

@@ -458,7 +458,7 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 		model.UpdateUserUsedQuotaAndRequestCount(relayInfo.UserId, summary.Quota)
 		model.UpdateChannelUsedQuota(relayInfo.ChannelId, summary.Quota)
 	}
-	if common.GetContextKeyString(ctx, constant.ContextKeyAsyncImageTaskID) != "" {
+	if common.GetContextKeyString(ctx, constant.ContextKeyAsyncImageTaskID) != "" || relayInfo.GetFinalRequestRelayFormat() == types.RelayFormatOpenAIImage {
 		common.SetContextKey(ctx, constant.ContextKeyAsyncImageQuota, summary.Quota)
 	}
 

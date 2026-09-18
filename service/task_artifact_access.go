@@ -135,3 +135,20 @@ func BuildTaskArtifactContentURL(taskID, artifactKey string) (string, error) {
 	baseURL.RawQuery = query.Encode()
 	return baseURL.String(), nil
 }
+
+// BuildTaskArtifactPreviewURL addresses the thumbnail variant of an image
+// artifact while retaining the same task/key capability.
+func BuildTaskArtifactPreviewURL(taskID, artifactKey string) (string, error) {
+	contentURL, err := BuildTaskArtifactContentURL(taskID, artifactKey)
+	if err != nil {
+		return "", err
+	}
+	parsed, err := url.Parse(contentURL)
+	if err != nil {
+		return "", err
+	}
+	query := parsed.Query()
+	query.Set("variant", "thumbnail")
+	parsed.RawQuery = query.Encode()
+	return parsed.String(), nil
+}

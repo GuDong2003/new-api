@@ -125,7 +125,7 @@ func ListGalleryImages(ctx context.Context, user, page, pageSize int, source str
 
 func SearchGalleryImages(ctx context.Context, user, page, pageSize int, source, search, sort string) (*GalleryPage, error) {
 	order := map[string]string{"created_desc": "created_at DESC, id DESC", "created_asc": "created_at ASC, id ASC"}[sort]
-	if user <= 0 || page < 1 || page > 1000000 || pageSize < 1 || pageSize > 100 || (source != "" && source != "drawing" && source != "nai") || order == "" || len(search) > 512 || !utf8.ValidString(search) {
+	if user <= 0 || page < 1 || page > 1000000 || pageSize < 1 || pageSize > 100 || (source != "" && source != "drawing" && source != "nai" && source != "api") || order == "" || len(search) > 512 || !utf8.ValidString(search) {
 		return nil, model.ErrGalleryInvalid
 	}
 	result := &GalleryPage{Items: []model.GalleryImage{}, Page: page, PageSize: pageSize}
@@ -297,6 +297,181 @@ func SaveGalleryImage(ctx context.Context, user int, reader *multipart.Reader) (
 	record.MIMEType, record.Width, record.Height, err = validateGalleryOriginal(root, record.ID, record.Bytes)
 	if err != nil {
 		return nil, model.ErrGalleryInvalid
+	}
+	thumbnail, err := makeGalleryThumbnail(ctx, root, record)
+	if err != nil {
+		return nil, err
+	}
+	record.StorageBytes = record.Bytes + int64(len(normalized))
+	if len(thumbnail) > 0 && int64(len(thumbnail)) <= budget-record.StorageBytes {
+		tw, e := newGalleryWriter(ctx, root, record.ID, "thumbnail", budget-record.StorageBytes)
+		if e != nil {
+			return nil, e
+		}
+		_, e = tw.Write(thumbnail)
+		ce := tw.Close()
+		if e != nil || ce != nil {
+			return nil, model.ErrGallerySave
+		}
+		record.HasThumbnail = true
+		record.StorageBytes += int64(len(thumbnail))
+	}
+	mw, err := newGalleryWriter(ctx, root, record.ID, "metadata", int64(len(normalized)))
+	if err != nil {
+		return nil, err
+	}
+	_, err = mw.Write(normalized)
+	closeErr = mw.Close()
+	if err != nil || closeErr != nil {
+		return nil, model.ErrGallerySave
+	}
+	record.State = "ready"
+	if err = model.DB.WithContext(ctx).Save(record).Error; err != nil {
+		return nil, model.ErrGallerySave
+	}
+	published = true
+	return record, nil
+}
+
+// SaveTaskGalleryImage stores one asynchronous image result in the same
+// original/thumbnail pipeline as canvas images. The task ID and artifact key
+// form an idempotent source ID, so a retry cannot publish a duplicate image.
+func SaveTaskGalleryImage(ctx context.Context, user int, taskID, artifactKey, modelName, prompt, mimeType string, content io.Reader) (*model.GalleryImage, error) {
+	return SaveTaskGalleryImageWithSource(ctx, user, taskID, artifactKey, "api", modelName, prompt, mimeType, content)
+}
+
+func SaveTaskGalleryImageWithSource(ctx context.Context, user int, taskID, artifactKey, source, modelName, prompt, mimeType string, content io.Reader) (*model.GalleryImage, error) {
+	if user <= 0 || content == nil || !validTaskGalleryInput(taskID, artifactKey, source, modelName, prompt, mimeType) {
+		return nil, model.ErrGalleryInvalid
+	}
+	metadata := GalleryMetadata{SourceID: taskID + ":" + artifactKey, Source: source, Model: modelName, Prompt: prompt, Parameters: map[string]any{}}
+	normalized, err := common.Marshal(metadata)
+	if err != nil {
+		return nil, model.ErrGalleryInvalid
+	}
+	return saveTaskGalleryImage(ctx, user, metadata, normalized, mimeType, func(writer io.Writer) error {
+		_, err := io.CopyBuffer(writer, content, make([]byte, 32<<10))
+		return err
+	})
+}
+
+// SaveTaskGalleryImageFromURL downloads a provider URL through the existing
+// SSRF-safe image client before publishing it to gallery storage.
+func SaveTaskGalleryImageFromURL(ctx context.Context, user int, taskID, artifactKey, modelName, prompt, rawURL string) (*model.GalleryImage, error) {
+	return SaveTaskGalleryImageFromURLWithSource(ctx, user, taskID, artifactKey, "api", modelName, prompt, rawURL)
+}
+
+func SaveTaskGalleryImageFromURLWithSource(ctx context.Context, user int, taskID, artifactKey, source, modelName, prompt, rawURL string) (*model.GalleryImage, error) {
+	if !validTaskGalleryInput(taskID, artifactKey, source, modelName, prompt, "") || strings.TrimSpace(rawURL) == "" {
+		return nil, model.ErrGalleryInvalid
+	}
+	metadata := GalleryMetadata{SourceID: taskID + ":" + artifactKey, Source: source, Model: modelName, Prompt: prompt, Parameters: map[string]any{}}
+	normalized, err := common.Marshal(metadata)
+	if err != nil {
+		return nil, model.ErrGalleryInvalid
+	}
+	return saveTaskGalleryImage(ctx, user, metadata, normalized, "", func(writer io.Writer) error {
+		client := newContentAuditImageClient()
+		defer client.CloseIdleConnections()
+		var declared string
+		return streamContentAuditImage(ctx, client, rawURL, writer, &declared)
+	})
+}
+
+func validTaskGalleryInput(taskID, artifactKey, source, modelName, prompt, mimeType string) bool {
+	if taskID == "" || artifactKey == "" || strings.TrimSpace(taskID) != taskID || strings.TrimSpace(artifactKey) != artifactKey || !gallerySourceID.MatchString(taskID+":"+artifactKey) {
+		return false
+	}
+	if source != "api" && source != "drawing" && source != "nai" {
+		return false
+	}
+	if len(modelName) == 0 || len(modelName) > 255 || len(prompt) > 32768 ||
+		strings.ContainsAny(modelName, "\x00\r\n") || strings.ContainsRune(prompt, 0) ||
+		!utf8.ValidString(modelName) || !utf8.ValidString(prompt) {
+		return false
+	}
+	return mimeType == "" || mimeType == "image/png" || mimeType == "image/jpeg" || mimeType == "image/webp"
+}
+
+func saveTaskGalleryImage(ctx context.Context, user int, metadata GalleryMetadata, normalized []byte, declaredMIME string, writeOriginal func(io.Writer) error) (*model.GalleryImage, error) {
+	galleryMu.Lock()
+	defer galleryMu.Unlock()
+	if err := cleanupGalleryLocked(ctx); err != nil {
+		return nil, err
+	}
+	var existing model.GalleryImage
+	err := model.DB.WithContext(ctx).Where("user_id = ? AND source_id = ? AND state = ?", user, metadata.SourceID, "ready").First(&existing).Error
+	if err == nil {
+		return &existing, nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, model.ErrGalleryUnavailable
+	}
+	settings, err := GetGallerySettings(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if !settings.Enabled {
+		return nil, model.ErrGalleryDisabled
+	}
+	count, used, total, err := model.GalleryTotals(ctx, user)
+	if err != nil {
+		return nil, model.ErrGalleryUnavailable
+	}
+	budget := min(settings.UserMaxBytes-used, settings.TotalMaxBytes-total)
+	if count >= int64(settings.UserMaxImages) || budget <= int64(len(normalized)) {
+		return nil, model.ErrGalleryCapacity
+	}
+	root, err := galleryRoot()
+	if err != nil {
+		return nil, err
+	}
+	free, err := galleryFreeBytes(root)
+	if err != nil {
+		return nil, err
+	}
+	budget = min(budget, free)
+	if budget <= int64(len(normalized)) {
+		return nil, model.ErrGalleryCapacity
+	}
+	now := time.Now().Unix()
+	parameterJSON, _ := common.Marshal(metadata.Parameters)
+	record := &model.GalleryImage{ID: uuid.NewString(), UserID: user, SourceID: metadata.SourceID, Source: metadata.Source, Model: metadata.Model, Prompt: metadata.Prompt, NegativePrompt: metadata.NegativePrompt, Parameters: metadata.Parameters, ParametersJSON: string(parameterJSON), CreatedAt: now, ExpiresAt: now + int64(settings.RetentionDays)*86400, State: "pending", StorageBytes: budget}
+	if err = model.DB.WithContext(ctx).Create(record).Error; err != nil {
+		return nil, model.ErrGallerySave
+	}
+	published := false
+	defer func() {
+		if !published {
+			_ = removeGalleryRecord(context.Background(), root, record)
+		}
+	}()
+	writer, err := newGalleryWriter(ctx, root, record.ID, "original", budget-int64(len(normalized)))
+	if err != nil {
+		return nil, err
+	}
+	if err = writeOriginal(writer); err != nil {
+		_ = writer.Close()
+		if writer.failure != nil {
+			return nil, writer.failure
+		}
+		return nil, model.ErrGalleryInvalid
+	}
+	closeErr := writer.Close()
+	if writer.failure != nil {
+		return nil, writer.failure
+	}
+	if closeErr != nil {
+		return nil, model.ErrGallerySave
+	}
+	record.Bytes = writer.written
+	record.MIMEType, record.Width, record.Height, err = validateGalleryOriginal(root, record.ID, record.Bytes)
+	if err != nil || (declaredMIME != "" && declaredMIME != record.MIMEType) {
+		return nil, model.ErrGalleryInvalid
+	}
+	record.SHA256, err = galleryAssetChecksum(root, record)
+	if err != nil {
+		return nil, err
 	}
 	thumbnail, err := makeGalleryThumbnail(ctx, root, record)
 	if err != nil {

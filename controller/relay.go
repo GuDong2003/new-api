@@ -142,6 +142,32 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		}
 	}
 
+	var syncImageCapture *imageResponseCaptureWriter
+	if relayFormat == types.RelayFormatOpenAIImage {
+		if imageRequest, ok := request.(*dto.ImageRequest); ok && !isAsyncImageRequest(c, imageRequest) {
+			originalWriter := c.Writer
+			syncImageCapture = &imageResponseCaptureWriter{
+				ResponseWriter: originalWriter,
+				limit:          maxAsyncImageResultBytes(),
+			}
+			c.Writer = syncImageCapture
+			defer func() {
+				c.Writer = originalWriter
+				if newAPIError != nil || syncImageCapture == nil || !syncImageCapture.Written() {
+					return
+				}
+				result, captureErr := synchronousImageResult(syncImageCapture)
+				if captureErr != nil {
+					logger.LogWarn(c, fmt.Sprintf("persist synchronous image task skipped: %v", captureErr))
+					return
+				}
+				if _, taskErr := persistSynchronousImageTask(c, relayInfo, imageRequest, result); taskErr != nil {
+					logger.LogWarn(c, fmt.Sprintf("persist synchronous image task failed: %v", taskErr))
+				}
+			}()
+		}
+	}
+
 	needSensitiveCheck := setting.ShouldCheckPromptSensitive()
 	needCountToken := constant.CountToken
 	// Avoid building huge CombineText (strings.Join) when token counting and sensitive check are both disabled.
