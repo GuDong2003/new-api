@@ -101,15 +101,24 @@ export function mergeGalleryImages(
 }
 
 /** Lists contain metadata only; originals are acquired for visible cards/preview. */
+const GALLERY_PAGE_CONCURRENCY = 3
+
 export async function collectGalleryPages<T>(
   read: (
     page: number
   ) => Promise<{ items: T[]; total: number; page_size: number }>
 ) {
   const first = await read(1)
+  const pageCount = Math.ceil(first.total / Math.max(first.page_size, 1))
+  const pages = Array.from(
+    { length: Math.max(pageCount - 1, 0) },
+    (_, index) => index + 2
+  )
   const items = [...first.items]
-  for (let page = 2; page <= Math.ceil(first.total / first.page_size); page++) {
-    items.push(...(await read(page)).items)
+  for (let index = 0; index < pages.length; index += GALLERY_PAGE_CONCURRENCY) {
+    const batch = pages.slice(index, index + GALLERY_PAGE_CONCURRENCY)
+    const results = await Promise.all(batch.map((page) => read(page)))
+    for (const result of results) items.push(...result.items)
   }
   return items
 }

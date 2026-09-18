@@ -34,6 +34,7 @@ import {
   type CanvasCodecContext,
 } from './canvas-document'
 import { canvasEditors, notifyCanvasProjects } from './canvas-events'
+import { enqueueCanvasMutation } from './canvas-mutation-queue'
 import {
   loadLocalCanvas,
   readCanvasAssets,
@@ -223,7 +224,9 @@ export function bindEditor(identity: GalleryIdentity, initial: LocalCanvas) {
   }
   const flush = () => {
     if (timer) clearTimeout(timer)
-    queue = queue.catch(() => undefined).then(save)
+    queue = queue
+      .catch(() => undefined)
+      .then(() => enqueueCanvasMutation(identity, initial.id, save))
     return queue
   }
   const unsubscribe = store.subscribe((state, previous) => {

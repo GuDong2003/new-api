@@ -4,6 +4,7 @@ import { getGalleryFile, readRemoteCanvasOriginal } from '../api'
 import type { CanvasKind, GalleryIdentity } from '../types'
 import { decodeCanvas, encodeCanvas } from './canvas-document'
 import { notifyCanvasProjects } from './canvas-events'
+import { enqueueCanvasMutation } from './canvas-mutation-queue'
 import {
   loadLocalCanvas,
   readCanvasAssets,
@@ -25,6 +26,21 @@ export type PersistedGenerationAsset = {
 }
 
 export async function persistCanvasGenerationResult(options: {
+  identity: GalleryIdentity
+  kind: CanvasKind
+  canvasId: string
+  nodeIds: readonly string[]
+  assets: readonly (PersistedGenerationAsset | null)[]
+  errors?: readonly (string | undefined)[]
+  revisedPrompts?: readonly (string | undefined)[]
+  usage?: Record<string, unknown>
+}): Promise<boolean> {
+  return enqueueCanvasMutation(options.identity, options.canvasId, () =>
+    persistCanvasGenerationResultUnsafe(options)
+  )
+}
+
+async function persistCanvasGenerationResultUnsafe(options: {
   identity: GalleryIdentity
   kind: CanvasKind
   canvasId: string
