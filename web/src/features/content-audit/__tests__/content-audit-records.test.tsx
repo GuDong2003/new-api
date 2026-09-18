@@ -217,6 +217,18 @@ it('paginates metadata, applies typed exact filters from page one, and loads bod
   await user.type(screen.getByRole('textbox', { name: 'HTTP status' }), '200')
   await user.click(screen.getByRole('combobox', { name: 'Content type' }))
   await user.click(screen.getByRole('option', { name: 'Text' }))
+  await waitFor(() =>
+    expect(transport.requests.at(-1)?.params).toMatchObject({
+      page: 1,
+      page_size: 25,
+      user_id: 7,
+      channel_id: 3,
+      model: 'test-model',
+      request_id: 'request-1',
+      http_status: 200,
+      kind: 'text',
+    })
+  )
   await user.click(screen.getByRole('combobox', { name: 'Capture integrity' }))
   await user.click(screen.getByRole('option', { name: 'Partial' }))
   await user.click(screen.getByRole('button', { name: 'Search' }))

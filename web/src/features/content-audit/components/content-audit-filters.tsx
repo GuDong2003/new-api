@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { zodResolver } from '@hookform/resolvers/zod'
 import type { Table } from '@tanstack/react-table'
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 
@@ -53,9 +53,21 @@ export function ContentAuditFilterBar(props: {
     resolver: zodResolver(contentAuditFilterSchema),
     defaultValues: props.initialValues,
   })
+  const kind = form.watch('kind')
+  const lastAppliedKind = useRef(props.initialValues.kind)
+  const onApplyRef = useRef(props.onApply)
+  onApplyRef.current = props.onApply
   useEffect(() => {
     form.reset(props.initialValues)
+    lastAppliedKind.current = props.initialValues.kind
   }, [form, props.initialValues])
+  useEffect(() => {
+    if (kind === lastAppliedKind.current) return
+    void form.handleSubmit((values) => {
+      lastAppliedKind.current = values.kind
+      onApplyRef.current(values)
+    })()
+  }, [form, kind])
   const submit = form.handleSubmit(props.onApply)
   const inputs = [
     { name: 'user_id', label: t('User ID'), numeric: true },
@@ -96,6 +108,7 @@ export function ContentAuditFilterBar(props: {
           onReset={() => {
             const defaults = defaultContentAuditFilters()
             form.reset(defaults)
+            lastAppliedKind.current = defaults.kind
             props.onApply(defaults)
           }}
           customSearch={
