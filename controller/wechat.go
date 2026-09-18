@@ -127,7 +127,7 @@ func WeChatAuth(c *gin.Context) {
 		})
 		return
 	}
-	setupLogin(&user, c)
+	setupLogin(&user, nil, c)
 }
 
 func newWeChatUser(wechatId string) model.User {
