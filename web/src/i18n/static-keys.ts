@@ -57,6 +57,8 @@ export const STATIC_I18N_KEYS = [
   'Model filter must not exceed 128 bytes.',
   'Request ID filter must not exceed 64 bytes.',
   'HTTP status must be between 100 and 599.',
+  'Task usage metadata is unavailable. Pricing details cannot be displayed.',
+  'This expression cannot be expanded into a price table. View the original expression below.',
   'For this channel, map the model name in client requests to the model name sent upstream.',
   // Channel provider labels, descriptions and presentation badges.
   'Zhipu GLM',
