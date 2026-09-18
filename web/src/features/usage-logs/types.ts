@@ -363,6 +363,7 @@ export interface TaskArtifact {
   type: TaskArtifactType
   mime_type?: string
   content_url: string
+  preview_url?: string
 }
 
 export interface TaskArtifactProjection {

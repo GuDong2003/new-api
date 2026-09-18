@@ -47,7 +47,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
 }
 
-function parseContentUrl(value: unknown): string {
+function parseContentUrl(
+  value: unknown,
+  variant?: 'thumbnail'
+): string {
   if (typeof value !== 'string') {
     throw new TaskArtifactApiError('invalid_content_url')
   }
@@ -88,10 +91,12 @@ function parseContentUrl(value: unknown): string {
       throw new TaskArtifactApiError('invalid_content_url')
     }
     const accessToken = url.searchParams.get('access')
+    const expectedSearch = new URLSearchParams({ access: accessToken ?? '' })
+    if (variant) expectedSearch.set('variant', variant)
     if (
       accessToken == null ||
       !taskArtifactAccessTokenPattern.test(accessToken) ||
-      url.search !== `?access=${accessToken}`
+      url.search !== `?${expectedSearch.toString()}`
     ) {
       throw new TaskArtifactApiError('invalid_content_url')
     }
@@ -121,6 +126,12 @@ function parseTaskArtifact(value: unknown): TaskArtifact {
     key,
     type: type as TaskArtifact['type'],
     content_url: parseContentUrl(value.content_url),
+  }
+  if (value.preview_url != null) {
+    if (type !== 'image') {
+      throw new TaskArtifactApiError('invalid_artifact')
+    }
+    artifact.preview_url = parseContentUrl(value.preview_url, 'thumbnail')
   }
   if (typeof value.mime_type === 'string' && value.mime_type.trim()) {
     const mimeType = value.mime_type.trim()

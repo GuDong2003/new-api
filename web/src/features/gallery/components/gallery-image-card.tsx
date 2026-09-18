@@ -33,6 +33,9 @@ export function GalleryImageCard(props: {
   onOpenCanvas?: () => void
 }) {
   const { t } = useTranslation()
+  let sourceLabel = t('Drawing')
+  if (props.image.source === 'nai') sourceLabel = t('NAI Canvas')
+  if (props.image.source === 'api') sourceLabel = t('API')
   const file = useGalleryFile(
     props.identity,
     props.image.id,
@@ -88,7 +91,7 @@ export function GalleryImageCard(props: {
           </p>
           <p className='text-muted-foreground truncate'>
             {props.image.width} × {props.image.height} ·{' '}
-            {props.image.source === 'nai' ? t('NAI Canvas') : t('Drawing')}
+            {sourceLabel}
           </p>
           <p className='text-muted-foreground truncate'>{expiry}</p>
         </div>

@@ -18,7 +18,7 @@ export type GalleryIdentity = {
   userId: number | null
   sessionId: string | null
 }
-export type GallerySource = 'drawing' | 'nai'
+export type GallerySource = 'drawing' | 'nai' | 'api'
 export type GalleryMetadata = {
   source_id: string
   source: GallerySource

@@ -603,6 +603,7 @@ function GalleryContent(props: { identity: GalleryIdentity }) {
                       all: t('All'),
                       drawing: t('Drawing'),
                       nai: t('NAI Canvas'),
+                      api: t('API'),
                     }[source]
                   }
                 </SelectValue>
@@ -612,6 +613,7 @@ function GalleryContent(props: { identity: GalleryIdentity }) {
                   <SelectItem value='all'>{t('All')}</SelectItem>
                   <SelectItem value='drawing'>{t('Drawing')}</SelectItem>
                   <SelectItem value='nai'>{t('NAI Canvas')}</SelectItem>
+                  <SelectItem value='api'>{t('API')}</SelectItem>
                 </SelectGroup>
               </SelectContent>
             </Select>
@@ -693,7 +695,7 @@ function GalleryContent(props: { identity: GalleryIdentity }) {
                               if (image.canvas_id) {
                                 openProject(
                                   image.canvas_id,
-                                  image.source,
+                                  image.source === 'nai' ? 'nai' : 'drawing',
                                   image.id
                                 )
                               }

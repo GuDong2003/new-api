@@ -244,7 +244,11 @@ function TaskArtifactCard(props: { artifact: TaskArtifact }) {
       <ArtifactMedia
         key={mediaRevision}
         artifact={props.artifact}
-        mediaUrl={props.artifact.content_url}
+        mediaUrl={
+          props.artifact.type === 'image'
+            ? (props.artifact.preview_url ?? props.artifact.content_url)
+            : props.artifact.content_url
+        }
         onError={() => setMediaFailed(true)}
       />
     )

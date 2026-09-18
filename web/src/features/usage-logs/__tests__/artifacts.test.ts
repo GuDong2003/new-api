@@ -38,6 +38,13 @@ function artifactContentUrl(
   return `${baseUrl}/v1/tasks/task-public/artifacts/${artifactKey}/content?access=${artifactAccessToken}`
 }
 
+function artifactPreviewUrl(
+  artifactKey: string,
+  baseUrl = 'https://media.example.com/media-prefix'
+): string {
+  return `${baseUrl}/v1/tasks/task-public/artifacts/${artifactKey}/content?access=${artifactAccessToken}&variant=thumbnail`
+}
+
 function taskFixture(overrides: Partial<TaskLog> = {}): TaskLog {
   return {
     id: 1,
@@ -107,6 +114,10 @@ describe('task artifact projection', () => {
                 'poster~main',
                 'http://127.0.0.1:3001/nginx/tasks'
               ),
+              preview_url: artifactPreviewUrl(
+                'poster~main',
+                'http://127.0.0.1:3001/nginx/tasks'
+              ),
             },
             {
               key: 'result-file',
@@ -136,6 +147,10 @@ describe('task artifact projection', () => {
             type: 'image',
             mime_type: 'image/webp',
             content_url: artifactContentUrl(
+              'poster~main',
+              'http://127.0.0.1:3001/nginx/tasks'
+            ),
+            preview_url: artifactPreviewUrl(
               'poster~main',
               'http://127.0.0.1:3001/nginx/tasks'
             ),

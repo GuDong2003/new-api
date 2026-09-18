@@ -30,6 +30,9 @@ export function GalleryPreview(props: {
   onClose: () => void
 }) {
   const { t } = useTranslation()
+  let sourceLabel = t('Drawing')
+  if (props.image.source === 'nai') sourceLabel = t('NAI Canvas')
+  if (props.image.source === 'api') sourceLabel = t('API')
   const file = useGalleryFile(props.identity, props.image.id, false, true, {
     blob: props.image.localBlob,
     only: props.image.localOnly,
@@ -82,7 +85,7 @@ export function GalleryPreview(props: {
           <dd className='[overflow-wrap:anywhere]'>{props.image.model}</dd>
           <dt>{t('Source')}</dt>
           <dd>
-            {props.image.source === 'nai' ? t('NAI Canvas') : t('Drawing')}
+            {sourceLabel}
           </dd>
           <dt>{t('Image size')}</dt>
           <dd>
