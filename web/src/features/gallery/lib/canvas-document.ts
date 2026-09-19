@@ -168,6 +168,18 @@ export function canvasDocumentAssetIds(
   return [...ids]
 }
 
+/**
+ * A canvas nobody has put anything on yet. Creating one is how you start
+ * drawing, so until it holds something it is not a thing worth listing next to
+ * the canvases that do.
+ */
+export function isCanvasDocumentEmpty(
+  document: Record<string, unknown>
+): boolean {
+  const nodes = document.nodes
+  return !Array.isArray(nodes) || nodes.length === 0
+}
+
 export function remapCanvasDocumentAssetIds(
   kind: CanvasKind,
   document: Record<string, unknown>,

@@ -33,6 +33,8 @@ import { IDBFactory } from 'fake-indexeddb'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { useCanvasFiles } from '@/features/playground/drawing/hooks/use-canvas-files'
+import { DEFAULT_IMAGE_SETTINGS } from '@/features/playground/drawing/lib/image-settings'
+import { DEFAULT_NAI_SETTINGS } from '@/features/playground/nai/lib/nai-settings'
 import { api } from '@/lib/api'
 import { useAuthStore } from '@/stores/auth-store'
 import { useDrawingStore } from '@/stores/drawing-store'
@@ -64,7 +66,7 @@ import {
   galleryAssetFingerprint,
   writeGalleryThumbnail,
 } from '../lib/gallery-thumbnail-cache'
-import type { CanvasRecord, GalleryImage } from '../types'
+import type { CanvasKind, CanvasRecord, GalleryImage } from '../types'
 import { galleryImage, login, response, usage, required } from './fixtures'
 
 const navigate = vi.hoisted(() => vi.fn())
@@ -147,13 +149,45 @@ afterEach(() => {
   api.defaults.adapter = adapter
   vi.unstubAllGlobals()
 })
-const renderGallery = () =>
+const renderGallery = (view?: 'images' | 'canvases') =>
   render(
     <QueryClientProvider client={client}>
-      <Gallery />
+      <Gallery initialView={view} />
     </QueryClientProvider>
   )
 const assetId = '11111111-1111-4111-8111-111111111111'
+
+// A canvas that holds something without holding a picture, for the tests whose
+// subject is the listing around it rather than what is on it.
+async function drawnCanvas(kind: CanvasKind, name: string) {
+  const canvas = await createCanvasProject(identity, kind, name)
+  return canvasRepository.saveLocalCanvas(
+    {
+      ...canvas,
+      document: {
+        ...canvas.document,
+        nodes: [
+          {
+            id: 'sketch',
+            type: kind === 'drawing' ? 'image' : 'nai-image',
+            position: { x: 0, y: 0 },
+            data: {
+              prompt: name,
+              settings:
+                kind === 'drawing'
+                  ? DEFAULT_IMAGE_SETTINGS
+                  : DEFAULT_NAI_SETTINGS,
+              status: 'error',
+              createdAt: 1,
+            },
+          },
+        ],
+      },
+    },
+    []
+  )
+}
+
 async function localImage() {
   const canvas = await createCanvasProject(identity, 'drawing', '本地画布')
   await startCanvasEditor(identity, 'drawing')
@@ -212,16 +246,14 @@ it('deduplicates linked images, previews the local original and navigates with t
   await userEvent.click(
     screen.getByRole('button', { name: 'Open source canvas' })
   )
+  // Opening happens on the canvas, which is what selects the node; the gallery's
+  // job is to get there carrying the exact picture that was asked for.
   await waitFor(() =>
     expect(navigate).toHaveBeenCalledWith({
       to: '/canvas/drawing',
       search: { canvas: canvas.id, image: assetId },
     })
   )
-  expect(
-    useDrawingStore.getState().nodes.find((node) => node.id === 'precise-node')
-      ?.selected
-  ).toBe(true)
 })
 
 const canvasId = '22222222-2222-4222-8222-222222222222'
@@ -411,14 +443,10 @@ it('marks an unuploaded image in a synced canvas local-only until its exact asse
 
 it('filters and paginates local canvases using the same title, source and sort controls', async () => {
   for (let index = 0; index < 25; index++) {
-    await createCanvasProject(
-      identity,
-      'drawing',
-      `画布 ${String(index).padStart(2, '0')}`
-    )
+    await drawnCanvas('drawing', `画布 ${String(index).padStart(2, '0')}`)
   }
   const longName = `特别的 NAI 画布${'很长的名称'.repeat(20)}`
-  await createCanvasProject(identity, 'nai', longName)
+  await drawnCanvas('nai', longName)
   renderGallery()
   await userEvent.click(screen.getByRole('tab', { name: /^Canvases/ }))
   await waitFor(() =>
@@ -649,7 +677,7 @@ it('shows the canvas title as text until it is clicked', async () => {
 
 it('guards gallery canvas switching until unsaved changes are resolved', async () => {
   const current = await localImage()
-  const target = await createCanvasProject(identity, 'drawing', '目标画布')
+  const target = await drawnCanvas('drawing', '目标画布')
   await openCanvasProject(identity, current.id)
   useDrawingStore.getState().updateSettings({ prompt: '未保存修改' })
 
@@ -695,7 +723,7 @@ it('closes the create dialog before showing the unsaved changes dialog', async (
 
 it('guards gallery switching when another canvas kind has unsaved changes', async () => {
   const current = await localImage()
-  const target = await createCanvasProject(identity, 'nai', '目标 NAI 画布')
+  const target = await drawnCanvas('nai', '目标 NAI 画布')
   await openCanvasProject(identity, current.id)
   useDrawingStore.getState().updateSettings({ prompt: '未保存修改' })
 
@@ -723,7 +751,7 @@ it('guards gallery switching when another canvas kind has unsaved changes', asyn
 
 it('keeps the switch dialog actionable after a save failure', async () => {
   const current = await localImage()
-  const target = await createCanvasProject(identity, 'drawing', '目标画布')
+  const target = await drawnCanvas('drawing', '目标画布')
   await openCanvasProject(identity, current.id)
   useDrawingStore.getState().updateSettings({ prompt: '未保存修改' })
 
@@ -914,4 +942,69 @@ describe('canvas project save status', () => {
       'Saved locally. Cloud save failed; try again later.'
     )
   })
+})
+
+// Starting a canvas is not the same as having one: a draft nobody has drawn on
+// yet would otherwise show up as a canvas the moment it was created.
+it('leaves a canvas nobody has drawn on out of the listing until it holds something', async () => {
+  await localImage()
+  await createCanvasProject(identity, 'drawing', '空白草稿')
+
+  renderGallery('canvases')
+
+  expect(await screen.findByText('本地画布')).toBeVisible()
+  expect(screen.queryByText('空白草稿')).toBeNull()
+})
+
+// The canvas draws its own progress bar, which it never got to show while the
+// gallery held the click until every last picture had arrived.
+it('goes to the canvas straight away rather than downloading it first', async () => {
+  await startCanvasEditor(identity, 'drawing')
+  const remote = remoteDrawingCanvas(useDrawingStore.getState().settings)
+  let releaseDownload = () => undefined as void
+  const download = new Promise<void>((resolve) => {
+    releaseDownload = () => resolve()
+  })
+  api.defaults.adapter = async (config) => {
+    if (config.url?.endsWith('/usage')) return response(config, usage)
+    if (config.url?.endsWith(`/canvases/${canvasId}`)) {
+      return response(config, remote)
+    }
+    if (config.url?.endsWith('/canvases')) {
+      return response(config, {
+        items: [{ ...remote, cover_asset_ids: [remoteAssetId] }],
+        page: 1,
+        page_size: 24,
+        total: 1,
+      })
+    }
+    if (config.url?.endsWith('/file')) {
+      await download
+      return {
+        ...response(config, {}),
+        data: new Blob(['remote'], { type: 'image/png' }),
+      }
+    }
+    throw new AxiosError(
+      'not found',
+      '',
+      config,
+      {},
+      { ...response(config, {}), status: 404 }
+    )
+  }
+
+  renderGallery('canvases')
+  await userEvent.click(
+    await screen.findByRole('button', { name: `Open canvas: ${remote.name}` })
+  )
+
+  // Still mid-download, and already on the canvas.
+  await waitFor(() =>
+    expect(navigate).toHaveBeenCalledWith({
+      to: '/canvas/drawing',
+      search: { canvas: canvasId, image: undefined },
+    })
+  )
+  releaseDownload()
 })

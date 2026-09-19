@@ -53,6 +53,7 @@ import { GalleryPreview } from './components/gallery-preview'
 import { GalleryUsageMeters } from './components/gallery-usage-meters'
 import { useCanvasProjects } from './hooks/use-canvas-projects'
 import { useGalleryGrid } from './hooks/use-gallery-grid'
+import { isCanvasDocumentEmpty } from './lib/canvas-document'
 import {
   canvasDeletionVersion,
   getCanvasDeletionEvents,
@@ -350,6 +351,18 @@ function GalleryContent(props: {
     ])
   )
   for (const canvas of localProjects) {
+    // Starting a canvas is not the same as having one, so a draft nobody has
+    // put anything on yet stays out of the listing. Emptying a canvas is not
+    // the same as never having filled one: a canvas the server knows about, or
+    // one whose pictures were taken out of it, stays listed so it can still be
+    // seen and deleted here.
+    if (
+      !canvas.cloudRevision &&
+      !canvas.removedAssetIds.length &&
+      isCanvasDocumentEmpty(canvas.document)
+    ) {
+      continue
+    }
     const assets =
       local.data?.find((item) => item.canvas.id === canvas.id)?.assets ?? []
     const remote = mergedProjects.get(canvas.id)
@@ -398,7 +411,13 @@ function GalleryContent(props: {
   const activeQuery = view === 'images' ? images : canvases
   const imageBadgeCount = images.data ? imageItems.length : null
   const localOnlyCanvasCount = localProjects.filter(
-    (canvas) => !canvas.cloudRevision || canvas.needsExplicitSave
+    (canvas) =>
+      (!canvas.cloudRevision || canvas.needsExplicitSave) &&
+      !(
+        !canvas.cloudRevision &&
+        !canvas.removedAssetIds.length &&
+        isCanvasDocumentEmpty(canvas.document)
+      )
   ).length
   let canvasBadgeCount: number | null = null
   if (canvases.data) canvasBadgeCount = projects.length
@@ -447,14 +466,11 @@ function GalleryContent(props: {
       search: { canvas: id, image },
     })
   }
-  const openProjectNow = async (
-    id: string,
-    kind: CanvasKind,
-    image?: string
-  ) => {
-    await projectFor(kind).open(id, image)
-    await navigateToCanvas(id, kind, image)
-  }
+  // Go to the canvas first and let it download there. Waiting here left
+  // someone staring at the gallery, with the canvas's own progress bar unable
+  // to show until the very moment it was no longer needed.
+  const openProjectNow = (id: string, kind: CanvasKind, image?: string) =>
+    navigateToCanvas(id, kind, image)
   const createProjectNow = async (name: string, kind: CanvasKind) => {
     const canvas = await projectFor(kind).create(name)
     setDialog(null)
