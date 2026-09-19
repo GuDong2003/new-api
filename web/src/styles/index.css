@@ -797,8 +797,7 @@ For commercial licensing, please contact support@quantumnous.com
   display: inline-block;
   opacity: 0;
   z-index: 2;
-  animation: drawing-generation-letter var(--drawing-generation-cycle, 4s)
-    infinite linear;
+  animation: drawing-generation-letter 4s infinite linear;
   animation-delay: var(--drawing-generation-delay, 0s);
 }
 
@@ -844,10 +843,11 @@ For commercial licensing, please contact support@quantumnous.com
     transparent 10%,
     black 25%
   );
+  /* Timed against the letters: the colour peaks while the word is lighting up
+   * and fades once it has, so the two read as one movement. */
   animation:
-    drawing-generation-sweep calc(var(--drawing-generation-cycle, 4s) / 2)
-      infinite alternate,
-    drawing-generation-flare var(--drawing-generation-cycle, 4s) infinite;
+    drawing-generation-sweep 2s infinite alternate,
+    drawing-generation-flare 4s infinite;
   animation-timing-function: cubic-bezier(0.6, 0.8, 0.5, 1);
 }
 

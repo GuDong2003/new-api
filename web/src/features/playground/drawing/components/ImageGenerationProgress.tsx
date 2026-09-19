@@ -21,6 +21,10 @@ import { useTranslation } from 'react-i18next'
 
 import type { ImageGenerationProgress as GenerationProgress } from '../types'
 
+/** When the first letter lights, and how long the wave takes to reach the last. */
+const LETTER_START = 0.1
+const LETTER_WAVE = 0.945
+
 // Elapsed time sits in the card header, clear of the animation. It owns its own
 // tick so a running generation does not re-render the whole node every second.
 export function ImageGenerationElapsed(props: { startedAt: number }) {
@@ -48,24 +52,21 @@ export function ImageGenerationProgress(props: {
       : t('Generating image…')
   const word =
     props.progress.phase === 'decoding' ? t('Preparing') : t('Generating')
-  // Letters light in turn at a fixed step, so the wave travels at one speed in
-  // every language. A short word runs out of steps quickly, so its cycle is
-  // shortened too: otherwise a three-character translation would blink three
-  // times and then sit dark for the rest of a ten-letter word's four seconds.
-  const cycle = Math.min(4, Math.max(2, [...word].length * 0.4))
-  const letters = [...word].map((letter, index) => ({
+  // The word lights up left to right over one span, which the colour behind it
+  // is timed against. Holding the span rather than the step per letter is what
+  // keeps the two together: a translation of another length spreads its letters
+  // over the same time instead of racing ahead of the colour or trailing it.
+  // Ten letters reproduce the original 0.105s stagger exactly.
+  const characters = [...word]
+  const step = characters.length > 1 ? LETTER_WAVE / (characters.length - 1) : 0
+  const letters = characters.map((letter, index) => ({
     id: `${index}-${letter}`,
     letter: letter === ' ' ? '\u00a0' : letter,
-    delay: `${(0.1 + index * 0.105).toFixed(3)}s`,
+    delay: `${(LETTER_START + index * step).toFixed(3)}s`,
   }))
   return (
     <div className='flex size-full min-h-0 flex-col justify-center gap-1'>
-      <div
-        role='status'
-        aria-label={status}
-        className='drawing-generation'
-        style={{ '--drawing-generation-cycle': `${cycle}s` } as CSSProperties}
-      >
+      <div role='status' aria-label={status} className='drawing-generation'>
         <span className='sr-only'>{status}</span>
         {letters.map((item) => (
           <span

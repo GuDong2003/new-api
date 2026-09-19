@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, render, screen } from '@testing-library/react'
 import { ReactFlowProvider, type NodeProps } from '@xyflow/react'
+import i18n from 'i18next'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { useDrawingStore } from '@/stores/drawing-store'
@@ -157,24 +158,59 @@ it('animates the label letter by letter while keeping it readable as one phrase'
   const status = screen.getByRole('status')
   expect(status).toHaveAccessibleName('Generating image…')
 
-  const letters = status.querySelectorAll('.drawing-generation-letter')
+  const letters = [...status.querySelectorAll('.drawing-generation-letter')]
   expect(letters).toHaveLength('Generating'.length)
-  expect([...letters].map((letter) => letter.textContent).join('')).toBe(
+  expect(letters.map((letter) => letter.textContent).join('')).toBe(
     'Generating'
   )
   for (const letter of letters) {
     expect(letter).toHaveAttribute('aria-hidden', 'true')
   }
   expect(letters[0].getAttribute('style')).toContain(
-    '--drawing-generation-delay'
+    '--drawing-generation-delay: 0.100s'
   )
-  expect(letters[0].getAttribute('style')).not.toBe(
-    letters[1].getAttribute('style')
+  // The word lights up over one fixed span however many letters it has, so the
+  // colour sweeping behind it stays in step with them in every language. Ten
+  // letters reproduce the original 0.105s stagger exactly.
+  expect(letters[1].getAttribute('style')).toContain(
+    '--drawing-generation-delay: 0.205s'
   )
-  // The wave travels at one speed in every language, so a shorter translation
-  // covers less ground and its cycle shortens with it rather than leaving the
-  // card dark for the rest of a ten-letter word's four seconds.
-  expect(status.getAttribute('style')).toContain(
-    '--drawing-generation-cycle: 4s'
+  expect(letters.at(-1)?.getAttribute('style')).toContain(
+    '--drawing-generation-delay: 1.045s'
   )
+})
+
+it('lights a translation of another length over that same span', () => {
+  const word = '图片生成中'
+  i18n.addResource('en', 'translation', 'Generating', word)
+  try {
+    render(
+      <QueryClientProvider client={client}>
+        <ReactFlowProvider>
+          <ImageGenerationProgress
+            progress={{
+              startedAt: Date.now(),
+              phase: 'generating',
+              previewCount: 0,
+            }}
+          />
+        </ReactFlowProvider>
+      </QueryClientProvider>
+    )
+
+    const letters = [
+      ...screen
+        .getByRole('status')
+        .querySelectorAll('.drawing-generation-letter'),
+    ]
+    expect(letters).toHaveLength([...word].length)
+    expect(letters[0].getAttribute('style')).toContain(
+      '--drawing-generation-delay: 0.100s'
+    )
+    expect(letters.at(-1)?.getAttribute('style')).toContain(
+      '--drawing-generation-delay: 1.045s'
+    )
+  } finally {
+    i18n.addResource('en', 'translation', 'Generating', 'Generating')
+  }
 })
