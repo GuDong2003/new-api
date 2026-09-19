@@ -579,7 +579,10 @@ function reattachToImageTask(
       jobId: job.id,
       error: undefined,
       progress: {
-        startedAt: node.data.progress?.startedAt ?? node.data.createdAt,
+        // A canvas does not persist progress, so a reattach after a reload has
+        // none. Falling back to the node's creation time billed the reader for
+        // every hour the canvas sat closed; the clock measures this attempt.
+        startedAt: node.data.progress?.startedAt ?? Date.now(),
         phase: 'generating',
         previewCount: node.data.progress?.previewCount ?? 0,
       },

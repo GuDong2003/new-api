@@ -623,6 +623,47 @@ describe('Image generation jobs', () => {
     hook.unmount()
     client.clear()
   })
+  // A canvas does not persist progress, so a node reopened days later has none.
+  // Falling back to when the node was first created counted the whole time the
+  // canvas sat closed as generation time.
+  it('times a reattached task from the reattach, not from when the node was made', async () => {
+    const client = new QueryClient()
+    renderHook(useImageGeneration, {
+      wrapper: (props: { children: ReactNode }) => (
+        <QueryClientProvider client={client}>
+          {props.children}
+        </QueryClientProvider>
+      ),
+    })
+    vi.spyOn(api, 'get').mockResolvedValue({
+      data: { task_id: 'task_stale', status: 'in_progress' },
+    })
+    const madeLongAgo = Date.now() - 86_400_000
+    act(() =>
+      useDrawingStore.getState().addNodes([
+        {
+          ...generationReference('stale', { x: 0, y: 0 }),
+          data: {
+            ...generationReference('stale', { x: 0, y: 0 }).data,
+            asset: undefined,
+            status: 'pending',
+            jobId: undefined,
+            taskId: 'task_stale',
+            createdAt: madeLongAgo,
+            progress: undefined,
+          },
+        },
+      ])
+    )
+
+    act(() => resumeImageGenerationJobs((key: string) => key))
+
+    const startedAt =
+      useDrawingStore.getState().nodes[0].data.progress?.startedAt
+    expect(startedAt).toBeGreaterThan(madeLongAgo)
+    expect(Date.now() - (startedAt ?? 0)).toBeLessThan(5000)
+  })
+
   it('keeps a cancelled generation collectable and returns the paid image', async () => {
     const client = new QueryClient()
     const hook = renderHook(useImageGeneration, {
