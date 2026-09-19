@@ -1,10 +1,12 @@
 {
   "translation": {
+    "Its stored copy was deleted or has expired.": "其存储副本已被删除或已过期。",
     "References count as originals. Thumbnails, masks and canvas documents share the byte quota. Cloud expiry keeps local drafts.": "参考图计入原图数量；缩略图、蒙版和画布文档共用字节额度。云端过期不会删除本机草稿。",
     "Canvas drafts save in this browser first. Full cloud storage pauses uploads without stopping generation or deleting unexpired originals.": "画布草稿优先保存在当前浏览器。云端空间不足时暂停上传，不影响出图，也不会删除未过期原图。",
     "Cloud conflict. Export your local canvas or reload the cloud version.": "云端版本冲突，请导出本机画布，或重新载入云端版本。",
     "Saved locally. Cloud save failed; try again later.": "已保存到本机，云端保存失败，请稍后重试。",
     "Reload cloud version": "重新载入云端版本",
+    "This artifact is no longer available": "该制品已不可用",
     "This discards the local conflicting version. Export it first if you need a copy.": "这会舍弃本机存在冲突的版本。如需保留，请先导出备份。",
     "This replaces the current canvas and deletes its shared images from the gallery. This cannot be undone.": "这会替换当前画布，并从图库中删除它的共享图片。此操作无法撤销。",
     "The canvas changed. Please try again.": "当前画布已切换，请重新操作。",

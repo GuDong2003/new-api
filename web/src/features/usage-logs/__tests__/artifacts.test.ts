@@ -291,6 +291,52 @@ describe('task artifact projection', () => {
       TaskArtifactApiError
     )
   })
+
+  test('marks an artifact whose stored copy was deleted as gone', () => {
+    assert.deepEqual(
+      parseTaskArtifactsResponse({
+        success: true,
+        data: {
+          artifacts: [
+            {
+              key: 'image-0',
+              type: 'image',
+              content_url: artifactContentUrl('image-0'),
+              gone: true,
+            },
+          ],
+        },
+      }),
+      {
+        artifacts: [
+          {
+            key: 'image-0',
+            type: 'image',
+            content_url: artifactContentUrl('image-0'),
+            gone: true,
+          },
+        ],
+      }
+    )
+  })
+
+  test('treats a non-boolean gone flag as still available', () => {
+    const projection = parseTaskArtifactsResponse({
+      success: true,
+      data: {
+        artifacts: [
+          {
+            key: 'image-0',
+            type: 'image',
+            content_url: artifactContentUrl('image-0'),
+            gone: 'yes',
+          },
+        ],
+      },
+    })
+
+    assert.equal(projection.artifacts[0].gone, undefined)
+  })
 })
 
 describe('legacy task preview compatibility', () => {

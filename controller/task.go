@@ -26,11 +26,16 @@ import (
 )
 
 type taskArtifactResponse struct {
-	Key        string `json:"key"`
-	Type       string `json:"type"`
-	MimeType   string `json:"mime_type,omitempty"`
+	Key      string `json:"key"`
+	Type     string `json:"type"`
+	MimeType string `json:"mime_type,omitempty"`
+	// ContentURL stays populated even when the content is gone so a client can
+	// still probe it and read the 410 directly.
 	ContentURL string `json:"content_url"`
 	PreviewURL string `json:"preview_url,omitempty"`
+	// Gone reports that this artifact was produced but its stored copy no
+	// longer exists, so loading it can never succeed again.
+	Gone bool `json:"gone,omitempty"`
 }
 
 var (
@@ -96,7 +101,7 @@ func GetDashboardTaskArtifacts(c *gin.Context) {
 
 func writeTaskArtifacts(c *gin.Context, task *model.Task, dashboard bool) {
 	c.Header("Cache-Control", "private, no-store")
-	imageArtifacts, err := projectImageTaskArtifacts(task)
+	imageArtifacts, goneImages, err := projectImageTaskArtifacts(task)
 	if err != nil {
 		writeTaskArtifactProjectionError(c, err)
 		return
@@ -126,10 +131,16 @@ func writeTaskArtifacts(c *gin.Context, task *model.Task, dashboard bool) {
 			ContentURL: contentURL,
 		}
 		if _, ok := task.PrivateData.GalleryImageIDs[artifact.Key]; ok && artifact.Type == "image" {
-			item.PreviewURL, buildErr = service.BuildTaskArtifactPreviewURL(task.TaskID, artifact.Key)
-			if buildErr != nil {
-				writeTaskArtifactError(c, http.StatusInternalServerError, "artifact_url_error", "Failed to build artifact preview URL")
-				return
+			// A gone artifact gets no preview URL: a thumbnail request could
+			// only produce another failed load.
+			if goneImages[artifact.Key] {
+				item.Gone = true
+			} else {
+				item.PreviewURL, buildErr = service.BuildTaskArtifactPreviewURL(task.TaskID, artifact.Key)
+				if buildErr != nil {
+					writeTaskArtifactError(c, http.StatusInternalServerError, "artifact_url_error", "Failed to build artifact preview URL")
+					return
+				}
 			}
 		}
 		items = append(items, item)
@@ -150,9 +161,13 @@ func writeTaskArtifacts(c *gin.Context, task *model.Task, dashboard bool) {
 	c.JSON(http.StatusOK, response)
 }
 
-func projectImageTaskArtifacts(task *model.Task) ([]relaychannel.TaskArtifact, error) {
+// projectImageTaskArtifacts lists the image artifacts a task produced, and
+// reports which of them no longer have a stored copy. A gallery image dies with
+// its retention window or with the canvas it is bound to, while the task row
+// keeps its reference, so an artifact legitimately outlives its own content.
+func projectImageTaskArtifacts(task *model.Task) ([]relaychannel.TaskArtifact, map[string]bool, error) {
 	if task == nil || task.Status != model.TaskStatusSuccess || len(task.PrivateData.GalleryImageIDs) == 0 {
-		return []relaychannel.TaskArtifact{}, nil
+		return []relaychannel.TaskArtifact{}, nil, nil
 	}
 	keys := make([]string, 0, len(task.PrivateData.GalleryImageIDs))
 	for key := range task.PrivateData.GalleryImageIDs {
@@ -160,21 +175,29 @@ func projectImageTaskArtifacts(task *model.Task) ([]relaychannel.TaskArtifact, e
 	}
 	sort.Strings(keys)
 	artifacts := make([]relaychannel.TaskArtifact, 0, len(keys))
+	gone := make(map[string]bool, len(keys))
 	for _, key := range keys {
 		imageID := strings.TrimSpace(task.PrivateData.GalleryImageIDs[key])
 		if !taskArtifactKeyPattern.MatchString(key) || imageID == "" {
-			return nil, fmt.Errorf("%w: invalid image artifact reference", errTaskArtifactPlugin)
+			return nil, nil, fmt.Errorf("%w: invalid image artifact reference", errTaskArtifactPlugin)
 		}
 		mimeType := ""
 		record, err := model.OwnedGalleryImage(context.Background(), task.UserId, imageID, time.Now().Unix())
-		if err == nil {
+		switch {
+		case err == nil:
 			mimeType = record.MIMEType
-		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, fmt.Errorf("%w: gallery image unavailable", errTaskArtifactPlugin)
+		case errors.Is(err, gorm.ErrRecordNotFound):
+			gone[key] = true
+		default:
+			return nil, nil, fmt.Errorf("%w: gallery image unavailable", errTaskArtifactPlugin)
 		}
 		artifacts = append(artifacts, relaychannel.TaskArtifact{Key: key, Type: "image", MimeType: mimeType})
 	}
-	return validateProjectedTaskArtifacts(artifacts)
+	validated, err := validateProjectedTaskArtifacts(artifacts)
+	if err != nil {
+		return nil, nil, err
+	}
+	return validated, gone, nil
 }
 
 func projectTaskArtifacts(task *model.Task) ([]relaychannel.TaskArtifact, error) {
@@ -353,6 +376,13 @@ func TaskArtifactContent(c *gin.Context) {
 			return
 		}
 		file, record, openErr := service.OpenGalleryImage(c.Request.Context(), task.UserId, imageID, variant == "thumbnail")
+		// The task did produce this artifact, but its stored copy was removed
+		// with the canvas it belonged to, or by retention. Say so instead of
+		// reporting a generic miss that reads as a transient failure.
+		if errors.Is(openErr, gorm.ErrRecordNotFound) {
+			writeTaskArtifactError(c, http.StatusGone, "artifact_gone", "Task artifact content was deleted")
+			return
+		}
 		if openErr != nil {
 			writeTaskArtifactError(c, http.StatusNotFound, "artifact_not_found", "Task or artifact not found")
 			return

@@ -140,6 +140,12 @@ function parseTaskArtifact(value: unknown): TaskArtifact {
     }
     artifact.mime_type = mimeType
   }
+  // Only an explicit boolean marks the content as gone. Anything else keeps the
+  // artifact loadable, so an unexpected value degrades to the normal preview
+  // rather than hiding content that is still there.
+  if (value.gone === true) {
+    artifact.gone = true
+  }
   return artifact
 }
 

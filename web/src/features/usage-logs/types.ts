@@ -364,6 +364,8 @@ export interface TaskArtifact {
   mime_type?: string
   content_url: string
   preview_url?: string
+  /** The task produced this artifact, but its stored copy no longer exists. */
+  gone?: boolean
 }
 
 export interface TaskArtifactProjection {

@@ -654,3 +654,56 @@ func TestSelfTaskMediaURLGuard(t *testing.T) {
 	assert.True(t, isTaskMediaFallbackLoop(remoteURL.String(), "task-1"))
 	assert.False(t, isTaskMediaFallbackLoop(remoteURL.String(), "task-2"))
 }
+
+// Deleting a canvas removes the gallery images bound to it, but the task row
+// keeps referencing them. The listing must say the content is gone so the UI
+// stops offering a retry that can never succeed.
+func TestTaskArtifactsReportDeletedGalleryImageAsGone(t *testing.T) {
+	task := setupGenericTaskTest(t)
+	require.NoError(t, model.MigrateGallery(model.DB))
+	previousSecret := common.CryptoSecret
+	previousPublicAddress := system_setting.TaskPublicAddress
+	common.CryptoSecret = "controller-task-artifact-gone-secret"
+	system_setting.TaskPublicAddress = "https://gateway.example"
+	t.Cleanup(func() {
+		common.CryptoSecret = previousSecret
+		system_setting.TaskPublicAddress = previousPublicAddress
+	})
+	task.Platform = constant.TaskPlatformImage
+	task.PrivateData.GalleryImageIDs = map[string]string{"image-0": "11111111-1111-4111-8111-111111111111"}
+	require.NoError(t, model.DB.Save(task).Error)
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Set("id", task.UserId)
+	c.Set("role", common.RoleCommonUser)
+	c.Params = gin.Params{{Key: "key", Value: task.TaskID}}
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1/tasks/"+task.TaskID+"/artifacts", nil)
+
+	GetTaskArtifacts(c)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	var response struct {
+		Artifacts []taskArtifactResponse `json:"artifacts"`
+	}
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+	require.Len(t, response.Artifacts, 1)
+	assert.True(t, response.Artifacts[0].Gone)
+	assert.Empty(t, response.Artifacts[0].PreviewURL)
+	assert.NotEmpty(t, response.Artifacts[0].ContentURL)
+
+	contentRecorder := httptest.NewRecorder()
+	content, _ := gin.CreateTestContext(contentRecorder)
+	content.Set("id", task.UserId)
+	content.Set("role", common.RoleCommonUser)
+	content.Params = gin.Params{
+		{Key: "key", Value: task.TaskID},
+		{Key: "artifact_key", Value: "image-0"},
+	}
+	content.Request = httptest.NewRequest(http.MethodGet, "/v1/tasks/"+task.TaskID+"/artifacts/image-0/content", nil)
+
+	TaskArtifactContent(content)
+
+	assert.Equal(t, http.StatusGone, contentRecorder.Code)
+	assert.Contains(t, contentRecorder.Body.String(), "artifact_gone")
+}

@@ -18,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import {
   Alert02Icon,
+  Delete02Icon,
   Download01Icon,
   File01Icon,
   Image01Icon,
@@ -212,6 +213,22 @@ function MediaFailure(props: { onRetry: () => void }) {
   )
 }
 
+// A stored copy can be removed while the task row keeps its reference: the
+// canvas it belonged to was deleted, or gallery retention expired it. Say that
+// plainly instead of offering a retry that can never succeed.
+function ArtifactGone() {
+  const { t } = useTranslation()
+  return (
+    <Alert>
+      <HugeiconsIcon icon={Delete02Icon} strokeWidth={2} aria-hidden='true' />
+      <AlertTitle>{t('This artifact is no longer available')}</AlertTitle>
+      <AlertDescription>
+        {t('Its stored copy was deleted or has expired.')}
+      </AlertDescription>
+    </Alert>
+  )
+}
+
 function TaskArtifactCard(props: { artifact: TaskArtifact }) {
   const { t } = useTranslation()
   const [mediaFailed, setMediaFailed] = useState(false)
@@ -230,7 +247,9 @@ function TaskArtifactCard(props: { artifact: TaskArtifact }) {
       <HugeiconsIcon icon={icon} className='size-6' strokeWidth={1.5} />
     </div>
   )
-  if (mediaFailed) {
+  if (props.artifact.gone) {
+    cardContent = <ArtifactGone />
+  } else if (mediaFailed) {
     cardContent = (
       <MediaFailure
         onRetry={() => {
@@ -280,28 +299,30 @@ function TaskArtifactCard(props: { artifact: TaskArtifact }) {
         </CardDescription>
       </CardHeader>
       <CardContent>{cardContent}</CardContent>
-      <CardFooter>
-        <Button
-          variant='outline'
-          size='sm'
-          nativeButton={false}
-          render={
-            <a
-              href={props.artifact.content_url}
-              download={props.artifact.key}
-              target='_blank'
-              rel='noopener noreferrer'
+      {props.artifact.gone ? null : (
+        <CardFooter>
+          <Button
+            variant='outline'
+            size='sm'
+            nativeButton={false}
+            render={
+              <a
+                href={props.artifact.content_url}
+                download={props.artifact.key}
+                target='_blank'
+                rel='noopener noreferrer'
+              />
+            }
+          >
+            <HugeiconsIcon
+              icon={Download01Icon}
+              strokeWidth={2}
+              data-icon='inline-start'
             />
-          }
-        >
-          <HugeiconsIcon
-            icon={Download01Icon}
-            strokeWidth={2}
-            data-icon='inline-start'
-          />
-          {t('Download')}
-        </Button>
-      </CardFooter>
+            {t('Download')}
+          </Button>
+        </CardFooter>
+      )}
     </Card>
   )
 }
