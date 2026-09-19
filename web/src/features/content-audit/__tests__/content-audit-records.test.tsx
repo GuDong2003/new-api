@@ -456,3 +456,44 @@ it('binds deletion to the confirmed sorted selection even if selection changes d
     )
   ).not.toContain('audit-one-use-proof')
 })
+
+// Every other table here holds its rows while the next result loads. Dropping
+// to a skeleton on each search, page and poll made the list look like it
+// reloaded from scratch on every operation.
+it('keeps the loaded rows on screen while the next search loads', async () => {
+  const detail = auditDetail()
+  let loads = 0
+  let release: (() => void) | undefined
+  transport = installAuditTransport((config) => {
+    if (config.url === '/api/content-audit/records') {
+      loads += 1
+      const body = auditSuccess({
+        items: [detail.record],
+        total: 1,
+        page: config.params.page,
+        page_size: config.params.page_size,
+      })
+      if (loads === 1) return { body }
+      // Hold the second load open so the table can be read mid-flight.
+      return new Promise<{ body: unknown }>((resolve) => {
+        release = () => resolve({ body })
+      })
+    }
+    return { body: auditSuccess(detail) }
+  })
+  const user = userEvent.setup()
+  renderRecords()
+  await screen.findByText('inference-user (#7)')
+
+  await user.click(screen.getByRole('button', { name: 'Expand' }))
+  await user.type(screen.getByRole('textbox', { name: 'Model' }), 'test-model')
+  await user.click(screen.getByRole('button', { name: 'Search' }))
+  await waitFor(() => expect(loads).toBe(2))
+
+  expect(screen.getByText('inference-user (#7)')).toBeVisible()
+
+  release?.()
+  await waitFor(() =>
+    expect(screen.getByText('inference-user (#7)')).toBeVisible()
+  )
+})

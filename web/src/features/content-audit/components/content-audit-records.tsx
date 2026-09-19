@@ -115,6 +115,14 @@ export function ContentAuditRecords() {
       )
         ? 5000
         : false,
+    // Hold the rows already on screen while the next page or filter loads, the
+    // way every other table here does: without this the list drops to a
+    // skeleton on each search, page and poll. Rows are dropped when the audit
+    // identity changes so one root session never shows another's records.
+    placeholderData: (previousData, previousQuery) =>
+      previousQuery?.queryKey[1] === access.queryKey[1]
+        ? previousData
+        : undefined,
   })
   const columns = useMemo<ColumnDef<ContentAuditRecord, unknown>[]>(
     () => [
