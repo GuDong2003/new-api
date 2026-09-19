@@ -148,7 +148,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			originalWriter := c.Writer
 			syncImageCapture = &imageResponseCaptureWriter{
 				ResponseWriter: originalWriter,
-				limit:          maxAsyncImageResultBytes(),
+				limit:          imageResultBudget(imageRequest),
 			}
 			c.Writer = syncImageCapture
 			defer func() {

@@ -56,15 +56,33 @@ const asyncImageRequestTimeout = 10 * time.Minute
 // base64 result; a 1024x1024 PNG lands near 1.5 MB once base64 expands it.
 const asyncImageInlineImageBudget = 2 << 20
 
-// maxAsyncImageResultBytes caps the provider payload persisted on a task row.
-// MySQL's default max_allowed_packet is 4 MB on 5.7, so a MySQL deployment keeps
-// a tighter budget; SQLite and PostgreSQL have no comparable per-statement limit
-// and can hold a larger batch.
-func maxAsyncImageResultBytes() int {
+// imageResultBudget caps the buffered copy of one provider response. Inline
+// base64 is the only payload that grows with the requested count, so the budget
+// follows n rather than a fixed ceiling: every batch is generated
+// asynchronously instead of being turned away for its size. The buffer is never
+// persisted as-is — persistImageTaskArtifacts swaps base64 for gallery URLs and
+// stripImageTaskBase64 drops inline payloads on the fallback — so what this
+// bounds is memory, multiplied by asyncImageSlots concurrent runs.
+//
+// The floor covers a single image and leaves URL results their existing
+// headroom. MySQL's default max_allowed_packet is 4 MB on 5.7, so a MySQL
+// deployment keeps the tighter floor.
+func imageResultBudget(request *dto.ImageRequest) int {
+	floor := 8 << 20
 	if common.UsingMainDatabase(common.DatabaseTypeMySQL) {
-		return 3 << 20
+		floor = 3 << 20
 	}
-	return 8 << 20
+	if request == nil || strings.EqualFold(request.ResponseFormat, "url") {
+		return floor
+	}
+	count := uint64(1)
+	if request.N != nil && *request.N > 0 {
+		// n is bounded at validation, but this runs on the raw *uint, where a
+		// wrapped negative arrives as a huge positive and would overflow the
+		// multiply into a negative budget.
+		count = min(uint64(*request.N), uint64(dto.MaxImageN))
+	}
+	return max(floor, int(count)*asyncImageInlineImageBudget)
 }
 
 // asyncImageSlots bounds detached image runs. An accepted task is not held open
@@ -184,8 +202,8 @@ func asyncImageRunFromRequest(c *gin.Context) *asyncImageRun {
 }
 
 // asyncImageResponseRecorder buffers the detached relay response. It keeps at
-// most maxAsyncImageResultBytes; anything larger marks the run as overflowing
-// so the task fails instead of persisting an oversized row.
+// most imageResultBudget bytes; anything larger marks the run as overflowing so
+// the task fails instead of persisting an oversized row.
 type asyncImageResponseRecorder struct {
 	header   http.Header
 	body     bytes.Buffer
@@ -297,21 +315,6 @@ func imageTaskGallerySource(info *relaycommon.RelayInfo, request *dto.ImageReque
 	return "drawing"
 }
 
-// asyncImageStorable reports whether a finished result can be kept on a task
-// row. Inline base64 is the only image payload that grows large, and MySQL's
-// default max_allowed_packet (4 MB on 5.7) bounds one row, so a base64 batch is
-// answered synchronously instead of being accepted and then failing.
-func asyncImageStorable(request *dto.ImageRequest) bool {
-	if strings.EqualFold(request.ResponseFormat, "url") {
-		return true
-	}
-	count := uint64(1)
-	if request.N != nil && *request.N > 0 {
-		count = uint64(*request.N)
-	}
-	return count*asyncImageInlineImageBudget <= uint64(maxAsyncImageResultBytes())
-}
-
 // submitAsyncImageTask persists the task, hands the request to a detached
 // replay, and answers the caller with the task handle. It runs before
 // pre-consume: the detached relay owns the entire billing lifecycle.
@@ -320,10 +323,6 @@ func asyncImageStorable(request *dto.ImageRequest) bool {
 // caller finishes the request on the ordinary synchronous path; nothing is
 // persisted and no quota is touched until the task is actually accepted.
 func submitAsyncImageTask(c *gin.Context, info *relaycommon.RelayInfo, request *dto.ImageRequest) bool {
-	if !asyncImageStorable(request) {
-		logger.LogInfo(c, "async image declined: a base64 batch result does not fit a task row, using the synchronous path")
-		return false
-	}
 	body, err := detachAsyncImageBody(c)
 	if err != nil {
 		logger.LogWarn(c, "async image declined: %s", err.Error())
@@ -395,7 +394,7 @@ func submitAsyncImageTask(c *gin.Context, info *relaycommon.RelayInfo, request *
 			return
 		}
 		defer func() { <-asyncImageSlots }()
-		recorder := &asyncImageResponseRecorder{header: make(http.Header), limit: maxAsyncImageResultBytes()}
+		recorder := &asyncImageResponseRecorder{header: make(http.Header), limit: imageResultBudget(request)}
 		asyncImageEngine().ServeHTTP(recorder, replay)
 		finishAsyncImageTask(finishContext, task, run, recorder)
 	})
@@ -705,6 +704,12 @@ func stripImageTaskBase64(result json.RawMessage) json.RawMessage {
 	}
 	for index := range response.Data {
 		response.Data[index].B64Json = ""
+		// A provider may inline the image in the url field instead. That
+		// payload is as large as b64_json, and this fallback is what reaches
+		// the task row, so it cannot be carried over either.
+		if strings.HasPrefix(strings.ToLower(response.Data[index].Url), "data:") {
+			response.Data[index].Url = ""
+		}
 	}
 	encoded, err := common.Marshal(response)
 	if err != nil {

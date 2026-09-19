@@ -12,6 +12,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -66,15 +67,21 @@ func TestImageTaskSubmissionUsesAutomaticallySelectedChannel(t *testing.T) {
 	for _, test := range []struct {
 		name                    string
 		edit, async, failInsert bool
+		// count drives the requested image quantity. A batch large enough to
+		// outgrow the result budget used to be answered synchronously; every
+		// quantity now takes the same asynchronous path.
+		count int
 	}{
 		{name: "async generation", async: true},
 		{name: "async multipart edit", edit: true, async: true},
+		{name: "async inline batch", async: true, count: 8},
 		{name: "synchronous generation"},
 		{name: "synchronous multipart edit", edit: true},
 		{name: "generation falls back when task insert fails", async: true, failInsert: true},
 		{name: "edit falls back when task insert fails", edit: true, async: true, failInsert: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
+			count := max(test.count, 1)
 			database, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 			require.NoError(t, err)
 			connection, err := database.DB()
@@ -128,7 +135,7 @@ func TestImageTaskSubmissionUsesAutomaticallySelectedChannel(t *testing.T) {
 				writer := multipart.NewWriter(&body)
 				for key, value := range map[string]string{
 					"model": "async-image-test", "prompt": "remove text", "group": "default",
-					"n": "1", "quality": "high", "stream": "false",
+					"n": strconv.Itoa(count), "quality": "high", "stream": "false",
 				} {
 					require.NoError(t, writer.WriteField(key, value))
 				}
@@ -139,7 +146,7 @@ func TestImageTaskSubmissionUsesAutomaticallySelectedChannel(t *testing.T) {
 				require.NoError(t, writer.Close())
 				contentType = writer.FormDataContentType()
 			} else {
-				body.WriteString(`{"model":"async-image-test","prompt":"remove text","group":"default","n":1,"quality":"high","stream":false}`)
+				body.WriteString(`{"model":"async-image-test","prompt":"remove text","group":"default","n":` + strconv.Itoa(count) + `,"quality":"high","stream":false}`)
 			}
 			target := path
 			if test.async {
@@ -324,22 +331,26 @@ func TestIsAsyncImageRequest(t *testing.T) {
 	}
 }
 
-func TestAsyncImageStorable(t *testing.T) {
+func TestImageResultBudget(t *testing.T) {
 	count := func(n uint) *uint { return &n }
 
 	tests := []struct {
 		name     string
 		database common.DatabaseType
 		request  *dto.ImageRequest
-		want     bool
+		want     int
 	}{
-		{name: "single inline image fits on mysql", database: common.DatabaseTypeMySQL, request: &dto.ImageRequest{}, want: true},
-		{name: "explicit single inline image fits on mysql", database: common.DatabaseTypeMySQL, request: &dto.ImageRequest{N: count(1)}, want: true},
-		{name: "mysql sends an inline pair to the sync path", database: common.DatabaseTypeMySQL, request: &dto.ImageRequest{N: count(2)}, want: false},
-		{name: "mysql keeps a url batch async", database: common.DatabaseTypeMySQL, request: &dto.ImageRequest{N: count(8), ResponseFormat: "url"}, want: true},
-		{name: "postgres holds an inline batch", database: common.DatabaseTypePostgreSQL, request: &dto.ImageRequest{N: count(4)}, want: true},
-		{name: "postgres sends an oversized inline batch to the sync path", database: common.DatabaseTypePostgreSQL, request: &dto.ImageRequest{N: count(8)}, want: false},
-		{name: "sqlite holds an inline batch", database: common.DatabaseTypeSQLite, request: &dto.ImageRequest{N: count(4), ResponseFormat: "b64_json"}, want: true},
+		{name: "an absent count keeps the single image floor", database: common.DatabaseTypeSQLite, request: &dto.ImageRequest{}, want: 8 << 20},
+		{name: "mysql keeps its tighter floor", database: common.DatabaseTypeMySQL, request: &dto.ImageRequest{N: count(1)}, want: 3 << 20},
+		{name: "a batch under the floor keeps it", database: common.DatabaseTypePostgreSQL, request: &dto.ImageRequest{N: count(4)}, want: 8 << 20},
+		{name: "an inline batch grows past the floor", database: common.DatabaseTypePostgreSQL, request: &dto.ImageRequest{N: count(10)}, want: 20 << 20},
+		{name: "mysql grows for the same inline batch", database: common.DatabaseTypeMySQL, request: &dto.ImageRequest{N: count(10)}, want: 20 << 20},
+		{name: "an explicit inline format grows too", database: common.DatabaseTypeSQLite, request: &dto.ImageRequest{N: count(16), ResponseFormat: "b64_json"}, want: 32 << 20},
+		{name: "a url batch carries no image bytes", database: common.DatabaseTypeMySQL, request: &dto.ImageRequest{N: count(64), ResponseFormat: "url"}, want: 3 << 20},
+		// An unvalidated *uint can carry a wrapped negative; an unclamped
+		// multiply would overflow to a negative budget, which reads as an
+		// instantly overflowing buffer and fails every run.
+		{name: "an absurd count clamps to the request bound", database: common.DatabaseTypeSQLite, request: &dto.ImageRequest{N: count(1 << 62)}, want: dto.MaxImageN * asyncImageInlineImageBudget},
 	}
 
 	for _, test := range tests {
@@ -347,9 +358,29 @@ func TestAsyncImageStorable(t *testing.T) {
 			previous := common.MainDatabaseType()
 			common.SetMainDatabaseType(test.database)
 			t.Cleanup(func() { common.SetMainDatabaseType(previous) })
-			assert.Equal(t, test.want, asyncImageStorable(test.request))
+			budget := imageResultBudget(test.request)
+			assert.Equal(t, test.want, budget)
+			assert.Positive(t, budget)
 		})
 	}
+}
+
+// A result that cannot reach the gallery still lands on the task row, so the
+// fallback has to drop every inline payload. b64_json is the documented one,
+// but a provider may answer with an equally large inline data URL.
+func TestStripImageTaskBase64DropsInlinePayloads(t *testing.T) {
+	result := json.RawMessage(`{"created":1,"data":[` +
+		`{"b64_json":"AAAA","revised_prompt":"kept"},` +
+		`{"url":"data:image/png;base64,AAAA"},` +
+		`{"url":"https://cdn.example.com/a.png"}]}`)
+
+	stripped := stripImageTaskBase64(result)
+
+	assert.NotContains(t, string(stripped), "b64_json")
+	assert.NotContains(t, string(stripped), "data:image/png")
+	assert.Contains(t, string(stripped), "https://cdn.example.com/a.png")
+	assert.Contains(t, string(stripped), "kept")
+	assert.Equal(t, "https://cdn.example.com/a.png", firstAsyncImageURL(stripped))
 }
 
 func TestImageTaskStatusURL(t *testing.T) {
@@ -398,7 +429,7 @@ func TestDetachAsyncImageBodyStripsAsyncAndStream(t *testing.T) {
 
 func TestAsyncImageResult(t *testing.T) {
 	t.Run("stores the provider object as returned", func(t *testing.T) {
-		recorder := &asyncImageResponseRecorder{header: http.Header{}, limit: maxAsyncImageResultBytes()}
+		recorder := &asyncImageResponseRecorder{header: http.Header{}, limit: imageResultBudget(nil)}
 		recorder.WriteHeader(http.StatusOK)
 		_, err := recorder.Write([]byte(`{"created":1,"data":[{"url":"https://cdn.example/a.png"}]}`))
 		require.NoError(t, err)
@@ -410,7 +441,7 @@ func TestAsyncImageResult(t *testing.T) {
 	})
 
 	t.Run("reports the upstream error message", func(t *testing.T) {
-		recorder := &asyncImageResponseRecorder{header: http.Header{}, limit: maxAsyncImageResultBytes()}
+		recorder := &asyncImageResponseRecorder{header: http.Header{}, limit: imageResultBudget(nil)}
 		recorder.WriteHeader(http.StatusBadRequest)
 		_, err := recorder.Write([]byte(`{"error":{"message":"prompt was rejected"}}`))
 		require.NoError(t, err)
@@ -433,7 +464,7 @@ func TestAsyncImageResult(t *testing.T) {
 	})
 
 	t.Run("collapses a streamed response into completed images", func(t *testing.T) {
-		recorder := &asyncImageResponseRecorder{header: http.Header{}, limit: maxAsyncImageResultBytes()}
+		recorder := &asyncImageResponseRecorder{header: http.Header{}, limit: imageResultBudget(nil)}
 		recorder.header.Set("Content-Type", "text/event-stream")
 		recorder.WriteHeader(http.StatusOK)
 		_, err := recorder.Write([]byte(strings.Join([]string{
@@ -464,7 +495,7 @@ func TestAsyncImageResult(t *testing.T) {
 	})
 
 	t.Run("fails a stream that never completed", func(t *testing.T) {
-		recorder := &asyncImageResponseRecorder{header: http.Header{}, limit: maxAsyncImageResultBytes()}
+		recorder := &asyncImageResponseRecorder{header: http.Header{}, limit: imageResultBudget(nil)}
 		recorder.header.Set("Content-Type", "text/event-stream")
 		recorder.WriteHeader(http.StatusOK)
 		_, err := recorder.Write([]byte("data: {\"type\":\"image_generation.partial_image\",\"b64_json\":\"cGFydGlhbA==\"}\n\n"))
@@ -505,7 +536,7 @@ func TestFinishAsyncImageTaskPersistsBillingQuota(t *testing.T) {
 	}
 	recorder := &asyncImageResponseRecorder{
 		header: make(http.Header),
-		limit:  maxAsyncImageResultBytes(),
+		limit:  imageResultBudget(nil),
 	}
 	recorder.WriteHeader(http.StatusOK)
 	_, err = recorder.Write([]byte(`{"created":1,"data":[{"url":"https://cdn.example/image.png"}]}`))
@@ -554,7 +585,7 @@ func TestFinishAsyncImageTaskPersistsGalleryArtifactsWithoutBase64TaskData(t *te
 	}
 	require.NoError(t, task.Insert())
 	run := &asyncImageRun{keys: map[string]any{}}
-	recorder := &asyncImageResponseRecorder{header: make(http.Header), limit: maxAsyncImageResultBytes()}
+	recorder := &asyncImageResponseRecorder{header: make(http.Header), limit: imageResultBudget(nil)}
 	recorder.WriteHeader(http.StatusOK)
 	result := `{"created":1,"data":[{"b64_json":"` + base64.StdEncoding.EncodeToString(picture.Bytes()) + `"}]}`
 	_, err = recorder.Write([]byte(result))
