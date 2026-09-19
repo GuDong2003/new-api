@@ -89,8 +89,7 @@ export function GalleryImageCard(props: {
             {props.image.prompt}
           </p>
           <p className='text-muted-foreground truncate'>
-            {props.image.width} × {props.image.height} ·{' '}
-            {sourceLabel}
+            {props.image.width} × {props.image.height} · {sourceLabel}
           </p>
           <p className='text-muted-foreground truncate'>{expiry}</p>
         </div>

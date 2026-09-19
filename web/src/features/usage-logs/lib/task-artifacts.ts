@@ -47,10 +47,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
 }
 
-function parseContentUrl(
-  value: unknown,
-  variant?: 'thumbnail'
-): string {
+function parseContentUrl(value: unknown, variant?: 'thumbnail'): string {
   if (typeof value !== 'string') {
     throw new TaskArtifactApiError('invalid_content_url')
   }

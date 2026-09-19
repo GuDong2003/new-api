@@ -74,8 +74,8 @@ import {
   referenceEdgeOptions,
 } from '../lib/reference-connections'
 import type { DrawingNode, ImageSettings } from '../types'
-import { CanvasToolbar } from './CanvasToolbar'
 import { CanvasBackground } from './CanvasBackground'
+import { CanvasToolbar } from './CanvasToolbar'
 import { CanvasViewportControls } from './CanvasViewportControls'
 import { DrawingSettings } from './DrawingSettings'
 import { ImageCanvasNode } from './ImageCanvasNode'

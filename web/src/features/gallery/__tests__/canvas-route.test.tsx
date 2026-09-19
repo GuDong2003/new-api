@@ -22,8 +22,8 @@ import { DEFAULT_IMAGE_SETTINGS } from '@/features/playground/drawing/lib/image-
 import type { DrawingNode } from '@/features/playground/drawing/types'
 import { useDrawingStore } from '@/stores/drawing-store'
 
-import { login } from './fixtures'
 import { useCanvasRoute } from '../hooks/use-canvas-route'
+import { login } from './fixtures'
 
 const startCanvasEditor = vi.hoisted(() => vi.fn())
 const openCanvasProject = vi.hoisted(() => vi.fn())

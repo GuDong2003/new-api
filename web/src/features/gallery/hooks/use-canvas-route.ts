@@ -26,11 +26,11 @@ import {
 import { useAuthStore } from '@/stores/auth-store'
 
 import { storeFor } from '../lib/canvas-editor'
-import { openCanvasProject, startCanvasEditor } from '../lib/canvas-projects'
 import {
   getCanvasOpenProgress,
   subscribeCanvasOpenProgress,
 } from '../lib/canvas-open-progress'
+import { openCanvasProject, startCanvasEditor } from '../lib/canvas-projects'
 import type { CanvasKind } from '../types'
 
 export type CanvasRouteState = {

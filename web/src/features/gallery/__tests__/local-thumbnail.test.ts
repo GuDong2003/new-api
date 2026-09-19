@@ -21,11 +21,11 @@ import { Blob as NodeBlob } from 'node:buffer'
 import { IDBFactory } from 'fake-indexeddb'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 
+import { readGalleryThumbnail } from '../lib/gallery-thumbnail-cache'
 import {
   getLocalThumbnail,
   localThumbnailFingerprint,
 } from '../lib/local-thumbnail'
-import { readGalleryThumbnail } from '../lib/gallery-thumbnail-cache'
 
 const original = new NodeBlob(['a full sized picture'], {
   type: 'image/png',
@@ -47,7 +47,13 @@ it('downscales a local original once and serves the cache after that', async () 
   const render = vi.fn().mockResolvedValue(preview)
 
   const first = await getLocalThumbnail(9, 'asset-a', 'sha-1', original, render)
-  const second = await getLocalThumbnail(9, 'asset-a', 'sha-1', original, render)
+  const second = await getLocalThumbnail(
+    9,
+    'asset-a',
+    'sha-1',
+    original,
+    render
+  )
 
   expect(first).toBe(preview)
   expect(second.size).toBe(preview.size)

@@ -335,7 +335,13 @@ it('gives the first of three canvas covers the full height beside the other two'
 })
 
 it('keeps at most four canvas covers in a square montage', () => {
-  const montage = renderCovers(['asset-a', 'asset-b', 'asset-c', 'asset-d', 'asset-e'])
+  const montage = renderCovers([
+    'asset-a',
+    'asset-b',
+    'asset-c',
+    'asset-d',
+    'asset-e',
+  ])
 
   expect(montage).toHaveClass('grid-cols-2', 'grid-rows-2')
   expect(montage.children).toHaveLength(4)

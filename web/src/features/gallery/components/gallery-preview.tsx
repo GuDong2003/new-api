@@ -84,9 +84,7 @@ export function GalleryPreview(props: {
           <dt>{t('Model')}</dt>
           <dd className='[overflow-wrap:anywhere]'>{props.image.model}</dd>
           <dt>{t('Source')}</dt>
-          <dd>
-            {sourceLabel}
-          </dd>
+          <dd>{sourceLabel}</dd>
           <dt>{t('Image size')}</dt>
           <dd>
             {props.image.width} × {props.image.height}

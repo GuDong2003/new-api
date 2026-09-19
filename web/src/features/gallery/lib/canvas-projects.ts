@@ -39,13 +39,12 @@ import {
   updateState,
 } from './canvas-editor'
 import { canvasEditors, notifyCanvasProjects } from './canvas-events'
-import { loadGalleryFile } from './gallery-file-source'
+import { migrateLegacyCanvases } from './canvas-migration'
 import {
   advanceCanvasOpenProgress,
   clearCanvasOpenProgress,
   startCanvasOpenProgress,
 } from './canvas-open-progress'
-import { migrateLegacyCanvases } from './canvas-migration'
 import {
   acknowledgeCanvasSave,
   listLocalCanvases,
@@ -56,6 +55,7 @@ import {
   updateCanvasUserState,
 } from './canvas-repository'
 import { reconcileCanvasRecord, syncCanvas } from './canvas-sync'
+import { loadGalleryFile } from './gallery-file-source'
 import {
   galleryOwner,
   assertGalleryIdentity,

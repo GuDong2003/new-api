@@ -74,7 +74,11 @@ afterEach(() => {
 })
 
 it('offers a download for an artifact whose stored copy is still available', async () => {
-  await openArtifacts({ key: 'image-0', type: 'image', content_url: contentUrl })
+  await openArtifacts({
+    key: 'image-0',
+    type: 'image',
+    content_url: contentUrl,
+  })
 
   // The Button renders as an anchor but keeps role="button".
   expect(
