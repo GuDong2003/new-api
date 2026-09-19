@@ -25,6 +25,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { useCanvasPreviewImage } from '@/features/gallery/hooks/use-canvas-node-image'
 import { useDrawingStore } from '@/stores/drawing-store'
 
 export function ImagePreview() {
@@ -34,6 +35,7 @@ export function ImagePreview() {
     state.nodes.find((item) => item.id === state.previewId)
   )
   const setPreview = useDrawingStore((state) => state.setPreview)
+  const source = useCanvasPreviewImage(node?.data.asset)
   if (!id || !node?.data.asset) return null
   return (
     <Dialog
@@ -50,7 +52,7 @@ export function ImagePreview() {
           </DialogDescription>
         </DialogHeader>
         <img
-          src={node.data.asset.src}
+          src={source}
           alt={node.data.prompt || node.data.asset.name}
           className='max-h-[70svh] w-full rounded-lg object-contain'
         />

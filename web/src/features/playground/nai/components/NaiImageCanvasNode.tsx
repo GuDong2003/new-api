@@ -30,14 +30,19 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/ui/spinner'
 import { useCanvasNodeDeletionRequest } from '@/features/gallery/components/canvas-node-deletion'
-import { cn } from '@/lib/utils'
+import {
+  readCanvasNodeOriginal,
+  useCanvasNodeImage,
+} from '@/features/gallery/hooks/use-canvas-node-image'
+import { useGalleryIdentity } from '@/features/gallery/hooks/use-gallery-identity'
 import {
   CANVAS_NODE_MIN_HEIGHT,
   CANVAS_NODE_MIN_WIDTH,
 } from '@/features/playground/drawing/lib/canvas-geometry'
+import { cn } from '@/lib/utils'
 import { useNaiDrawingStore } from '@/stores/nai-drawing-store'
 
-import { imageAssetToFile, downloadBlob } from '../../drawing/lib/image-assets'
+import { downloadBlob } from '../../drawing/lib/image-assets'
 import { useNaiImageGeneration } from '../hooks/use-nai-image-generation'
 import type { NaiCanvasNode } from '../types'
 
@@ -51,7 +56,9 @@ export const NaiImageCanvasNode = memo(function NaiImageCanvasNode(
   const [downloading, setDownloading] = useState(false)
   const [failedSource, setFailedSource] = useState<string | null>(null)
   const asset = props.data.asset
-  const imageFailed = Boolean(asset && failedSource === asset.src)
+  const identity = useGalleryIdentity()
+  const source = useCanvasNodeImage(asset, props.width)
+  const imageFailed = Boolean(asset && failedSource === source)
   const failed = props.data.status === 'error'
   const complete = props.data.status === 'complete'
   const pending = props.data.status === 'pending'
@@ -95,11 +102,11 @@ export const NaiImageCanvasNode = memo(function NaiImageCanvasNode(
         <div className='nai-drawing-node-handle bg-muted/40 relative flex min-h-0 flex-1 cursor-grab items-center justify-center overflow-hidden'>
           {asset && !imageFailed && (
             <img
-              src={asset.src}
+              src={source}
               alt={props.data.prompt || asset.name}
               draggable={false}
               className='size-full object-contain'
-              onError={() => setFailedSource(asset.src)}
+              onError={() => setFailedSource(source)}
             />
           )}
           {pending && (
@@ -181,7 +188,7 @@ export const NaiImageCanvasNode = memo(function NaiImageCanvasNode(
                 if (!asset) return
                 setDownloading(true)
                 try {
-                  const file = await imageAssetToFile(asset)
+                  const file = await readCanvasNodeOriginal(identity, asset)
                   downloadBlob(file, `new-api-nai-${props.id}.png`)
                 } catch (error) {
                   toast.error(

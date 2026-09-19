@@ -16,6 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, render, screen } from '@testing-library/react'
 import { ReactFlowProvider, type NodeProps } from '@xyflow/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -24,8 +25,10 @@ import { useDrawingStore } from '@/stores/drawing-store'
 
 import { DEFAULT_IMAGE_SETTINGS } from '../../lib/image-settings'
 import type { DrawingNode } from '../../types'
-import { ImageGenerationProgress } from '../ImageGenerationProgress'
 import { ImageCanvasNode } from '../ImageCanvasNode'
+import { ImageGenerationProgress } from '../ImageGenerationProgress'
+
+const client = new QueryClient()
 
 afterEach(() => vi.useRealTimers())
 
@@ -59,14 +62,14 @@ describe('Image generation progress', () => {
       },
     }
     const view = render(
-      <ReactFlowProvider>
-        <ImageCanvasNode {...props} />
-      </ReactFlowProvider>
+      <QueryClientProvider client={client}>
+        <ReactFlowProvider>
+          <ImageCanvasNode {...props} />
+        </ReactFlowProvider>
+      </QueryClientProvider>
     )
     expect(screen.getByText('Elapsed: 0s')).toBeTruthy()
-    expect(screen.getByRole('status')).toHaveAccessibleName(
-      'Generating image…'
-    )
+    expect(screen.getByRole('status')).toHaveAccessibleName('Generating image…')
     act(() => vi.advanceTimersByTime(65000))
     expect(screen.getByText('Elapsed: 65s')).toBeTruthy()
 
@@ -79,47 +82,55 @@ describe('Image generation progress', () => {
       height: 512,
     }
     view.rerender(
-      <ReactFlowProvider>
-        <ImageCanvasNode
-          {...props}
-          data={{
-            ...props.data,
-            asset: preview,
-            progress: { startedAt: 100000, phase: 'decoding', previewCount: 2 },
-          }}
-        />
-      </ReactFlowProvider>
+      <QueryClientProvider client={client}>
+        <ReactFlowProvider>
+          <ImageCanvasNode
+            {...props}
+            data={{
+              ...props.data,
+              asset: preview,
+              progress: {
+                startedAt: 100000,
+                phase: 'decoding',
+                previewCount: 2,
+              },
+            }}
+          />
+        </ReactFlowProvider>
+      </QueryClientProvider>
     )
-    expect(screen.getByRole('status')).toHaveAccessibleName(
-      'Preparing image…'
-    )
+    expect(screen.getByRole('status')).toHaveAccessibleName('Preparing image…')
     expect(screen.getByText('Previews received: 2')).toBeTruthy()
     expect(screen.getByRole('img', { name: 'A cup' })).toBeTruthy()
 
     view.rerender(
-      <ReactFlowProvider>
-        <ImageCanvasNode
-          {...props}
-          data={{
-            ...props.data,
-            progress: {
-              startedAt: Date.now(),
-              phase: 'generating',
-              previewCount: 0,
-            },
-          }}
-        />
-      </ReactFlowProvider>
+      <QueryClientProvider client={client}>
+        <ReactFlowProvider>
+          <ImageCanvasNode
+            {...props}
+            data={{
+              ...props.data,
+              progress: {
+                startedAt: Date.now(),
+                phase: 'generating',
+                previewCount: 0,
+              },
+            }}
+          />
+        </ReactFlowProvider>
+      </QueryClientProvider>
     )
     expect(screen.getByText('Elapsed: 0s')).toBeTruthy()
     expect(screen.queryByText('Previews received: 2')).toBeNull()
     view.rerender(
-      <ReactFlowProvider>
-        <ImageCanvasNode
-          {...props}
-          data={{ ...props.data, status: 'complete', asset: preview }}
-        />
-      </ReactFlowProvider>
+      <QueryClientProvider client={client}>
+        <ReactFlowProvider>
+          <ImageCanvasNode
+            {...props}
+            data={{ ...props.data, status: 'complete', asset: preview }}
+          />
+        </ReactFlowProvider>
+      </QueryClientProvider>
     )
     expect(screen.queryByRole('status')).toBeNull()
   })
@@ -130,11 +141,17 @@ describe('Image generation progress', () => {
 // word's own length or a translation of another length would animate wrong.
 it('animates the label letter by letter while keeping it readable as one phrase', () => {
   render(
-    <ReactFlowProvider>
-      <ImageGenerationProgress
-        progress={{ startedAt: Date.now(), phase: 'generating', previewCount: 0 }}
-      />
-    </ReactFlowProvider>
+    <QueryClientProvider client={client}>
+      <ReactFlowProvider>
+        <ImageGenerationProgress
+          progress={{
+            startedAt: Date.now(),
+            phase: 'generating',
+            previewCount: 0,
+          }}
+        />
+      </ReactFlowProvider>
+    </QueryClientProvider>
   )
 
   const status = screen.getByRole('status')

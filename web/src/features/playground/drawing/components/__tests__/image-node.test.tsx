@@ -31,6 +31,8 @@ import { DEFAULT_IMAGE_SETTINGS } from '../../lib/image-settings'
 import type { DrawingNode } from '../../types'
 import { ImageCanvasNode } from '../ImageCanvasNode'
 
+const client = new QueryClient()
+
 function RetryImageCard() {
   const generation = useImageGeneration()
   const node = useDrawingStore((state) => state.nodes[0])
@@ -78,9 +80,11 @@ describe('Canvas image result', () => {
       },
     }
     render(
-      <ReactFlowProvider>
-        <ImageCanvasNode {...props} />
-      </ReactFlowProvider>
+      <QueryClientProvider client={client}>
+        <ReactFlowProvider>
+          <ImageCanvasNode {...props} />
+        </ReactFlowProvider>
+      </QueryClientProvider>
     )
 
     // The resizer draws four separate straight lines, which cannot round the
@@ -138,20 +142,24 @@ describe('Canvas image result', () => {
       },
     }
     const view = render(
-      <ReactFlowProvider>
-        <ImageCanvasNode {...props} />
-      </ReactFlowProvider>
+      <QueryClientProvider client={client}>
+        <ReactFlowProvider>
+          <ImageCanvasNode {...props} />
+        </ReactFlowProvider>
+      </QueryClientProvider>
     )
     const output = screen.getByRole('button', { name: 'Reference output' })
     expect(output.getAttribute('aria-disabled')).toBe('false')
     expect(output.tabIndex).toBe(0)
     view.rerender(
-      <ReactFlowProvider>
-        <ImageCanvasNode
-          {...props}
-          data={{ ...props.data, status: 'pending' }}
-        />
-      </ReactFlowProvider>
+      <QueryClientProvider client={client}>
+        <ReactFlowProvider>
+          <ImageCanvasNode
+            {...props}
+            data={{ ...props.data, status: 'pending' }}
+          />
+        </ReactFlowProvider>
+      </QueryClientProvider>
     )
     expect(
       screen
@@ -304,23 +312,27 @@ describe('Canvas image result', () => {
       positionAbsoluteY: 0,
     }
     const view = render(
-      <ReactFlowProvider>
-        <ImageCanvasNode {...props} />
-      </ReactFlowProvider>
+      <QueryClientProvider client={client}>
+        <ReactFlowProvider>
+          <ImageCanvasNode {...props} />
+        </ReactFlowProvider>
+      </QueryClientProvider>
     )
     fireEvent.error(screen.getByRole('img', { name: 'A cup' }))
     expect(screen.queryByText('The image could not be loaded.')).toBeNull()
     view.rerender(
-      <ReactFlowProvider>
-        <ImageCanvasNode
-          {...props}
-          data={{
-            ...props.data,
-            status: 'complete',
-            asset: { ...asset, src: 'data:image/png;base64,ZGVm' },
-          }}
-        />
-      </ReactFlowProvider>
+      <QueryClientProvider client={client}>
+        <ReactFlowProvider>
+          <ImageCanvasNode
+            {...props}
+            data={{
+              ...props.data,
+              status: 'complete',
+              asset: { ...asset, src: 'data:image/png;base64,ZGVm' },
+            }}
+          />
+        </ReactFlowProvider>
+      </QueryClientProvider>
     )
     expect(screen.getByRole('img', { name: 'A cup' }).getAttribute('src')).toBe(
       'data:image/png;base64,ZGVm'

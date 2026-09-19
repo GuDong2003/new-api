@@ -33,16 +33,21 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/ui/spinner'
 import { useCanvasNodeDeletionRequest } from '@/features/gallery/components/canvas-node-deletion'
-import { cn } from '@/lib/utils'
 import {
-  CANVAS_NODE_MIN_HEIGHT,
-  CANVAS_NODE_MIN_WIDTH,
-} from '../lib/canvas-geometry'
+  readCanvasNodeOriginal,
+  useCanvasNodeImage,
+} from '@/features/gallery/hooks/use-canvas-node-image'
+import { useGalleryIdentity } from '@/features/gallery/hooks/use-gallery-identity'
+import { cn } from '@/lib/utils'
 import { useDrawingStore } from '@/stores/drawing-store'
 
 import { ImageCollectContext } from '../context/image-collect-context'
 import { ImageRetryContext } from '../context/image-retry-context'
-import { downloadBlob, imageAssetToFile } from '../lib/image-assets'
+import {
+  CANVAS_NODE_MIN_HEIGHT,
+  CANVAS_NODE_MIN_WIDTH,
+} from '../lib/canvas-geometry'
+import { downloadBlob } from '../lib/image-assets'
 import { getImageModelFamily } from '../lib/image-settings'
 import type { DrawingNode } from '../types'
 import {
@@ -64,7 +69,9 @@ export const ImageCanvasNode = memo(function ImageCanvasNode(
   const [downloading, setDownloading] = useState(false)
   const [failedSource, setFailedSource] = useState<string | null>(null)
   const asset = props.data.asset
-  const imageFailed = Boolean(asset && failedSource === asset.src)
+  const identity = useGalleryIdentity()
+  const source = useCanvasNodeImage(asset, props.width)
+  const imageFailed = Boolean(asset && failedSource === source)
   const pending = props.data.status === 'pending'
   const complete = props.data.status === 'complete'
   const failed = props.data.status === 'error'
@@ -168,18 +175,19 @@ export const ImageCanvasNode = memo(function ImageCanvasNode(
         >
           {asset && !imageFailed && (
             <img
-              src={asset.src}
+              src={source}
               alt={props.data.prompt || asset.name}
               draggable={false}
               className='size-full object-contain'
-              onError={() => setFailedSource(asset.src)}
+              onError={() => setFailedSource(source)}
             />
           )}
           {pending && (
             <div
               className={cn(
                 'absolute inset-x-0 bottom-0 bg-background/90 p-2 text-center text-xs',
-                (!asset || imageFailed) && 'inset-0 flex flex-col justify-center'
+                (!asset || imageFailed) &&
+                  'inset-0 flex flex-col justify-center'
               )}
             >
               <ImageGenerationProgress
@@ -319,7 +327,7 @@ export const ImageCanvasNode = memo(function ImageCanvasNode(
                 if (!asset) return
                 setDownloading(true)
                 try {
-                  const file = await imageAssetToFile(asset)
+                  const file = await readCanvasNodeOriginal(identity, asset)
                   downloadBlob(
                     file,
                     `new-api-${props.id}.${file.type.split('/')[1]}`

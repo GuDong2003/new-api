@@ -28,14 +28,18 @@ import {
 // locally and keep it in the cache the gallery already reads, so a picture is
 // downscaled once no matter how many times it is shown.
 
-/** Matches the server's thumbnail, so both look the same wherever they appear. */
-export const LOCAL_THUMBNAIL_EDGE = 512
+/**
+ * The longest edge of a preview, server-made or derived here. Both sides use
+ * the same number so a picture looks the same wherever it appears, and so a
+ * node can tell when it has been drawn large enough to outgrow one.
+ */
+export const GALLERY_PREVIEW_EDGE = 512
 const LOCAL_THUMBNAIL_TYPE = 'image/jpeg'
 const LOCAL_THUMBNAIL_QUALITY = 0.8
 
 /** Content addressed: the same bytes never need downscaling twice. */
 export function localThumbnailFingerprint(sha256: string) {
-  return `local:${sha256}:${LOCAL_THUMBNAIL_EDGE}`
+  return `local:${sha256}:${GALLERY_PREVIEW_EDGE}`
 }
 
 export async function renderLocalThumbnail(blob: Blob): Promise<Blob | null> {
@@ -43,7 +47,7 @@ export async function renderLocalThumbnail(blob: Blob): Promise<Blob | null> {
   let bitmap: ImageBitmap | undefined
   try {
     bitmap = await createImageBitmap(blob)
-    const scale = LOCAL_THUMBNAIL_EDGE / Math.max(bitmap.width, bitmap.height)
+    const scale = GALLERY_PREVIEW_EDGE / Math.max(bitmap.width, bitmap.height)
     // An image already smaller than the preview gains nothing from a re-encode.
     if (scale >= 1) return null
     const width = Math.max(1, Math.round(bitmap.width * scale))

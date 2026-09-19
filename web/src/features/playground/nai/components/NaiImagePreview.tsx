@@ -23,6 +23,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { useCanvasPreviewImage } from '@/features/gallery/hooks/use-canvas-node-image'
 import { useNaiDrawingStore } from '@/stores/nai-drawing-store'
 
 export function NaiImagePreview() {
@@ -32,6 +33,7 @@ export function NaiImagePreview() {
     state.nodes.find((item) => item.id === state.previewId)
   )
   const setPreview = useNaiDrawingStore((state) => state.setPreview)
+  const source = useCanvasPreviewImage(node?.data.asset)
   if (!id || !node?.data.asset) return null
   return (
     <Dialog open onOpenChange={(open) => !open && setPreview(null)}>
@@ -43,7 +45,7 @@ export function NaiImagePreview() {
           </DialogDescription>
         </DialogHeader>
         <img
-          src={node.data.asset.src}
+          src={source}
           alt={node.data.prompt}
           className='max-h-[70svh] w-full rounded-lg object-contain'
         />
