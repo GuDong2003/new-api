@@ -20,6 +20,7 @@ import { useTranslation } from 'react-i18next'
 
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
+import { cn } from '@/lib/utils'
 
 import { useGalleryFile } from '../hooks/use-gallery-file'
 import { galleryCanvasThumbnailFingerprint } from '../lib/gallery-thumbnail-cache'
@@ -57,6 +58,7 @@ export function CanvasCard(props: {
     synced: t('Synced'),
   }[project.status ?? 'synced']
   const type = project.kind === 'nai' ? t('NAI Canvas') : t('Drawing')
+  const covers = project.coverAssetIds.slice(0, 4)
   const updated = project.updatedAt
     ? new Date(project.updatedAt * 1000).toLocaleString()
     : t('Not synced')
@@ -68,12 +70,24 @@ export function CanvasCard(props: {
         onClick={props.onOpen}
         aria-label={t('Open canvas: {{name}}', { name: project.name })}
       >
-        <div className='bg-muted flex size-full items-center justify-center p-2'>
-          {project.coverAssetIds.length ? (
-            <div className='grid w-full max-w-44 grid-cols-2 gap-1.5'>
-              {project.coverAssetIds.slice(0, 4).map((id) => (
+        <div className='bg-muted flex size-full items-center justify-center p-1.5'>
+          {covers.length ? (
+            <div
+              className={cn(
+                'grid size-full gap-1.5',
+                covers.length === 1 ? 'grid-cols-1' : 'grid-cols-2',
+                covers.length > 2 && 'grid-rows-2'
+              )}
+            >
+              {covers.map((id, index) => (
                 <CanvasCover
                   key={id}
+                  // Three covers read best as one tall image beside a stack.
+                  className={
+                    covers.length === 3 && index === 0
+                      ? 'row-span-2'
+                      : undefined
+                  }
                   identity={props.identity}
                   id={id}
                   blob={
@@ -141,6 +155,7 @@ function CanvasCover(props: {
   blob?: Blob
   localOnly?: boolean
   cacheFingerprint: string
+  className?: string
 }) {
   const { t } = useTranslation()
   const file = useGalleryFile(
@@ -163,11 +178,17 @@ function CanvasCover(props: {
     <img
       src={url}
       alt=''
-      className='bg-background aspect-video w-full rounded-md border object-contain'
+      className={cn(
+        'bg-background size-full rounded-md border object-cover',
+        props.className
+      )}
     />
   ) : (
     <div
-      className='bg-background relative aspect-video rounded-md border'
+      className={cn(
+        'bg-background relative size-full rounded-md border',
+        props.className
+      )}
       aria-label={t('Canvas cover')}
     >
       {loading ? <Skeleton className='absolute inset-0 size-full' /> : null}

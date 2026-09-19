@@ -276,3 +276,68 @@ it('keeps a quota with room to spare on the calm color', () => {
     screen.getByRole('progressbar', { name: 'Images' }).firstElementChild
   ).toHaveClass('bg-success')
 })
+
+function coverProject(coverAssetIds: string[]) {
+  return {
+    id: 'canvas-1',
+    kind: 'drawing' as const,
+    name: '封面画布',
+    revision: 1,
+    state: 'ready' as const,
+    updatedAt: 1700000000,
+    expiresAt: 0,
+    coverAssetIds,
+  }
+}
+
+function renderCovers(coverAssetIds: string[]) {
+  render(
+    <QueryClientProvider client={client}>
+      <CanvasCard
+        identity={{ userId: 813, sessionId: 'gallery-session' }}
+        project={coverProject(coverAssetIds)}
+        onOpen={vi.fn()}
+        onRename={vi.fn()}
+        onDelete={vi.fn()}
+      />
+    </QueryClientProvider>
+  )
+  const montage = screen
+    .getByRole('button', { name: 'Open canvas: 封面画布' })
+    .querySelector('.grid')
+  if (!montage) throw new Error('The cover montage is missing.')
+  return montage
+}
+
+// The montage used to sit in a 176px box in the middle of the card, so a single
+// cover occupied a quarter of the area it had.
+it('spreads a single canvas cover over the whole preview area', () => {
+  const montage = renderCovers(['asset-a'])
+
+  expect(montage).toHaveClass('size-full', 'grid-cols-1')
+  expect(montage.className).not.toMatch(/max-w-/)
+})
+
+it('splits two canvas covers into one row of two', () => {
+  const montage = renderCovers(['asset-a', 'asset-b'])
+
+  expect(montage).toHaveClass('grid-cols-2')
+  expect(montage).not.toHaveClass('grid-rows-2')
+})
+
+it('gives the first of three canvas covers the full height beside the other two', () => {
+  const montage = renderCovers(['asset-a', 'asset-b', 'asset-c'])
+
+  expect(montage).toHaveClass('grid-cols-2', 'grid-rows-2')
+  expect(montage.children).toHaveLength(3)
+  expect(montage.children[0]).toHaveClass('row-span-2')
+  expect(montage.children[1]).not.toHaveClass('row-span-2')
+})
+
+it('keeps at most four canvas covers in a square montage', () => {
+  const montage = renderCovers(['asset-a', 'asset-b', 'asset-c', 'asset-d', 'asset-e'])
+
+  expect(montage).toHaveClass('grid-cols-2', 'grid-rows-2')
+  expect(montage.children).toHaveLength(4)
+  expect(montage.children[0]).not.toHaveClass('row-span-2')
+})

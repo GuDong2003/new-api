@@ -65,7 +65,7 @@ export const NaiImageCanvasNode = memo(function NaiImageCanvasNode(
         maxWidth={10000}
         maxHeight={10000}
         onResizeStart={checkpoint}
-        lineClassName='!border-primary/70'
+        lineClassName='!rounded-xl !border-primary/70'
         handleClassName='!size-2 !rounded-sm !bg-background !border-primary'
       />
       <article
@@ -95,7 +95,6 @@ export const NaiImageCanvasNode = memo(function NaiImageCanvasNode(
               src={asset.src}
               alt={props.data.prompt || asset.name}
               draggable={false}
-              loading='lazy'
               className='size-full object-contain'
               onError={() => setFailedSource(asset.src)}
             />
