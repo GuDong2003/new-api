@@ -84,15 +84,11 @@ describe('image source assets', () => {
 describe('reference images held by the canvas', () => {
   it('reads one the canvas is holding as an object URL', async () => {
     const bytes = new Blob(['a picture'], { type: 'image/png' })
+    // Only what imageAssetToFile reads off a response. Building a real one ties
+    // the test to whichever Blob and Response the runtime happens to ship.
     vi.stubGlobal(
       'fetch',
-      vi.fn(
-        async () =>
-          new Response(bytes, {
-            status: 200,
-            headers: { 'Content-Type': 'image/png' },
-          })
-      )
+      vi.fn(async () => ({ ok: true, blob: async () => bytes }))
     )
 
     const file = await imageAssetToFile({
