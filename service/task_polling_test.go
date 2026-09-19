@@ -518,6 +518,11 @@ func TestUpdateVideoTasksSlowChannelDoesNotBlockOtherChannels(t *testing.T) {
 	GetTaskAdaptorFunc = func(constant.TaskPlatform) TaskPollingAdaptor { return adaptor }
 	t.Cleanup(func() { GetTaskAdaptorFunc = previousFactory })
 
+	// UpdateVideoTasks writes these task records while the assertion below
+	// polls, so the expected IDs must be read before the work starts.
+	fastFirstUpstreamID := fastFirst.GetUpstreamTaskID()
+	fastSecondUpstreamID := fastSecond.GetUpstreamTaskID()
+
 	errCh := make(chan error, 1)
 	gopool.Go(func() {
 		errCh <- UpdateVideoTasks(context.Background(), constant.TaskPlatform("kling"), map[int][]string{
@@ -544,8 +549,8 @@ func TestUpdateVideoTasksSlowChannelDoesNotBlockOtherChannels(t *testing.T) {
 	require.Eventually(t, func() bool {
 		fetchedTaskIDs := adaptor.fetchedTaskIDs()
 		return len(fetchedTaskIDs) == 2 &&
-			fetchedTaskIDs[0] == fastFirst.GetUpstreamTaskID() &&
-			fetchedTaskIDs[1] == fastSecond.GetUpstreamTaskID()
+			fetchedTaskIDs[0] == fastFirstUpstreamID &&
+			fetchedTaskIDs[1] == fastSecondUpstreamID
 	}, 500*time.Millisecond, 10*time.Millisecond)
 
 	releaseBlockedTask()
