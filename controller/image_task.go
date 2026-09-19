@@ -113,6 +113,16 @@ func imageTaskStatus(status string) string {
 	}
 }
 
+// shouldRecordSynchronousImageTask reports whether this request has to leave a
+// task record behind once it answers. A caller waiting on an inline image gets
+// one so the result is still reachable afterwards. A caller who asked for a
+// task already has one, and so does an accepted task being carried out in the
+// background — recording that replay would duplicate the task it is running,
+// down to the artifacts, with no time elapsed between submission and finish.
+func shouldRecordSynchronousImageTask(c *gin.Context, request *dto.ImageRequest) bool {
+	return !isAsyncImageRequest(c, request) && !c.GetBool(asyncImageRunningKey)
+}
+
 // isAsyncImageRequest reports whether the caller asked for a task instead of an
 // inline image response. The query parameter and the two headers work for
 // multipart uploads as well, where the JSON body field is not available.

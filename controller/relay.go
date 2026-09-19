@@ -144,7 +144,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 	var syncImageCapture *imageResponseCaptureWriter
 	if relayFormat == types.RelayFormatOpenAIImage {
-		if imageRequest, ok := request.(*dto.ImageRequest); ok && !isAsyncImageRequest(c, imageRequest) {
+		if imageRequest, ok := request.(*dto.ImageRequest); ok && shouldRecordSynchronousImageTask(c, imageRequest) {
 			originalWriter := c.Writer
 			syncImageCapture = &imageResponseCaptureWriter{
 				ResponseWriter: originalWriter,

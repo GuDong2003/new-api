@@ -331,6 +331,32 @@ func TestIsAsyncImageRequest(t *testing.T) {
 	}
 }
 
+// An accepted task already has a record; carrying it out in the background must
+// not leave a second, zero-duration one beside it holding the same result.
+func TestShouldRecordSynchronousImageTask(t *testing.T) {
+	tests := []struct {
+		name    string
+		target  string
+		running bool
+		want    bool
+	}{
+		{name: "a caller waiting on the response is recorded", target: "/v1/images/generations", want: true},
+		{name: "a caller asking for a task is not", target: "/v1/images/generations?async=true", want: false},
+		{name: "an accepted task being carried out is not", target: "/v1/images/generations?async=true", running: true, want: false},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			context, _ := gin.CreateTestContext(httptest.NewRecorder())
+			context.Request = httptest.NewRequest(http.MethodPost, test.target, nil)
+			if test.running {
+				context.Set(asyncImageRunningKey, true)
+			}
+			assert.Equal(t, test.want, shouldRecordSynchronousImageTask(context, &dto.ImageRequest{}))
+		})
+	}
+}
+
 func TestImageResultBudget(t *testing.T) {
 	count := func(n uint) *uint { return &n }
 
