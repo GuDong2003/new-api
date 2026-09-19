@@ -91,7 +91,9 @@ type PendingCanvasAction =
     }
   | { type: 'create'; name: string; kind: CanvasKind; sourceKind: CanvasKind }
 
-export function Gallery() {
+export type GalleryView = 'images' | 'canvases'
+
+export function Gallery(props: { initialView?: GalleryView } = {}) {
   const { t } = useTranslation()
   const userId = useAuthStore((state) => state.auth.user?.id ?? null)
   const sessionId = useAuthStore((state) => state.auth.session?.sid ?? null)
@@ -102,11 +104,15 @@ export function Gallery() {
     <GalleryContent
       key={`${userId}:${sessionId}`}
       identity={{ userId, sessionId }}
+      initialView={props.initialView}
     />
   )
 }
 
-function GalleryContent(props: { identity: GalleryIdentity }) {
+function GalleryContent(props: {
+  identity: GalleryIdentity
+  initialView?: GalleryView
+}) {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const client = useQueryClient()
@@ -118,7 +124,10 @@ function GalleryContent(props: { identity: GalleryIdentity }) {
     [props.identity.sessionId, props.identity.userId]
   )
   const { gridRef, metrics } = useGalleryGrid()
-  const [view, setView] = useState('images')
+  // Which tab opens is a route parameter so the canvas editor can link into
+  // the list of canvases directly instead of landing on the images. Switching
+  // afterwards stays local: it is not worth a history entry.
+  const [view, setView] = useState<string>(props.initialView ?? 'images')
   const [source, setSource] = useState('all')
   const [search, setSearch] = useState('')
   const [sort, setSort] = useState('newest')

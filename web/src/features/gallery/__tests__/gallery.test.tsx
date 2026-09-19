@@ -315,3 +315,35 @@ it('replaces failed loading with a retry action and keeps thumbnails private aft
     screen.queryByRole('progressbar', { name: 'Images' })
   ).not.toBeInTheDocument()
 })
+
+// The canvas editor links here to reach its own list. Landing on the images
+// and making the reader click a second time is the whole reason the tab is
+// addressable.
+it('opens the canvases tab when the route asks for it', async () => {
+  api.defaults.adapter = async (config) => {
+    if (config.url?.endsWith('/usage')) return response(config, usage)
+    if (config.url?.endsWith('/canvases')) {
+      return response(config, { items: [], total: 0, page: 1, page_size: 24 })
+    }
+    return response(config, {
+      items: [galleryImage],
+      total: 1,
+      page: 1,
+      page_size: 24,
+    })
+  }
+
+  render(
+    <QueryClientProvider client={client}>
+      <Gallery initialView='canvases' />
+    </QueryClientProvider>
+  )
+
+  expect(
+    await screen.findByRole('tab', { name: /Canvases/, selected: true })
+  ).toBeVisible()
+  expect(screen.getByRole('tab', { name: /Images/ })).toHaveAttribute(
+    'aria-selected',
+    'false'
+  )
+})

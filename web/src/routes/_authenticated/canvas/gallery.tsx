@@ -17,9 +17,21 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { createFileRoute } from '@tanstack/react-router'
+import { z } from 'zod'
 
 import { Gallery } from '@/features/gallery'
 
-export const Route = createFileRoute('/_authenticated/canvas/gallery')({
-  component: Gallery,
+// The tab lives in the URL so a canvas can send you straight to its list
+// instead of landing on the images and making you click again.
+const gallerySearchSchema = z.object({
+  view: z.enum(['images', 'canvases']).default('images'),
 })
+
+export const Route = createFileRoute('/_authenticated/canvas/gallery')({
+  validateSearch: gallerySearchSchema,
+  component: GalleryRoute,
+})
+
+function GalleryRoute() {
+  return <Gallery initialView={Route.useSearch().view} />
+}

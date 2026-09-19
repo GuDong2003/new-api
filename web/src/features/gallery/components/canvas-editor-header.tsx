@@ -207,7 +207,9 @@ export function CanvasEditorHeader(props: {
             type='button'
             variant='ghost'
             size='icon-sm'
-            render={<Link to='/canvas/gallery' />}
+            render={
+              <Link to='/canvas/gallery' search={{ view: 'canvases' }} />
+            }
             aria-label={t('Open canvas')}
             title={t('Open canvas')}
           >
