@@ -764,8 +764,12 @@ For commercial licensing, please contact support@quantumnous.com
   }
   5% {
     opacity: 1;
-    text-shadow: 0 0 4px var(--background);
-    transform: scale(1.1) translateY(-2px);
+    /* The glow is the text's own colour, so a letter lights up rather than
+     * being outlined: an opposite colour here draws a ring that wipes out the
+     * stripes passing behind it. Stated against the font size, as 4px and 2px
+     * are in the original's own. */
+    text-shadow: 0 0 0.156em var(--foreground);
+    transform: scale(1.1) translateY(-0.078em);
   }
   20% {
     opacity: 0.2;
@@ -796,6 +800,19 @@ For commercial licensing, please contact support@quantumnous.com
   font-weight: 600;
   letter-spacing: 0.01em;
   user-select: none;
+}
+
+/* The picture area with nothing in it yet: the word is the only thing there is
+ * to show, so it takes the room. Sized against the box rather than in fixed
+ * pixels, because a node can be dragged to any size. Width sets it so the word
+ * spans the card; height caps it so the glow is never clipped. */
+.drawing-generation-fill {
+  container-type: size;
+}
+
+.drawing-generation-fill .drawing-generation {
+  font-size: min(17cqw, 27cqh);
+  min-height: 0;
 }
 
 .drawing-generation-letter {

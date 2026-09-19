@@ -187,7 +187,7 @@ export const ImageCanvasNode = memo(function ImageCanvasNode(
               className={cn(
                 'absolute inset-x-0 bottom-0 bg-background/90 p-2 text-center text-xs',
                 (!asset || imageFailed) &&
-                  'inset-0 flex flex-col justify-center'
+                  'drawing-generation-fill inset-0 flex flex-col justify-center'
               )}
             >
               <ImageGenerationProgress
