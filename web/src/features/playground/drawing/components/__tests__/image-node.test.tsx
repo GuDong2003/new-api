@@ -83,8 +83,19 @@ describe('Canvas image result', () => {
       </ReactFlowProvider>
     )
 
+    // The resizer draws four separate straight lines, which cannot round the
+    // corners of the card and leave them open, so the card carries the outline
+    // and the lines stay invisible rather than adding a second square one.
     const article = screen.getByRole('article', { name: 'A cup' })
-    expect(article.className).not.toContain('ring-2')
+    expect(article.className).toContain('ring-2')
+
+    const lines = [
+      ...document.querySelectorAll('.react-flow__resize-control.line'),
+    ]
+    expect(lines.length).toBeGreaterThan(0)
+    expect(
+      lines.every((line) => line.className.includes('border-transparent'))
+    ).toBe(true)
 
     const resizeControls = [
       ...document.querySelectorAll('.react-flow__resize-control.handle'),

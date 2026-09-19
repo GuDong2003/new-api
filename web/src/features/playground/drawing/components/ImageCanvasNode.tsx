@@ -45,7 +45,10 @@ import { ImageRetryContext } from '../context/image-retry-context'
 import { downloadBlob, imageAssetToFile } from '../lib/image-assets'
 import { getImageModelFamily } from '../lib/image-settings'
 import type { DrawingNode } from '../types'
-import { ImageGenerationProgress } from './ImageGenerationProgress'
+import {
+  ImageGenerationElapsed,
+  ImageGenerationProgress,
+} from './ImageGenerationProgress'
 
 export const ImageCanvasNode = memo(function ImageCanvasNode(
   props: NodeProps<DrawingNode>
@@ -83,7 +86,7 @@ export const ImageCanvasNode = memo(function ImageCanvasNode(
         maxWidth={10000}
         maxHeight={10000}
         onResizeStart={checkpoint}
-        lineClassName='!rounded-xl !border-primary/70'
+        lineClassName='!border-transparent'
         handleClassName='!size-2 !rounded-sm !bg-background !border-primary'
       />
       <Handle
@@ -129,6 +132,9 @@ export const ImageCanvasNode = memo(function ImageCanvasNode(
       <article
         className={cn(
           'flex size-full min-h-0 flex-col overflow-hidden rounded-xl border bg-card shadow-sm',
+          // The resizer draws four separate straight lines, which leave the
+          // corners of a rounded card open. The outline belongs here instead.
+          props.selected && 'ring-primary/70 ring-2',
           reference && 'border-primary'
         )}
         aria-label={props.data.prompt || asset?.name || t('Image')}
@@ -141,6 +147,11 @@ export const ImageCanvasNode = memo(function ImageCanvasNode(
             <Badge variant='secondary' className='text-[10px]'>
               {t('Reference')}
             </Badge>
+          )}
+          {pending && (
+            <ImageGenerationElapsed
+              startedAt={props.data.progress?.startedAt ?? props.data.createdAt}
+            />
           )}
           {pending && <Spinner className='size-3' aria-hidden='true' />}
           {asset && complete && (
@@ -167,8 +178,8 @@ export const ImageCanvasNode = memo(function ImageCanvasNode(
           {pending && (
             <div
               className={cn(
-                'absolute inset-x-0 bottom-0 bg-background/90 p-3 text-center text-xs',
-                (!asset || imageFailed) && 'inset-0 flex items-center p-5'
+                'absolute inset-x-0 bottom-0 bg-background/90 p-2 text-center text-xs',
+                (!asset || imageFailed) && 'inset-0 flex flex-col justify-center'
               )}
             >
               <ImageGenerationProgress

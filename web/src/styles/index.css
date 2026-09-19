@@ -780,6 +780,13 @@ For commercial licensing, please contact support@quantumnous.com
   display: flex;
   align-items: center;
   justify-content: center;
+  /* The flare is a set of radial gradients sized to this box, so the box takes
+   * the whole card: squeezed into a caption-sized strip they flatten into a
+   * smear instead of a glow travelling behind the word. */
+  flex: 1 1 auto;
+  min-height: 3.5em;
+  width: 100%;
+  font-size: 1.125rem;
   color: var(--foreground);
   font-weight: 600;
   letter-spacing: 0.01em;
@@ -790,7 +797,8 @@ For commercial licensing, please contact support@quantumnous.com
   display: inline-block;
   opacity: 0;
   z-index: 2;
-  animation: drawing-generation-letter 4s infinite linear;
+  animation: drawing-generation-letter var(--drawing-generation-cycle, 4s)
+    infinite linear;
   animation-delay: var(--drawing-generation-delay, 0s);
 }
 
@@ -836,8 +844,9 @@ For commercial licensing, please contact support@quantumnous.com
     black 25%
   );
   animation:
-    drawing-generation-sweep 2s infinite alternate,
-    drawing-generation-flare 4s infinite;
+    drawing-generation-sweep calc(var(--drawing-generation-cycle, 4s) / 2)
+      infinite alternate,
+    drawing-generation-flare var(--drawing-generation-cycle, 4s) infinite;
   animation-timing-function: cubic-bezier(0.6, 0.8, 0.5, 1);
 }
 

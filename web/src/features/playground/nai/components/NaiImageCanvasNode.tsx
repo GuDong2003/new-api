@@ -65,12 +65,15 @@ export const NaiImageCanvasNode = memo(function NaiImageCanvasNode(
         maxWidth={10000}
         maxHeight={10000}
         onResizeStart={checkpoint}
-        lineClassName='!rounded-xl !border-primary/70'
+        lineClassName='!border-transparent'
         handleClassName='!size-2 !rounded-sm !bg-background !border-primary'
       />
       <article
         className={cn(
           'flex size-full min-h-0 flex-col overflow-hidden rounded-xl border bg-card shadow-sm',
+          // The resizer draws four separate straight lines, which leave the
+          // corners of a rounded card open. The outline belongs here instead.
+          props.selected && 'ring-primary/70 ring-2',
           props.selected && 'border-primary ring-primary/20 ring-2'
         )}
         aria-label={props.data.prompt || asset?.name || t('NAI image')}

@@ -21,43 +21,50 @@ import { useTranslation } from 'react-i18next'
 
 import type { ImageGenerationProgress as GenerationProgress } from '../types'
 
-export function ImageGenerationProgress(props: {
-  progress: GenerationProgress
-}) {
+// Elapsed time sits in the card header, clear of the animation. It owns its own
+// tick so a running generation does not re-render the whole node every second.
+export function ImageGenerationElapsed(props: { startedAt: number }) {
   const { t } = useTranslation()
   const [now, setNow] = useState(Date.now)
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1000)
     return () => window.clearInterval(timer)
   }, [])
-
-  const seconds = Math.max(
-    0,
-    Math.floor((now - props.progress.startedAt) / 1000)
+  const seconds = Math.max(0, Math.floor((now - props.startedAt) / 1000))
+  return (
+    <span className='text-muted-foreground font-mono text-[10px] tabular-nums'>
+      {t('Elapsed: {{seconds}}s', { seconds })}
+    </span>
   )
+}
+
+export function ImageGenerationProgress(props: {
+  progress: GenerationProgress
+}) {
+  const { t } = useTranslation()
   const status =
     props.progress.phase === 'decoding'
       ? t('Preparing image…')
       : t('Generating image…')
-  // The flare sweeps behind one word, so the label is split into letters that
-  // light up in turn. Delays are derived from the word rather than fixed, so a
-  // translation of any length still animates end to end.
   const word =
     props.progress.phase === 'decoding' ? t('Preparing') : t('Generating')
-  // A word repeats letters, so each one is identified by its position, and its
-  // delay is spread across the word rather than fixed: a translation of any
-  // length still lights up end to end.
-  const letters = [...word].map((letter, index, all) => ({
+  // Letters light in turn at a fixed step, so the wave travels at one speed in
+  // every language. A short word runs out of steps quickly, so its cycle is
+  // shortened too: otherwise a three-character translation would blink three
+  // times and then sit dark for the rest of a ten-letter word's four seconds.
+  const cycle = Math.min(4, Math.max(2, [...word].length * 0.4))
+  const letters = [...word].map((letter, index) => ({
     id: `${index}-${letter}`,
     letter: letter === ' ' ? '\u00a0' : letter,
-    delay: `${(0.1 + index / all.length).toFixed(3)}s`,
+    delay: `${(0.1 + index * 0.105).toFixed(3)}s`,
   }))
   return (
-    <div className='w-full space-y-1.5'>
+    <div className='flex size-full min-h-0 flex-col justify-center gap-1'>
       <div
         role='status'
         aria-label={status}
-        className='drawing-generation h-6 text-sm'
+        className='drawing-generation'
+        style={{ '--drawing-generation-cycle': `${cycle}s` } as CSSProperties}
       >
         <span className='sr-only'>{status}</span>
         {letters.map((item) => (
@@ -74,11 +81,8 @@ export function ImageGenerationProgress(props: {
         ))}
         <span className='drawing-generation-flare' aria-hidden='true' />
       </div>
-      <p className='text-muted-foreground tabular-nums'>
-        {t('Elapsed: {{seconds}}s', { seconds })}
-      </p>
       {props.progress.previewCount > 0 && (
-        <p>
+        <p className='shrink-0'>
           {t('Previews received: {{count}}', {
             count: props.progress.previewCount,
           })}

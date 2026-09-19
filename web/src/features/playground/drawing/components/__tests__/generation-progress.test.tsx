@@ -154,4 +154,10 @@ it('animates the label letter by letter while keeping it readable as one phrase'
   expect(letters[0].getAttribute('style')).not.toBe(
     letters[1].getAttribute('style')
   )
+  // The wave travels at one speed in every language, so a shorter translation
+  // covers less ground and its cycle shortens with it rather than leaving the
+  // card dark for the rest of a ten-letter word's four seconds.
+  expect(status.getAttribute('style')).toContain(
+    '--drawing-generation-cycle: 4s'
+  )
 })
