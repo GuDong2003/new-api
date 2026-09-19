@@ -5029,12 +5029,12 @@ export function ChannelMutateDrawer({
   return (
     <>
       <DialogRoot open={open} onOpenChange={handleOpenChange}>
-        {/* Centered with margins instead of a translate: a translated popup
-            would become the containing block of the fixed redirect window
-            and clip it to the dialog. */}
+        {/* Positioned from the dynamic-viewport center instead of with a
+            translate: a translated popup would become the containing block of
+            the fixed redirect window and clip it to the dialog. */}
         <DialogContent
           showCloseButton={false}
-          className='inset-0 m-auto flex h-[min(900px,calc(100vh-2rem))] max-h-[calc(100vh-2rem)] w-[calc(100vw-2rem)] max-w-[1400px] translate-none flex-col gap-0 overflow-hidden p-0 sm:max-w-[1400px]'
+          className='inset-x-0 top-[calc(var(--dialog-viewport-center)-var(--channel-editor-height)/2)] mx-auto flex h-(--channel-editor-height) max-h-(--dialog-available-height) w-[calc(100vw-2rem)] max-w-[1400px] translate-none flex-col gap-0 overflow-hidden p-0 [--channel-editor-height:min(900px,var(--dialog-available-height))] sm:max-w-[1400px]'
         >
           <DialogClose
             render={

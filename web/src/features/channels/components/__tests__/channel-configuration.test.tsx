@@ -2412,11 +2412,11 @@ test('on wide screens redirecting a fetched model opens the floating panel besid
     top: '16px',
     width: '420px',
   })
-  // The window floats; the dialog keeps its full width and is centered
-  // without a translate, which would clip the fixed window to the dialog.
+  // The window floats; the dialog keeps its full width, fits the dynamic
+  // viewport and has no translate, which would clip the fixed window to it.
   expect(document.querySelector('[data-slot="dialog-content"]')).toHaveClass(
     'sm:max-w-[1400px]',
-    'm-auto',
+    'max-h-(--dialog-available-height)',
     'translate-none'
   )
   expect(
