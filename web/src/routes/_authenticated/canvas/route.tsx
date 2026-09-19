@@ -46,7 +46,7 @@ function CanvasLayout() {
     <Main className='p-0'>
       <nav
         aria-label={t('Infinite Canvas')}
-        className='flex shrink-0 items-center gap-1 overflow-x-auto px-2 py-2 sm:px-4'
+        className='flex shrink-0 items-center gap-1 overflow-x-auto overflow-y-hidden px-2 py-2 sm:px-4'
       >
         {tabs.map((tab) => (
           <Button

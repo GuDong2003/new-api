@@ -152,7 +152,7 @@ export function CanvasEditorHeader(props: {
         role='toolbar'
         aria-label={props.toolbarLabel ?? t('Canvas tools')}
       >
-        <div className='flex min-w-0 items-center gap-1 overflow-x-auto'>
+        <div className='flex min-w-0 items-center gap-1 overflow-x-auto overflow-y-hidden'>
           {props.children}
         </div>
 

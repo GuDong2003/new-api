@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Link, Outlet } from '@tanstack/react-router'
+import { Link } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
 
 import { SectionPageLayout } from '@/components/layout'
@@ -43,7 +43,6 @@ export function ContentAudit() {
         </SectionPageLayout.Actions>
         <SectionPageLayout.Content>
           <ContentAuditRecords />
-          <Outlet />
         </SectionPageLayout.Content>
       </SectionPageLayout>
     </ContentAuditAccessBoundary>

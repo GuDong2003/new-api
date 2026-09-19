@@ -43,7 +43,6 @@ import { Route as AuthenticatedCanvasGalleryRouteImport } from './routes/_authen
 import { Route as AuthenticatedCanvasNaiRouteImport } from './routes/_authenticated/canvas/nai'
 import { Route as AuthenticatedChannelsIndexRouteImport } from './routes/_authenticated/channels/index'
 import { Route as AuthenticatedChatChatIdRouteImport } from './routes/_authenticated/chat/$chatId'
-import { Route as AuthenticatedContentAuditIdRouteImport } from './routes/_authenticated/content-audit/$id'
 import { Route as AuthenticatedDashboardIndexRouteImport } from './routes/_authenticated/dashboard/index'
 import { Route as AuthenticatedDashboardSectionRouteImport } from './routes/_authenticated/dashboard/$section'
 import { Route as AuthenticatedErrorsErrorRouteImport } from './routes/_authenticated/errors/$error'
@@ -261,12 +260,6 @@ const AuthenticatedChatChatIdRoute = AuthenticatedChatChatIdRouteImport.update({
   path: '/chat/$chatId',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
-const AuthenticatedContentAuditIdRoute =
-  AuthenticatedContentAuditIdRouteImport.update({
-    id: '/$id',
-    path: '/$id',
-    getParentRoute: () => AuthenticatedContentAuditRouteRoute,
-  } as any)
 const AuthenticatedDashboardIndexRoute =
   AuthenticatedDashboardIndexRouteImport.update({
     id: '/dashboard/',
@@ -509,7 +502,7 @@ export interface FileRoutesByFullPath {
   '/privacy-policy': typeof PrivacyPolicyRoute
   '/user-agreement': typeof UserAgreementRoute
   '/canvas': typeof AuthenticatedCanvasRouteRouteWithChildren
-  '/content-audit': typeof AuthenticatedContentAuditRouteRouteWithChildren
+  '/content-audit': typeof AuthenticatedContentAuditRouteRoute
   '/playground': typeof AuthenticatedPlaygroundRouteRouteWithChildren
   '/system-settings': typeof AuthenticatedSystemSettingsRouteRouteWithChildren
   '/forgot-password': typeof authForgotPasswordRoute
@@ -535,7 +528,6 @@ export interface FileRoutesByFullPath {
   '/canvas/gallery': typeof AuthenticatedCanvasGalleryRoute
   '/canvas/nai': typeof AuthenticatedCanvasNaiRoute
   '/chat/$chatId': typeof AuthenticatedChatChatIdRoute
-  '/content-audit/$id': typeof AuthenticatedContentAuditIdRoute
   '/dashboard/$section': typeof AuthenticatedDashboardSectionRoute
   '/errors/$error': typeof AuthenticatedErrorsErrorRoute
   '/models/$section': typeof AuthenticatedModelsSectionRoute
@@ -583,7 +575,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/privacy-policy': typeof PrivacyPolicyRoute
   '/user-agreement': typeof UserAgreementRoute
-  '/content-audit': typeof AuthenticatedContentAuditRouteRouteWithChildren
+  '/content-audit': typeof AuthenticatedContentAuditRouteRoute
   '/forgot-password': typeof authForgotPasswordRoute
   '/oauth': typeof authOauthRoute
   '/otp': typeof authOtpRoute
@@ -607,7 +599,6 @@ export interface FileRoutesByTo {
   '/canvas/gallery': typeof AuthenticatedCanvasGalleryRoute
   '/canvas/nai': typeof AuthenticatedCanvasNaiRoute
   '/chat/$chatId': typeof AuthenticatedChatChatIdRoute
-  '/content-audit/$id': typeof AuthenticatedContentAuditIdRoute
   '/dashboard/$section': typeof AuthenticatedDashboardSectionRoute
   '/errors/$error': typeof AuthenticatedErrorsErrorRoute
   '/models/$section': typeof AuthenticatedModelsSectionRoute
@@ -659,7 +650,7 @@ export interface FileRoutesById {
   '/privacy-policy': typeof PrivacyPolicyRoute
   '/user-agreement': typeof UserAgreementRoute
   '/_authenticated/canvas': typeof AuthenticatedCanvasRouteRouteWithChildren
-  '/_authenticated/content-audit': typeof AuthenticatedContentAuditRouteRouteWithChildren
+  '/_authenticated/content-audit': typeof AuthenticatedContentAuditRouteRoute
   '/_authenticated/playground': typeof AuthenticatedPlaygroundRouteRouteWithChildren
   '/_authenticated/system-settings': typeof AuthenticatedSystemSettingsRouteRouteWithChildren
   '/(auth)/forgot-password': typeof authForgotPasswordRoute
@@ -685,7 +676,6 @@ export interface FileRoutesById {
   '/_authenticated/canvas/gallery': typeof AuthenticatedCanvasGalleryRoute
   '/_authenticated/canvas/nai': typeof AuthenticatedCanvasNaiRoute
   '/_authenticated/chat/$chatId': typeof AuthenticatedChatChatIdRoute
-  '/_authenticated/content-audit/$id': typeof AuthenticatedContentAuditIdRoute
   '/_authenticated/dashboard/$section': typeof AuthenticatedDashboardSectionRoute
   '/_authenticated/errors/$error': typeof AuthenticatedErrorsErrorRoute
   '/_authenticated/models/$section': typeof AuthenticatedModelsSectionRoute
@@ -762,7 +752,6 @@ export interface FileRouteTypes {
     | '/canvas/gallery'
     | '/canvas/nai'
     | '/chat/$chatId'
-    | '/content-audit/$id'
     | '/dashboard/$section'
     | '/errors/$error'
     | '/models/$section'
@@ -834,7 +823,6 @@ export interface FileRouteTypes {
     | '/canvas/gallery'
     | '/canvas/nai'
     | '/chat/$chatId'
-    | '/content-audit/$id'
     | '/dashboard/$section'
     | '/errors/$error'
     | '/models/$section'
@@ -911,7 +899,6 @@ export interface FileRouteTypes {
     | '/_authenticated/canvas/gallery'
     | '/_authenticated/canvas/nai'
     | '/_authenticated/chat/$chatId'
-    | '/_authenticated/content-audit/$id'
     | '/_authenticated/dashboard/$section'
     | '/_authenticated/errors/$error'
     | '/_authenticated/models/$section'
@@ -1214,13 +1201,6 @@ declare module '@tanstack/react-router' {
       fullPath: '/chat/$chatId'
       preLoaderRoute: typeof AuthenticatedChatChatIdRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
-    }
-    '/_authenticated/content-audit/$id': {
-      id: '/_authenticated/content-audit/$id'
-      path: '/$id'
-      fullPath: '/content-audit/$id'
-      preLoaderRoute: typeof AuthenticatedContentAuditIdRouteImport
-      parentRoute: typeof AuthenticatedContentAuditRouteRoute
     }
     '/_authenticated/dashboard/': {
       id: '/_authenticated/dashboard/'
@@ -1551,20 +1531,6 @@ const AuthenticatedCanvasRouteRouteWithChildren =
     AuthenticatedCanvasRouteRouteChildren,
   )
 
-interface AuthenticatedContentAuditRouteRouteChildren {
-  AuthenticatedContentAuditIdRoute: typeof AuthenticatedContentAuditIdRoute
-}
-
-const AuthenticatedContentAuditRouteRouteChildren: AuthenticatedContentAuditRouteRouteChildren =
-  {
-    AuthenticatedContentAuditIdRoute: AuthenticatedContentAuditIdRoute,
-  }
-
-const AuthenticatedContentAuditRouteRouteWithChildren =
-  AuthenticatedContentAuditRouteRoute._addFileChildren(
-    AuthenticatedContentAuditRouteRouteChildren,
-  )
-
 interface AuthenticatedPlaygroundRouteRouteChildren {
   AuthenticatedPlaygroundChatRoute: typeof AuthenticatedPlaygroundChatRoute
   AuthenticatedPlaygroundDrawingRoute: typeof AuthenticatedPlaygroundDrawingRoute
@@ -1644,7 +1610,7 @@ const AuthenticatedSystemSettingsRouteRouteWithChildren =
 
 interface AuthenticatedRouteRouteChildren {
   AuthenticatedCanvasRouteRoute: typeof AuthenticatedCanvasRouteRouteWithChildren
-  AuthenticatedContentAuditRouteRoute: typeof AuthenticatedContentAuditRouteRouteWithChildren
+  AuthenticatedContentAuditRouteRoute: typeof AuthenticatedContentAuditRouteRoute
   AuthenticatedPlaygroundRouteRoute: typeof AuthenticatedPlaygroundRouteRouteWithChildren
   AuthenticatedSystemSettingsRouteRoute: typeof AuthenticatedSystemSettingsRouteRouteWithChildren
   AuthenticatedChat2linkRoute: typeof AuthenticatedChat2linkRoute
@@ -1674,8 +1640,7 @@ interface AuthenticatedRouteRouteChildren {
 
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedCanvasRouteRoute: AuthenticatedCanvasRouteRouteWithChildren,
-  AuthenticatedContentAuditRouteRoute:
-    AuthenticatedContentAuditRouteRouteWithChildren,
+  AuthenticatedContentAuditRouteRoute: AuthenticatedContentAuditRouteRoute,
   AuthenticatedPlaygroundRouteRoute:
     AuthenticatedPlaygroundRouteRouteWithChildren,
   AuthenticatedSystemSettingsRouteRoute:

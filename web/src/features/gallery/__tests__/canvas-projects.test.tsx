@@ -1015,3 +1015,15 @@ it('goes to the canvas straight away rather than downloading it first', async ()
   )
   releaseDownload()
 })
+
+// The tools sit on one line and are scrolled sideways when they do not fit.
+// Asking only for horizontal scrolling silently grants vertical scrolling too,
+// which put a scrollbar down the middle of the toolbar the moment a rerender
+// made the row a fraction taller than its box.
+it('scrolls the canvas tools sideways without scrolling them vertically', () => {
+  render(<CanvasEditorHeader kind='drawing' />)
+
+  const tools = screen.getByRole('toolbar').firstElementChild
+  expect(tools).toHaveClass('overflow-x-auto')
+  expect(tools).toHaveClass('overflow-y-hidden')
+})

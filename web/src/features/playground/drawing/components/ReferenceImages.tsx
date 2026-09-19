@@ -86,7 +86,7 @@ export function ReferenceImages(props: ReferenceImagesProps) {
         }}
       />
       <div
-        className='flex max-w-full gap-2 overflow-x-auto pb-1'
+        className='flex max-w-full gap-2 overflow-x-auto overflow-y-hidden pb-1'
         role='list'
         aria-label={t('Reference images')}
       >

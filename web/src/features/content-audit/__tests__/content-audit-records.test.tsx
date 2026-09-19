@@ -24,8 +24,6 @@ import {
   createRouter,
   Outlet,
   RouterProvider,
-  useNavigate,
-  useParams,
 } from '@tanstack/react-router'
 import {
   act,
@@ -45,7 +43,6 @@ import { useAuthStore } from '@/stores/auth-store'
 
 import { ContentAuditAccessBoundary } from '../components/content-audit-access'
 import { ContentAuditDeleteButton } from '../components/content-audit-delete'
-import { ContentAuditDetailDialog } from '../components/content-audit-detail'
 import { ContentAuditRecords } from '../components/content-audit-records'
 import {
   auditDetail,
@@ -68,24 +65,7 @@ function RecordsLayout() {
   return (
     <ContentAuditAccessBoundary>
       <ContentAuditRecords />
-      <Outlet />
     </ContentAuditAccessBoundary>
-  )
-}
-function RecordRoute() {
-  const params = useParams({ strict: false })
-  const navigate = useNavigate()
-  return (
-    <ContentAuditDetailDialog
-      key={params.id}
-      id={params.id ?? auditId}
-      onClose={() =>
-        void navigate({
-          to: '/content-audit',
-          search: (previous) => previous,
-        })
-      }
-    />
   )
 }
 function renderRecords(path = '/content-audit') {
@@ -97,19 +77,13 @@ function renderRecords(path = '/content-audit') {
     validateSearch: (search) => search,
     beforeLoad: () => (ContentAuditRoute.options.beforeLoad as () => void)(),
   })
-  const detail = createRoute({
-    getParentRoute: () => audit,
-    path: '$id',
-    component: RecordRoute,
-    validateSearch: (search) => search,
-  })
   const forbidden = createRoute({
     getParentRoute: () => root,
     path: '403',
     component: () => <p>Forbidden</p>,
   })
   const router = createRouter({
-    routeTree: root.addChildren([audit.addChildren([detail]), forbidden]),
+    routeTree: root.addChildren([audit, forbidden]),
     history: createMemoryHistory({ initialEntries: [path] }),
   })
   const view = render(
@@ -143,13 +117,13 @@ afterEach(() => {
 })
 
 it.each([1, 10])(
-  'rejects direct detail-route access before fetching for role %s',
+  'rejects a role that is not root before fetching, role %s',
   async (role) => {
     signInAuditRoot(role)
     transport = installAuditTransport(() => {
       throw new Error('No content audit fetch expected')
     })
-    renderRecords(`/content-audit/${auditId}`)
+    renderRecords()
     expect(await screen.findByText('Forbidden')).toBeVisible()
     expect(transport.requests).toHaveLength(0)
   }
@@ -251,7 +225,7 @@ it('paginates metadata, applies typed exact filters from page one, and loads bod
       (request) => request.url === '/api/content-audit/records'
     )
   ).toBe(true)
-  await user.click(screen.getByRole('link', { name: 'Details' }))
+  await user.click(screen.getByRole('button', { name: 'Details' }))
   expect(await screen.findByLabelText('Request content')).toBeVisible()
   expect(transport.requests.at(-1)?.url).toBe(
     `/api/content-audit/records/${auditId}`
@@ -288,7 +262,7 @@ it('keeps the applied filters and does not refetch the list when details open an
       )
     ).toHaveLength(2)
   )
-  await user.click(screen.getByRole('link', { name: 'Details' }))
+  await user.click(screen.getByRole('button', { name: 'Details' }))
   expect(await screen.findByLabelText('Request content')).toBeVisible()
   expect(
     transport.requests.filter(
@@ -311,6 +285,44 @@ it('keeps the applied filters and does not refetch the list when details open an
       (request) => request.url === '/api/content-audit/records'
     )
   ).toHaveLength(2)
+})
+
+// Details belong to the page, not to an address. Sending the browser to another
+// URL for them tore the list down and rebuilt it on the way in and again on the
+// way out, which is what read as the page reloading itself.
+it('opens details without leaving the list', async () => {
+  const detail = auditDetail()
+  detail.payload.images = []
+  transport = installAuditTransport((config) => {
+    if (config.url === '/api/content-audit/records') {
+      return {
+        body: auditSuccess({
+          items: [detail.record],
+          total: 1,
+          page: config.params.page,
+          page_size: config.params.page_size,
+        }),
+      }
+    }
+    return { body: auditSuccess(detail) }
+  })
+  const user = userEvent.setup()
+  const { router } = renderRecords()
+  await screen.findByText('inference-user (#7)')
+
+  await user.click(screen.getByRole('button', { name: 'Details' }))
+  expect(await screen.findByLabelText('Request content')).toBeVisible()
+  expect(router.state.location.pathname).toBe('/content-audit')
+
+  await user.click(
+    within(screen.getByRole('dialog')).getAllByRole('button', {
+      name: 'Close',
+    })[0]
+  )
+  await waitFor(() =>
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  )
+  expect(router.state.location.pathname).toBe('/content-audit')
 })
 
 it('rejects a reversed or overlong date range before querying', async () => {
@@ -361,7 +373,7 @@ it('shows a controlled list error instead of displaying raw backend messages', a
   ).toBeVisible()
   expect(screen.queryByText('private mount path')).not.toBeInTheDocument()
   expect(
-    screen.queryByRole('link', { name: 'Details' })
+    screen.queryByRole('button', { name: 'Details' })
   ).not.toBeInTheDocument()
 })
 

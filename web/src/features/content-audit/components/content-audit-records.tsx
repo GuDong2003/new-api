@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useQuery } from '@tanstack/react-query'
-import { Link, useNavigate, useSearch } from '@tanstack/react-router'
+import { useNavigate, useSearch } from '@tanstack/react-router'
 import type { ColumnDef, RowSelectionState } from '@tanstack/react-table'
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -29,7 +29,7 @@ import {
 } from '@/components/data-table'
 import { ErrorState } from '@/components/error-state'
 import { Badge } from '@/components/ui/badge'
-import { buttonVariants } from '@/components/ui/button'
+import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 
 import { listContentAudits } from '../api'
@@ -49,6 +49,7 @@ import {
 } from '../lib/schema'
 import type { ContentAuditFilters, ContentAuditRecord } from '../types'
 import { ContentAuditDeleteButton } from './content-audit-delete'
+import { ContentAuditDetailDialog } from './content-audit-detail'
 import { ContentAuditFilterBar } from './content-audit-filters'
 
 const emptyRecords: ContentAuditRecord[] = []
@@ -101,6 +102,10 @@ export function ContentAuditRecords() {
     [fallbackInitialValues, search]
   )
   const [selection, setSelection] = useState<RowSelectionState>({})
+  // Details open over the list rather than at an address of their own. Sending
+  // the browser elsewhere for them tore this page down and rebuilt it on the
+  // way in and again on the way out, which read as the list reloading itself.
+  const [detailId, setDetailId] = useState<string | null>(null)
   const query = useQuery({
     ...contentAuditRecordsQueryOptions,
     queryKey: [...access.queryKey, 'records', filters],
@@ -212,15 +217,14 @@ export function ContentAuditRecords() {
         header: t('Actions'),
         cell: ({ row }) => (
           <div className='flex items-center gap-1'>
-            <Link
-              className={buttonVariants({ variant: 'ghost', size: 'sm' })}
-              to='/content-audit/$id'
-              params={{ id: row.original.id }}
-              search={(previous) => previous}
-              preload={false}
+            <Button
+              type='button'
+              variant='ghost'
+              size='sm'
+              onClick={() => setDetailId(row.original.id)}
             >
               {t('Details')}
-            </Link>
+            </Button>
             <ContentAuditDeleteButton
               ids={[row.original.id]}
               compact
@@ -360,6 +364,12 @@ export function ContentAuditRecords() {
           </DataTableBulkActions>
         }
       />
+      {detailId && (
+        <ContentAuditDetailDialog
+          id={detailId}
+          onClose={() => setDetailId(null)}
+        />
+      )}
     </div>
   )
 }
