@@ -22,7 +22,6 @@ import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 
 import { useGalleryFile } from '../hooks/use-gallery-file'
-import { galleryThumbnailFingerprint } from '../lib/gallery-thumbnail-cache'
 import type { GalleryIdentity, GalleryImage } from '../types'
 
 export function GalleryImageCard(props: {
@@ -40,8 +39,7 @@ export function GalleryImageCard(props: {
     props.identity,
     props.image.id,
     true,
-    props.image.has_thumbnail && !props.image.localBlob,
-    { cacheFingerprint: galleryThumbnailFingerprint(props.image) }
+    props.image.has_thumbnail && !props.image.localBlob
   )
   const original = useGalleryFile(
     props.identity,

@@ -60,6 +60,10 @@ import {
   updateCanvasCloudState,
 } from '../lib/canvas-repository'
 import { cancelCanvasSession } from '../lib/canvas-sync'
+import {
+  galleryAssetFingerprint,
+  writeGalleryThumbnail,
+} from '../lib/gallery-thumbnail-cache'
 import type { CanvasRecord, GalleryImage } from '../types'
 import { galleryImage, login, response, usage, required } from './fixtures'
 
@@ -220,12 +224,11 @@ it('deduplicates linked images, previews the local original and navigates with t
   ).toBe(true)
 })
 
-it('opens a remote canvas from thumbnails and reads originals only when exporting', async () => {
-  const canvasId = '22222222-2222-4222-8222-222222222222'
-  const remoteAssetId = '33333333-3333-4333-8333-333333333333'
-  await startCanvasEditor(identity, 'drawing')
-  const settings = useDrawingStore.getState().settings
-  const remote: CanvasRecord = {
+const canvasId = '22222222-2222-4222-8222-222222222222'
+const remoteAssetId = '33333333-3333-4333-8333-333333333333'
+
+function remoteDrawingCanvas(settings: unknown): CanvasRecord {
+  return {
     id: canvasId,
     kind: 'drawing',
     name: '远程缩略图画布',
@@ -277,6 +280,9 @@ it('opens a remote canvas from thumbnails and reads originals only when exportin
     ],
     asset_id_map: {},
   }
+}
+
+function serveRemoteDrawingCanvas(remote: CanvasRecord) {
   api.defaults.adapter = async (config) => {
     if (config.url?.endsWith(`/canvases/${canvasId}`)) {
       return response(config, remote)
@@ -300,16 +306,72 @@ it('opens a remote canvas from thumbnails and reads originals only when exportin
       { ...response(config, {}), status: 404 }
     )
   }
+}
+
+it('opens a remote canvas from thumbnails and reads originals only when exporting', async () => {
+  await startCanvasEditor(identity, 'drawing')
+  serveRemoteDrawingCanvas(
+    remoteDrawingCanvas(useDrawingStore.getState().settings)
+  )
 
   await openCanvasProject(identity, canvasId, undefined, 'drawing')
   expect(fileParams).toEqual([{ thumbnail: true }])
-  expect(useDrawingStore.getState().nodes[0]?.data.asset?.src).toContain(
-    'data:image/jpeg;base64'
-  )
   expect((await readCanvasAssets(813, canvasId))[0]?.previewOnly).toBe(true)
 
   await exportCanvasProject(identity, 'drawing')
   expect(fileParams).toEqual([{ thumbnail: true }, undefined])
+})
+
+// Base64 is only worth its cost when the document has to outlive the tab, as an
+// export does. Encoding every picture on the way into the editor is what made a
+// canvas sit on "loading" after its images had already arrived.
+it('shows an opened canvas from object URLs and exports it as portable data', async () => {
+  await startCanvasEditor(identity, 'drawing')
+  serveRemoteDrawingCanvas(
+    remoteDrawingCanvas(useDrawingStore.getState().settings)
+  )
+
+  await openCanvasProject(identity, canvasId, undefined, 'drawing')
+  expect(useDrawingStore.getState().nodes[0]?.data.asset?.src).toBe(
+    'blob:local-original'
+  )
+
+  const exported = await exportCanvasProject(identity, 'drawing')
+  expect(await exported.text()).toContain('data:image/png;base64')
+})
+
+it('releases an opened canvas from memory once its editor stops', async () => {
+  await startCanvasEditor(identity, 'drawing')
+  serveRemoteDrawingCanvas(
+    remoteDrawingCanvas(useDrawingStore.getState().settings)
+  )
+  await openCanvasProject(identity, canvasId, undefined, 'drawing')
+  expect(URL.revokeObjectURL).not.toHaveBeenCalled()
+
+  stopCanvasEditors(identity)
+
+  expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:local-original')
+})
+
+// The images tab and a canvas show the same pictures. Downloading them again on
+// the way into a canvas is what made opening one feel slow even though the grid
+// had already fetched every thumbnail.
+it('opens a remote canvas from thumbnails the images tab already cached', async () => {
+  await startCanvasEditor(identity, 'drawing')
+  serveRemoteDrawingCanvas(
+    remoteDrawingCanvas(useDrawingStore.getState().settings)
+  )
+  await writeGalleryThumbnail(
+    813,
+    remoteAssetId,
+    galleryAssetFingerprint(remoteAssetId),
+    new Blob(['cached'], { type: 'image/jpeg' })
+  )
+
+  await openCanvasProject(identity, canvasId, undefined, 'drawing')
+
+  expect(fileParams).toEqual([])
+  expect((await readCanvasAssets(813, canvasId))[0]?.blob.size).toBe(6)
 })
 
 it('marks an unuploaded image in a synced canvas local-only until its exact asset appears remotely', async () => {

@@ -23,7 +23,6 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
 
 import { useGalleryFile } from '../hooks/use-gallery-file'
-import { galleryCanvasThumbnailFingerprint } from '../lib/gallery-thumbnail-cache'
 import type { GalleryIdentity } from '../types'
 
 export type CanvasProjectView = {
@@ -94,11 +93,6 @@ export function CanvasCard(props: {
                     project.localOnly ? project.coverBlobs?.[id] : undefined
                   }
                   localOnly={project.localOnly}
-                  cacheFingerprint={galleryCanvasThumbnailFingerprint(
-                    project.id,
-                    project.revision,
-                    id
-                  )}
                 />
               ))}
             </div>
@@ -154,7 +148,6 @@ function CanvasCover(props: {
   id: string
   blob?: Blob
   localOnly?: boolean
-  cacheFingerprint: string
   className?: string
 }) {
   const { t } = useTranslation()
@@ -162,8 +155,7 @@ function CanvasCover(props: {
     props.identity,
     props.id,
     true,
-    !props.blob && !props.localOnly,
-    { cacheFingerprint: props.cacheFingerprint }
+    !props.blob && !props.localOnly
   )
   const original = useGalleryFile(
     props.identity,

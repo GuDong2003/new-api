@@ -21,7 +21,7 @@ import type { NaiCanvasDocument } from '@/features/playground/nai/types'
 import { useDrawingStore } from '@/stores/drawing-store'
 import { useNaiDrawingStore } from '@/stores/nai-drawing-store'
 
-import { getCanvasRecord, getGalleryFile } from '../api'
+import { getCanvasRecord } from '../api'
 import type {
   CanvasKind,
   CanvasRecord,
@@ -39,6 +39,7 @@ import {
   updateState,
 } from './canvas-editor'
 import { canvasEditors, notifyCanvasProjects } from './canvas-events'
+import { loadGalleryFile } from './gallery-file-source'
 import {
   advanceCanvasOpenProgress,
   clearCanvasOpenProgress,
@@ -176,7 +177,11 @@ async function downloadCloudCanvas(
   startCanvasOpenProgress(remote.id, remote.assets.length)
   const assets = await Promise.all(
     remote.assets.map(async (asset) => {
-      const blob = await getGalleryFile(identity, asset.id, asset.has_thumbnail)
+      const blob = await loadGalleryFile(
+        identity,
+        asset.id,
+        asset.has_thumbnail
+      )
       advanceCanvasOpenProgress(remote.id)
       return {
         id: asset.id,
@@ -298,7 +303,8 @@ async function openCanvasProjectInternal(
   if (!reopened) {
     const document = await decodeCanvas(
       canvas,
-      await readCanvasAssets(galleryOwner(identity), id)
+      await readCanvasAssets(galleryOwner(identity), id),
+      true
     )
     assertGalleryIdentity(identity)
     if (canvas.kind === 'drawing') {
@@ -377,7 +383,8 @@ export async function discardCanvasChanges(
   if (canvas && !canvas.deleted) {
     const document = await decodeCanvas(
       canvas,
-      await readCanvasAssets(galleryOwner(identity), canvas.id)
+      await readCanvasAssets(galleryOwner(identity), canvas.id),
+      true
     )
     assertGalleryIdentity(identity)
     if (kind === 'drawing') {
@@ -440,6 +447,8 @@ export async function renameCanvasProject(
   if (
     !normalized ||
     [...normalized].length > 255 ||
+    // A name reaches log lines and file names, so these are rejected on purpose.
+    // oxlint-disable-next-line no-control-regex
     /[\0\r\n]/.test(normalized)
   ) {
     throw new Error('Invalid canvas name.')

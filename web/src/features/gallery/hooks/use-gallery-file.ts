@@ -17,21 +17,13 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 import { useQuery } from '@tanstack/react-query'
 import { useLayoutEffect, useState } from 'react'
 
-import { getGalleryFile } from '../api'
-import {
-  readGalleryThumbnail,
-  writeGalleryThumbnail,
-} from '../lib/gallery-thumbnail-cache'
-import { createRequestGate } from '../lib/request-gate'
+import { loadGalleryFile } from '../lib/gallery-file-source'
 import type { GalleryIdentity } from '../types'
 
 type GalleryFileOptions = {
   blob?: Blob
   only?: boolean
-  cacheFingerprint?: string
 }
-
-const requestThumbnail = createRequestGate(6)
 
 export function useGalleryFile(
   identity: GalleryIdentity,
@@ -40,7 +32,6 @@ export function useGalleryFile(
   enabled = true,
   local?: GalleryFileOptions
 ) {
-  const cacheFingerprint = local?.cacheFingerprint
   const query = useQuery({
     queryKey: [
       'gallery',
@@ -49,38 +40,8 @@ export function useGalleryFile(
       'file',
       id,
       thumbnail,
-      cacheFingerprint,
     ],
-    queryFn: async ({ signal }) => {
-      if (thumbnail && cacheFingerprint && identity.userId !== null) {
-        let cached: Blob | null = null
-        try {
-          cached = await readGalleryThumbnail(
-            identity.userId,
-            id,
-            cacheFingerprint
-          )
-        } catch {
-          // A browser storage failure must not make a server thumbnail fail.
-        }
-        if (cached) return cached
-      }
-      const blob = thumbnail
-        ? await requestThumbnail(
-            () => getGalleryFile(identity, id, true, signal),
-            signal
-          )
-        : await getGalleryFile(identity, id, false, signal)
-      if (thumbnail && cacheFingerprint && identity.userId !== null) {
-        await writeGalleryThumbnail(
-          identity.userId,
-          id,
-          cacheFingerprint,
-          blob
-        ).catch(() => undefined)
-      }
-      return blob
-    },
+    queryFn: ({ signal }) => loadGalleryFile(identity, id, thumbnail, signal),
     enabled: enabled && !local?.blob && !local?.only,
     retry: false,
     gcTime: 30 * 60 * 1000,

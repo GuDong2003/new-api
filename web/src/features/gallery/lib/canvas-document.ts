@@ -39,6 +39,7 @@ import type {
   CanvasKind,
   LocalCanvas,
 } from '../types'
+import { adoptCanvasObjectUrls } from './canvas-object-urls'
 
 type EditorDocument = DrawingDocument | NaiCanvasDocument
 export type CanvasCodecContext = {
@@ -273,16 +274,27 @@ export async function encodeCanvas(
   return { document: normalized, assets }
 }
 
-/** Portable data sources have no session-lifetime object URLs to leak/export. */
+/**
+ * Data sources are portable — they survive being exported to a file and have no
+ * session lifetime to manage — but encoding one costs a base64 pass over every
+ * picture in the canvas. Pass `display` when the result is only going to be
+ * shown in this tab: the pictures are handed over as object URLs instead, owned
+ * by the open canvas and released when it closes.
+ */
 export async function decodeCanvas(
   canvas: LocalCanvas,
-  assets: CanvasBinary[]
+  assets: CanvasBinary[],
+  display = false
 ): Promise<EditorDocument> {
   const normalized = normalizeCanvasDocument(canvas.kind, canvas.document)
   const sources = new Map<string, string>()
   for (const id of canvasDocumentAssetIds(normalized)) {
     const binary = assets.find((asset) => asset.id === id)
     if (!binary) throw new Error('Canvas original is unavailable.')
+    if (display) {
+      sources.set(id, URL.createObjectURL(binary.blob))
+      continue
+    }
     const bytes = new Uint8Array(await binary.blob.arrayBuffer())
     const chunks: string[] = []
     for (let offset = 0; offset < bytes.length; offset += 16384) {
@@ -292,6 +304,7 @@ export async function decodeCanvas(
     }
     sources.set(id, `data:${binary.blob.type};base64,${btoa(chunks.join(''))}`)
   }
+  if (display) adoptCanvasObjectUrls(canvas.kind, [...sources.values()])
   // Parse the small descriptors first, avoiding the old reference-upload size
   // ceiling for generated originals. Hydration never changes their bytes.
   const parsed = parseDocument(

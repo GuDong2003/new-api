@@ -88,30 +88,18 @@ function sweepExpiredEntries(store: IDBObjectStore) {
   })
 }
 
-export function galleryThumbnailFingerprint(image: {
-  id: string
-  bytes: number
-  mime_type: string
-  created_at: number
-  expires_at: number
-  has_thumbnail: boolean
-}) {
-  return [
-    image.id,
-    image.bytes,
-    image.mime_type,
-    image.created_at,
-    image.expires_at,
-    image.has_thumbnail ? 'thumbnail' : 'original',
-  ].join(':')
-}
-
-export function galleryCanvasThumbnailFingerprint(
-  canvasId: string,
-  revision: number,
-  assetId: string
-): string {
-  return `canvas:${canvasId}:${revision}:${assetId}`
+/**
+ * Every surface showing a gallery picture — the images tab, a canvas cover, a
+ * canvas being opened — shares one entry per image, so they must all describe
+ * it the same way. Two schemes over the same key meant each surface treated the
+ * other's copy as stale and downloaded the picture again.
+ *
+ * The id alone identifies the bytes: what a gallery image stores never changes
+ * after it is written, and its thumbnail is dropped only when the image itself
+ * is being removed.
+ */
+export function galleryAssetFingerprint(imageId: string): string {
+  return `asset:${imageId}`
 }
 
 export async function readGalleryThumbnail(

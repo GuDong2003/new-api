@@ -18,7 +18,7 @@ import { IDBFactory } from 'fake-indexeddb'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 
 import {
-  galleryThumbnailFingerprint,
+  galleryAssetFingerprint,
   readGalleryThumbnail,
   removeGalleryThumbnail,
   writeGalleryThumbnail,
@@ -33,21 +33,13 @@ afterEach(() => {
 })
 
 it('only reuses a thumbnail when its image fingerprint is unchanged', async () => {
-  const image = {
-    id: 'image-1',
-    bytes: 2048,
-    mime_type: 'image/png',
-    created_at: 1700000000,
-    expires_at: 9999999999,
-    has_thumbnail: true,
-  }
-  const fingerprint = galleryThumbnailFingerprint(image)
+  const fingerprint = galleryAssetFingerprint('image-1')
   const blob = new Blob(['thumbnail'], { type: 'image/jpeg' })
-  await writeGalleryThumbnail(813, image.id, fingerprint, blob)
+  await writeGalleryThumbnail(813, 'image-1', fingerprint, blob)
 
-  expect(await readGalleryThumbnail(813, image.id, fingerprint)).not.toBeNull()
+  expect(await readGalleryThumbnail(813, 'image-1', fingerprint)).not.toBeNull()
   expect(
-    await readGalleryThumbnail(813, image.id, `${fingerprint}:changed`)
+    await readGalleryThumbnail(813, 'image-1', `${fingerprint}:changed`)
   ).toBeNull()
 })
 

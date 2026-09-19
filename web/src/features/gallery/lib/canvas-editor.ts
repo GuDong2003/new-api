@@ -35,6 +35,7 @@ import {
 } from './canvas-document'
 import { canvasEditors, notifyCanvasProjects } from './canvas-events'
 import { enqueueCanvasMutation } from './canvas-mutation-queue'
+import { releaseCanvasObjectUrls } from './canvas-object-urls'
 import {
   loadLocalCanvas,
   readCanvasAssets,
@@ -422,8 +423,10 @@ export async function flushLocalEditors(
   )
 }
 export function stopCanvasEditors(identity: GalleryIdentity) {
-  for (const editor of canvasEditors.values()) {
-    if (sameIdentity(editor.identity, identity)) editor.stop()
+  for (const [kind, editor] of canvasEditors) {
+    if (!sameIdentity(editor.identity, identity)) continue
+    editor.stop()
+    releaseCanvasObjectUrls(kind)
   }
 }
 useAuthStore.subscribe((state, previous) => {
