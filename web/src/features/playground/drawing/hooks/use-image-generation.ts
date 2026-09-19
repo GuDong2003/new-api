@@ -20,6 +20,7 @@ import { useCallback, useSyncExternalStore } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
+import { readCanvasNodeOriginal } from '@/features/gallery/hooks/use-canvas-node-image'
 import { persistCanvasGenerationResult } from '@/features/gallery/lib/canvas-generation'
 import { useAuthStore } from '@/stores/auth-store'
 import { useDrawingStore } from '@/stores/drawing-store'
@@ -100,6 +101,14 @@ async function executeImageJob(
       settings: input.settings,
       references: input.references,
       mask: input.mask,
+      // A canvas opened from the gallery shows previews while its originals
+      // arrive. What is sent upstream is always the original.
+      readImage: (asset, signal) =>
+        readCanvasNodeOriginal(
+          { userId: input.userId, sessionId: input.sessionId },
+          asset,
+          signal
+        ),
       signal: input.job.controller.signal,
       taskId: input.taskId,
       onTask: (taskId) => {

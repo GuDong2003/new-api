@@ -14,14 +14,9 @@ GNU Affero General Public License for more details.
 You should have received a copy of the GNU Affero General Public License
 along with this program. If not, see <https://www.gnu.org/licenses/>.
 */
-import { useStore } from '@xyflow/react'
-import { useEffect, useState } from 'react'
-
-import { CANVAS_NODE_WIDTH } from '@/features/playground/drawing/lib/canvas-geometry'
 import { imageAssetToFile } from '@/features/playground/drawing/lib/image-assets'
 
 import { loadGalleryFile } from '../lib/gallery-file-source'
-import { GALLERY_PREVIEW_EDGE } from '../lib/local-thumbnail'
 import type { GalleryIdentity } from '../types'
 import { useGalleryFile } from './use-gallery-file'
 import { useGalleryIdentity } from './use-gallery-identity'
@@ -38,46 +33,15 @@ type CanvasNodeAsset = {
 }
 
 /**
- * A canvas opens from previews, which is what makes it open quickly at all. A
- * preview only stops being enough once its node is drawn large enough to show
- * more pixels than it has, so the original is fetched at that point and not
- * before — and then kept, because someone who has looked closely at a picture
- * once tends to look again.
+ * A canvas opens from previews, which is what makes it open quickly at all.
+ * They are a stand-in for the wait, not the answer: the original follows behind
+ * each one and takes its place, so a node ends up showing the picture itself
+ * however far in it is zoomed — and so does a right-click copy or save.
  *
- * Returns the source the node should display.
+ * Nodes scrolled out of view are not rendered, so this only fetches originals
+ * for the part of the canvas actually being looked at.
  */
-export function useCanvasNodeImage(
-  asset: CanvasNodeAsset | undefined,
-  width: number | undefined
-): string {
-  const identity = useGalleryIdentity()
-  // Every node on the canvas runs this. Subscribing to the answer rather than
-  // to the zoom keeps a pinch from re-rendering all of them on every frame.
-  const outgrown = useStore(
-    (state) =>
-      Boolean(asset?.previewOnly) &&
-      (width ?? CANVAS_NODE_WIDTH) *
-        state.transform[2] *
-        (globalThis.devicePixelRatio || 1) >
-        GALLERY_PREVIEW_EDGE
-  )
-  const [sharpened, setSharpened] = useState(false)
-  useEffect(() => {
-    if (outgrown) setSharpened(true)
-  }, [outgrown])
-  const original = useGalleryFile(
-    identity,
-    asset?.id ?? '',
-    false,
-    sharpened && Boolean(asset?.previewOnly)
-  )
-  return original.url ?? asset?.src ?? ''
-}
-
-/** Shown as large as the window allows, so a preview is never enough here. */
-export function useCanvasPreviewImage(
-  asset: CanvasNodeAsset | undefined
-): string {
+export function useCanvasNodeImage(asset: CanvasNodeAsset | undefined): string {
   const identity = useGalleryIdentity()
   const original = useGalleryFile(
     identity,
@@ -89,14 +53,16 @@ export function useCanvasPreviewImage(
 }
 
 /**
- * The picture itself rather than whatever is currently on screen. Saving a
- * canvas image to disk must never hand over the preview it opened with.
+ * The picture itself rather than whatever a node happens to be showing. Saving
+ * one to disk, or sending one upstream as the reference for the next
+ * generation, must never hand over the preview it opened with.
  */
 export async function readCanvasNodeOriginal(
   identity: GalleryIdentity,
-  asset: CanvasNodeAsset
+  asset: CanvasNodeAsset,
+  signal?: AbortSignal
 ): Promise<File> {
-  if (!asset.previewOnly) return imageAssetToFile(asset)
-  const blob = await loadGalleryFile(identity, asset.id, false)
+  if (!asset.previewOnly) return imageAssetToFile(asset, signal)
+  const blob = await loadGalleryFile(identity, asset.id, false, signal)
   return new File([blob], asset.name, { type: blob.type })
 }

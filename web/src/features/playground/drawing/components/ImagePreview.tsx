@@ -25,7 +25,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { useCanvasPreviewImage } from '@/features/gallery/hooks/use-canvas-node-image'
+import { useCanvasNodeImage } from '@/features/gallery/hooks/use-canvas-node-image'
 import { useDrawingStore } from '@/stores/drawing-store'
 
 export function ImagePreview() {
@@ -35,7 +35,7 @@ export function ImagePreview() {
     state.nodes.find((item) => item.id === state.previewId)
   )
   const setPreview = useDrawingStore((state) => state.setPreview)
-  const source = useCanvasPreviewImage(node?.data.asset)
+  const source = useCanvasNodeImage(node?.data.asset)
   if (!id || !node?.data.asset) return null
   return (
     <Dialog

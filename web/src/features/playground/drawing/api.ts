@@ -40,6 +40,12 @@ export type GenerateImagesOptions = {
   settings: ImageSettings
   references: ImageAsset[]
   mask?: ImageAsset
+  /**
+   * Reads a picture in full. A canvas opened from the gallery shows previews
+   * while its originals arrive, and a preview must never be what gets sent
+   * upstream as the reference for a generation.
+   */
+  readImage?: (asset: ImageAsset, signal?: AbortSignal) => Promise<File>
   signal: AbortSignal
   onPartial: (result: ImageResult, index: number) => void
   // Reports the accepted task so the canvas can resume it after a reload.
@@ -88,8 +94,9 @@ export async function generateImages(
         'The mask must be a PNG with the same dimensions as the first reference image.'
       )
     }
+    const readImage = options.readImage ?? imageAssetToFile
     const files = await Promise.all(
-      options.references.map((asset) => imageAssetToFile(asset, options.signal))
+      options.references.map((asset) => readImage(asset, options.signal))
     )
     if (
       getImageModelFamily(options.settings.model) === 'dall-e-2' &&
@@ -107,7 +114,7 @@ export async function generateImages(
       form.append(files.length === 1 ? 'image' : 'image[]', file)
     }
     if (options.mask) {
-      const mask = await imageAssetToFile(options.mask, options.signal)
+      const mask = await readImage(options.mask, options.signal)
       if (mask.size >= 4 * 1024 * 1024) {
         throw new Error('The mask must be smaller than 4 MB.')
       }

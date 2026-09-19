@@ -70,7 +70,7 @@ export const ImageCanvasNode = memo(function ImageCanvasNode(
   const [failedSource, setFailedSource] = useState<string | null>(null)
   const asset = props.data.asset
   const identity = useGalleryIdentity()
-  const source = useCanvasNodeImage(asset, props.width)
+  const source = useCanvasNodeImage(asset)
   const imageFailed = Boolean(asset && failedSource === source)
   const pending = props.data.status === 'pending'
   const complete = props.data.status === 'complete'

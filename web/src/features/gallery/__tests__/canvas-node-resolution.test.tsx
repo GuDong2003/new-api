@@ -125,17 +125,15 @@ const canvasAt = (zoom: number, node = previewNode) => (
 
 const picture = () => screen.getByRole('img', { name: 'A quiet forest' })
 
-it('shows a preview without fetching the original while the node stays small', async () => {
+// The preview is what the canvas opens with so nothing waits on a blank node.
+// The original follows behind it and takes its place, so what is on screen —
+// and what a right-click copies or saves — is the picture itself.
+it('replaces the preview a node opened with by the original', async () => {
   render(canvasAt(1))
 
   await waitFor(() =>
     expect(picture()).toHaveAttribute('src', 'blob:canvas-preview')
   )
-  expect(originalReads).toBe(0)
-})
-
-it('fetches the original once a node is drawn larger than its preview', async () => {
-  render(canvasAt(4))
 
   await waitFor(() =>
     expect(picture()).toHaveAttribute('src', 'blob:sharp-original')
@@ -161,13 +159,12 @@ it('saves the original rather than the preview a node is showing', async () => {
 
   await userEvent.click(screen.getByRole('button', { name: 'Download' }))
 
-  await waitFor(() => expect(originalReads).toBe(1))
-  expect(saved).toHaveBeenCalledWith('original'.length)
+  await waitFor(() => expect(saved).toHaveBeenCalledWith('original'.length))
 })
 
-it('keeps a picture the canvas already holds in full at its own source', async () => {
+it('leaves a picture the canvas already holds in full alone', async () => {
   render(
-    canvasAt(4, {
+    canvasAt(1, {
       ...previewNode,
       data: {
         ...previewNode.data,

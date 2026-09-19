@@ -22,7 +22,7 @@ import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
 
-import { useGalleryFile } from '../hooks/use-gallery-file'
+import { useGalleryImage } from '../hooks/use-gallery-image'
 import type { GalleryIdentity } from '../types'
 
 export type CanvasProjectView = {
@@ -153,22 +153,15 @@ function CanvasCover(props: {
 }) {
   const { t } = useTranslation()
   // A draft the server has never seen is only ever shown from what is in hand.
-  const file = useGalleryFile(
-    props.identity,
-    props.id,
-    true,
-    Boolean(props.local) || !props.localOnly,
-    props.local
-  )
-  const original = useGalleryFile(
-    props.identity,
-    props.id,
-    false,
-    file.isError || (Boolean(props.localOnly) && !props.local),
-    { blob: props.local?.blob, only: props.localOnly }
-  )
-  const url = file.url ?? original.url
-  const loading = file.isPending || original.isPending
+  const file = useGalleryImage(props.identity, props.id, {
+    enabled: Boolean(props.local) || !props.localOnly,
+    preview: true,
+    blob: props.local?.blob,
+    sha256: props.local?.sha256,
+    only: props.localOnly,
+  })
+  const url = file.url
+  const loading = file.isPending
   return url ? (
     <img
       src={url}

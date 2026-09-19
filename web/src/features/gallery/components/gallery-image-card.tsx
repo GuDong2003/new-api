@@ -21,7 +21,7 @@ import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 
-import { useGalleryFile } from '../hooks/use-gallery-file'
+import { useGalleryImage } from '../hooks/use-gallery-image'
 import type { GalleryIdentity, GalleryImage } from '../types'
 
 export function GalleryImageCard(props: {
@@ -35,23 +35,13 @@ export function GalleryImageCard(props: {
   let sourceLabel = t('Drawing')
   if (props.image.source === 'nai') sourceLabel = t('NAI Canvas')
   if (props.image.source === 'api') sourceLabel = t('API')
-  const file = useGalleryFile(
-    props.identity,
-    props.image.id,
-    true,
-    props.image.has_thumbnail || Boolean(props.image.localBlob),
-    { blob: props.image.localBlob, sha256: props.image.localSha256 }
-  )
-  // Only pictures with no preview to show, here or on the server, cost a card
-  // the full original.
-  const original = useGalleryFile(
-    props.identity,
-    props.image.id,
-    false,
-    (!props.image.has_thumbnail && !props.image.localBlob) || file.isError,
-    { blob: props.image.localBlob, only: props.image.localOnly }
-  )
-  const imageUrl = file.url ?? original.url
+  const file = useGalleryImage(props.identity, props.image.id, {
+    preview: props.image.has_thumbnail || Boolean(props.image.localBlob),
+    blob: props.image.localBlob,
+    sha256: props.image.localSha256,
+    only: props.image.localOnly,
+  })
+  const imageUrl = file.url
   const expiry =
     props.image.localOnly || !props.image.expires_at
       ? t('Local draft')
@@ -75,7 +65,7 @@ export function GalleryImageCard(props: {
           />
         ) : (
           <div className='bg-muted flex size-full items-center justify-center rounded-md p-2 text-xs'>
-            {props.image.has_thumbnail && file.isPending ? (
+            {file.isPending ? (
               <Skeleton className='size-full' />
             ) : (
               t('Thumbnail unavailable')

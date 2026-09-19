@@ -71,6 +71,46 @@ describe('Image request transport', () => {
     })
   })
 
+  // A canvas opened from the gallery shows previews while its originals arrive.
+  // A preview must never be what gets sent upstream to build the next image on.
+  it('sends the original of a reference rather than the preview on screen', async () => {
+    const request = vi.spyOn(api, 'post').mockResolvedValue({
+      headers: { 'content-type': 'application/json' },
+      data: new Response(JSON.stringify({ data: [{ b64_json: 'YWJj' }] })).body,
+    })
+    const readImage = vi.fn(
+      async () =>
+        new File(['the original'], 'reference.png', { type: 'image/png' })
+    )
+
+    await generateImages({
+      settings: {
+        ...DEFAULT_IMAGE_SETTINGS,
+        model: 'gpt-image-1',
+        mode: 'edit',
+        prompt: 'A cup',
+      },
+      references: [
+        {
+          id: 'asset-1',
+          name: 'preview.png',
+          src: 'blob:http://localhost/preview',
+          width: 1024,
+          height: 1024,
+          mimeType: 'image/png',
+          previewOnly: true,
+        },
+      ],
+      readImage,
+      signal: new AbortController().signal,
+      onPartial: vi.fn(),
+    })
+
+    expect(readImage).toHaveBeenCalledTimes(1)
+    const form = request.mock.calls[0][1] as FormData
+    expect((form.get('image') as File).name).toBe('reference.png')
+  })
+
   it('submits a non-streaming request as a task and polls it to completion', async () => {
     const request = vi
       .spyOn(api, 'post')

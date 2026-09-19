@@ -184,7 +184,11 @@ it('reuses a cached remote canvas cover after the query cache is cleared', async
   let fileRequests = 0
   api.defaults.adapter = async (config) => {
     if (config.url?.endsWith('/file')) {
-      fileRequests++
+      // Only previews are cached across sessions; the original behind one is
+      // fetched fresh and is not what this is about.
+      if ((config.params as { thumbnail?: boolean } | undefined)?.thumbnail) {
+        fileRequests++
+      }
       return {
         ...response(config, {}),
         data: new Blob(['cover'], { type: 'image/jpeg' }),
