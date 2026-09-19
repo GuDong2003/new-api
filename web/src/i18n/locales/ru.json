@@ -3643,7 +3643,6 @@
     "Metadata changes": "Изменения метаданных",
     "Metadata language": "Язык метаданных",
     "Metadata only": "Только метаданные",
-    "Metadata only. Open a record to load its content. Partial captures and HTTP 200 streams may be incomplete.": "Только метаданные. Откройте запись для загрузки содержимого. Частичные записи и потоки HTTP 200 могут быть неполными.",
     "Metadata sync completed": "Синхронизация метаданных завершена",
     "Metadata sync disabled": "Синхронизация метаданных запрещена",
     "Metadata sync failed": "Не удалось синхронизировать метаданные",

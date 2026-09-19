@@ -3643,7 +3643,6 @@
     "Metadata changes": "Thay đổi siêu dữ liệu",
     "Metadata language": "Ngôn ngữ siêu dữ liệu",
     "Metadata only": "Chỉ siêu dữ liệu",
-    "Metadata only. Open a record to load its content. Partial captures and HTTP 200 streams may be incomplete.": "Chỉ hiển thị siêu dữ liệu. Mở bản ghi để tải nội dung. Bản ghi một phần và luồng HTTP 200 vẫn có thể chưa đầy đủ.",
     "Metadata sync completed": "Đồng bộ siêu dữ liệu hoàn tất",
     "Metadata sync disabled": "Đã tắt đồng bộ siêu dữ liệu",
     "Metadata sync failed": "Đồng bộ siêu dữ liệu thất bại",

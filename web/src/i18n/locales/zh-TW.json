@@ -3643,7 +3643,6 @@
     "Metadata changes": "資料變更",
     "Metadata language": "資料語言",
     "Metadata only": "僅中繼資料",
-    "Metadata only. Open a record to load its content. Partial captures and HTTP 200 streams may be incomplete.": "清單僅含中繼資料，開啟紀錄才會載入內容。部分紀錄及 HTTP 200 串流回應也可能不完整。",
     "Metadata sync completed": "資料同步完成",
     "Metadata sync disabled": "已禁止資料同步",
     "Metadata sync failed": "資料同步失敗",

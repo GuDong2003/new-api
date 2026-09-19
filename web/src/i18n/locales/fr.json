@@ -3643,7 +3643,6 @@
     "Metadata changes": "Modifications des métadonnées",
     "Metadata language": "Langue des métadonnées",
     "Metadata only": "Métadonnées seules",
-    "Metadata only. Open a record to load its content. Partial captures and HTTP 200 streams may be incomplete.": "Métadonnées uniquement. Ouvrez un enregistrement pour charger son contenu. Les captures partielles et les flux HTTP 200 peuvent être incomplets.",
     "Metadata sync completed": "Métadonnées synchronisées",
     "Metadata sync disabled": "Synchronisation désactivée",
     "Metadata sync failed": "Échec de la synchronisation",

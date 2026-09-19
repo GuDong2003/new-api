@@ -3751,7 +3751,6 @@
     "Metadata changes": "资料变更",
     "Metadata language": "资料语言",
     "Metadata only": "仅元数据",
-    "Metadata only. Open a record to load its content. Partial captures and HTTP 200 streams may be incomplete.": "列表仅含元数据，打开记录才会加载内容。部分记录及 HTTP 200 流式响应也可能不完整。",
     "Metadata sync completed": "资料同步完成",
     "Metadata sync disabled": "已禁止资料同步",
     "Metadata sync failed": "资料同步失败",

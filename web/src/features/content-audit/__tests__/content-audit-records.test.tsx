@@ -28,6 +28,7 @@ import {
   useParams,
 } from '@tanstack/react-router'
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -36,7 +37,7 @@ import {
   within,
 } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { afterEach, beforeEach, expect, it } from 'vitest'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 
 import { useSidebarView } from '@/hooks/use-sidebar-view'
 import { Route as ContentAuditRoute } from '@/routes/_authenticated/content-audit/route'
@@ -496,4 +497,46 @@ it('keeps the loaded rows on screen while the next search loads', async () => {
   await waitFor(() =>
     expect(screen.getByText('inference-user (#7)')).toBeVisible()
   )
+})
+
+// The list refreshes when asked to, the way the usage and task logs do. It used
+// to poll every five seconds while any record was still settling, which read as
+// the page reloading itself while a record was being looked at.
+it('never refetches the list on its own while a record is still settling', async () => {
+  const detail = auditDetail()
+  detail.record.status = 'pending'
+  transport = installAuditTransport((config) => {
+    if (config.url === '/api/content-audit/records') {
+      return {
+        body: auditSuccess({
+          items: [detail.record],
+          total: 1,
+          page: config.params.page,
+          page_size: config.params.page_size,
+        }),
+      }
+    }
+    return { body: auditSuccess(detail) }
+  })
+  const listRequests = () =>
+    transport.requests.filter(
+      (request) => request.url === '/api/content-audit/records'
+    ).length
+
+  vi.useFakeTimers()
+  try {
+    renderRecords()
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(100)
+    })
+    expect(listRequests()).toBe(1)
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000)
+    })
+
+    expect(listRequests()).toBe(1)
+  } finally {
+    vi.useRealTimers()
+  }
 })

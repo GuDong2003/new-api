@@ -3643,7 +3643,6 @@
     "Metadata changes": "メタデータの変更",
     "Metadata language": "メタデータの言語",
     "Metadata only": "情報のみ",
-    "Metadata only. Open a record to load its content. Partial captures and HTTP 200 streams may be incomplete.": "一覧にはメタデータのみを表示します。記録を開くと内容を読み込みます。部分的な記録や HTTP 200 のストリームも不完全な場合があります。",
     "Metadata sync completed": "メタデータの同期が完了しました",
     "Metadata sync disabled": "メタデータ同期は禁止されています",
     "Metadata sync failed": "メタデータの同期に失敗しました",

@@ -109,12 +109,11 @@ export function ContentAuditRecords() {
         (requestSignal) => listContentAudits(filters, requestSignal),
         signal
       ),
-    refetchInterval: (current) =>
-      current.state.data?.items.some(
-        (record) => record.status === 'pending' || record.status === 'deleting'
-      )
-        ? 5000
-        : false,
+    // Refreshed when asked to, the way the usage and task logs are. Polling
+    // while a record was still settling meant the page reloaded itself every
+    // five seconds, which is long enough to land in the middle of reading a
+    // record and read as the list refreshing on its own.
+    //
     // Hold the rows already on screen while the next page or filter loads, the
     // way every other table here does: without this the list drops to a
     // skeleton on each search, page and poll. Rows are dropped when the audit
@@ -314,11 +313,6 @@ export function ContentAuditRecords() {
   }
   return (
     <div className='flex h-full min-h-0 flex-col gap-3'>
-      <p className='text-muted-foreground text-sm'>
-        {t(
-          'Metadata only. Open a record to load its content. Partial captures and HTTP 200 streams may be incomplete.'
-        )}
-      </p>
       <DataTablePage
         table={table}
         columns={columns}
