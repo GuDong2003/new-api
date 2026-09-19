@@ -21,6 +21,10 @@ import type { ImageAsset } from '../types'
 export const MAX_IMAGE_BYTES = 50 * 1024 * 1024
 export const IMAGE_MIME_TYPES = ['image/png', 'image/jpeg', 'image/webp']
 
+/**
+ * Safe to keep: a picture that will still resolve after this tab is gone, which
+ * is what a saved or exported canvas needs. An object URL would not.
+ */
 export function isSafeImageSource(source: string): boolean {
   if (/^data:image\/(?:png|jpeg|webp);base64,[a-zA-Z0-9+/=\s]+$/.test(source)) {
     return true
@@ -31,6 +35,15 @@ export function isSafeImageSource(source: string): boolean {
   } catch {
     return false
   }
+}
+
+/**
+ * Safe to read right now, which additionally covers an object URL — bytes this
+ * tab already holds, for a canvas opened from the gallery. Reading one is how a
+ * picture on the canvas becomes the reference for the next generation.
+ */
+export function isReadableImageSource(source: string): boolean {
+  return source.startsWith('blob:') || isSafeImageSource(source)
 }
 
 export async function imageSourceToAsset(
@@ -106,7 +119,7 @@ export async function imageAssetToFile(
   asset: ImageAsset,
   signal?: AbortSignal
 ): Promise<File> {
-  if (!isSafeImageSource(asset.src)) {
+  if (!isReadableImageSource(asset.src)) {
     throw new Error('The image response is invalid.')
   }
   const response = await fetch(asset.src, {

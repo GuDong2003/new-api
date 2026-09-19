@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { imageSourceToAsset } from '../image-assets'
+import { imageAssetToFile, imageSourceToAsset } from '../image-assets'
 
 class TestImage extends EventTarget {
   naturalWidth = 512
@@ -75,5 +75,53 @@ describe('image source assets', () => {
       width: 1024,
       height: 1024,
     })
+  })
+})
+
+// A canvas opened from the gallery holds its pictures as object URLs, so an
+// image used as a reference for the next generation arrives as one. Refusing to
+// read it failed the generation outright with "the image response is invalid".
+describe('reference images held by the canvas', () => {
+  it('reads one the canvas is holding as an object URL', async () => {
+    const bytes = new Blob(['a picture'], { type: 'image/png' })
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(bytes, {
+            status: 200,
+            headers: { 'Content-Type': 'image/png' },
+          })
+      )
+    )
+
+    const file = await imageAssetToFile({
+      id: 'asset-1',
+      name: 'reference.png',
+      src: 'blob:http://localhost/9f1c',
+      width: 1024,
+      height: 1024,
+      mimeType: 'image/png',
+    })
+
+    expect(file.type).toBe('image/png')
+    expect(file.name).toBe('asset-1.png')
+    expect(fetch).toHaveBeenCalledWith(
+      'blob:http://localhost/9f1c',
+      expect.anything()
+    )
+  })
+
+  it('still refuses a source this tab has no business reading', async () => {
+    await expect(
+      imageAssetToFile({
+        id: 'asset-2',
+        name: 'reference.png',
+        src: 'file:///etc/passwd',
+        width: 1,
+        height: 1,
+        mimeType: 'image/png',
+      })
+    ).rejects.toThrow('The image response is invalid.')
   })
 })
