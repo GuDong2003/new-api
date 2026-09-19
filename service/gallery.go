@@ -20,7 +20,9 @@ import (
 
 // One instance owns this store. Holding the lock through streaming also counts
 // pending writes against admission without a reservation/lease subsystem.
-var galleryMu sync.Mutex
+// Read-only callers take the read lock so a grid of thumbnail requests is not
+// serialized behind itself; they still exclude every mutating path.
+var galleryMu sync.RWMutex
 var galleryLifecycleMu sync.Mutex
 var galleryCancel context.CancelFunc
 var galleryDone chan struct{}
@@ -83,8 +85,8 @@ func GetGalleryBudget(ctx context.Context, user int, requiredBytes, requiredImag
 	if user <= 0 || requiredBytes < 0 || requiredImages < 0 || requiredBytes > 1<<40 || requiredImages > 1<<40 {
 		return nil, model.ErrGalleryInvalid
 	}
-	galleryMu.Lock()
-	defer galleryMu.Unlock()
+	galleryMu.RLock()
+	defer galleryMu.RUnlock()
 	settings, err := GetGallerySettings(ctx)
 	if err != nil {
 		return nil, err
@@ -524,8 +526,8 @@ func saveTaskGalleryImage(ctx context.Context, user int, metadata GalleryMetadat
 }
 
 func OpenGalleryImage(ctx context.Context, user int, id string, thumbnail bool) (*os.File, *model.GalleryImage, error) {
-	galleryMu.Lock()
-	defer galleryMu.Unlock()
+	galleryMu.RLock()
+	defer galleryMu.RUnlock()
 	record, err := model.OwnedGalleryImage(ctx, user, id, time.Now().Unix())
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {

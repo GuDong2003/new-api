@@ -16,8 +16,14 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 */
 
 const DATABASE_NAME = 'new-api-gallery-thumbnail-cache'
-const DATABASE_VERSION = 1
+const DATABASE_VERSION = 2
 const STORE_NAME = 'thumbnails'
+const SAVED_AT_INDEX = 'savedAt'
+// Images are deleted server side once their retention expires, and nothing ever
+// rewrites their cache entry again. Without this sweep those dead entries grow
+// without bound until the origin hits its storage quota and every write starts
+// failing silently. Re-fetching an entry that is still alive only costs a miss.
+const MAX_ENTRY_AGE_MS = 14 * 24 * 60 * 60 * 1000
 
 type GalleryThumbnailEntry = {
   fingerprint: string
@@ -29,19 +35,56 @@ function cacheKey(userId: number, imageId: string) {
   return `${userId}:${imageId}`
 }
 
+let openedFrom: IDBFactory | null = null
+let connection: Promise<IDBDatabase> | null = null
+
 function openDatabase(): Promise<IDBDatabase | null> {
   if (typeof indexedDB === 'undefined') return Promise.resolve(null)
+  // The memo belongs to the factory it was opened from, so a replaced global
+  // never keeps handing back a connection to a database that no longer exists.
+  if (connection && openedFrom === indexedDB) return connection
   const request = indexedDB.open(DATABASE_NAME, DATABASE_VERSION)
   request.addEventListener('upgradeneeded', () => {
-    if (!request.result.objectStoreNames.contains(STORE_NAME)) {
-      request.result.createObjectStore(STORE_NAME)
+    const upgrade = request.transaction
+    if (!upgrade) return
+    const store = request.result.objectStoreNames.contains(STORE_NAME)
+      ? upgrade.objectStore(STORE_NAME)
+      : request.result.createObjectStore(STORE_NAME)
+    if (!store.indexNames.contains(SAVED_AT_INDEX)) {
+      store.createIndex(SAVED_AT_INDEX, SAVED_AT_INDEX)
     }
   })
-  return new Promise((resolve, reject) => {
-    request.addEventListener('success', () => resolve(request.result))
+  const pending = new Promise<IDBDatabase>((resolve, reject) => {
+    request.addEventListener('success', () => {
+      request.result.addEventListener('close', () => forget(pending))
+      resolve(request.result)
+    })
     request.addEventListener('error', () =>
       reject(request.error ?? new Error('Gallery thumbnail cache unavailable.'))
     )
+  })
+  pending.catch(() => forget(pending))
+  openedFrom = indexedDB
+  connection = pending
+  return pending
+}
+
+function forget(pending: Promise<IDBDatabase>) {
+  if (connection !== pending) return
+  connection = null
+  openedFrom = null
+}
+
+function sweepExpiredEntries(store: IDBObjectStore) {
+  const cutoff = Date.now() - MAX_ENTRY_AGE_MS
+  const cursor = store
+    .index(SAVED_AT_INDEX)
+    .openCursor(IDBKeyRange.upperBound(cutoff, true))
+  cursor.addEventListener('success', () => {
+    const position = cursor.result
+    if (!position) return
+    position.delete()
+    position.continue()
   })
 }
 
@@ -90,13 +133,11 @@ export async function readGalleryThumbnail(
     request.addEventListener('error', () =>
       reject(request.error ?? new Error('Gallery thumbnail cache read failed.'))
     )
-    transaction.addEventListener('complete', () => database.close())
-    transaction.addEventListener('abort', () => {
-      database.close()
+    transaction.addEventListener('abort', () =>
       reject(
         transaction.error ?? new Error('Gallery thumbnail cache read aborted.')
       )
-    })
+    )
   })
 }
 
@@ -110,7 +151,8 @@ export async function writeGalleryThumbnail(
   if (!database) return
   await new Promise<void>((resolve, reject) => {
     const transaction = database.transaction(STORE_NAME, 'readwrite')
-    transaction.objectStore(STORE_NAME).put(
+    const store = transaction.objectStore(STORE_NAME)
+    store.put(
       {
         fingerprint,
         blob,
@@ -118,22 +160,18 @@ export async function writeGalleryThumbnail(
       } satisfies GalleryThumbnailEntry,
       cacheKey(userId, imageId)
     )
-    transaction.addEventListener('complete', () => {
-      database.close()
-      resolve()
-    })
-    transaction.addEventListener('abort', () => {
-      database.close()
+    sweepExpiredEntries(store)
+    transaction.addEventListener('complete', () => resolve())
+    transaction.addEventListener('abort', () =>
       reject(
         transaction.error ?? new Error('Gallery thumbnail cache write aborted.')
       )
-    })
-    transaction.addEventListener('error', () => {
-      database.close()
+    )
+    transaction.addEventListener('error', () =>
       reject(
         transaction.error ?? new Error('Gallery thumbnail cache write failed.')
       )
-    })
+    )
   })
 }
 
@@ -146,22 +184,17 @@ export async function removeGalleryThumbnail(
   await new Promise<void>((resolve, reject) => {
     const transaction = database.transaction(STORE_NAME, 'readwrite')
     transaction.objectStore(STORE_NAME).delete(cacheKey(userId, imageId))
-    transaction.addEventListener('complete', () => {
-      database.close()
-      resolve()
-    })
-    transaction.addEventListener('abort', () => {
-      database.close()
+    transaction.addEventListener('complete', () => resolve())
+    transaction.addEventListener('abort', () =>
       reject(
         transaction.error ??
           new Error('Gallery thumbnail cache delete aborted.')
       )
-    })
-    transaction.addEventListener('error', () => {
-      database.close()
+    )
+    transaction.addEventListener('error', () =>
       reject(
         transaction.error ?? new Error('Gallery thumbnail cache delete failed.')
       )
-    })
+    )
   })
 }

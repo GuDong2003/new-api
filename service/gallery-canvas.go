@@ -64,8 +64,8 @@ func ListGalleryCanvases(ctx context.Context, user, page, pageSize int, source, 
 	if user <= 0 || page < 1 || page > 1000000 || pageSize < 1 || pageSize > 100 || (source != "" && source != "drawing" && source != "nai") || order == "" || len(search) > 512 || !utf8.ValidString(search) {
 		return nil, model.ErrGalleryInvalid
 	}
-	galleryMu.Lock()
-	defer galleryMu.Unlock()
+	galleryMu.RLock()
+	defer galleryMu.RUnlock()
 	result := &GalleryCanvasPage{Items: []GalleryCanvasSummary{}, Page: page, PageSize: pageSize}
 	query := model.DB.WithContext(ctx).Model(&model.GalleryCanvas{}).Where("user_id = ? AND state = ? AND expires_at > ?", user, "ready", time.Now().Unix())
 	if source != "" {

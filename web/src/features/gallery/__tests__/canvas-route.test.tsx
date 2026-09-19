@@ -18,6 +18,10 @@ import { renderHook, waitFor } from '@testing-library/react'
 import { ReactFlowProvider } from '@xyflow/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { DEFAULT_IMAGE_SETTINGS } from '@/features/playground/drawing/lib/image-settings'
+import type { DrawingNode } from '@/features/playground/drawing/types'
+import { useDrawingStore } from '@/stores/drawing-store'
+
 import { login } from './fixtures'
 import { useCanvasRoute } from '../hooks/use-canvas-route'
 
@@ -29,6 +33,28 @@ vi.mock('../lib/canvas-projects', () => ({
   startCanvasEditor,
 }))
 
+function focusedNode(assetId: string): DrawingNode {
+  return {
+    id: 'node-focus',
+    type: 'image',
+    position: { x: 0, y: 0 },
+    data: {
+      prompt: 'A quiet forest',
+      status: 'complete',
+      createdAt: 1,
+      settings: DEFAULT_IMAGE_SETTINGS,
+      asset: {
+        id: assetId,
+        name: 'forest.png',
+        src: 'data:image/png;base64,YWJj',
+        mimeType: 'image/png',
+        width: 1024,
+        height: 1024,
+      },
+    },
+  }
+}
+
 describe('canvas route loading state', () => {
   beforeEach(() => {
     login(901, 'route-session')
@@ -39,6 +65,7 @@ describe('canvas route loading state', () => {
   afterEach(() => {
     startCanvasEditor.mockReset()
     openCanvasProject.mockReset()
+    useDrawingStore.setState({ nodes: [] })
   })
 
   it('stays loading until the requested canvas has opened', async () => {
@@ -85,5 +112,23 @@ describe('canvas route loading state', () => {
     await waitFor(() => expect(openCanvasProject).toHaveBeenCalledTimes(2))
     await waitFor(() => expect(result.current.error).toBeNull())
     expect(result.current.loading).toBe(false)
+  })
+
+  it('finishes loading a focused asset while the flow viewport is still unmounted', async () => {
+    const focusAssetId = '66666666-6666-4666-8666-666666666666'
+    useDrawingStore.setState({ nodes: [focusedNode(focusAssetId)] })
+
+    const { result } = renderHook(
+      () =>
+        useCanvasRoute(
+          'drawing',
+          '77777777-7777-4777-8777-777777777777',
+          focusAssetId
+        ),
+      { wrapper: ReactFlowProvider }
+    )
+
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.error).toBeNull()
   })
 })

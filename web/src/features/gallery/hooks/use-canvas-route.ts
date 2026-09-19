@@ -61,23 +61,18 @@ export function useCanvasRoute(
           .getState()
           .nodes.find((node) => node.data.asset?.id === focusAssetId)
         if (node) {
-          await new Promise<void>((resolve, reject) => {
-            requestAnimationFrame(() => {
-              if (!active) {
-                resolve()
-                return
-              }
-              void Promise.resolve(
-                flowRef.current.fitView({
-                  nodes: [{ id: node.id }],
-                  padding: 0.3,
-                  maxZoom: 1,
-                })
-              )
-                .then(() => resolve())
-                .catch(reject)
+          // React Flow settles fitView only once its viewport is mounted and
+          // the nodes are measured, but the workspace mounts only after this
+          // hook reports loading as finished. Awaiting the fit would deadlock
+          // those two; queue it instead, because React Flow replays a pending
+          // fit as soon as it initializes.
+          void flowRef.current
+            .fitView({
+              nodes: [{ id: node.id }],
+              padding: 0.3,
+              maxZoom: 1,
             })
-          })
+            .catch(() => undefined)
         } else {
           await flowRef.current.setViewport(storeFor(kind).getState().viewport)
         }

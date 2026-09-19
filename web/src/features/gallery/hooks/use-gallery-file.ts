@@ -22,6 +22,7 @@ import {
   readGalleryThumbnail,
   writeGalleryThumbnail,
 } from '../lib/gallery-thumbnail-cache'
+import { createRequestGate } from '../lib/request-gate'
 import type { GalleryIdentity } from '../types'
 
 type GalleryFileOptions = {
@@ -30,27 +31,7 @@ type GalleryFileOptions = {
   cacheFingerprint?: string
 }
 
-const galleryThumbnailConcurrency = 6
-let activeThumbnailRequests = 0
-const pendingThumbnailRequests: Array<() => void> = []
-
-async function requestGalleryThumbnail(
-  identity: GalleryIdentity,
-  id: string,
-  signal?: AbortSignal
-): Promise<Blob> {
-  while (activeThumbnailRequests >= galleryThumbnailConcurrency) {
-    await new Promise<void>((resolve) => pendingThumbnailRequests.push(resolve))
-    signal?.throwIfAborted()
-  }
-  activeThumbnailRequests++
-  try {
-    return await getGalleryFile(identity, id, true, signal)
-  } finally {
-    activeThumbnailRequests--
-    pendingThumbnailRequests.shift()?.()
-  }
-}
+const requestThumbnail = createRequestGate(6)
 
 export function useGalleryFile(
   identity: GalleryIdentity,
@@ -85,7 +66,10 @@ export function useGalleryFile(
         if (cached) return cached
       }
       const blob = thumbnail
-        ? await requestGalleryThumbnail(identity, id, signal)
+        ? await requestThumbnail(
+            () => getGalleryFile(identity, id, true, signal),
+            signal
+          )
         : await getGalleryFile(identity, id, false, signal)
       if (thumbnail && cacheFingerprint && identity.userId !== null) {
         await writeGalleryThumbnail(

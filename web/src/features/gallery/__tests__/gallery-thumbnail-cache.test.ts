@@ -58,3 +58,39 @@ it('removes a thumbnail from the persistent cache', async () => {
 
   expect(await readGalleryThumbnail(813, 'image-1', 'fingerprint')).toBeNull()
 })
+
+it('drops entries whose images outlived the cache retention window', async () => {
+  const blob = new Blob(['thumbnail'], { type: 'image/jpeg' })
+  const clock = vi.spyOn(Date, 'now')
+
+  clock.mockReturnValue(Date.parse('2026-01-01T00:00:00Z'))
+  await writeGalleryThumbnail(813, 'expired-image', 'fingerprint', blob)
+  expect(
+    await readGalleryThumbnail(813, 'expired-image', 'fingerprint')
+  ).not.toBeNull()
+
+  clock.mockReturnValue(Date.parse('2026-02-01T00:00:00Z'))
+  await writeGalleryThumbnail(813, 'fresh-image', 'fingerprint', blob)
+
+  expect(
+    await readGalleryThumbnail(813, 'expired-image', 'fingerprint')
+  ).toBeNull()
+  expect(
+    await readGalleryThumbnail(813, 'fresh-image', 'fingerprint')
+  ).not.toBeNull()
+  clock.mockRestore()
+})
+
+it('reuses one database connection across cache operations', async () => {
+  const factory = new IDBFactory()
+  const open = vi.spyOn(factory, 'open')
+  vi.stubGlobal('indexedDB', factory)
+  const blob = new Blob(['thumbnail'], { type: 'image/jpeg' })
+
+  await writeGalleryThumbnail(813, 'image-1', 'fingerprint', blob)
+  await readGalleryThumbnail(813, 'image-1', 'fingerprint')
+  await writeGalleryThumbnail(813, 'image-2', 'fingerprint', blob)
+  await readGalleryThumbnail(813, 'image-2', 'fingerprint')
+
+  expect(open).toHaveBeenCalledTimes(1)
+})
