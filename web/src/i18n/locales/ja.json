@@ -1,9 +1,11 @@
 {
   "translation": {
+    "Generating": "生成中",
     "Image {{index}}": "画像 {{index}}",
     "Audit images": "監査画像",
     "Image pages": "画像のページ",
     "Its stored copy was deleted or has expired.": "保存されたコピーは削除されたか、有効期限が切れています。",
+    "Preparing": "準備中",
     "Previous images": "前の画像",
     "Next images": "次の画像",
     "Image page {{page}} · {{total}} images": "{{page}} ページ · 全 {{total}} 枚",

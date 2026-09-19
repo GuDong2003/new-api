@@ -192,9 +192,9 @@ describe('Canvas image result', () => {
     )
 
     await user.click(screen.getByRole('button', { name: 'Retry' }))
-    expect(screen.getByRole('status', { name: '' }).textContent).toBe(
-      'Generating image…'
-    )
+    expect(
+      screen.getByRole('status', { name: 'Generating image…' })
+    ).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull()
     expect(screen.queryByRole('alert')).toBeNull()
     expect(screen.getByRole('article', { name: 'A cup' })).toBeTruthy()

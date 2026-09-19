@@ -1,9 +1,11 @@
 {
   "translation": {
+    "Generating": "Генерация",
     "Image {{index}}": "Изображение {{index}}",
     "Audit images": "Изображения аудита",
     "Image pages": "Страницы изображений",
     "Its stored copy was deleted or has expired.": "Сохранённая копия удалена или срок её хранения истёк.",
+    "Preparing": "Подготовка",
     "Previous images": "Предыдущие изображения",
     "Next images": "Следующие изображения",
     "Image page {{page}} · {{total}} images": "Страница {{page}} · {{total}} изображений",

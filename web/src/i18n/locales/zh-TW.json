@@ -1,9 +1,11 @@
 {
   "translation": {
+    "Generating": "生成中",
     "Image {{index}}": "圖片 {{index}}",
     "Audit images": "稽核圖片",
     "Image pages": "圖片分頁",
     "Its stored copy was deleted or has expired.": "其儲存副本已被刪除或已過期。",
+    "Preparing": "準備中",
     "Previous images": "上一頁圖片",
     "Next images": "下一頁圖片",
     "Image page {{page}} · {{total}} images": "第 {{page}} 頁 · 共 {{total}} 張圖片",

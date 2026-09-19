@@ -1,9 +1,11 @@
 {
   "translation": {
+    "Generating": "Đang tạo",
     "Image {{index}}": "Ảnh {{index}}",
     "Audit images": "Ảnh kiểm toán",
     "Image pages": "Trang ảnh",
     "Its stored copy was deleted or has expired.": "Bản sao đã lưu đã bị xóa hoặc đã hết hạn.",
+    "Preparing": "Đang chuẩn bị",
     "Previous images": "Ảnh trước",
     "Next images": "Ảnh tiếp theo",
     "Image page {{page}} · {{total}} images": "Trang {{page}} · {{total}} ảnh",

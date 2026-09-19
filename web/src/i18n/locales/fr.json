@@ -1,9 +1,11 @@
 {
   "translation": {
+    "Generating": "Génération",
     "Image {{index}}": "Image {{index}}",
     "Audit images": "Images d’audit",
     "Image pages": "Pages d’images",
     "Its stored copy was deleted or has expired.": "Sa copie stockée a été supprimée ou a expiré.",
+    "Preparing": "Préparation",
     "Previous images": "Images précédentes",
     "Next images": "Images suivantes",
     "Image page {{page}} · {{total}} images": "Page {{page}} · {{total}} images",

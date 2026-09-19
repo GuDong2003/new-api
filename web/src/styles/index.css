@@ -730,3 +730,124 @@ For commercial licensing, please contact support@quantumnous.com
     display: none;
   }
 }
+
+/* ── Canvas image generation loader ──
+ * A scanning flare passes behind the word while its letters light up in turn.
+ * Text takes the foreground and its glow takes the background, so the pair
+ * inverts with the theme: dark letters haloed in white on a light canvas, light
+ * letters haloed in black on a dark one. */
+@keyframes drawing-generation-sweep {
+  from {
+    transform: translateX(-55%);
+  }
+  to {
+    transform: translateX(55%);
+  }
+}
+
+@keyframes drawing-generation-flare {
+  0%,
+  100% {
+    opacity: 0;
+  }
+  15% {
+    opacity: 1;
+  }
+  65% {
+    opacity: 0;
+  }
+}
+
+@keyframes drawing-generation-letter {
+  0% {
+    opacity: 0;
+  }
+  5% {
+    opacity: 1;
+    text-shadow: 0 0 4px var(--background);
+    transform: scale(1.1) translateY(-2px);
+  }
+  20% {
+    opacity: 0.2;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+.drawing-generation {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--foreground);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  user-select: none;
+}
+
+.drawing-generation-letter {
+  display: inline-block;
+  opacity: 0;
+  z-index: 2;
+  animation: drawing-generation-letter 4s infinite linear;
+  animation-delay: var(--drawing-generation-delay, 0s);
+}
+
+.drawing-generation-flare {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  -webkit-mask: repeating-linear-gradient(
+    90deg,
+    transparent 0,
+    transparent 6px,
+    black 7px,
+    black 8px
+  );
+  mask: repeating-linear-gradient(
+    90deg,
+    transparent 0,
+    transparent 6px,
+    black 7px,
+    black 8px
+  );
+}
+
+.drawing-generation-flare::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(circle at 50% 50%, #ff0 0%, transparent 50%),
+    radial-gradient(circle at 45% 45%, #f00 0%, transparent 45%),
+    radial-gradient(circle at 55% 55%, #0ff 0%, transparent 45%),
+    radial-gradient(circle at 45% 55%, #0f0 0%, transparent 45%),
+    radial-gradient(circle at 55% 45%, #00f 0%, transparent 45%);
+  -webkit-mask: radial-gradient(
+    circle at 50% 50%,
+    transparent 0%,
+    transparent 10%,
+    black 25%
+  );
+  mask: radial-gradient(
+    circle at 50% 50%,
+    transparent 0%,
+    transparent 10%,
+    black 25%
+  );
+  animation:
+    drawing-generation-sweep 2s infinite alternate,
+    drawing-generation-flare 4s infinite;
+  animation-timing-function: cubic-bezier(0.6, 0.8, 0.5, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .drawing-generation-letter {
+    animation: none;
+    opacity: 1;
+  }
+
+  .drawing-generation-flare {
+    display: none;
+  }
+}

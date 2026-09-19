@@ -24,6 +24,7 @@ import { useDrawingStore } from '@/stores/drawing-store'
 
 import { DEFAULT_IMAGE_SETTINGS } from '../../lib/image-settings'
 import type { DrawingNode } from '../../types'
+import { ImageGenerationProgress } from '../ImageGenerationProgress'
 import { ImageCanvasNode } from '../ImageCanvasNode'
 
 afterEach(() => vi.useRealTimers())
@@ -63,8 +64,8 @@ describe('Image generation progress', () => {
       </ReactFlowProvider>
     )
     expect(screen.getByText('Elapsed: 0s')).toBeTruthy()
-    expect(screen.getByRole('progressbar').hasAttribute('aria-valuenow')).toBe(
-      false
+    expect(screen.getByRole('status')).toHaveAccessibleName(
+      'Generating image…'
     )
     act(() => vi.advanceTimersByTime(65000))
     expect(screen.getByText('Elapsed: 65s')).toBeTruthy()
@@ -89,7 +90,9 @@ describe('Image generation progress', () => {
         />
       </ReactFlowProvider>
     )
-    expect(screen.getByRole('status').textContent).toBe('Preparing image…')
+    expect(screen.getByRole('status')).toHaveAccessibleName(
+      'Preparing image…'
+    )
     expect(screen.getByText('Previews received: 2')).toBeTruthy()
     expect(screen.getByRole('img', { name: 'A cup' })).toBeTruthy()
 
@@ -118,7 +121,37 @@ describe('Image generation progress', () => {
         />
       </ReactFlowProvider>
     )
-    expect(screen.queryByRole('progressbar')).toBeNull()
     expect(screen.queryByRole('status')).toBeNull()
   })
+})
+
+// The flare sweeps behind one word, so the label is split per letter. Screen
+// readers must still get the whole phrase, and the stagger has to come from the
+// word's own length or a translation of another length would animate wrong.
+it('animates the label letter by letter while keeping it readable as one phrase', () => {
+  render(
+    <ReactFlowProvider>
+      <ImageGenerationProgress
+        progress={{ startedAt: Date.now(), phase: 'generating', previewCount: 0 }}
+      />
+    </ReactFlowProvider>
+  )
+
+  const status = screen.getByRole('status')
+  expect(status).toHaveAccessibleName('Generating image…')
+
+  const letters = status.querySelectorAll('.drawing-generation-letter')
+  expect(letters).toHaveLength('Generating'.length)
+  expect([...letters].map((letter) => letter.textContent).join('')).toBe(
+    'Generating'
+  )
+  for (const letter of letters) {
+    expect(letter).toHaveAttribute('aria-hidden', 'true')
+  }
+  expect(letters[0].getAttribute('style')).toContain(
+    '--drawing-generation-delay'
+  )
+  expect(letters[0].getAttribute('style')).not.toBe(
+    letters[1].getAttribute('style')
+  )
 })

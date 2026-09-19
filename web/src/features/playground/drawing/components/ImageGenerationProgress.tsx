@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type CSSProperties } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import type { ImageGenerationProgress as GenerationProgress } from '../types'
@@ -39,16 +39,40 @@ export function ImageGenerationProgress(props: {
     props.progress.phase === 'decoding'
       ? t('Preparing image…')
       : t('Generating image…')
+  // The flare sweeps behind one word, so the label is split into letters that
+  // light up in turn. Delays are derived from the word rather than fixed, so a
+  // translation of any length still animates end to end.
+  const word =
+    props.progress.phase === 'decoding' ? t('Preparing') : t('Generating')
+  // A word repeats letters, so each one is identified by its position, and its
+  // delay is spread across the word rather than fixed: a translation of any
+  // length still lights up end to end.
+  const letters = [...word].map((letter, index, all) => ({
+    id: `${index}-${letter}`,
+    letter: letter === ' ' ? '\u00a0' : letter,
+    delay: `${(0.1 + index / all.length).toFixed(3)}s`,
+  }))
   return (
-    <div className='w-full space-y-2'>
-      <p role='status'>{status}</p>
+    <div className='w-full space-y-1.5'>
       <div
-        role='progressbar'
+        role='status'
         aria-label={status}
-        aria-valuetext={status}
-        className='bg-primary/15 h-1.5 overflow-hidden rounded-full'
+        className='drawing-generation h-6 text-sm'
       >
-        <div className='bg-primary h-full w-1/3 rounded-full motion-safe:animate-[drawing-generation-progress_1.5s_linear_infinite] motion-reduce:w-full motion-reduce:opacity-50' />
+        <span className='sr-only'>{status}</span>
+        {letters.map((item) => (
+          <span
+            key={item.id}
+            aria-hidden='true'
+            className='drawing-generation-letter'
+            style={
+              { '--drawing-generation-delay': item.delay } as CSSProperties
+            }
+          >
+            {item.letter}
+          </span>
+        ))}
+        <span className='drawing-generation-flare' aria-hidden='true' />
       </div>
       <p className='text-muted-foreground tabular-nums'>
         {t('Elapsed: {{seconds}}s', { seconds })}

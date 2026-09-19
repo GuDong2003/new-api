@@ -1,6 +1,8 @@
 {
   "translation": {
+    "Generating": "生成中",
     "Its stored copy was deleted or has expired.": "其存储副本已被删除或已过期。",
+    "Preparing": "准备中",
     "References count as originals. Thumbnails, masks and canvas documents share the byte quota. Cloud expiry keeps local drafts.": "参考图计入原图数量；缩略图、蒙版和画布文档共用字节额度。云端过期不会删除本机草稿。",
     "Canvas drafts save in this browser first. Full cloud storage pauses uploads without stopping generation or deleting unexpired originals.": "画布草稿优先保存在当前浏览器。云端空间不足时暂停上传，不影响出图，也不会删除未过期原图。",
     "Cloud conflict. Export your local canvas or reload the cloud version.": "云端版本冲突，请导出本机画布，或重新载入云端版本。",
