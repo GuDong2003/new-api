@@ -8,7 +8,8 @@ const openCanvasProject = vi.hoisted(() => vi.fn())
 const startCanvasEditor = vi.hoisted(() => vi.fn())
 const flowCalls = vi.hoisted(() => ({ count: 0 }))
 
-vi.mock('@xyflow/react', () => ({
+vi.mock('@xyflow/react', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@xyflow/react')>()),
   useReactFlow: () => {
     flowCalls.count += 1
     return {

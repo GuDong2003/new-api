@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import type { Connection } from '@xyflow/react'
+import { MarkerType, type Connection, type Edge } from '@xyflow/react'
 
 import type { DrawingNode } from '../types'
 import { getImageModelFamily } from './image-settings'
@@ -73,4 +73,41 @@ export function canConnectReference(
     )
   }
   return true
+}
+
+// A reference connection is context rather than the subject of the canvas, so
+// it stays quiet until it is selected or the image it feeds starts generating.
+export const referenceEdgeOptions = {
+  type: 'smoothstep',
+  style: { stroke: 'var(--muted-foreground)', opacity: 0.5, strokeWidth: 1.5 },
+  markerEnd: { type: MarkerType.ArrowClosed, color: 'var(--muted-foreground)' },
+}
+
+const activeReferenceEdgeStyle = {
+  stroke: 'var(--primary)',
+  opacity: 1,
+  strokeWidth: 2.5,
+}
+
+// decorateReferenceEdges raises the connections worth looking at. Marching ants
+// mark a reference that is being consumed right now, so a long generation shows
+// which images it is reading without opening anything.
+export function decorateReferenceEdges<T extends Edge>(
+  edges: T[],
+  generatingTargets: ReadonlySet<string>
+): T[] {
+  return edges.map((edge) => {
+    const feedsGeneration = generatingTargets.has(edge.target)
+    if (!edge.selected && !feedsGeneration) return edge
+    return {
+      ...edge,
+      animated: feedsGeneration,
+      style: {
+        ...referenceEdgeOptions.style,
+        ...edge.style,
+        ...activeReferenceEdgeStyle,
+      },
+      markerEnd: { type: MarkerType.ArrowClosed, color: 'var(--primary)' },
+    }
+  })
 }

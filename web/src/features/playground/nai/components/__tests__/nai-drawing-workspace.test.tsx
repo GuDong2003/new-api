@@ -50,6 +50,7 @@ vi.mock('@xyflow/react', () => {
   return {
     Background: Container,
     BackgroundVariant: { Dots: 'dots' },
+    MarkerType: { ArrowClosed: 'arrowclosed' },
     MiniMap: Container,
     Panel: Container,
     ReactFlow: Container,

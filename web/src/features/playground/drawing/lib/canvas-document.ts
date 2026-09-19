@@ -16,10 +16,16 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import dagre from '@dagrejs/dagre'
 import type { Edge } from '@xyflow/react'
 import { z } from 'zod'
 
 import type { DrawingDocument, DrawingNode } from '../types'
+import {
+  CANVAS_NODE_GAP as NODE_GAP,
+  CANVAS_NODE_HEIGHT as DEFAULT_NODE_HEIGHT,
+  CANVAS_NODE_WIDTH as DEFAULT_NODE_WIDTH,
+} from './canvas-geometry'
 import { isSafeImageSource } from './image-assets'
 import {
   imageSettingsSchema,
@@ -187,16 +193,12 @@ type LayerLayout = {
   width: number
   height: number
 }
-type LayerMode = 'grid' | 'stack'
 type ComponentLayout = {
   positions: Map<string, CanvasPosition>
   width: number
   height: number
 }
 
-const DEFAULT_NODE_WIDTH = 280
-const DEFAULT_NODE_HEIGHT = 330
-const NODE_GAP = 40
 const COMPONENT_GAP = 96
 
 function getNodeSize(node: DrawingNode): NodeSize {
@@ -282,54 +284,12 @@ function getComponents(
   return components
 }
 
-function getLayerRanks(
-  nodes: DrawingNode[],
-  edges: CanvasEdge[]
-): Map<string, number> | null {
-  const incoming = new Map<string, number>()
-  const outgoing = new Map<string, string[]>()
-  const ranks = new Map<string, number>()
-  for (const node of nodes) {
-    incoming.set(node.id, 0)
-    outgoing.set(node.id, [])
-    ranks.set(node.id, 0)
-  }
-  for (const edge of edges) {
-    incoming.set(edge.target, (incoming.get(edge.target) || 0) + 1)
-    outgoing.get(edge.source)?.push(edge.target)
-  }
-
-  const queue = nodes
-    .filter((node) => incoming.get(node.id) === 0)
-    .map((node) => node.id)
-  let processed = 0
-  for (let index = 0; index < queue.length; index += 1) {
-    const id = queue[index]
-    if (!id) continue
-    processed += 1
-    const rank = ranks.get(id) || 0
-    for (const target of outgoing.get(id) || []) {
-      ranks.set(target, Math.max(ranks.get(target) || 0, rank + 1))
-      const remaining = (incoming.get(target) || 0) - 1
-      incoming.set(target, remaining)
-      if (remaining === 0) queue.push(target)
-    }
-  }
-  return processed === nodes.length ? ranks : null
-}
-
-function layoutLayer(
-  nodes: DrawingNode[],
-  mode: LayerMode = 'grid'
-): LayerLayout {
+// layoutLayer packs an unconnected batch into a near-square grid. Connected
+// nodes go through layoutComponent instead, which ranks them by their edges.
+function layoutLayer(nodes: DrawingNode[]): LayerLayout {
   if (!nodes.length) return { entries: [], width: 0, height: 0 }
 
-  // Keep small source layers vertical for relationship diagrams. Generated
-  // batches and larger layers use a near-square grid instead.
-  const columns =
-    mode === 'stack' && nodes.length <= 3
-      ? 1
-      : Math.max(1, Math.ceil(Math.sqrt(nodes.length)))
+  const columns = Math.max(1, Math.ceil(Math.sqrt(nodes.length)))
   const rows = Math.ceil(nodes.length / columns)
   const sizes = nodes.map((node) => getNodeSize(node))
   const columnWidths = Array.from({ length: columns }, () => 0)
@@ -368,52 +328,96 @@ function layoutLayer(
   }
 }
 
+// layoutComponent ranks one connected group left to right with dagre. A layer
+// holds every node at the same distance from a source, so a fan-out stacks in
+// one column instead of reading as a longer chain, and each node settles on the
+// centre of the nodes it comes from.
 function layoutComponent(
   nodes: DrawingNode[],
   edges: CanvasEdge[]
 ): ComponentLayout {
+  const graph = new dagre.graphlib.Graph({ directed: true })
+  graph.setGraph({ rankdir: 'LR', nodesep: NODE_GAP, ranksep: NODE_GAP })
+  graph.setDefaultEdgeLabel(() => ({}))
+  for (const node of nodes) {
+    graph.setNode(node.id, getNodeSize(node))
+  }
   const componentEdges = getValidEdges(nodes, edges)
-  const ranks = getLayerRanks(nodes, componentEdges)
-  if (!ranks) {
-    const layer = layoutLayer(nodes, 'grid')
-    return {
-      positions: new Map(
-        layer.entries.map((entry) => [entry.node.id, entry.position])
-      ),
-      width: layer.width,
-      height: layer.height,
+  for (const edge of componentEdges) {
+    graph.setEdge(edge.source, edge.target)
+  }
+  dagre.layout(graph)
+
+  // dagre orders a layer by a crossing heuristic, which is free to flip nodes
+  // that nothing constrains against each other, so arranging twice could
+  // reshuffle a set of references. Re-stack each layer in the order the canvas
+  // holds its nodes, walking left to right so every layer lands on the middle
+  // of the images it was generated from.
+  const byID = new Map(nodes.map((node) => [node.id, node]))
+  const sources = new Map<string, string[]>()
+  for (const edge of componentEdges) {
+    const known = sources.get(edge.target)
+    if (known) known.push(edge.source)
+    else sources.set(edge.target, [edge.source])
+  }
+  const layers = new Map<number, DrawingNode[]>()
+  for (const node of nodes) {
+    const rank = Math.round(graph.node(node.id).x)
+    const layer = layers.get(rank)
+    if (layer) layer.push(node)
+    else layers.set(rank, [node])
+  }
+
+  const centres = new Map<string, number>()
+  const spanOf = (members: DrawingNode[], placed: boolean) => {
+    let top = Number.POSITIVE_INFINITY
+    let bottom = Number.NEGATIVE_INFINITY
+    for (const member of members) {
+      const centre = placed ? centres.get(member.id) : graph.node(member.id).y
+      if (centre === undefined) continue
+      const { height } = getNodeSize(member)
+      top = Math.min(top, centre - height / 2)
+      bottom = Math.max(bottom, centre + height / 2)
+    }
+    return top <= bottom ? (top + bottom) / 2 : undefined
+  }
+  for (const rank of [...layers.keys()].sort((a, b) => a - b)) {
+    const layer = layers.get(rank) ?? []
+    const parents = layer.flatMap((node) =>
+      (sources.get(node.id) ?? []).flatMap((id) => byID.get(id) ?? [])
+    )
+    const centre = spanOf(parents, true) ?? spanOf(layer, false) ?? 0
+    let stacked = NODE_GAP * (layer.length - 1)
+    for (const node of layer) stacked += getNodeSize(node).height
+    let cursor = centre - stacked / 2
+    for (const node of layer) {
+      const { height } = getNodeSize(node)
+      centres.set(node.id, cursor + height / 2)
+      cursor += height + NODE_GAP
     }
   }
 
-  let maxRank = 0
-  for (const rank of ranks.values()) maxRank = Math.max(maxRank, rank)
-  const layers: LayerLayout[] = []
-  let componentWidth = 0
-  for (let rank = 0; rank <= maxRank; rank += 1) {
-    const layerNodes = nodes.filter((node) => ranks.get(node.id) === rank)
-    const layer = layoutLayer(layerNodes, rank === 0 ? 'stack' : 'grid')
-    layers.push(layer)
-    componentWidth += layer.width
-    if (rank < maxRank) componentWidth += NODE_GAP
-  }
-  let componentHeight = 0
-  for (const layer of layers) {
-    componentHeight = Math.max(componentHeight, layer.height)
-  }
-
+  // dagre reports centres; the canvas positions nodes by their top-left corner.
   const positions = new Map<string, CanvasPosition>()
-  let x = 0
-  for (const layer of layers) {
-    const y = (componentHeight - layer.height) / 2
-    for (const entry of layer.entries) {
-      positions.set(entry.node.id, {
-        x: x + entry.position.x,
-        y: y + entry.position.y,
-      })
-    }
-    x += layer.width + NODE_GAP
+  let left = Number.POSITIVE_INFINITY
+  let top = Number.POSITIVE_INFINITY
+  let right = Number.NEGATIVE_INFINITY
+  let bottom = Number.NEGATIVE_INFINITY
+  for (const node of nodes) {
+    const size = getNodeSize(node)
+    const laid = graph.node(node.id)
+    const x = laid.x - size.width / 2
+    const y = (centres.get(node.id) ?? laid.y) - size.height / 2
+    positions.set(node.id, { x, y })
+    left = Math.min(left, x)
+    top = Math.min(top, y)
+    right = Math.max(right, x + size.width)
+    bottom = Math.max(bottom, y + size.height)
   }
-  return { positions, width: componentWidth, height: componentHeight }
+  for (const [id, position] of positions) {
+    positions.set(id, { x: position.x - left, y: position.y - top })
+  }
+  return { positions, width: right - left, height: bottom - top }
 }
 
 function getBounds(
@@ -556,7 +560,7 @@ export function positionGeneratedImageNodes(
   anchor: CanvasPosition
 ): DrawingNode[] {
   if (!generatedNodes.length) return []
-  const layer = layoutLayer(generatedNodes, 'grid')
+  const layer = layoutLayer(generatedNodes)
   const referenceBounds = getBounds(referenceNodes)
   const initialPositions = new Map<string, CanvasPosition>()
   const origin = referenceNodes.length

@@ -26,6 +26,7 @@ import {
   serializeDrawingDocument,
 } from '../canvas-document'
 import { DEFAULT_IMAGE_SETTINGS } from '../image-settings'
+import { decorateReferenceEdges } from '../reference-connections'
 
 function imageNode(
   id: string,
@@ -180,5 +181,47 @@ describe('Image reference connections', () => {
     expect(store.connectReference({ source: 'A', target: 'B' })).toBe(true)
     expect(store.connectReference({ source: 'D', target: 'B' })).toBe(false)
     expect(store.connectReference({ source: 'A', target: 'C' })).toBe(false)
+  })
+})
+
+describe('Reference edge appearance', () => {
+  const edge = (id: string, target: string, selected = false) => ({
+    id,
+    source: 'reference',
+    target,
+    ...(selected ? { selected } : {}),
+  })
+
+  it('leaves a quiet connection untouched so it stays in the background', () => {
+    const edges = [edge('quiet', 'idle')]
+
+    const decorated = decorateReferenceEdges(edges, new Set<string>())
+
+    expect(decorated[0]).toBe(edges[0])
+  })
+
+  it('animates a connection feeding an image that is generating', () => {
+    const decorated = decorateReferenceEdges(
+      [edge('busy', 'generating')],
+      new Set(['generating'])
+    )
+
+    expect(decorated[0].animated).toBe(true)
+    expect(decorated[0].style).toMatchObject({
+      stroke: 'var(--primary)',
+      strokeWidth: 2.5,
+    })
+  })
+
+  // Selecting an edge is how a reference gets removed, so it has to stand out,
+  // but nothing is being consumed yet and marching ants would claim otherwise.
+  it('highlights a selected connection without animating it', () => {
+    const decorated = decorateReferenceEdges(
+      [edge('picked', 'idle', true)],
+      new Set<string>()
+    )
+
+    expect(decorated[0].animated).toBe(false)
+    expect(decorated[0].style).toMatchObject({ stroke: 'var(--primary)' })
   })
 })

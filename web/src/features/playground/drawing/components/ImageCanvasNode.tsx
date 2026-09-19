@@ -34,6 +34,10 @@ import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/ui/spinner'
 import { useCanvasNodeDeletionRequest } from '@/features/gallery/components/canvas-node-deletion'
 import { cn } from '@/lib/utils'
+import {
+  CANVAS_NODE_MIN_HEIGHT,
+  CANVAS_NODE_MIN_WIDTH,
+} from '../lib/canvas-geometry'
 import { useDrawingStore } from '@/stores/drawing-store'
 
 import { ImageCollectContext } from '../context/image-collect-context'
@@ -74,8 +78,8 @@ export const ImageCanvasNode = memo(function ImageCanvasNode(
     <>
       <NodeResizer
         isVisible={props.selected}
-        minWidth={220}
-        minHeight={230}
+        minWidth={CANVAS_NODE_MIN_WIDTH}
+        minHeight={CANVAS_NODE_MIN_HEIGHT}
         maxWidth={10000}
         maxHeight={10000}
         onResizeStart={checkpoint}
@@ -129,7 +133,7 @@ export const ImageCanvasNode = memo(function ImageCanvasNode(
         )}
         aria-label={props.data.prompt || asset?.name || t('Image')}
       >
-        <div className='drawing-node-handle flex h-9 shrink-0 cursor-grab items-center gap-2 border-b px-3 active:cursor-grabbing'>
+        <div className='drawing-node-handle flex h-8 shrink-0 cursor-grab items-center gap-2 border-b px-2.5 active:cursor-grabbing'>
           <span className='min-w-0 flex-1 truncate text-[11px] font-medium'>
             {props.data.settings.model || t('Uploaded image')}
           </span>
@@ -217,9 +221,9 @@ export const ImageCanvasNode = memo(function ImageCanvasNode(
             </div>
           )}
         </div>
-        <div className='shrink-0 space-y-2 border-t p-3'>
+        <div className='shrink-0 space-y-1.5 border-t p-2.5'>
           <p
-            className='line-clamp-2 text-xs leading-relaxed break-words'
+            className='line-clamp-1 text-xs leading-relaxed break-words'
             title={props.data.prompt}
           >
             {props.data.prompt || asset?.name}

@@ -56,6 +56,8 @@ const image: DrawingNode = {
   },
 }
 
+// Sizes are explicit so the expected coordinates below describe the layout
+// rules rather than whatever default a freshly dropped node happens to carry.
 function canvasImage(
   id: string,
   position = { x: 0, y: 0 },
@@ -66,6 +68,8 @@ function canvasImage(
     ...image,
     id,
     position,
+    width: 280,
+    height: 330,
     ...dimensions,
     ...(selected === undefined ? {} : { selected }),
   }
@@ -164,7 +168,9 @@ describe('Canvas documents', () => {
     ])
   })
 
-  it('keeps a one-to-two generation graph on separate adaptive layers', () => {
+  // Both results come from the same source, so they belong to one layer. Laying
+  // them out in a row would read as a three-step chain instead of a fan-out.
+  it('stacks a one-to-two generation fan-out in a single layer', () => {
     const source = canvasImage('source')
     const generatedA = canvasImage('generated-a')
     const generatedB = canvasImage('generated-b')
@@ -178,9 +184,9 @@ describe('Canvas documents', () => {
     )
 
     expect(arranged.map((node) => node.position)).toEqual([
-      { x: 0, y: 0 },
+      { x: 0, y: 185 },
       { x: 320, y: 0 },
-      { x: 640, y: 0 },
+      { x: 320, y: 370 },
     ])
   })
 
@@ -298,8 +304,10 @@ describe('Canvas documents', () => {
       ]
     )
 
+    // A layer centres its nodes on the rank, so the narrower reference sits
+    // half the width difference in from the wider one.
     expect(arranged.map((node) => node.position)).toEqual([
-      { x: 0, y: 0 },
+      { x: 50, y: 0 },
       { x: 0, y: 240 },
       { x: 340, y: 270 },
     ])

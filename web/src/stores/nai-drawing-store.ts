@@ -18,6 +18,10 @@ import { applyNodeChanges, type NodeChange, type Viewport } from '@xyflow/react'
 import { create } from 'zustand'
 
 import {
+  CANVAS_NODE_STEP_X,
+  CANVAS_NODE_STEP_Y,
+} from '@/features/playground/drawing/lib/canvas-geometry'
+import {
   DEFAULT_NAI_SETTINGS,
   naiSettingsSchema,
 } from '@/features/playground/nai/lib/nai-settings'
@@ -69,8 +73,8 @@ function arrangeNodes(nodes: NaiCanvasNode[]): NaiCanvasNode[] {
   return nodes.map((node, index) => ({
     ...node,
     position: {
-      x: (index % columns) * 320,
-      y: Math.floor(index / columns) * 370,
+      x: (index % columns) * CANVAS_NODE_STEP_X,
+      y: Math.floor(index / columns) * CANVAS_NODE_STEP_Y,
     },
   }))
 }

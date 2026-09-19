@@ -17,8 +17,6 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 import { ImageAdd01Icon } from '@hugeicons/core-free-icons'
 import { HugeiconsIcon } from '@hugeicons/react'
 import {
-  Background,
-  BackgroundVariant,
   MiniMap,
   ReactFlow,
   ReactFlowProvider,
@@ -57,6 +55,7 @@ import {
 import { useCanvasRoute } from '@/features/gallery/hooks/use-canvas-route'
 import { exportCanvasProject } from '@/features/gallery/lib/canvas-projects'
 import { CanvasToolbar } from '@/features/playground/drawing/components/CanvasToolbar'
+import { CanvasBackground } from '@/features/playground/drawing/components/CanvasBackground'
 import { CanvasViewportControls } from '@/features/playground/drawing/components/CanvasViewportControls'
 import { downloadBlob } from '@/features/playground/drawing/lib/image-assets'
 import { useMediaQuery } from '@/hooks/use-media-query'
@@ -281,7 +280,7 @@ function NaiDrawingWorkspace(props: { userId: number }) {
               deleteKeyCode={['Delete', 'Backspace']}
               onlyRenderVisibleElements
               className='bg-muted/25'
-              attributionPosition='bottom-right'
+              proOptions={{ hideAttribution: true }}
               ariaLabelConfig={{
                 'node.a11yDescription.default': t(
                   'Press Enter to select an NAI image and use arrow keys to move it. Delete removes the selection.'
@@ -289,12 +288,7 @@ function NaiDrawingWorkspace(props: { userId: number }) {
                 'minimap.ariaLabel': t('NAI canvas overview'),
               }}
             >
-              <Background
-                variant={BackgroundVariant.Dots}
-                gap={24}
-                size={1}
-                color='var(--border)'
-              />
+              <CanvasBackground />
               <CanvasViewportControls />
               {!compact && nodes.length > 0 && (
                 <MiniMap

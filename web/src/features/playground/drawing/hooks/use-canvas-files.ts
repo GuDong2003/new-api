@@ -29,6 +29,12 @@ import { exportCanvasProject } from '@/features/gallery/lib/canvas-projects'
 import { useDrawingStore } from '@/stores/drawing-store'
 
 import { parseDrawingDocument } from '../lib/canvas-document'
+import {
+  CANVAS_NODE_HEIGHT,
+  CANVAS_NODE_STEP_X,
+  CANVAS_NODE_STEP_Y,
+  CANVAS_NODE_WIDTH,
+} from '../lib/canvas-geometry'
 import { downloadBlob, imageFileToAsset } from '../lib/image-assets'
 import type { DrawingDocument, DrawingNode, ImageAsset } from '../types'
 
@@ -69,11 +75,11 @@ export function useCanvasFiles() {
         type: 'image',
         dragHandle: '.drawing-node-handle',
         position: {
-          x: position.x + (index % 3) * 312,
-          y: position.y + Math.floor(index / 3) * 370,
+          x: position.x + (index % 3) * CANVAS_NODE_STEP_X,
+          y: position.y + Math.floor(index / 3) * CANVAS_NODE_STEP_Y,
         },
-        width: 280,
-        height: 330,
+        width: CANVAS_NODE_WIDTH,
+        height: CANVAS_NODE_HEIGHT,
         selected: true,
         data: {
           asset,

@@ -19,6 +19,12 @@ import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
 import { persistCanvasGenerationResult } from '@/features/gallery/lib/canvas-generation'
+import {
+  CANVAS_NODE_HEIGHT,
+  CANVAS_NODE_STEP_X,
+  CANVAS_NODE_STEP_Y,
+  CANVAS_NODE_WIDTH,
+} from '@/features/playground/drawing/lib/canvas-geometry'
 import { useAuthStore } from '@/stores/auth-store'
 import { useNaiDrawingStore } from '@/stores/nai-drawing-store'
 
@@ -220,11 +226,11 @@ function createNodes(
     type: 'nai-image',
     dragHandle: '.nai-drawing-node-handle',
     position: {
-      x: ((startIndex + index) % 3) * 320,
-      y: Math.floor((startIndex + index) / 3) * 370,
+      x: ((startIndex + index) % 3) * CANVAS_NODE_STEP_X,
+      y: Math.floor((startIndex + index) / 3) * CANVAS_NODE_STEP_Y,
     },
-    width: 280,
-    height: 330,
+    width: CANVAS_NODE_WIDTH,
+    height: CANVAS_NODE_HEIGHT,
     data: {
       prompt: settings.prompt,
       settings: { ...settings },

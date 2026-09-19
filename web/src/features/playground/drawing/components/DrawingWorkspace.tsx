@@ -18,14 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { Delete02Icon, ImageAdd01Icon } from '@hugeicons/core-free-icons'
 import { HugeiconsIcon } from '@hugeicons/react'
-import {
-  Background,
-  BackgroundVariant,
-  MarkerType,
-  MiniMap,
-  ReactFlow,
-  useReactFlow,
-} from '@xyflow/react'
+import { MiniMap, ReactFlow, useReactFlow } from '@xyflow/react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -75,9 +68,14 @@ import {
 } from '../hooks/use-image-generation'
 import { useReferenceConnections } from '../hooks/use-reference-connections'
 import { imageFileToAsset } from '../lib/image-assets'
-import { canConnectReference } from '../lib/reference-connections'
+import {
+  canConnectReference,
+  decorateReferenceEdges,
+  referenceEdgeOptions,
+} from '../lib/reference-connections'
 import type { DrawingNode, ImageSettings } from '../types'
 import { CanvasToolbar } from './CanvasToolbar'
+import { CanvasBackground } from './CanvasBackground'
 import { CanvasViewportControls } from './CanvasViewportControls'
 import { DrawingSettings } from './DrawingSettings'
 import { ImageCanvasNode } from './ImageCanvasNode'
@@ -87,12 +85,6 @@ import { MaskEditor } from './MaskEditor'
 import '@xyflow/react/dist/style.css'
 
 const nodeTypes = { image: ImageCanvasNode }
-const defaultEdgeOptions = {
-  type: 'smoothstep',
-  style: { stroke: 'var(--primary)', opacity: 0.7, strokeWidth: 2 },
-  markerEnd: { type: MarkerType.ArrowClosed, color: 'var(--primary)' },
-}
-
 export function DrawingWorkspace(props: { userId: number }) {
   const { t } = useTranslation()
   const { resolvedTheme } = useTheme()
@@ -119,22 +111,23 @@ export function DrawingWorkspace(props: { userId: number }) {
       (node) => node.id === edge.target && node.data.status === 'pending'
     )
   )
+  // Keyed as a string so dragging a node does not rebuild every edge; only a
+  // change in which images are generating matters here.
+  const generatingIds = useMemo(
+    () =>
+      nodes
+        .filter((node) => node.data.status === 'pending')
+        .map((node) => node.id)
+        .join(','),
+    [nodes]
+  )
   const canvasEdges = useMemo(
     () =>
-      edges.map((edge) =>
-        edge.selected
-          ? {
-              ...edge,
-              style: {
-                ...defaultEdgeOptions.style,
-                ...edge.style,
-                strokeWidth: 3,
-                opacity: 1,
-              },
-            }
-          : edge
+      decorateReferenceEdges(
+        edges,
+        new Set(generatingIds ? generatingIds.split(',') : [])
       ),
-    [edges]
+    [edges, generatingIds]
   )
   const viewport = useDrawingStore((state) => state.viewport)
   const referenceId = useDrawingStore((state) => state.referenceIds[0])
@@ -410,7 +403,7 @@ export function DrawingWorkspace(props: { userId: number }) {
                   onMoveEnd={(_event, nextViewport) =>
                     setViewport(nextViewport)
                   }
-                  defaultEdgeOptions={defaultEdgeOptions}
+                  defaultEdgeOptions={referenceEdgeOptions}
                   nodesConnectable={tool === 'select'}
                   edgesReconnectable={false}
                   selectionOnDrag={tool === 'select'}
@@ -422,7 +415,7 @@ export function DrawingWorkspace(props: { userId: number }) {
                   deleteKeyCode={['Delete', 'Backspace']}
                   onlyRenderVisibleElements
                   className='bg-muted/25'
-                  attributionPosition='bottom-right'
+                  proOptions={{ hideAttribution: true }}
                   ariaLabelConfig={{
                     'node.a11yDescription.default': t(
                       'Press Enter to select an image and use arrow keys to move it. Delete removes the selection.'
@@ -437,12 +430,7 @@ export function DrawingWorkspace(props: { userId: number }) {
                     'minimap.ariaLabel': t('Canvas overview'),
                   }}
                 >
-                  <Background
-                    variant={BackgroundVariant.Dots}
-                    gap={24}
-                    size={1}
-                    color='var(--border)'
-                  />
+                  <CanvasBackground />
                   <CanvasViewportControls />
                   {!compact && nodes.length > 0 && (
                     <MiniMap
