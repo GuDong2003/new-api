@@ -210,6 +210,9 @@ func validateGalleryCanvasRetry(reader *multipart.Reader, manifest map[string]Ga
 
 func prepareGalleryCanvasAssets(ctx context.Context, root string, reader *multipart.Reader, assets map[string]*model.GalleryImage, remap map[string]string, staged *[]*model.GalleryImage, budget int64) error {
 	seen := map[string]bool{}
+	// Originals that arrived in this request, to be previewed once every part
+	// has been read.
+	var uploaded []*model.GalleryImage
 	for {
 		part, err := reader.NextPart()
 		if err == io.EOF {
@@ -301,11 +304,8 @@ func prepareGalleryCanvasAssets(ctx context.Context, root string, reader *multip
 			if e != nil || mime != asset.MIMEType || width != asset.Width || height != asset.Height {
 				return model.ErrGalleryInvalid
 			}
-			// Existing safe decoder catches invalid pixel streams for bounded images.
-			if _, e = makeGalleryThumbnail(ctx, root, asset); e != nil {
-				return e
-			}
 			asset.StorageBytes = asset.Bytes + galleryCanvasImageMetadataBytes(asset)
+			uploaded = append(uploaded, asset)
 		} else {
 			file, err := openGalleryFile(root, asset.ID, "thumbnail")
 			if err != nil {
@@ -329,6 +329,38 @@ func prepareGalleryCanvasAssets(ctx context.Context, root string, reader *multip
 	for id, asset := range assets {
 		if asset.State == "pending" && !seen["file:"+id] {
 			return model.ErrGalleryInvalid
+		}
+	}
+	// Give every original a preview to be opened from; without one, each
+	// surface showing this image has to download the whole thing, which is what
+	// makes a canvas slow to open. Deferred to here so a client sending its own
+	// thumbnail is not written over, and it doubles as the full decode that
+	// proves the bytes are a real image rather than a bounded-size header.
+	for _, asset := range uploaded {
+		thumbnail, err := makeGalleryThumbnail(ctx, root, asset)
+		if err != nil {
+			return err
+		}
+		if asset.HasThumbnail || len(thumbnail) == 0 || int64(len(thumbnail)) > budget {
+			continue
+		}
+		writer, err := newGalleryWriter(ctx, root, asset.ID, "thumbnail", budget)
+		if err != nil {
+			return err
+		}
+		_, writeErr := writer.Write(thumbnail)
+		closeErr := writer.Close()
+		if writer.failure != nil {
+			return writer.failure
+		}
+		if writeErr != nil || closeErr != nil {
+			return model.ErrGallerySave
+		}
+		asset.HasThumbnail = true
+		asset.StorageBytes += writer.written
+		budget -= writer.written
+		if err := model.DB.WithContext(ctx).Save(asset).Error; err != nil {
+			return model.ErrGallerySave
 		}
 	}
 	return nil

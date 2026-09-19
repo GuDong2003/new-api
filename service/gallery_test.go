@@ -1084,6 +1084,33 @@ func TestGalleryCanvasLinkedPreviewMetadataAndTombstoneAccounting(t *testing.T) 
 	assert.Greater(t, removed.StorageBytes, int64(len(markerRaw)))
 }
 
+// A canvas image had no preview unless the client happened to upload one, so
+// every surface showing it had to download the original — the server was
+// already deriving a thumbnail to prove the pixels decode, then discarding it.
+func TestGalleryCanvasDerivesThumbnailWhenClientSendsNone(t *testing.T) {
+	galleryFixture(t, sqlite.Open(filepath.Join(t.TempDir(), "gallery.db")))
+	ctx := context.Background()
+	original := galleryPNG(t)
+	saved, err := saveCanvasMetadata(t, 41, canvasSaveMetadata(t), []string{"file:" + canvasFixtureAsset, string(original)})
+	require.NoError(t, err)
+	require.Len(t, saved.Assets, 1)
+	assert.True(t, saved.Assets[0].HasThumbnail)
+
+	f, _, err := service.OpenGalleryImage(ctx, 41, canvasFixtureAsset, true)
+	require.NoError(t, err)
+	data, err := io.ReadAll(f)
+	require.NoError(t, f.Close())
+	require.NoError(t, err)
+	assert.NotEqual(t, original, data, "the preview must not be the original")
+	_, err = jpeg.Decode(bytes.NewReader(data))
+	require.NoError(t, err)
+
+	// The derived preview is charged to the canvas like any other stored byte.
+	_, used, _, err := model.GalleryTotals(ctx, 41)
+	require.NoError(t, err)
+	assert.Greater(t, used, int64(len(original)+len(data)-1))
+}
+
 func TestGalleryCanvasThumbnailActualBytesAndNAICloudRoundtrip(t *testing.T) {
 	galleryFixture(t, sqlite.Open(filepath.Join(t.TempDir(), "gallery.db")))
 	ctx := context.Background()
@@ -1155,6 +1182,9 @@ func TestGalleryCanvasReclaimedOriginalNoLongerConsumesImageCount(t *testing.T) 
 	saved, err := saveCanvasMetadata(t, 41, canvasSaveMetadata(t), []string{"file:" + canvasFixtureAsset, string(galleryPNG(t))})
 	require.NoError(t, err)
 	path := filepath.Join(os.Getenv("GALLERY_STORAGE_DIR"), "gallery-"+canvasFixtureAsset+".thumbnail")
+	// Saving derives a preview here; replace it with a directory that cannot be
+	// removed, which is what this is about.
+	require.NoError(t, os.Remove(path))
 	require.NoError(t, os.Mkdir(path, 0700))
 	require.NoError(t, os.WriteFile(filepath.Join(path, "blocker"), []byte("x"), 0600))
 	assert.ErrorIs(t, service.DeleteGalleryCanvas(ctx, 41, saved.ID, saved.Revision), model.ErrGalleryUnavailable)
