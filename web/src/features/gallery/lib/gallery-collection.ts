@@ -72,6 +72,7 @@ export function localGalleryImages(
         expires_at: 0,
         has_thumbnail: false,
         localBlob: binary.blob,
+        localSha256: binary.sha256,
         localOnly: true,
       },
     ]
@@ -93,6 +94,7 @@ export function mergeGalleryImages(
       ...image,
       ...cloud,
       localBlob: image.localBlob,
+      localSha256: image.localSha256,
       localOnly: !cloud,
       expires_at: cloud?.expires_at ?? 0,
     })

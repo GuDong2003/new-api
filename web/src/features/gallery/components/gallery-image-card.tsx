@@ -39,15 +39,16 @@ export function GalleryImageCard(props: {
     props.identity,
     props.image.id,
     true,
-    props.image.has_thumbnail && !props.image.localBlob
+    props.image.has_thumbnail || Boolean(props.image.localBlob),
+    { blob: props.image.localBlob, sha256: props.image.localSha256 }
   )
+  // Only pictures with no preview to show, here or on the server, cost a card
+  // the full original.
   const original = useGalleryFile(
     props.identity,
     props.image.id,
     false,
-    Boolean(props.image.localBlob) ||
-      !props.image.has_thumbnail ||
-      file.isError,
+    (!props.image.has_thumbnail && !props.image.localBlob) || file.isError,
     { blob: props.image.localBlob, only: props.image.localOnly }
   )
   const imageUrl = file.url ?? original.url

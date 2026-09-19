@@ -18,10 +18,13 @@ import { useQuery } from '@tanstack/react-query'
 import { useLayoutEffect, useState } from 'react'
 
 import { loadGalleryFile } from '../lib/gallery-file-source'
+import { getLocalThumbnail } from '../lib/local-thumbnail'
 import type { GalleryIdentity } from '../types'
 
 type GalleryFileOptions = {
   blob?: Blob
+  /** Identifies `blob`'s bytes, so a preview of them is derived only once. */
+  sha256?: string
   only?: boolean
 }
 
@@ -32,23 +35,39 @@ export function useGalleryFile(
   enabled = true,
   local?: GalleryFileOptions
 ) {
+  const userId = identity.userId
+  // A picture held only in this browser has no server thumbnail to ask for, so
+  // a preview of it is derived here and then read back from the same cache as
+  // every other one. The original stays in hand and is shown until it is ready.
+  const derive = Boolean(
+    thumbnail && local?.blob && local?.sha256 && userId !== null
+  )
   const query = useQuery({
     queryKey: [
       'gallery',
-      identity.userId,
+      userId,
       identity.sessionId,
       'file',
       id,
       thumbnail,
+      derive ? local?.sha256 : undefined,
     ],
-    queryFn: ({ signal }) => loadGalleryFile(identity, id, thumbnail, signal),
-    enabled: enabled && !local?.blob && !local?.only,
+    queryFn: ({ signal }) =>
+      derive
+        ? getLocalThumbnail(
+            userId as number,
+            id,
+            local?.sha256 as string,
+            local?.blob as Blob
+          )
+        : loadGalleryFile(identity, id, thumbnail, signal),
+    enabled: enabled && (derive || (!local?.blob && !local?.only)),
     retry: false,
     gcTime: 30 * 60 * 1000,
     staleTime: Infinity,
   })
   const [resource, setResource] = useState<{ blob: Blob; url: string }>()
-  const blob = local?.blob ?? query.data
+  const blob = query.data ?? local?.blob
   useLayoutEffect(() => {
     if (!blob || !enabled) return
     const url = URL.createObjectURL(blob)

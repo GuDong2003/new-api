@@ -40,6 +40,8 @@ export type GalleryImage = GalleryMetadata & {
   node_id?: string
   canvas_name?: string
   localBlob?: Blob
+  /** Identifies `localBlob`'s bytes, so a preview of them is derived only once. */
+  localSha256?: string
   localOnly?: boolean
 }
 export type GalleryUsage = {

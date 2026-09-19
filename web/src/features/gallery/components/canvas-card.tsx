@@ -34,7 +34,8 @@ export type CanvasProjectView = {
   updatedAt: number
   expiresAt: number
   coverAssetIds: string[]
-  coverBlobs?: Record<string, Blob>
+  /** Covers for a canvas this browser holds, which the server has no preview of. */
+  coverAssets?: Record<string, { blob: Blob; sha256: string }>
   localOnly?: boolean
   status?: 'local' | 'pending' | 'synced' | 'full' | 'conflict' | 'error'
 }
@@ -89,8 +90,8 @@ export function CanvasCard(props: {
                   }
                   identity={props.identity}
                   id={id}
-                  blob={
-                    project.localOnly ? project.coverBlobs?.[id] : undefined
+                  local={
+                    project.localOnly ? project.coverAssets?.[id] : undefined
                   }
                   localOnly={project.localOnly}
                 />
@@ -146,23 +147,25 @@ export function CanvasCard(props: {
 function CanvasCover(props: {
   identity: GalleryIdentity
   id: string
-  blob?: Blob
+  local?: { blob: Blob; sha256: string }
   localOnly?: boolean
   className?: string
 }) {
   const { t } = useTranslation()
+  // A draft the server has never seen is only ever shown from what is in hand.
   const file = useGalleryFile(
     props.identity,
     props.id,
     true,
-    !props.blob && !props.localOnly
+    Boolean(props.local) || !props.localOnly,
+    props.local
   )
   const original = useGalleryFile(
     props.identity,
     props.id,
     false,
-    Boolean(props.blob) || file.isError || Boolean(props.localOnly),
-    { blob: props.blob, only: props.localOnly }
+    file.isError || (Boolean(props.localOnly) && !props.local),
+    { blob: props.local?.blob, only: props.localOnly }
   )
   const url = file.url ?? original.url
   const loading = file.isPending || original.isPending

@@ -371,8 +371,11 @@ function GalleryContent(props: {
         )
         .map((asset) => asset.id)
         .slice(0, 4),
-      coverBlobs: Object.fromEntries(
-        assets.map((asset) => [asset.id, asset.blob])
+      coverAssets: Object.fromEntries(
+        assets.map((asset) => [
+          asset.id,
+          { blob: asset.blob, sha256: asset.sha256 },
+        ])
       ),
       localOnly: !canvas.cloudRevision || canvas.needsExplicitSave,
       status: canvas.status,
