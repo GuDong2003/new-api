@@ -20,10 +20,10 @@ import { ReactFlowProvider } from '@xyflow/react'
 import { useTranslation } from 'react-i18next'
 
 import { ErrorState } from '@/components/error-state'
-import { LoadingState } from '@/components/loading-state'
 import { useCanvasRoute } from '@/features/gallery/hooks/use-canvas-route'
 import { useAuthStore } from '@/stores/auth-store'
 
+import { CanvasLoadingState } from './components/CanvasLoadingState'
 import { DrawingWorkspace } from './components/DrawingWorkspace'
 
 export function Drawing(
@@ -51,7 +51,7 @@ function DrawingEntry(props: {
         <ErrorState description={t(route.error)} onRetry={route.retry} />
       ) : null}
       {route.loading ? (
-        <LoadingState message={t('Loading canvas…')} />
+        <CanvasLoadingState progress={route.progress} />
       ) : (
         <DrawingWorkspace userId={props.userId} />
       )}

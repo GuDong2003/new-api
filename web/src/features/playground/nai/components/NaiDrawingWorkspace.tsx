@@ -27,7 +27,6 @@ import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
 import { ErrorState } from '@/components/error-state'
-import { LoadingState } from '@/components/loading-state'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import {
@@ -56,6 +55,7 @@ import { useCanvasRoute } from '@/features/gallery/hooks/use-canvas-route'
 import { exportCanvasProject } from '@/features/gallery/lib/canvas-projects'
 import { CanvasToolbar } from '@/features/playground/drawing/components/CanvasToolbar'
 import { CanvasBackground } from '@/features/playground/drawing/components/CanvasBackground'
+import { CanvasLoadingState } from '@/features/playground/drawing/components/CanvasLoadingState'
 import { CanvasViewportControls } from '@/features/playground/drawing/components/CanvasViewportControls'
 import { downloadBlob } from '@/features/playground/drawing/lib/image-assets'
 import { useMediaQuery } from '@/hooks/use-media-query'
@@ -96,7 +96,7 @@ function NaiDrawingEntry(props: {
         <ErrorState description={t(route.error)} onRetry={route.retry} />
       ) : null}
       {route.loading ? (
-        <LoadingState message={t('Loading NAI canvas…')} />
+        <CanvasLoadingState progress={route.progress} />
       ) : (
         <NaiDrawingWorkspace userId={props.userId} />
       )}

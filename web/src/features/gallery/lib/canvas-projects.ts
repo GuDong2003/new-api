@@ -39,6 +39,11 @@ import {
   updateState,
 } from './canvas-editor'
 import { canvasEditors, notifyCanvasProjects } from './canvas-events'
+import {
+  advanceCanvasOpenProgress,
+  clearCanvasOpenProgress,
+  startCanvasOpenProgress,
+} from './canvas-open-progress'
 import { migrateLegacyCanvases } from './canvas-migration'
 import {
   acknowledgeCanvasSave,
@@ -166,15 +171,22 @@ async function downloadCloudCanvas(
   if (remote.state !== 'ready' || !remote.document) {
     throw new Error('Canvas original is unavailable.')
   }
+  // Report each image as it lands so opening a canvas shows real progress
+  // instead of an empty wait.
+  startCanvasOpenProgress(remote.id, remote.assets.length)
   const assets = await Promise.all(
-    remote.assets.map(async (asset) => ({
-      id: asset.id,
-      role: asset.role,
-      nodeId: asset.node_id,
-      sha256: asset.sha256,
-      previewOnly: asset.has_thumbnail,
-      blob: await getGalleryFile(identity, asset.id, asset.has_thumbnail),
-    }))
+    remote.assets.map(async (asset) => {
+      const blob = await getGalleryFile(identity, asset.id, asset.has_thumbnail)
+      advanceCanvasOpenProgress(remote.id)
+      return {
+        id: asset.id,
+        role: asset.role,
+        nodeId: asset.node_id,
+        sha256: asset.sha256,
+        previewOnly: asset.has_thumbnail,
+        blob,
+      }
+    })
   )
   assertGalleryIdentity(identity)
   const canvas = await saveLocalCanvas(
@@ -212,6 +224,7 @@ export function openCanvasProject(
     focusAssetId,
     expectedKind
   ).finally(() => {
+    clearCanvasOpenProgress(id)
     if (openingCanvasProjects.get(key) === pending) {
       openingCanvasProjects.delete(key)
     }

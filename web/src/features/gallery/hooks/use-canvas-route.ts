@@ -15,12 +15,22 @@ You should have received a copy of the GNU Affero General Public License
 along with this program. If not, see <https://www.gnu.org/licenses/>.
 */
 import { useReactFlow } from '@xyflow/react'
-import { useEffect, useRef, useState } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react'
 
 import { useAuthStore } from '@/stores/auth-store'
 
 import { storeFor } from '../lib/canvas-editor'
 import { openCanvasProject, startCanvasEditor } from '../lib/canvas-projects'
+import {
+  getCanvasOpenProgress,
+  subscribeCanvasOpenProgress,
+} from '../lib/canvas-open-progress'
 import type { CanvasKind } from '../types'
 
 export type CanvasRouteState = {
@@ -39,6 +49,18 @@ export function useCanvasRoute(
   const flowRef = useRef(flow)
   flowRef.current = flow
   const [attempt, setAttempt] = useState(0)
+  // The download publishes progress per canvas because concurrent opens share
+  // one request, so the view subscribes rather than being handed a callback.
+  const progress = useSyncExternalStore(
+    useCallback(
+      (listener: () => void) =>
+        canvasId
+          ? subscribeCanvasOpenProgress(canvasId, listener)
+          : () => undefined,
+      [canvasId]
+    ),
+    () => (canvasId ? getCanvasOpenProgress(canvasId) : undefined)
+  )
   const [route, setRoute] = useState<CanvasRouteState>(() => ({
     loading: Boolean(canvasId),
     error: null,
@@ -93,6 +115,7 @@ export function useCanvasRoute(
   }, [attempt, canvasId, focusAssetId, kind, userId, sessionId])
   return {
     ...route,
+    progress,
     retry: () => {
       setRoute({ loading: true, error: null })
       setAttempt((value) => value + 1)
