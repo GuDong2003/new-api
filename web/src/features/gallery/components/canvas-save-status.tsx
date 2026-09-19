@@ -47,6 +47,10 @@ export function CanvasSaveStatus(props: CanvasSaveStatusProps) {
       text = t('Saved locally. Cloud save failed; try again later.')
     } else text = t('Saved in this browser')
   }
+  // A canvas that has not settled yet has nothing to report. Saying so with an
+  // empty element leaves a blank gap in the toolbar and an empty live region
+  // for a screen reader to announce.
+  if (!text) return null
   return (
     // Callers that clip this line must pass the truncation here rather than on a
     // wrapper: an ancestor's text-overflow never reaches this block, so the

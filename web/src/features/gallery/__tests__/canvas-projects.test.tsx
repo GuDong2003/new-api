@@ -926,6 +926,13 @@ describe('canvas project save status', () => {
     ).not.toBeInTheDocument()
     expect(screen.getByText('Canvas not saved')).toBeVisible()
   })
+  // Nothing to say is not the same as an empty thing to look at: a canvas that
+  // has not settled yet left a blank status element sitting in the toolbar.
+  it('leaves nothing behind while the canvas has no status to report', () => {
+    render(<CanvasSaveStatus localStatus='loading' cloudStatus='' />)
+
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+  })
   it('carries clipping on the status line itself and keeps the full message in its title', () => {
     render(
       <CanvasSaveStatus
