@@ -780,13 +780,18 @@ For commercial licensing, please contact support@quantumnous.com
   display: flex;
   align-items: center;
   justify-content: center;
-  /* The flare is a set of radial gradients sized to this box, so the box takes
-   * the whole card: squeezed into a caption-sized strip they flatten into a
-   * smear instead of a glow travelling behind the word. */
+  /* The flare is sized to this box and sweeps across it, so the box is only as
+   * wide as the word it sits behind — the box is what ties the colour to the
+   * letters. Stretching it to the whole card sent the colour travelling far
+   * outside them, which no amount of retiming could bring back together.
+   *
+   * Height is what gives the glow room, not width: it fills the picture area
+   * the way the original fills its own. */
   flex: 1 1 auto;
-  min-height: 3.5em;
-  width: 100%;
-  font-size: 1.125rem;
+  align-self: center;
+  min-height: 4.7em;
+  width: auto;
+  font-size: 1.25rem;
   color: var(--foreground);
   font-weight: 600;
   letter-spacing: 0.01em;
@@ -808,16 +813,16 @@ For commercial licensing, please contact support@quantumnous.com
   -webkit-mask: repeating-linear-gradient(
     90deg,
     transparent 0,
-    transparent 6px,
-    black 7px,
-    black 8px
+    transparent 0.234em,
+    black 0.273em,
+    black 0.313em
   );
   mask: repeating-linear-gradient(
     90deg,
     transparent 0,
-    transparent 6px,
-    black 7px,
-    black 8px
+    transparent 0.234em,
+    black 0.273em,
+    black 0.313em
   );
 }
 
