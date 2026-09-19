@@ -16,6 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import type { Edge } from '@xyflow/react'
 import { beforeEach, describe, expect, it } from 'vitest'
 
 import { useDrawingStore } from '@/stores/drawing-store'
@@ -185,7 +186,7 @@ describe('Image reference connections', () => {
 })
 
 describe('Reference edge appearance', () => {
-  const edge = (id: string, target: string, selected = false) => ({
+  const edge = (id: string, target: string, selected = false): Edge => ({
     id,
     source: 'reference',
     target,
