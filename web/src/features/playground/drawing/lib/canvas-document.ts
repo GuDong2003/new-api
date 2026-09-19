@@ -23,6 +23,7 @@ import { z } from 'zod'
 import type { DrawingDocument, DrawingNode } from '../types'
 import {
   CANVAS_NODE_GAP as NODE_GAP,
+  CANVAS_RANK_GAP as RANK_GAP,
   CANVAS_NODE_HEIGHT as DEFAULT_NODE_HEIGHT,
   CANVAS_NODE_WIDTH as DEFAULT_NODE_WIDTH,
 } from './canvas-geometry'
@@ -337,7 +338,7 @@ function layoutComponent(
   edges: CanvasEdge[]
 ): ComponentLayout {
   const graph = new dagre.graphlib.Graph({ directed: true })
-  graph.setGraph({ rankdir: 'LR', nodesep: NODE_GAP, ranksep: NODE_GAP })
+  graph.setGraph({ rankdir: 'LR', nodesep: NODE_GAP, ranksep: RANK_GAP })
   graph.setDefaultEdgeLabel(() => ({}))
   for (const node of nodes) {
     graph.setNode(node.id, getNodeSize(node))
@@ -565,7 +566,7 @@ export function positionGeneratedImageNodes(
   const initialPositions = new Map<string, CanvasPosition>()
   const origin = referenceNodes.length
     ? {
-        x: referenceBounds.right + NODE_GAP,
+        x: referenceBounds.right + RANK_GAP,
         y:
           referenceBounds.top +
           (referenceBounds.bottom - referenceBounds.top - layer.height) / 2,

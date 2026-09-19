@@ -25,6 +25,11 @@ export const CANVAS_NODE_WIDTH = 260
 export const CANVAS_NODE_HEIGHT = 290
 export const CANVAS_NODE_GAP = 40
 
+// Layers sit further apart than siblings do. A connection leaves one image and
+// enters the next from the side, so a narrow gap forces the curve to double
+// back on itself between two images that are only slightly offset.
+export const CANVAS_RANK_GAP = 120
+
 // A node keeps its image readable even at the smallest size a drag can reach.
 export const CANVAS_NODE_MIN_WIDTH = 200
 export const CANVAS_NODE_MIN_HEIGHT = 200

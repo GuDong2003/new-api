@@ -133,7 +133,7 @@ describe('Image generation jobs', () => {
 
     const generatedNode = useDrawingStore.getState().nodes.at(-1)
     expect(generatedNode?.position).toEqual({
-      x: 420,
+      x: 500,
       y: 285,
     })
     expect(generatedNode).toBeDefined()

@@ -101,7 +101,7 @@ describe('Canvas documents', () => {
     expect(arranged.map((node) => node.position)).toEqual([
       { x: 0, y: 0 },
       { x: 0, y: 370 },
-      { x: 320, y: 185 },
+      { x: 400, y: 185 },
     ])
   })
 
@@ -117,7 +117,7 @@ describe('Canvas documents', () => {
       { x: 20, y: 30 }
     )
 
-    expect(positioned[0].position).toEqual({ x: 420, y: 285 })
+    expect(positioned[0].position).toEqual({ x: 500, y: 285 })
   })
 
   it('uses reference connections when arranging through the drawing store', () => {
@@ -147,7 +147,7 @@ describe('Canvas documents', () => {
     ).toEqual([
       { x: 0, y: 0 },
       { x: 0, y: 370 },
-      { x: 320, y: 185 },
+      { x: 400, y: 185 },
     ])
   })
 
@@ -185,8 +185,8 @@ describe('Canvas documents', () => {
 
     expect(arranged.map((node) => node.position)).toEqual([
       { x: 0, y: 185 },
-      { x: 320, y: 0 },
-      { x: 320, y: 370 },
+      { x: 400, y: 0 },
+      { x: 400, y: 370 },
     ])
   })
 
@@ -208,8 +208,8 @@ describe('Canvas documents', () => {
     expect(arranged.map((node) => node.position)).toEqual([
       { x: 0, y: 0 },
       { x: 0, y: 370 },
-      { x: 320, y: 185 },
-      { x: 640, y: 185 },
+      { x: 400, y: 185 },
+      { x: 800, y: 185 },
     ])
   })
 
@@ -309,7 +309,7 @@ describe('Canvas documents', () => {
     expect(arranged.map((node) => node.position)).toEqual([
       { x: 50, y: 0 },
       { x: 0, y: 240 },
-      { x: 340, y: 270 },
+      { x: 420, y: 270 },
     ])
   })
 
