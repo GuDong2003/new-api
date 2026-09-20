@@ -730,7 +730,7 @@ func TestInputPreConsumeMultiplierLegacyAndRequestPrices(t *testing.T) {
 				reservation := &priceTestReservation{held: price.QuotaToPreConsume}
 				info.Billing = reservation
 				operation_setting.GetQuotaSetting().PreConsumeMultiplier = 10
-				require.Nil(t, service.PrepareImageBillingForRequest(ctx, info, 2, false))
+				require.Nil(t, service.PrepareImageBillingForRequest(ctx, info, 2))
 				assert.Equal(t, 750, reservation.held, "retry must reuse the original fractional multiplier")
 			}
 		})
