@@ -5034,7 +5034,7 @@ export function ChannelMutateDrawer({
             the fixed redirect window and clip it to the dialog. */}
         <DialogContent
           showCloseButton={false}
-          className='inset-x-0 top-[calc(var(--dialog-viewport-center)-var(--channel-editor-height)/2)] mx-auto flex h-(--channel-editor-height) max-h-(--dialog-available-height) w-[calc(100vw-2rem)] max-w-[1400px] translate-none flex-col gap-0 overflow-hidden p-0 [--channel-editor-height:min(900px,var(--dialog-available-height))] sm:max-w-[1400px]'
+          className='inset-x-0 top-[calc(var(--dialog-viewport-center,50dvh)-var(--channel-editor-height)/2)] mx-auto flex h-(--channel-editor-height) max-h-[var(--dialog-available-height,calc(100dvh-2rem))] w-[calc(100vw-2rem)] max-w-[1400px] translate-none flex-col gap-0 overflow-hidden p-0 [--channel-editor-height:min(900px,var(--dialog-available-height,calc(100dvh-2rem)))] sm:max-w-[1400px]'
         >
           <DialogClose
             render={

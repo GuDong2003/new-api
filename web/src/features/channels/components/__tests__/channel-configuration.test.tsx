@@ -2416,7 +2416,7 @@ test('on wide screens redirecting a fetched model opens the floating panel besid
   // viewport and has no translate, which would clip the fixed window to it.
   expect(document.querySelector('[data-slot="dialog-content"]')).toHaveClass(
     'sm:max-w-[1400px]',
-    'max-h-(--dialog-available-height)',
+    'max-h-[var(--dialog-available-height,calc(100dvh-2rem))]',
     'translate-none'
   )
   expect(
