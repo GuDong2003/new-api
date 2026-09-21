@@ -125,9 +125,16 @@ it('keeps the model clamped to two lines and exposes its full value with keyboar
   const user = userEvent.setup()
   renderLogs()
   const button = screen.getByRole('button', { name: `Model: ${longName}` })
-  expect(within(button).getByText(longName)).toHaveClass(
+  const modelText = within(button).getByText(longName)
+  expect(modelText).toHaveClass(
     'line-clamp-2',
+    'leading-5',
     '[overflow-wrap:anywhere]'
+  )
+  expect(modelText.closest('[data-slot="status-badge"]')).toHaveClass(
+    'max-w-full',
+    'min-h-6',
+    'py-px'
   )
   button.focus()
   await user.keyboard('{Enter}')
