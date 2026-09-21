@@ -344,3 +344,38 @@ describe('Image parameter fields', () => {
     useDrawingStore.getState().initialize(914)
   })
 })
+
+describe('Grok NSFW switch', () => {
+  it('submits nsfw true after the switch is turned on for a Grok model', async () => {
+    const onSubmit = vi.fn()
+    render(
+      <ResolutionForm
+        settings={{ model: 'grok-imagine-image-2.0' }}
+        onSubmit={onSubmit}
+      />
+    )
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: 'Advanced settings' }))
+
+    const nsfw = screen.getByRole('switch', { name: 'Allow NSFW content' })
+    expect(nsfw).toHaveAttribute('aria-checked', 'false')
+
+    await user.click(nsfw)
+    expect(nsfw).toHaveAttribute('aria-checked', 'true')
+
+    await user.click(screen.getByRole('button', { name: 'Generate' }))
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({ nsfw: true })
+    )
+  })
+
+  it('hides the switch for a model that is not Grok', async () => {
+    render(<ResolutionForm settings={{ model: 'gpt-image-2.5' }} />)
+    await userEvent
+      .setup()
+      .click(screen.getByRole('button', { name: 'Advanced settings' }))
+    expect(
+      screen.queryByRole('switch', { name: 'Allow NSFW content' })
+    ).toBeNull()
+  })
+})

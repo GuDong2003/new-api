@@ -1,5 +1,6 @@
 {
   "translation": {
+    "Allow NSFW content": "Разрешить контент NSFW",
     "Generating": "Генерация",
     "Image {{index}}": "Изображение {{index}}",
     "Audit images": "Изображения аудита",

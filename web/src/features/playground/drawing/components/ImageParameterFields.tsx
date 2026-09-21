@@ -28,6 +28,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
+import { Switch } from '@/components/ui/switch'
 
 import { getImageModelFamily, getImageQualities } from '../lib/image-settings'
 import type { ImageSettings } from '../types'
@@ -239,6 +240,17 @@ export function ImageParameterFields(props: {
                   { value: 'natural', label: 'Natural' },
                 ]}
               />
+            )}
+            {family === 'grok-imagine' && (
+              <label className='flex items-center justify-between gap-3 text-sm'>
+                <span>{t('Allow NSFW content')}</span>
+                <Switch
+                  checked={settings.nsfw}
+                  onCheckedChange={(checked) =>
+                    form.setValue('nsfw', checked, { shouldDirty: true })
+                  }
+                />
+              </label>
             )}
             <div className='space-y-1.5'>
               <Label htmlFor='drawing-user'>{t('User identifier')}</Label>

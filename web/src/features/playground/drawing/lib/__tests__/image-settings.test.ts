@@ -223,3 +223,40 @@ describe('OpenAI image parameters', () => {
     )
   })
 })
+
+describe('Grok NSFW switch', () => {
+  const grok = { ...settings, model: 'grok-imagine-image-2.0' }
+
+  it('sends nsfw for a Grok model when the switch is on', () => {
+    expect(buildImagePayload({ ...grok, nsfw: true })).toMatchObject({
+      nsfw: true,
+    })
+  })
+
+  it('sends nsfw false for a Grok model when the switch is off', () => {
+    expect(buildImagePayload({ ...grok, nsfw: false })).toMatchObject({
+      nsfw: false,
+    })
+  })
+
+  it('sends nsfw when editing a Grok image', () => {
+    expect(
+      buildImagePayload({
+        ...grok,
+        model: 'grok-imagine-image-edit',
+        mode: 'edit',
+        nsfw: true,
+      })
+    ).toMatchObject({ nsfw: true })
+  })
+
+  it('omits nsfw for a non-Grok model even when the switch is on', () => {
+    expect(buildImagePayload({ ...settings, nsfw: true })).not.toHaveProperty(
+      'nsfw'
+    )
+  })
+
+  it('defaults the switch to off', () => {
+    expect(DEFAULT_IMAGE_SETTINGS.nsfw).toBe(false)
+  })
+})

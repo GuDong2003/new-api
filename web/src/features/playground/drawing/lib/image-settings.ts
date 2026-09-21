@@ -52,6 +52,7 @@ export const imageSettingsSchema = z.object({
   stream: z.boolean().default(false),
   partialImages: z.number().int().min(0).max(3).default(1),
   user: z.string().max(512).default(''),
+  nsfw: z.boolean().default(false),
 })
 
 export const DEFAULT_IMAGE_SETTINGS = imageSettingsSchema.parse({})
@@ -276,6 +277,8 @@ export function buildImagePayload(
     quality: settings.quality,
   }
   if (settings.user.trim()) payload.user = settings.user.trim()
+  // Only Grok reads nsfw; other providers reject or ignore the unknown field.
+  if (family === 'grok-imagine') payload.nsfw = settings.nsfw
   if (family === 'gpt-image') {
     payload.background = settings.background
     payload.output_format = settings.outputFormat

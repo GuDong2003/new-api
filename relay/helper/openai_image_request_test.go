@@ -239,3 +239,83 @@ func TestGetAndValidOpenAIImageRequestNBounds(t *testing.T) {
 		require.Contains(t, err.Error(), boundErr)
 	})
 }
+
+// TestGetAndValidOpenAIImageRequestNsfw verifies the Grok nsfw switch survives
+// request parsing and is re-marshaled for the upstream provider. Unknown JSON
+// fields land in ImageRequest.Extra, which MarshalJSON deliberately drops, so
+// nsfw only reaches the provider as a declared field.
+func TestGetAndValidOpenAIImageRequestNsfw(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	t.Run("json", func(t *testing.T) {
+		for _, tc := range []struct {
+			name, body string
+			want       *bool
+			wantJSON   string
+		}{
+			{name: "enabled", body: `{"model":"grok-imagine-image-2.0","prompt":"a cat","nsfw":true}`, want: common.GetPointer(true), wantJSON: `"nsfw":true`},
+			{name: "explicitly disabled", body: `{"model":"grok-imagine-image-2.0","prompt":"a cat","nsfw":false}`, want: common.GetPointer(false), wantJSON: `"nsfw":false`},
+			{name: "absent", body: `{"model":"grok-imagine-image-2.0","prompt":"a cat"}`},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				c, _ := gin.CreateTestContext(httptest.NewRecorder())
+				c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", bytes.NewBufferString(tc.body))
+				c.Request.Header.Set("Content-Type", "application/json")
+
+				req, err := GetAndValidOpenAIImageRequest(c, relayconstant.RelayModeImagesGenerations)
+				require.NoError(t, err)
+
+				if tc.want == nil {
+					assert.Nil(t, req.Nsfw)
+				} else {
+					require.NotNil(t, req.Nsfw)
+					assert.Equal(t, *tc.want, *req.Nsfw)
+				}
+
+				upstream, err := common.Marshal(req)
+				require.NoError(t, err)
+				if tc.wantJSON == "" {
+					assert.NotContains(t, string(upstream), "nsfw")
+					return
+				}
+				assert.Contains(t, string(upstream), tc.wantJSON)
+			})
+		}
+	})
+
+	t.Run("multipart", func(t *testing.T) {
+		for _, tc := range []struct {
+			name, value string
+			want        *bool
+		}{
+			{name: "enabled", value: "true", want: common.GetPointer(true)},
+			{name: "explicitly disabled", value: "false", want: common.GetPointer(false)},
+			{name: "absent"},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				var body bytes.Buffer
+				writer := multipart.NewWriter(&body)
+				require.NoError(t, writer.WriteField("model", "grok-imagine-image-edit"))
+				require.NoError(t, writer.WriteField("prompt", "make it blue"))
+				if tc.value != "" {
+					require.NoError(t, writer.WriteField("nsfw", tc.value))
+				}
+				require.NoError(t, writer.Close())
+
+				c, _ := gin.CreateTestContext(httptest.NewRecorder())
+				c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/edits", &body)
+				c.Request.Header.Set("Content-Type", writer.FormDataContentType())
+
+				req, err := GetAndValidOpenAIImageRequest(c, relayconstant.RelayModeImagesEdits)
+				require.NoError(t, err)
+
+				if tc.want == nil {
+					assert.Nil(t, req.Nsfw)
+					return
+				}
+				require.NotNil(t, req.Nsfw)
+				assert.Equal(t, *tc.want, *req.Nsfw)
+			})
+		}
+	})
+}

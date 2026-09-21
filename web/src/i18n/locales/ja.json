@@ -1,5 +1,6 @@
 {
   "translation": {
+    "Allow NSFW content": "NSFW コンテンツを許可",
     "Generating": "画像を生成中",
     "Image {{index}}": "画像 {{index}}",
     "Audit images": "監査画像",

@@ -233,6 +233,10 @@ func GetAndValidOpenAIImageRequest(c *gin.Context, relayMode int) (*dto.ImageReq
 				watermark := formData.Get("watermark") == "true"
 				imageRequest.Watermark = &watermark
 			}
+			if formData.Has("nsfw") {
+				nsfw := formData.Get("nsfw") == "true"
+				imageRequest.Nsfw = &nsfw
+			}
 			break
 		}
 		fallthrough

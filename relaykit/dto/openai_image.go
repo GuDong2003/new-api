@@ -41,6 +41,10 @@ type ImageRequest struct {
 	Mask              json.RawMessage `json:"mask,omitempty"`
 	InputFidelity     json.RawMessage `json:"input_fidelity,omitempty"`
 	Watermark         *bool           `json:"watermark,omitempty"`
+	// Nsfw relaxes Grok image moderation. Unknown JSON fields land in Extra,
+	// which MarshalJSON drops, so this must stay a declared field to reach the
+	// provider. Other providers ignore it.
+	Nsfw *bool `json:"nsfw,omitempty"`
 	// zhipu 4v
 	WatermarkEnabled json.RawMessage `json:"watermark_enabled,omitempty"`
 	UserId           json.RawMessage `json:"user_id,omitempty"`
