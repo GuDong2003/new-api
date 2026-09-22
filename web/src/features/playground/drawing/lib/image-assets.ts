@@ -19,6 +19,8 @@ For commercial licensing, please contact support@quantumnous.com
 import type { ImageAsset } from '../types'
 
 export const MAX_IMAGE_BYTES = 50 * 1024 * 1024
+/** A whole request may reach MAX_IMAGE_BYTES, but one reference may not. */
+export const MAX_REFERENCE_IMAGE_BYTES = 20 * 1024 * 1024
 export const IMAGE_MIME_TYPES = ['image/png', 'image/jpeg', 'image/webp']
 
 /**

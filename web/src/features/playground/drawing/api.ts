@@ -20,10 +20,14 @@ import { isAxiosError } from 'axios'
 
 import { api } from '@/lib/api'
 
-import { imageAssetToFile } from './lib/image-assets'
+import {
+  imageAssetToFile,
+  MAX_REFERENCE_IMAGE_BYTES,
+} from './lib/image-assets'
 import {
   buildImagePayload,
   getImageModelFamily,
+  supportsImageSizePresets,
   usesImageTask,
   validateImageSettings,
 } from './lib/image-settings'
@@ -105,6 +109,14 @@ export async function generateImages(
         options.references[0].width !== options.references[0].height)
     ) {
       throw new Error('DALL·E 2 requires a square PNG smaller than 4 MB.')
+    }
+    // The 50 MB body limit covers the whole request; a single reference is
+    // capped far lower, so a large one has to be caught before it is sent.
+    if (
+      supportsImageSizePresets(options.settings.model) &&
+      files.some((file) => file.size > MAX_REFERENCE_IMAGE_BYTES)
+    ) {
+      throw new Error('Each reference image must be smaller than 20 MB.')
     }
     const form = new FormData()
     for (const [key, value] of Object.entries(payload)) {

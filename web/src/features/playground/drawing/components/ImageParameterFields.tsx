@@ -33,6 +33,7 @@ import { Switch } from '@/components/ui/switch'
 import {
   getImageModelFamily,
   getImageQualities,
+  getMaxImagesPerRequest,
   supportsImageSizePresets,
 } from '../lib/image-settings'
 import type { ImageSettings } from '../types'
@@ -117,7 +118,7 @@ export function ImageParameterFields(props: {
             id='drawing-n'
             type='number'
             min={1}
-            max={family === 'dall-e-3' ? 1 : 10}
+            max={getMaxImagesPerRequest(settings.model)}
             step={1}
             aria-invalid={Boolean(form.formState.errors.n)}
             {...form.register('n', { valueAsNumber: true })}

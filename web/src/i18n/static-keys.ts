@@ -46,6 +46,9 @@ export const STATIC_I18N_KEYS = [
   'Enter a valid width and height.',
   'Choose a size supported by this model.',
   'Custom dimensions must be multiples of 16, at most 3840 pixels per side, with a 1:3 to 3:1 aspect ratio.',
+  'This model supports one image per request.',
+  'Prompts for this model must be 4,000 characters or fewer.',
+  'Each reference image must be smaller than 20 MB.',
   // Content audit form validation (messages translated by FormMessage).
   'Enter a whole number within the displayed limits.',
   'Enter a positive integer ID.',

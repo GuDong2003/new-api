@@ -141,6 +141,26 @@ export function supportsAutomaticImageSize(model: string): boolean {
 }
 
 /**
+ * The prompt length the preset-table provider keeps. It truncates anything
+ * longer without saying so, which silently drops the end of a long prompt.
+ */
+export const MAX_PRESET_PROMPT_CHARACTERS = 4000
+
+/**
+ * How many images one request can come back with. The provider that serves the
+ * preset tables renders a single image and ignores a larger `n`, and DALL·E 3
+ * and the video-style models only ever return one, so a batch would leave the
+ * extra canvas nodes waiting for images that never arrive.
+ */
+export function getMaxImagesPerRequest(model: string): number {
+  const family = getImageModelFamily(model)
+  if (family === 'dall-e-3' || family === 'imagen' || family === 'seedream') {
+    return 1
+  }
+  return supportsImageSizePresets(model) ? 1 : 10
+}
+
+/**
  * Nano Banana v2 is the only model that renders the extreme panoramas. It ships
  * both under its own alias and as the Gemini 3.1 Flash image model.
  */
@@ -345,9 +365,9 @@ export function settingsForImageModel(
     next.size = getImagePresetSize('1:1', '1K', model)
   }
   if (family === 'dall-e-3' || family === 'imagen' || family === 'seedream') {
-    next.n = 1
     next.mode = 'generate'
   }
+  next.n = Math.min(next.n, getMaxImagesPerRequest(model))
   return next
 }
 
@@ -365,6 +385,16 @@ export function validateImageSettings(
   const family = getImageModelFamily(settings.model)
   if (family === 'dall-e-3' && settings.n !== 1) {
     return 'DALL·E 3 supports one image per request.'
+  }
+  if (settings.n > getMaxImagesPerRequest(settings.model)) {
+    return 'This model supports one image per request.'
+  }
+  // Runes, not UTF-16 units: a surrogate pair counts once upstream.
+  if (
+    supportsImageSizePresets(settings.model) &&
+    [...settings.prompt].length > MAX_PRESET_PROMPT_CHARACTERS
+  ) {
+    return 'Prompts for this model must be 4,000 characters or fewer.'
   }
   if (settings.mode === 'edit') {
     if (family === 'dall-e-3') return 'DALL·E 3 does not support image editing.'

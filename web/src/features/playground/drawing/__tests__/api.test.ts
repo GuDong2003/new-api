@@ -21,7 +21,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { api } from '@/lib/api'
 
 import { generateImages } from '../api'
-import { DEFAULT_IMAGE_SETTINGS } from '../lib/image-settings'
+import {
+  DEFAULT_IMAGE_SETTINGS,
+  settingsForImageModel,
+} from '../lib/image-settings'
 
 function streamed(payload: unknown) {
   return {
@@ -109,6 +112,39 @@ describe('Image request transport', () => {
     expect(readImage).toHaveBeenCalledTimes(1)
     const form = request.mock.calls[0][1] as FormData
     expect((form.get('image') as File).name).toBe('reference.png')
+  })
+
+  // The gateway rejects a single reference over 20 MB, well under the 50 MB it
+  // allows for the whole request, so the per-image cap has to be its own check.
+  it('refuses a reference image the gateway would reject as too large', async () => {
+    const request = vi.spyOn(api, 'post')
+    const oversized = new File(['x'], 'huge.png', { type: 'image/png' })
+    Object.defineProperty(oversized, 'size', { value: 21 * 1024 * 1024 })
+
+    await expect(
+      generateImages({
+        settings: {
+          ...settingsForImageModel(DEFAULT_IMAGE_SETTINGS, 'nano-banana-pro'),
+          mode: 'edit',
+          prompt: 'A cup',
+        },
+        references: [
+          {
+            id: 'asset-1',
+            name: 'huge.png',
+            src: 'blob:http://localhost/huge',
+            width: 1024,
+            height: 1024,
+            mimeType: 'image/png',
+          },
+        ],
+        readImage: vi.fn(async () => oversized),
+        signal: new AbortController().signal,
+        onPartial: vi.fn(),
+      })
+    ).rejects.toThrow('Each reference image must be smaller than 20 MB.')
+
+    expect(request).not.toHaveBeenCalled()
   })
 
   it('submits a non-streaming request as a task and polls it to completion', async () => {

@@ -168,6 +168,57 @@ describe('OpenAI image parameters', () => {
     }
   )
 
+  // The gateway behind these models renders one image per call and ignores a
+  // larger `n`, so asking for a batch would leave empty nodes behind.
+  it.each(['nano-banana', 'nano-banana-pro', 'gpt-image-2', 'gpt-image-2.5'])(
+    'caps %s at one image per request',
+    (model) => {
+      expect(settingsForImageModel({ ...settings, n: 4 }, model).n).toBe(1)
+      expect(
+        validateImageSettings(
+          { ...settingsForImageModel(settings, model), n: 4 },
+          0
+        )
+      ).toBe('This model supports one image per request.')
+    }
+  )
+
+  it.each(['gpt-image-1', 'dall-e-2'])(
+    'still allows a batch on %s, which returns them',
+    (model) => {
+      const next = settingsForImageModel({ ...settings, n: 4 }, model)
+
+      expect(next.n).toBe(4)
+      expect(validateImageSettings(next, 0)).toBeNull()
+    }
+  )
+
+  it.each(['nano-banana', 'gpt-image-2'])(
+    'rejects a prompt the gateway would truncate on %s',
+    (model) => {
+      const next = settingsForImageModel(
+        { ...settings, prompt: 'a'.repeat(4001) },
+        model
+      )
+
+      expect(validateImageSettings(next, 0)).toBe(
+        'Prompts for this model must be 4,000 characters or fewer.'
+      )
+    }
+  )
+
+  // The cap upstream counts runes, so a surrogate pair is one character even
+  // though `String.length` reports two.
+  it('measures the prompt cap in code points rather than UTF-16 units', () => {
+    const next = settingsForImageModel(
+      { ...settings, prompt: '𝄞'.repeat(2001) },
+      'nano-banana'
+    )
+
+    expect(next.prompt.length).toBeGreaterThan(4000)
+    expect(validateImageSettings(next, 0)).toBeNull()
+  })
+
   // These messages are returned as plain strings, so the t('...') scanner cannot
   // find them; they only reach the locale files via the static key registry.
   it('registers the out-of-range size message for translation', () => {
