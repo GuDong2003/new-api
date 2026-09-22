@@ -255,18 +255,6 @@ describe('OpenAI image parameters', () => {
     }
   )
 
-  // The gateway reads quality as the billed tier, so it is derived from the
-  // chosen size rather than picked separately.
-  it.each([
-    ['1024x1024', '1k'],
-    ['2048x2048', '2k'],
-    ['4096x4096', '4k'],
-    ['5504x3072', '4k'],
-  ])('bills %s as the %s tier', (size, quality) => {
-    const next = settingsForImageModel({ ...settings, size }, 'nano-banana-pro')
-    expect(buildImagePayload(next).quality).toBe(quality)
-  })
-
   it('reads the tier of a custom pixel size from its longest side', () => {
     expect(getImageResolutionTier('1280x720')).toBe('1K')
     expect(getImageResolutionTier('1600x1600')).toBe('1K')
@@ -386,25 +374,29 @@ describe('Nano Banana size and resolution', () => {
     expect(payload.size).toBe('2560x1440')
   })
 
-  // Gemini has no quality parameter, so on Nano Banana the field carries the
-  // tier keyword instead; that is the only thing it can usefully say there.
+  // Gemini defines no quality of its own, so the request carries none and the
+  // size is what says how large the result should be.
   it.each(['nano-banana', 'nano-banana-pro', 'nano-banana-v2'])(
-    'sends the documented tier keywords on %s',
+    'sends no quality at all on %s',
     (model) => {
-      expect(getImageQualities(model)).toEqual(['1k', '2k', '4k'])
+      expect(getImageQualities(model)).toEqual([])
 
       const next = settingsForImageModel(
-        { ...settings, size: '1024x1024' },
+        { ...settings, size: getImagePresetSize('16:9', '4K', model) },
         model
       )
-      expect(buildImagePayload(next).quality).toBe('1k')
+      const payload = buildImagePayload(next)
+
+      expect(payload).not.toHaveProperty('quality')
+      expect(payload.size).toBe('5504x3072')
+      expect(validateImageSettings(next, 0)).toBeNull()
     }
   )
 
   it('carries the ratio and tier in the pixel size', () => {
     expect(
       buildImagePayload({ ...nano, size: '2752x1536', quality: 'auto' })
-    ).toMatchObject({ size: '2752x1536', quality: '2k' })
+    ).toMatchObject({ size: '2752x1536' })
   })
 
   it('accepts auto and preset sizes for this family', () => {
@@ -418,14 +410,17 @@ describe('Nano Banana size and resolution', () => {
 })
 
 describe('stored settings stay valid for their model', () => {
-  it('repairs a Nano Banana quality saved before the tier steps existed', () => {
+  // A document saved while the field still carried a tier keeps that value in
+  // storage; the request simply stops carrying it.
+  it('drops a Nano Banana quality saved before the field was removed', () => {
     const restored = normalizeStoredImageSettings({
       ...DEFAULT_IMAGE_SETTINGS,
       model: 'nano-banana',
       prompt: 'A blue ceramic cup',
-      quality: 'auto',
+      quality: '2k',
     })
-    expect(getImageQualities('nano-banana')).toContain(restored.quality)
+
+    expect(buildImagePayload(restored)).not.toHaveProperty('quality')
     expect(validateImageSettings(restored, 0)).toBeNull()
   })
 

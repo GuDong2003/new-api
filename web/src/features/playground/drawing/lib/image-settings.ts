@@ -174,11 +174,6 @@ function isNanoBananaV2(model: string): boolean {
   )
 }
 
-/** The request value for a tier: the provider names them `1k`, `2k` and `4k`. */
-export function imageTierQuality(resolution: ImageResolution): string {
-  return resolution.toLowerCase()
-}
-
 export function getImageAspectRatios(
   model: string
 ): readonly ImageAspectRatio[] {
@@ -374,9 +369,9 @@ export function getImageQualities(model: string): string[] {
   if (family === 'dall-e-3') return ['standard', 'hd']
   if (family === 'imagen' || family === 'flux') return ['standard', 'hd']
   if (family === 'seedream') return ['standard']
-  // Gemini has no quality parameter, so the field carries the tier keyword on
-  // Nano Banana; buildImagePayload derives it from the chosen size.
-  if (supportsAutomaticImageSize(model)) return ['1k', '2k', '4k']
+  // Gemini defines no quality: its output is described entirely by the size,
+  // so there is nothing to offer and nothing to send.
+  if (supportsAutomaticImageSize(model)) return []
   // Listed best first, after `auto`, which stays the default for every family.
   // GPT Image 2 added the two rungs above `high`; gpt-image-1 stops there.
   if (supportsImageSizePresetTable(model)) {
@@ -392,7 +387,7 @@ export function settingsForImageModel(
   const next = { ...DEFAULT_IMAGE_SETTINGS, ...settings, model }
   const family = getImageModelFamily(model)
   const qualities = getImageQualities(model)
-  if (!qualities.includes(next.quality)) {
+  if (qualities.length && !qualities.includes(next.quality)) {
     next.quality = qualities[0] as typeof next.quality
   }
   if (
@@ -455,7 +450,8 @@ export function validateImageSettings(
       return 'Use one reference for DALL·E 2 or up to 16 for GPT Image.'
     }
   }
-  if (!getImageQualities(settings.model).includes(settings.quality)) {
+  const qualities = getImageQualities(settings.model)
+  if (qualities.length && !qualities.includes(settings.quality)) {
     return 'Choose a quality supported by this model.'
   }
   if (
@@ -523,17 +519,13 @@ export function buildImagePayload(
     group: settings.group,
     n: settings.n,
     size: settings.size,
-    quality: settings.quality,
+  }
+  // Gemini describes its output entirely through the size, so a model with no
+  // quality of its own sends none rather than an invented one.
+  if (getImageQualities(settings.model).length) {
+    payload.quality = settings.quality
   }
   if (settings.user.trim()) payload.user = settings.user.trim()
-  // Gemini takes no quality of its own, so on Nano Banana the field names the
-  // tier instead and has to agree with the pixels in size. GPT Image keeps the
-  // OpenAI meaning: quality is how finely it renders, size is how large.
-  if (supportsAutomaticImageSize(settings.model)) {
-    payload.quality = imageTierQuality(
-      getImageSizePreset(settings.size, settings.model)?.resolution ?? '1K'
-    )
-  }
   // Only Grok reads nsfw; other providers reject or ignore the unknown field.
   if (family === 'grok-imagine') payload.nsfw = settings.nsfw
   if (family === 'gpt-image') {
