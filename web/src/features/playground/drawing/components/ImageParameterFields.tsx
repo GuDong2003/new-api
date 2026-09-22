@@ -34,6 +34,8 @@ import {
   getImageModelFamily,
   getImageQualities,
   getMaxImagesPerRequest,
+  supportsImageStreaming,
+  supportsImageUserIdentifier,
 } from '../lib/image-settings'
 import type { ImageSettings } from '../types'
 import { ImageSizeFields } from './ImageSizeFields'
@@ -111,18 +113,20 @@ export function ImageParameterFields(props: {
             }))}
           />
         )}
-        <div className='space-y-1.5'>
-          <Label htmlFor='drawing-n'>{t('Image count')}</Label>
-          <Input
-            id='drawing-n'
-            type='number'
-            min={1}
-            max={getMaxImagesPerRequest(settings.model)}
-            step={1}
-            aria-invalid={Boolean(form.formState.errors.n)}
-            {...form.register('n', { valueAsNumber: true })}
-          />
-        </div>
+        {getMaxImagesPerRequest(settings.model) > 1 && (
+          <div className='space-y-1.5'>
+            <Label htmlFor='drawing-n'>{t('Image count')}</Label>
+            <Input
+              id='drawing-n'
+              type='number'
+              min={1}
+              max={getMaxImagesPerRequest(settings.model)}
+              step={1}
+              aria-invalid={Boolean(form.formState.errors.n)}
+              {...form.register('n', { valueAsNumber: true })}
+            />
+          </div>
+        )}
         {family === 'gpt-image' && (
           <ParameterSelect
             name='outputFormat'
@@ -208,35 +212,34 @@ export function ImageParameterFields(props: {
                     ]}
                   />
                 )}
-                <label className='flex cursor-pointer items-center gap-2 text-sm'>
-                  <input
-                    type='checkbox'
-                    className='accent-primary size-4'
-                    {...form.register('stream')}
-                  />
-                  {t('Stream image previews')}
-                </label>
-                {settings.stream && (
-                  <div className='space-y-1.5'>
-                    <Label htmlFor='drawing-partials'>
-                      {t('Partial images')}
-                    </Label>
-                    <Input
-                      id='drawing-partials'
-                      type='number'
-                      min={0}
-                      max={3}
-                      step={1}
-                      aria-invalid={Boolean(
-                        form.formState.errors.partialImages
-                      )}
-                      {...form.register('partialImages', {
-                        valueAsNumber: true,
-                      })}
-                    />
-                  </div>
-                )}
               </>
+            )}
+            {supportsImageStreaming(settings.model) && (
+              <label className='flex cursor-pointer items-center gap-2 text-sm'>
+                <input
+                  type='checkbox'
+                  className='accent-primary size-4'
+                  {...form.register('stream')}
+                />
+                {t('Stream image previews')}
+              </label>
+            )}
+            {/* Partial frames are an OpenAI extension to the stream. */}
+            {family === 'gpt-image' && settings.stream && (
+              <div className='space-y-1.5'>
+                <Label htmlFor='drawing-partials'>{t('Partial images')}</Label>
+                <Input
+                  id='drawing-partials'
+                  type='number'
+                  min={0}
+                  max={3}
+                  step={1}
+                  aria-invalid={Boolean(form.formState.errors.partialImages)}
+                  {...form.register('partialImages', {
+                    valueAsNumber: true,
+                  })}
+                />
+              </div>
             )}
             {family === 'dall-e-3' && (
               <ParameterSelect
@@ -259,16 +262,18 @@ export function ImageParameterFields(props: {
                 />
               </label>
             )}
-            <div className='space-y-1.5'>
-              <Label htmlFor='drawing-user'>{t('User identifier')}</Label>
-              <Input
-                id='drawing-user'
-                {...form.register('user')}
-                placeholder={t('Optional')}
-                autoComplete='off'
-                maxLength={512}
-              />
-            </div>
+            {supportsImageUserIdentifier(settings.model) && (
+              <div className='space-y-1.5'>
+                <Label htmlFor='drawing-user'>{t('User identifier')}</Label>
+                <Input
+                  id='drawing-user'
+                  {...form.register('user')}
+                  placeholder={t('Optional')}
+                  autoComplete='off'
+                  maxLength={512}
+                />
+              </div>
+            )}
           </AccordionContent>
         </AccordionItem>
       </Accordion>

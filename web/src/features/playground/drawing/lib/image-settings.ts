@@ -163,6 +163,23 @@ export function getMaxImagesPerRequest(model: string): number {
 }
 
 /**
+ * Whether the model can push the image as it renders. DALL·E and the providers
+ * modelled on it only answer once the image is finished.
+ */
+export function supportsImageStreaming(model: string): boolean {
+  const family = getImageModelFamily(model)
+  return family === 'gpt-image' || family === 'nano-banana'
+}
+
+/**
+ * `user` is an OpenAI field for attributing a request to an end user. Gemini
+ * has no equivalent, so Nano Banana has nothing to carry it.
+ */
+export function supportsImageUserIdentifier(model: string): boolean {
+  return getImageModelFamily(model) !== 'nano-banana'
+}
+
+/**
  * Nano Banana v2 is the only model that renders the extreme panoramas. It ships
  * both under its own alias and as the Gemini 3.1 Flash image model.
  */
@@ -525,17 +542,21 @@ export function buildImagePayload(
   if (getImageQualities(settings.model).length) {
     payload.quality = settings.quality
   }
-  if (settings.user.trim()) payload.user = settings.user.trim()
+  // Gemini has no end-user identifier to attach a request to.
+  if (supportsImageUserIdentifier(settings.model) && settings.user.trim()) {
+    payload.user = settings.user.trim()
+  }
+  if (supportsImageStreaming(settings.model)) payload.stream = settings.stream
   // Only Grok reads nsfw; other providers reject or ignore the unknown field.
   if (family === 'grok-imagine') payload.nsfw = settings.nsfw
   if (family === 'gpt-image') {
     payload.background = settings.background
     payload.output_format = settings.outputFormat
     payload.moderation = settings.moderation
-    payload.stream = settings.stream
     if (settings.outputFormat !== 'png') {
       payload.output_compression = settings.outputCompression
     }
+    // Partial frames are an OpenAI extension to the stream.
     if (settings.stream) payload.partial_images = settings.partialImages
     if (settings.mode === 'edit' && settings.inputFidelity !== 'default') {
       payload.input_fidelity = settings.inputFidelity

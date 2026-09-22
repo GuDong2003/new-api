@@ -131,6 +131,34 @@ describe('Image parameter fields', () => {
     )
   })
 
+  // A count that can only be one, or a ladder a model does not define, is a
+  // control that cannot do anything, so the panel leaves it out.
+  it.each(['gpt-image-2.5', 'nano-banana-pro', 'dall-e-3'])(
+    'hides the image count on %s, which returns one',
+    (model) => {
+      render(<ResolutionForm settings={{ model }} />)
+      expect(screen.queryByLabelText('Image count')).toBeNull()
+    }
+  )
+
+  it.each(['gpt-image-1', 'dall-e-2'])(
+    'keeps the image count on %s, which returns a batch',
+    (model) => {
+      render(<ResolutionForm settings={{ model }} />)
+      expect(screen.getByLabelText('Image count')).toBeVisible()
+    }
+  )
+
+  it('offers streaming previews on Nano Banana', async () => {
+    render(<ResolutionForm settings={{ model: 'nano-banana-pro' }} />)
+    await userEvent
+      .setup()
+      .click(screen.getByRole('button', { name: 'Advanced settings' }))
+
+    expect(screen.getByLabelText('Stream image previews')).toBeVisible()
+    expect(screen.queryByLabelText('User identifier')).toBeNull()
+  })
+
   it('keeps the OpenAI quality ladder for GPT Image 1', () => {
     render(<ResolutionForm settings={{ model: 'gpt-image-1' }} />)
     const quality = screen.getByLabelText('Image quality')

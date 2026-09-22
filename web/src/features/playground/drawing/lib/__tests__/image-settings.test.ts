@@ -393,6 +393,27 @@ describe('Nano Banana size and resolution', () => {
     }
   )
 
+  it('streams previews when asked, without the OpenAI-only partial count', () => {
+    const next = settingsForImageModel(
+      { ...settings, stream: true, partialImages: 2 },
+      'nano-banana-pro'
+    )
+    const payload = buildImagePayload(next)
+
+    expect(payload.stream).toBe(true)
+    expect(payload).not.toHaveProperty('partial_images')
+  })
+
+  // Gemini has no end-user identifier, so there is nothing to attach it to.
+  it('sends no user identifier', () => {
+    const next = settingsForImageModel(
+      { ...settings, user: 'someone' },
+      'nano-banana-pro'
+    )
+
+    expect(buildImagePayload(next)).not.toHaveProperty('user')
+  })
+
   it('carries the ratio and tier in the pixel size', () => {
     expect(
       buildImagePayload({ ...nano, size: '2752x1536', quality: 'auto' })
