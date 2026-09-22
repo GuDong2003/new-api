@@ -34,7 +34,7 @@ import {
   getImageModelFamily,
   getImageQualities,
   getMaxImagesPerRequest,
-  supportsAutomaticImageSize,
+  supportsImageSizePresets,
 } from '../lib/image-settings'
 import type { ImageSettings } from '../types'
 import { ImageSizeFields } from './ImageSizeFields'
@@ -102,7 +102,7 @@ export function ImageParameterFields(props: {
         )}
       </p>
       <div className='grid grid-cols-2 gap-3'>
-        {!supportsAutomaticImageSize(settings.model) && (
+        {!supportsImageSizePresets(settings.model) && (
           <ParameterSelect
             name='quality'
             label='Image quality'

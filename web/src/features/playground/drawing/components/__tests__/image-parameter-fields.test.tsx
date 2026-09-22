@@ -105,19 +105,19 @@ describe('Image parameter fields', () => {
     expect(screen.getByRole('option', { name: '透明' })).toBeVisible()
   })
 
-  // GPT Image keeps the OpenAI meaning of the two fields: the resolution comes
-  // from the size and the ladder is how finely that size is rendered.
-  it('offers the resolution toggles and the quality ladder together', () => {
+  // This gateway reads quality as the billed tier, so a separate ladder would
+  // silently change what the request is charged for.
+  it('leaves the tier to the resolution toggles and hides the quality select', () => {
     render(<ResolutionForm />)
-    expect(screen.getByLabelText('Image quality')).toBeVisible()
+    expect(screen.queryByLabelText('Image quality')).toBeNull()
     expect(
       screen.getByRole('group', { name: 'Image resolution' })
     ).toBeVisible()
   })
 
-  it('changes only the size when the resolution changes', async () => {
+  it('bills the tier it renders when the resolution changes', async () => {
     const onSubmit = vi.fn()
-    render(<ResolutionForm settings={{ quality: 'max' }} onSubmit={onSubmit} />)
+    render(<ResolutionForm onSubmit={onSubmit} />)
     const user = userEvent.setup()
     await user.click(
       within(screen.getByRole('group', { name: 'Image resolution' })).getByRole(
@@ -127,7 +127,7 @@ describe('Image parameter fields', () => {
     )
     await user.click(screen.getByRole('button', { name: 'Generate' }))
     expect(onSubmit).toHaveBeenCalledWith(
-      expect.objectContaining({ quality: 'max', size: '2480x2480' })
+      expect.objectContaining({ quality: '4k', size: '2480x2480' })
     )
   })
 
