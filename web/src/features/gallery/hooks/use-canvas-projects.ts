@@ -39,6 +39,7 @@ import {
   discardCanvasChanges,
   hasUnsavedCanvasChanges,
   openCanvasProject,
+  overwriteCanvasProject,
   reloadCanvasProject,
   renameCanvasProject,
   startCanvasEditor,
@@ -180,5 +181,6 @@ export function useCanvasProjects(kind: CanvasKind) {
     deleteResource: (id: string, assetId: string) =>
       deleteCanvasResource(identity, id, assetId),
     reloadConflict: (id: string) => reloadCanvasProject(identity, id),
+    overwriteConflict: (id: string) => overwriteCanvasProject(identity, id),
   }
 }

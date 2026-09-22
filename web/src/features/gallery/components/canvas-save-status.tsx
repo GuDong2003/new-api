@@ -41,7 +41,7 @@ export function CanvasSaveStatus(props: CanvasSaveStatusProps) {
     else if (props.cloudStatus === 'synced') text = t('Synced')
     else if (props.cloudStatus === 'conflict') {
       text = t(
-        'Cloud conflict. Export your local canvas or reload the cloud version.'
+        'Cloud conflict. Export your local canvas, replace the cloud version with it, or reload the cloud version.'
       )
     } else if (props.cloudStatus === 'error') {
       text = t('Saved locally. Cloud save failed; try again later.')

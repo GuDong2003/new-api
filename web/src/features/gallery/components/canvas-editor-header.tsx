@@ -50,6 +50,7 @@ export function CanvasEditorHeader(props: {
   const current = canvas.current
   const [createOpen, setCreateOpen] = useState(false)
   const [reloadOpen, setReloadOpen] = useState(false)
+  const [replaceOpen, setReplaceOpen] = useState(false)
   const [switchOpen, setSwitchOpen] = useState(false)
   const [pendingCreate, setPendingCreate] = useState<{
     name: string
@@ -249,14 +250,24 @@ export function CanvasEditorHeader(props: {
             </Button>
           ) : null}
           {canvas.cloudStatus === 'conflict' ? (
-            <Button
-              size='sm'
-              variant='outline'
-              disabled={busy}
-              onClick={() => setReloadOpen(true)}
-            >
-              {t('Reload cloud version')}
-            </Button>
+            <>
+              <Button
+                size='sm'
+                variant='outline'
+                disabled={busy}
+                onClick={() => setReplaceOpen(true)}
+              >
+                {t('Replace cloud version')}
+              </Button>
+              <Button
+                size='sm'
+                variant='outline'
+                disabled={busy}
+                onClick={() => setReloadOpen(true)}
+              >
+                {t('Reload cloud version')}
+              </Button>
+            </>
           ) : null}
         </div>
       </header>
@@ -302,6 +313,25 @@ export function CanvasEditorHeader(props: {
           void run(async () => {
             if (current) await canvas.reloadConflict(current.id)
             setReloadOpen(false)
+          })
+        }
+      >
+        {error ? <p role='alert'>{t(error)}</p> : null}
+      </ConfirmDialog>
+      <ConfirmDialog
+        open={replaceOpen}
+        onOpenChange={setReplaceOpen}
+        title={t('Replace cloud version')}
+        desc={t(
+          'This discards the version stored in the cloud. The canvas on screen becomes the one everywhere.'
+        )}
+        isLoading={busy}
+        destructive
+        confirmText={t('Replace')}
+        handleConfirm={() =>
+          void run(async () => {
+            if (current) await canvas.overwriteConflict(current.id)
+            setReplaceOpen(false)
           })
         }
       >

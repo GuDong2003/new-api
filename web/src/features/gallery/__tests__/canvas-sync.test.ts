@@ -35,6 +35,7 @@ import {
 } from '../lib/canvas-editor'
 import {
   createCanvasProject,
+  overwriteCanvasProject,
   startCanvasEditor,
   openCanvasProject,
 } from '../lib/canvas-projects'
@@ -356,6 +357,48 @@ it('retains a conflicting local document and never overwrites the server', async
     status: 'conflict',
   })
   expect(posts()).toHaveLength(1)
+})
+
+// The counterpart to reloading: a conflict can also be resolved by keeping what
+// is on screen. The upload names the revision it succeeds, so replacing has to
+// adopt whatever the cloud holds now or the server rejects it all over again.
+it('replaces the cloud version with the local one as its successor', async () => {
+  let canvas = await createCanvasProject(identity, 'drawing')
+  await syncCanvas(identity, canvas.id, 'manual')
+  canvas = required(await loadLocalCanvas(813, canvas.id))
+  // A real conflict is a document that diverged, not just a renamed one.
+  await saveLocalCanvas(
+    {
+      ...canvas,
+      name: '保留本地名字',
+      document: { ...canvas.document, settings: { prompt: '本地修改' } },
+    },
+    []
+  )
+  remote = {
+    ...required(remote),
+    revision: 9,
+    document: {
+      ...required(remote).document,
+      settings: { prompt: '云端修改' },
+    },
+  }
+  await syncCanvas(identity, canvas.id, 'manual')
+  expect(await loadLocalCanvas(813, canvas.id)).toMatchObject({
+    status: 'conflict',
+  })
+
+  await overwriteCanvasProject(identity, canvas.id)
+
+  const sent = JSON.parse(
+    String((required(posts().at(-1)).data as FormData).get('metadata'))
+  ) as CanvasSaveMetadata
+  expect(sent.base_revision).toBe(9)
+  expect(sent.document).toMatchObject({ settings: { prompt: '本地修改' } })
+  expect(await loadLocalCanvas(813, canvas.id)).toMatchObject({
+    name: '保留本地名字',
+    status: 'synced',
+  })
 })
 
 it('marks expiry without content revision changes or unchanged automatic reupload', async () => {

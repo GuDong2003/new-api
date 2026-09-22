@@ -52,6 +52,7 @@ import {
   readCanvasAssets,
   readCanvasUserState,
   saveLocalCanvas,
+  updateCanvasCloudState,
   updateCanvasUserState,
 } from './canvas-repository'
 import { reconcileCanvasRecord, syncCanvas } from './canvas-sync'
@@ -436,6 +437,35 @@ export async function reloadCanvasProject(
     latest
   )
   await openCanvasProject(identity, id)
+}
+/**
+ * Resolve a conflict the other way: keep what is on screen and let it succeed
+ * the version in the cloud. Adopting the cloud's revision as the base makes the
+ * next upload its successor rather than a competing edit, and clearing the
+ * saved revision marks the local document as still owing an upload.
+ */
+export async function overwriteCanvasProject(
+  identity: GalleryIdentity,
+  id: string
+): Promise<void> {
+  const current = await loadLocalCanvas(galleryOwner(identity), id)
+  if (!current || current.deleted) throw new Error('Canvas has been deleted.')
+  // Deliberate conflict action only; callers confirm discarding the cloud version.
+  const remote = await getCanvasRecord(identity, id)
+  const adopted = await updateCanvasCloudState(
+    galleryOwner(identity),
+    id,
+    (canvas) => ({
+      cloudRevision: remote.revision,
+      cloudSavedRevision: 0,
+      expiresAt: remote.expires_at,
+      status: 'pending',
+      needsExplicitSave: canvas.needsExplicitSave,
+    })
+  )
+  if (!adopted) throw new Error('Canvas has been deleted.')
+  notifyCanvasProjects()
+  await syncCanvas(identity, id, 'manual')
 }
 export async function renameCanvasProject(
   identity: GalleryIdentity,

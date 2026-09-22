@@ -654,6 +654,28 @@ it('requires an explicit conflict reload and offers local export without a nativ
   expect(useDrawingStore.getState().nodes).toHaveLength(1)
 })
 
+// A conflict previously offered only export and reload, so keeping the local
+// version meant exporting it and rebuilding the canvas by hand.
+it('offers replacing the cloud version and confirms before discarding it', async () => {
+  const canvas = await localImage()
+  await updateCanvasCloudState(813, canvas.id, (current) => ({
+    ...current,
+    status: 'conflict',
+  }))
+  await openCanvasProject(identity, canvas.id)
+  render(<CanvasEditorHeader kind='drawing' />)
+
+  await userEvent.click(
+    await screen.findByRole('button', { name: 'Replace cloud version' })
+  )
+
+  expect(screen.getByRole('alertdialog')).toHaveTextContent(
+    'This discards the version stored in the cloud.'
+  )
+  await userEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+  expect(useDrawingStore.getState().nodes).toHaveLength(1)
+})
+
 it('shows the canvas title as text until it is clicked', async () => {
   await localImage()
   render(<CanvasEditorHeader kind='drawing' />)

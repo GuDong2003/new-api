@@ -21,7 +21,7 @@ For commercial licensing, please contact support@quantumnous.com
 export const STATIC_I18N_KEYS = [
   'References count as originals. Thumbnails, masks and canvas documents share the byte quota. Cloud expiry keeps local drafts.',
   'Canvas drafts save in this browser first. Full cloud storage pauses uploads without stopping generation or deleting unexpired originals.',
-  'Cloud conflict. Export your local canvas or reload the cloud version.',
+  'Cloud conflict. Export your local canvas, replace the cloud version with it, or reload the cloud version.',
   'Saved locally. Cloud save failed; try again later.',
   'This discards the local conflicting version. Export it first if you need a copy.',
   'This replaces the current canvas and deletes its shared images from the gallery. This cannot be undone.',
