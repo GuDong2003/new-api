@@ -172,12 +172,8 @@ function isNanoBananaV2(model: string): boolean {
   )
 }
 
-/**
- * The request value for a tier. `1k` is documented but rejected upstream, so
- * its documented synonym `standard` carries the 1K tier instead.
- */
+/** The request value for a tier: the provider names them `1k`, `2k` and `4k`. */
 export function imageTierQuality(resolution: ImageResolution): string {
-  if (resolution === '1K') return 'standard'
   return resolution.toLowerCase()
 }
 
@@ -334,7 +330,7 @@ export function getImageQualities(model: string): string[] {
   if (family === 'seedream') return ['standard']
   // Preset models do not expose quality at all: this gateway reads it as the
   // billed tier, which buildImagePayload derives from the chosen size.
-  if (supportsImageSizePresets(model)) return ['standard', '2k', '4k']
+  if (supportsImageSizePresets(model)) return ['1k', '2k', '4k']
   // Listed best first, after `auto`, which stays the default for every family.
   return ['auto', 'high', 'medium', 'low']
 }

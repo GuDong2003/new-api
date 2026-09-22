@@ -131,7 +131,7 @@ describe('OpenAI image parameters', () => {
     expect(validateImageSettings(settings, 0)).toBeNull()
     expect(
       validateImageSettings(
-        { ...settings, model: 'gpt-image-2', size: '1536x864', quality: 'standard' },
+        { ...settings, model: 'gpt-image-2', size: '1536x864', quality: '1k' },
         0
       )
     ).toBeNull()
@@ -161,7 +161,7 @@ describe('OpenAI image parameters', () => {
     (size) => {
       expect(
         validateImageSettings(
-          { ...settings, model: 'gpt-image-2.5', size, quality: 'standard' },
+          { ...settings, model: 'gpt-image-2.5', size, quality: '1k' },
           0
         )
       ).not.toBeNull()
@@ -227,7 +227,7 @@ describe('OpenAI image parameters', () => {
         ...settings,
         model: 'gpt-image-2.5',
         size: '3856x2048',
-        quality: 'standard',
+        quality: '1k',
       },
       0
     )
@@ -253,7 +253,7 @@ describe('OpenAI image parameters', () => {
   // The gateway reads quality as the billed tier, so it is derived from the
   // chosen size rather than picked separately.
   it.each([
-    ['1024x1024', 'standard'],
+    ['1024x1024', '1k'],
     ['2048x2048', '2k'],
     ['2480x2480', '4k'],
     ['3328x1872', '4k'],
@@ -357,12 +357,18 @@ describe('Nano Banana size and resolution', () => {
   // Verified against the provider: it rejects `1k` and reads the tier from the
   // pixel size, so quality keeps its ordinary picture-quality meaning here.
   // `1k` is documented but rejected upstream, so its synonym carries 1K.
-  it('never sends the tier value the provider rejects', () => {
-    const next = settingsForImageModel(
-      { ...settings, size: '1024x1024' },
-      'nano-banana-pro'
-    )
-    expect(buildImagePayload(next).quality).toBe('standard')
+  // Every model the provider documents takes the same three tier keywords.
+  it.each([
+    'nano-banana',
+    'nano-banana-pro',
+    'nano-banana-v2',
+    'gpt-image-2',
+    'gpt-image-2.5-flare',
+  ])('sends the documented tier keywords on %s', (model) => {
+    expect(getImageQualities(model)).toEqual(['1k', '2k', '4k'])
+
+    const next = settingsForImageModel({ ...settings, size: '1024x1024' }, model)
+    expect(buildImagePayload(next).quality).toBe('1k')
   })
 
   it('carries the ratio and tier in the pixel size', () => {
@@ -373,10 +379,10 @@ describe('Nano Banana size and resolution', () => {
 
   it('accepts auto and preset sizes for this family', () => {
     expect(
-      validateImageSettings({ ...nano, size: 'auto', quality: 'standard' }, 1)
+      validateImageSettings({ ...nano, size: 'auto', quality: '1k' }, 1)
     ).toBeNull()
     expect(
-      validateImageSettings({ ...nano, size: '2048x2048', quality: 'standard' }, 0)
+      validateImageSettings({ ...nano, size: '2048x2048', quality: '1k' }, 0)
     ).toBeNull()
   })
 
