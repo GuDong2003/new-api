@@ -147,6 +147,40 @@ describe('Image request transport', () => {
     expect(request).not.toHaveBeenCalled()
   })
 
+  // Each reference can clear the 20 MB per-image cap and still put the request
+  // body over the 50 MB the gateway accepts.
+  it('refuses references that individually fit but together exceed the body limit', async () => {
+    const request = vi.spyOn(api, 'post')
+    const readImage = vi.fn(async () => {
+      const file = new File(['x'], 'big.png', { type: 'image/png' })
+      Object.defineProperty(file, 'size', { value: 18 * 1024 * 1024 })
+      return file
+    })
+
+    await expect(
+      generateImages({
+        settings: {
+          ...settingsForImageModel(DEFAULT_IMAGE_SETTINGS, 'nano-banana-pro'),
+          mode: 'edit',
+          prompt: 'A cup',
+        },
+        references: [1, 2, 3].map((index) => ({
+          id: `asset-${index}`,
+          name: `big-${index}.png`,
+          src: `blob:http://localhost/big-${index}`,
+          width: 1024,
+          height: 1024,
+          mimeType: 'image/png',
+        })),
+        readImage,
+        signal: new AbortController().signal,
+        onPartial: vi.fn(),
+      })
+    ).rejects.toThrow('The reference images must total less than 50 MB.')
+
+    expect(request).not.toHaveBeenCalled()
+  })
+
   it('submits a non-streaming request as a task and polls it to completion', async () => {
     const request = vi
       .spyOn(api, 'post')

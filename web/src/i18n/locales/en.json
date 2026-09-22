@@ -103,6 +103,7 @@
     "This model supports one image per request.": "This model supports one image per request.",
     "Prompts for this model must be 4,000 characters or fewer.": "Prompts for this model must be 4,000 characters or fewer.",
     "Each reference image must be smaller than 20 MB.": "Each reference image must be smaller than 20 MB.",
+    "The reference images must total less than 50 MB.": "The reference images must total less than 50 MB.",
     "Image {{index}}": "Image {{index}}",
     "Audit images": "Audit images",
     "Image pages": "Image pages",

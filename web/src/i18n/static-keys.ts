@@ -49,6 +49,7 @@ export const STATIC_I18N_KEYS = [
   'This model supports one image per request.',
   'Prompts for this model must be 4,000 characters or fewer.',
   'Each reference image must be smaller than 20 MB.',
+  'The reference images must total less than 50 MB.',
   // Content audit form validation (messages translated by FormMessage).
   'Enter a whole number within the displayed limits.',
   'Enter a positive integer ID.',

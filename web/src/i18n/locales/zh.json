@@ -107,6 +107,7 @@
     "This model supports one image per request.": "此模型每次请求只返回一张图片。",
     "Prompts for this model must be 4,000 characters or fewer.": "此模型的提示词不得超过 4,000 个字符。",
     "Each reference image must be smaller than 20 MB.": "每张参考图不得超过 20 MB。",
+    "The reference images must total less than 50 MB.": "所有参考图总大小不得超过 50 MB。",
     "Image {{index}}": "图片 {{index}}",
     "Audit images": "审计图片",
     "Image pages": "图片分页",
