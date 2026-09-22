@@ -140,7 +140,11 @@ export function ImageSizeFields(props: ImageSizeFieldsProps) {
             changeSize(
               ratio === 'auto'
                 ? 'auto'
-                : getImagePresetSize(ratio as ImageAspectRatio, resolution, props.model)
+                : getImagePresetSize(
+                    ratio as ImageAspectRatio,
+                    resolution,
+                    props.model
+                  )
             )
           }}
           variant='outline'
@@ -194,7 +198,9 @@ export function ImageSizeFields(props: ImageSizeFieldsProps) {
             const selected = values[0]
             if (!selected) return
             const next = selected as ImageResolution
-            changeSize(getImagePresetSize(aspectRatio ?? '1:1', next, props.model))
+            changeSize(
+              getImagePresetSize(aspectRatio ?? '1:1', next, props.model)
+            )
           }}
           variant='outline'
           size='sm'
@@ -202,11 +208,7 @@ export function ImageSizeFields(props: ImageSizeFieldsProps) {
           className='grid w-full grid-cols-3 gap-1.5'
         >
           {IMAGE_RESOLUTIONS.map((step) => (
-            <ToggleGroupItem
-              key={step}
-              value={step}
-              disabled={automatic}
-            >
+            <ToggleGroupItem key={step} value={step} disabled={automatic}>
               {step}
             </ToggleGroupItem>
           ))}

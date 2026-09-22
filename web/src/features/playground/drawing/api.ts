@@ -20,10 +20,7 @@ import { isAxiosError } from 'axios'
 
 import { api } from '@/lib/api'
 
-import {
-  imageAssetToFile,
-  MAX_REFERENCE_IMAGE_BYTES,
-} from './lib/image-assets'
+import { imageAssetToFile, MAX_REFERENCE_IMAGE_BYTES } from './lib/image-assets'
 import {
   buildImagePayload,
   getImageModelFamily,

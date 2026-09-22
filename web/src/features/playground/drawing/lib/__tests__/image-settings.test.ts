@@ -367,7 +367,10 @@ describe('Nano Banana size and resolution', () => {
   ])('sends the documented tier keywords on %s', (model) => {
     expect(getImageQualities(model)).toEqual(['1k', '2k', '4k'])
 
-    const next = settingsForImageModel({ ...settings, size: '1024x1024' }, model)
+    const next = settingsForImageModel(
+      { ...settings, size: '1024x1024' },
+      model
+    )
     expect(buildImagePayload(next).quality).toBe('1k')
   })
 
@@ -385,7 +388,6 @@ describe('Nano Banana size and resolution', () => {
       validateImageSettings({ ...nano, size: '2048x2048', quality: '1k' }, 0)
     ).toBeNull()
   })
-
 })
 
 describe('stored settings stay valid for their model', () => {
@@ -515,21 +517,24 @@ describe('Nano Banana runs its own size table', () => {
     ['3:2', '2K'],
     ['21:9', '4K'],
     ['1:1', '4K'],
-  ])('keeps the %s %s size distinct from the GPT Image table', (ratio, tier) => {
-    expect(
-      getImagePresetSize(
-        ratio as ImageAspectRatio,
-        tier as ImageResolution,
-        'nano-banana-pro'
+  ])(
+    'keeps the %s %s size distinct from the GPT Image table',
+    (ratio, tier) => {
+      expect(
+        getImagePresetSize(
+          ratio as ImageAspectRatio,
+          tier as ImageResolution,
+          'nano-banana-pro'
+        )
+      ).not.toBe(
+        getImagePresetSize(
+          ratio as ImageAspectRatio,
+          tier as ImageResolution,
+          'gpt-image-2'
+        )
       )
-    ).not.toBe(
-      getImagePresetSize(
-        ratio as ImageAspectRatio,
-        tier as ImageResolution,
-        'gpt-image-2'
-      )
-    )
-  })
+    }
+  )
 
   // Panoramas exist only in the Nano Banana table, so every other model has to
   // resolve to a real size rather than an undefined one.

@@ -214,12 +214,16 @@ describe('grouped options', () => {
         aria-label='Model'
       />
     )
-    await userEvent.setup().click(screen.getByRole('combobox', { name: 'Model' }))
+    await userEvent
+      .setup()
+      .click(screen.getByRole('combobox', { name: 'Model' }))
 
     for (const vendor of ['OpenAI', 'Gemini', 'xAI']) {
       expect(screen.getByText(vendor)).toBeVisible()
     }
-    const openai = screen.getByText('OpenAI').closest('[data-slot="combobox-group"]')
+    const openai = screen
+      .getByText('OpenAI')
+      .closest('[data-slot="combobox-group"]')
     expect(openai).not.toBeNull()
     expect(within(openai as HTMLElement).getByText('gpt-image-2')).toBeVisible()
     expect(within(openai as HTMLElement).getByText('dall-e-3')).toBeVisible()
@@ -247,9 +251,16 @@ describe('grouped options', () => {
 
   it('keeps the flat list when no grouping is requested', async () => {
     render(
-      <Combobox options={models} value='' onValueChange={vi.fn()} aria-label='Model' />
+      <Combobox
+        options={models}
+        value=''
+        onValueChange={vi.fn()}
+        aria-label='Model'
+      />
     )
-    await userEvent.setup().click(screen.getByRole('combobox', { name: 'Model' }))
+    await userEvent
+      .setup()
+      .click(screen.getByRole('combobox', { name: 'Model' }))
     expect(document.querySelector('[data-slot="combobox-group"]')).toBeNull()
     expect(screen.getByRole('option', { name: 'gpt-image-2' })).toBeVisible()
   })

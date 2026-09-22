@@ -110,7 +110,9 @@ describe('Image parameter fields', () => {
   it('leaves the tier to the resolution toggles and hides the quality select', () => {
     render(<ResolutionForm />)
     expect(screen.queryByLabelText('Image quality')).toBeNull()
-    expect(screen.getByRole('group', { name: 'Image resolution' })).toBeVisible()
+    expect(
+      screen.getByRole('group', { name: 'Image resolution' })
+    ).toBeVisible()
   })
 
   it('bills the tier it renders when the resolution changes', async () => {
@@ -128,7 +130,6 @@ describe('Image parameter fields', () => {
       expect.objectContaining({ quality: '4k', size: '2480x2480' })
     )
   })
-
 
   it('keeps the OpenAI quality ladder for GPT Image 1', () => {
     render(<ResolutionForm settings={{ model: 'gpt-image-1' }} />)
@@ -205,13 +206,10 @@ describe('Image parameter fields', () => {
     )
   })
 
-
-
   it('hides the automatic ratio for a model that falls back to 1:1', () => {
     render(<ResolutionForm />)
     expect(screen.queryByRole('button', { name: 'Auto' })).toBeNull()
   })
-
 
   it('keeps fixed-size model options selectable without offering unsupported 4K', async () => {
     const onSubmit = vi.fn()
@@ -332,7 +330,9 @@ describe('Nano Banana size controls', () => {
     expect(
       screen.getByRole('group', { name: 'Image aspect ratio' })
     ).toBeVisible()
-    expect(screen.getByRole('group', { name: 'Image resolution' })).toBeVisible()
+    expect(
+      screen.getByRole('group', { name: 'Image resolution' })
+    ).toBeVisible()
   })
 
   it('omits the custom size option for a model without free-form sizes', () => {
@@ -365,7 +365,6 @@ describe('Nano Banana size controls', () => {
     )
   })
 
-
   // `auto` takes its ratio from the reference image, and the provider rejects
   // it outright for text-to-image.
   it('hides the automatic ratio until a reference image is being edited', () => {
@@ -385,21 +384,18 @@ describe('the resolution tiers stay on screen for every model', () => {
     ['dall-e-3', '1792x1024', '2K'],
     ['black-forest-labs/flux-1.1-pro', '1024x1024', '1K'],
     ['gpt-image-1', '1024x1024', '1K'],
-  ])(
-    'shows %s at %s as a locked %s tier',
-    (model, size, tier) => {
-      render(<ResolutionForm settings={{ model, size }} />)
-      const tiers = screen.getByRole('group', { name: 'Image resolution' })
-      for (const step of ['1K', '2K', '4K']) {
-        const button = within(tiers).getByRole('button', { name: step })
-        expect(button).toBeDisabled()
-        expect(button).toHaveAttribute(
-          'aria-pressed',
-          step === tier ? 'true' : 'false'
-        )
-      }
+  ])('shows %s at %s as a locked %s tier', (model, size, tier) => {
+    render(<ResolutionForm settings={{ model, size }} />)
+    const tiers = screen.getByRole('group', { name: 'Image resolution' })
+    for (const step of ['1K', '2K', '4K']) {
+      const button = within(tiers).getByRole('button', { name: step })
+      expect(button).toBeDisabled()
+      expect(button).toHaveAttribute(
+        'aria-pressed',
+        step === tier ? 'true' : 'false'
+      )
     }
-  )
+  })
 
   it('still offers the exact sizes the model supports', () => {
     render(<ResolutionForm settings={{ model: 'dall-e-3' }} />)
@@ -461,10 +457,9 @@ describe('the published ultrawide and 5:4 ratios are offered', () => {
       )
     )
     await user.click(
-      within(screen.getByRole('group', { name: 'Image aspect ratio' })).getByRole(
-        'button',
-        { name: ratio }
-      )
+      within(
+        screen.getByRole('group', { name: 'Image aspect ratio' })
+      ).getByRole('button', { name: ratio })
     )
     await user.click(screen.getByRole('button', { name: 'Generate' }))
     expect(onSubmit).toHaveBeenLastCalledWith(
@@ -520,9 +515,9 @@ describe('the model selector groups by vendor', () => {
         />
       </QueryClientProvider>
     )
-    await userEvent.setup().click(
-      screen.getByPlaceholderText('Search models...')
-    )
+    await userEvent
+      .setup()
+      .click(screen.getByPlaceholderText('Search models...'))
 
     for (const vendor of ['OpenAI', 'Gemini', 'xAI']) {
       expect(screen.getByText(vendor)).toBeVisible()
