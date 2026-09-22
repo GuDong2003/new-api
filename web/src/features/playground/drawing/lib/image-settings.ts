@@ -374,10 +374,14 @@ export function getImageQualities(model: string): string[] {
   if (family === 'dall-e-3') return ['standard', 'hd']
   if (family === 'imagen' || family === 'flux') return ['standard', 'hd']
   if (family === 'seedream') return ['standard']
-  // Preset models do not expose quality at all: this gateway reads it as the
-  // billed tier, which buildImagePayload derives from the chosen size.
-  if (supportsImageSizePresets(model)) return ['1k', '2k', '4k']
+  // Gemini has no quality parameter, so the field carries the tier keyword on
+  // Nano Banana; buildImagePayload derives it from the chosen size.
+  if (supportsAutomaticImageSize(model)) return ['1k', '2k', '4k']
   // Listed best first, after `auto`, which stays the default for every family.
+  // GPT Image 2 added the two rungs above `high`; gpt-image-1 stops there.
+  if (supportsImageSizePresetTable(model)) {
+    return ['auto', 'max', 'xhigh', 'high', 'medium', 'low']
+  }
   return ['auto', 'high', 'medium', 'low']
 }
 
@@ -522,9 +526,10 @@ export function buildImagePayload(
     quality: settings.quality,
   }
   if (settings.user.trim()) payload.user = settings.user.trim()
-  // This gateway bills by the tier named in quality, so it must agree with the
-  // pixels in size or the request pays for one tier and renders another.
-  if (supportsImageSizePresets(settings.model)) {
+  // Gemini takes no quality of its own, so on Nano Banana the field names the
+  // tier instead and has to agree with the pixels in size. GPT Image keeps the
+  // OpenAI meaning: quality is how finely it renders, size is how large.
+  if (supportsAutomaticImageSize(settings.model)) {
     payload.quality = imageTierQuality(
       getImageSizePreset(settings.size, settings.model)?.resolution ?? '1K'
     )

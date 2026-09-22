@@ -131,7 +131,12 @@ describe('OpenAI image parameters', () => {
     expect(validateImageSettings(settings, 0)).toBeNull()
     expect(
       validateImageSettings(
-        { ...settings, model: 'gpt-image-2', size: '1536x864', quality: '1k' },
+        {
+          ...settings,
+          model: 'gpt-image-2',
+          size: '1536x864',
+          quality: 'auto',
+        },
         0
       )
     ).toBeNull()
@@ -148,7 +153,7 @@ describe('OpenAI image parameters', () => {
         ...settings,
         model: 'gpt-image-2.5',
         size,
-        quality: '4k' as const,
+        quality: 'max' as const,
       }
       expect(validateImageSettings(next, 0)).toBeNull()
       const restored = normalizeStoredImageSettings(next)
@@ -161,7 +166,7 @@ describe('OpenAI image parameters', () => {
     (size) => {
       expect(
         validateImageSettings(
-          { ...settings, model: 'gpt-image-2.5', size, quality: '1k' },
+          { ...settings, model: 'gpt-image-2.5', size, quality: 'auto' },
           0
         )
       ).not.toBeNull()
@@ -227,7 +232,7 @@ describe('OpenAI image parameters', () => {
         ...settings,
         model: 'gpt-image-2.5',
         size: '3856x2048',
-        quality: '1k',
+        quality: 'auto',
       },
       0
     )
@@ -255,13 +260,10 @@ describe('OpenAI image parameters', () => {
   it.each([
     ['1024x1024', '1k'],
     ['2048x2048', '2k'],
-    ['2480x2480', '4k'],
-    ['3328x1872', '4k'],
+    ['4096x4096', '4k'],
+    ['5504x3072', '4k'],
   ])('bills %s as the %s tier', (size, quality) => {
-    const next = settingsForImageModel(
-      { ...settings, size },
-      'gpt-image-2.5-flare'
-    )
+    const next = settingsForImageModel({ ...settings, size }, 'nano-banana-pro')
     expect(buildImagePayload(next).quality).toBe(quality)
   })
 
@@ -357,22 +359,47 @@ describe('Nano Banana size and resolution', () => {
   // Verified against the provider: it rejects `1k` and reads the tier from the
   // pixel size, so quality keeps its ordinary picture-quality meaning here.
   // `1k` is documented but rejected upstream, so its synonym carries 1K.
-  // Every model the provider documents takes the same three tier keywords.
-  it.each([
-    'nano-banana',
-    'nano-banana-pro',
-    'nano-banana-v2',
-    'gpt-image-2',
-    'gpt-image-2.5-flare',
-  ])('sends the documented tier keywords on %s', (model) => {
-    expect(getImageQualities(model)).toEqual(['1k', '2k', '4k'])
+  // GPT Image 2 is an OpenAI-shaped model: the ladder is the rendering quality
+  // and the resolution comes from the size, so the two stay independent.
+  it.each(['gpt-image-2', 'gpt-image-2.5-flare'])(
+    'offers the official quality ladder on %s',
+    (model) => {
+      expect(getImageQualities(model)).toEqual([
+        'auto',
+        'max',
+        'xhigh',
+        'high',
+        'medium',
+        'low',
+      ])
+    }
+  )
 
+  it('sends the chosen quality next to the tier size on GPT Image 2', () => {
     const next = settingsForImageModel(
-      { ...settings, size: '1024x1024' },
-      model
+      { ...settings, quality: 'max' },
+      'gpt-image-2'
     )
-    expect(buildImagePayload(next).quality).toBe('1k')
+    const payload = buildImagePayload({ ...next, size: '2560x1440' })
+
+    expect(payload.quality).toBe('max')
+    expect(payload.size).toBe('2560x1440')
   })
+
+  // Gemini has no quality parameter, so on Nano Banana the field carries the
+  // tier keyword instead; that is the only thing it can usefully say there.
+  it.each(['nano-banana', 'nano-banana-pro', 'nano-banana-v2'])(
+    'sends the documented tier keywords on %s',
+    (model) => {
+      expect(getImageQualities(model)).toEqual(['1k', '2k', '4k'])
+
+      const next = settingsForImageModel(
+        { ...settings, size: '1024x1024' },
+        model
+      )
+      expect(buildImagePayload(next).quality).toBe('1k')
+    }
+  )
 
   it('carries the ratio and tier in the pixel size', () => {
     expect(
