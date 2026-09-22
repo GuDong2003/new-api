@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
@@ -188,5 +188,69 @@ describe('selected option icons', () => {
       />
     )
     expect(screen.queryByAltText('')).not.toBeInTheDocument()
+  })
+})
+
+describe('grouped options', () => {
+  const models = [
+    { value: 'gpt-image-2', label: 'gpt-image-2' },
+    { value: 'dall-e-3', label: 'dall-e-3' },
+    { value: 'nano-banana-pro', label: 'nano-banana-pro' },
+    { value: 'grok-imagine-image-2.0', label: 'grok-imagine-image-2.0' },
+  ]
+  const vendorOf = (value: string) => {
+    if (value.startsWith('gpt-') || value.startsWith('dall-e')) return 'OpenAI'
+    if (value.startsWith('nano-banana')) return 'Gemini'
+    return 'xAI'
+  }
+
+  it('labels each vendor and keeps its models together', async () => {
+    render(
+      <Combobox
+        options={models}
+        groupBy={(option) => vendorOf(option.value)}
+        value=''
+        onValueChange={vi.fn()}
+        aria-label='Model'
+      />
+    )
+    await userEvent.setup().click(screen.getByRole('combobox', { name: 'Model' }))
+
+    for (const vendor of ['OpenAI', 'Gemini', 'xAI']) {
+      expect(screen.getByText(vendor)).toBeVisible()
+    }
+    const openai = screen.getByText('OpenAI').closest('[data-slot="combobox-group"]')
+    expect(openai).not.toBeNull()
+    expect(within(openai as HTMLElement).getByText('gpt-image-2')).toBeVisible()
+    expect(within(openai as HTMLElement).getByText('dall-e-3')).toBeVisible()
+    expect(
+      within(openai as HTMLElement).queryByText('nano-banana-pro')
+    ).toBeNull()
+  })
+
+  it('still selects a model from inside a group', async () => {
+    const onValueChange = vi.fn()
+    render(
+      <Combobox
+        options={models}
+        groupBy={(option) => vendorOf(option.value)}
+        value=''
+        onValueChange={onValueChange}
+        aria-label='Model'
+      />
+    )
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('combobox', { name: 'Model' }))
+    await user.click(screen.getByRole('option', { name: 'nano-banana-pro' }))
+    expect(onValueChange).toHaveBeenCalledWith('nano-banana-pro')
+  })
+
+  it('keeps the flat list when no grouping is requested', async () => {
+    render(
+      <Combobox options={models} value='' onValueChange={vi.fn()} aria-label='Model' />
+    )
+    await userEvent.setup().click(screen.getByRole('combobox', { name: 'Model' }))
+    expect(document.querySelector('[data-slot="combobox-group"]')).toBeNull()
+    expect(screen.getByRole('option', { name: 'gpt-image-2' })).toBeVisible()
   })
 })

@@ -42,6 +42,11 @@ import { cn } from '@/lib/utils'
 
 type LegacyComboboxProps = {
   options: readonly ComboboxInputOption[]
+  /**
+   * Group the options under labelled headings, in first-seen order. Long lists
+   * are easier to scan by vendor than as one alphabetical run.
+   */
+  groupBy?: (option: ComboboxInputOption) => string
   value?: string | null
   onValueChange?: (value: string | null) => void
   placeholder?: string
@@ -105,7 +110,11 @@ function OptionCombobox(props: LegacyComboboxProps) {
   const displayedValue = selected?.label ?? props.value ?? ''
   return (
     <ComboboxPrimitive.Root
-      items={props.options}
+      items={
+        props.groupBy
+          ? groupComboboxOptions(props.options, props.groupBy)
+          : props.options
+      }
       value={selected ?? null}
       name={props.name}
       disabled={props.disabled}
@@ -162,26 +171,72 @@ function OptionCombobox(props: LegacyComboboxProps) {
           {props.emptyText ?? t('No results found')}
         </ComboboxEmpty>
         <ComboboxList>
-          {(option: ComboboxInputOption) => (
-            <ComboboxItem
-              key={option.value}
-              value={option}
-              disabled={option.disabled}
-            >
-              {option.icon && <span aria-hidden>{option.icon}</span>}
-              <span className='min-w-0 break-words'>
-                {option.label}
-                {option.description && (
-                  <span className='text-muted-foreground block text-xs break-all'>
-                    {option.description}
-                  </span>
-                )}
-              </span>
-            </ComboboxItem>
-          )}
+          {(entry: ComboboxInputOption | ComboboxOptionGroup) =>
+            'items' in entry ? (
+              <ComboboxGroup key={entry.value} items={entry.items}>
+                <ComboboxLabel>{entry.value}</ComboboxLabel>
+                <ComboboxCollection>
+                  {(option: ComboboxInputOption) => (
+                    <ComboboxOptionItem key={option.value} option={option} />
+                  )}
+                </ComboboxCollection>
+              </ComboboxGroup>
+            ) : (
+              <ComboboxOptionItem key={entry.value} option={entry} />
+            )
+          }
         </ComboboxList>
       </ComboboxContent>
     </ComboboxPrimitive.Root>
+  )
+}
+
+type ComboboxOptionGroup = {
+  value: string
+  items: ComboboxInputOption[]
+}
+
+function groupComboboxOptions(
+  options: readonly ComboboxInputOption[],
+  groupBy: (option: ComboboxInputOption) => string
+): ComboboxOptionGroup[] {
+  const groups: ComboboxOptionGroup[] = []
+  const byName = new Map<string, ComboboxOptionGroup>()
+  for (const option of options) {
+    const name = groupBy(option)
+    let group = byName.get(name)
+    if (!group) {
+      group = { value: name, items: [] }
+      byName.set(name, group)
+      groups.push(group)
+    }
+    group.items.push(option)
+  }
+  return groups
+}
+
+function ComboboxOptionItem(props: { option: ComboboxInputOption }) {
+  return (
+    <ComboboxItem value={props.option} disabled={props.option.disabled}>
+      <ComboboxOptionItemBody option={props.option} />
+    </ComboboxItem>
+  )
+}
+
+function ComboboxOptionItemBody(props: { option: ComboboxInputOption }) {
+  const option = props.option
+  return (
+    <>
+      {option.icon && <span aria-hidden>{option.icon}</span>}
+      <span className='min-w-0 break-words'>
+        {option.label}
+        {option.description && (
+          <span className='text-muted-foreground block text-xs break-all'>
+            {option.description}
+          </span>
+        )}
+      </span>
+    </>
   )
 }
 

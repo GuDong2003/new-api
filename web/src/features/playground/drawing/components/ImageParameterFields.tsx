@@ -30,7 +30,11 @@ import { Label } from '@/components/ui/label'
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { Switch } from '@/components/ui/switch'
 
-import { getImageModelFamily, getImageQualities } from '../lib/image-settings'
+import {
+  getImageModelFamily,
+  getImageQualities,
+  supportsImageSizePresets,
+} from '../lib/image-settings'
 import type { ImageSettings } from '../types'
 import { ImageSizeFields } from './ImageSizeFields'
 
@@ -83,6 +87,7 @@ export function ImageParameterFields(props: {
       <ImageSizeFields
         key={settings.model}
         model={settings.model}
+        mode={settings.mode}
         size={settings.size}
         onChange={(size) => {
           form.setValue('size', size, { shouldDirty: true })
@@ -96,14 +101,16 @@ export function ImageParameterFields(props: {
         )}
       </p>
       <div className='grid grid-cols-2 gap-3'>
-        <ParameterSelect
-          name='quality'
-          label='Image quality'
-          options={getImageQualities(settings.model).map((quality) => ({
-            value: quality,
-            label: qualityLabels[quality],
-          }))}
-        />
+        {!supportsImageSizePresets(settings.model) && (
+          <ParameterSelect
+            name='quality'
+            label='Image quality'
+            options={getImageQualities(settings.model).map((quality) => ({
+              value: quality,
+              label: qualityLabels[quality],
+            }))}
+          />
+        )}
         <div className='space-y-1.5'>
           <Label htmlFor='drawing-n'>{t('Image count')}</Label>
           <Input

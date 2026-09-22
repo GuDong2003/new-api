@@ -103,7 +103,7 @@
     "Choose a size supported by this model.": "请选择此模型支持的尺寸。",
     "Size is chosen automatically by the model.": "由模型自动决定尺寸",
     "Supported resolutions and aspect ratios depend on the selected model.": "支持的分辨率和比例以所选模型为准。",
-    "Custom dimensions must be multiples of 16, at most 4096 pixels per side, with a 1:3 to 3:1 aspect ratio.": "宽高须为 16 的倍数，每边不超过 4096 像素，比例介于 1:3 与 3:1 之间。",
+    "Custom dimensions must be multiples of 16, at most 3840 pixels per side, with a 1:3 to 3:1 aspect ratio.": "宽高须为 16 的倍数，每边不超过 3840 像素，比例介于 1:3 与 3:1 之间。",
     "Image {{index}}": "图片 {{index}}",
     "Audit images": "审计图片",
     "Image pages": "图片分页",

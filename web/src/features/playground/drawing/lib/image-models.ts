@@ -56,7 +56,16 @@ export function getImageModelFamily(model: string): ImageModelFamily | null {
   ) {
     return 'grok-imagine'
   }
-  if (/nano-banana/.test(normalized)) return 'nano-banana'
+  // Nano Banana ships under its own name and as the Gemini image models it is
+  // built on. Gemini text and embedding names must not be swept in, so an
+  // `image` segment is required, and video variants stay out.
+  if (
+    /nano-banana/.test(normalized) ||
+    (!/video/.test(normalized) &&
+      /(^|[/.:_-])gemini[\w.-]*[/.:_-]image(?:[/.:_-]|$)/.test(normalized))
+  ) {
+    return 'nano-banana'
+  }
   if (/(^|[/.:_-])imagen(?:[/.:_-]|$)/.test(normalized)) return 'imagen'
   if (/(^|[/._-])flux(?:[/._-]|$)/.test(normalized)) return 'flux'
   if (/(^|[/._-])seedream(?:[/._-]|$)/.test(normalized)) {

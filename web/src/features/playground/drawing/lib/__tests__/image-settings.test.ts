@@ -18,11 +18,21 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { describe, it, expect } from 'vitest'
 
+import enLocale from '@/i18n/locales/en.json'
+import { STATIC_I18N_KEYS } from '@/i18n/static-keys'
+
 import {
   DEFAULT_IMAGE_SETTINGS,
   buildImagePayload,
   getImageModelFamily,
+  getImagePresetSize,
   getImageQualities,
+  getImageResolutionTier,
+  getImageSizePreset,
+  getImageAspectRatios,
+  IMAGE_RESOLUTIONS,
+  type ImageAspectRatio,
+  type ImageResolution,
   getImageSizes,
   normalizeStoredImageSettings,
   settingsForImageModel,
@@ -121,7 +131,7 @@ describe('OpenAI image parameters', () => {
     expect(validateImageSettings(settings, 0)).toBeNull()
     expect(
       validateImageSettings(
-        { ...settings, model: 'gpt-image-2', size: '1536x864' },
+        { ...settings, model: 'gpt-image-2', size: '1536x864', quality: 'standard' },
         0
       )
     ).toBeNull()
@@ -130,24 +140,51 @@ describe('OpenAI image parameters', () => {
     ).not.toBeNull()
   })
 
-  it.each(['4096x4096', '4096x2304', '2304x4096'])(
+  // The official ceiling is 3840 per side, so these are the real 4K presets.
+  it.each(['2480x2480', '3328x1872', '1872x3328'])(
     'accepts and preserves a 4K request size of %s for custom-size models',
     (size) => {
-      const next = { ...settings, model: 'gpt-image-2.5', size }
+      const next = {
+        ...settings,
+        model: 'gpt-image-2.5',
+        size,
+        quality: '4k' as const,
+      }
       expect(validateImageSettings(next, 0)).toBeNull()
       const restored = normalizeStoredImageSettings(next)
       expect(buildImagePayload(restored).size).toBe(size)
     }
   )
 
-  it.each(['4097x4096', '8192x8192', '1024x128', '0x1024', 'x1024'])(
+  it.each(['3856x2048', '8192x8192', '1024x128', '0x1024', 'x1024'])(
     'rejects invalid custom dimensions %s',
     (size) => {
       expect(
-        validateImageSettings({ ...settings, model: 'gpt-image-2.5', size }, 0)
+        validateImageSettings(
+          { ...settings, model: 'gpt-image-2.5', size, quality: 'standard' },
+          0
+        )
       ).not.toBeNull()
     }
   )
+
+  // These messages are returned as plain strings, so the t('...') scanner cannot
+  // find them; they only reach the locale files via the static key registry.
+  it('registers the out-of-range size message for translation', () => {
+    const message = validateImageSettings(
+      {
+        ...settings,
+        model: 'gpt-image-2.5',
+        size: '3856x2048',
+        quality: 'standard',
+      },
+      0
+    )
+
+    expect(message).not.toBeNull()
+    expect(STATIC_I18N_KEYS).toContain(message)
+    expect(enLocale.translation).toHaveProperty([message as string])
+  })
 
   it.each(['gpt-image-1', 'gpt-image-1.5', 'chatgpt-image-latest', 'dall-e-3'])(
     'keeps fixed-size restrictions for %s',
@@ -162,25 +199,27 @@ describe('OpenAI image parameters', () => {
     }
   )
 
-  it('offers the extended quality ladder on GPT Image 2.5 and later', () => {
-    expect(getImageQualities('gpt-image-2.5-flare')).toEqual([
-      'auto',
-      'max',
-      'xhigh',
-      'high',
-      'medium',
-      'low',
-    ])
-    expect(getImageQualities('openai/gpt-image-2.5-sunburst')).toContain('max')
+  // The gateway reads quality as the billed tier, so it is derived from the
+  // chosen size rather than picked separately.
+  it.each([
+    ['1024x1024', 'standard'],
+    ['2048x2048', '2k'],
+    ['2480x2480', '4k'],
+    ['3328x1872', '4k'],
+  ])('bills %s as the %s tier', (size, quality) => {
     const next = settingsForImageModel(
-      { ...settings, quality: 'max' },
+      { ...settings, size },
       'gpt-image-2.5-flare'
     )
-    expect(next.quality).toBe('max')
-    expect(validateImageSettings(next, 0)).toBeNull()
-    expect(buildImagePayload(normalizeStoredImageSettings(next)).quality).toBe(
-      'max'
-    )
+    expect(buildImagePayload(next).quality).toBe(quality)
+  })
+
+  it('reads the tier of a custom pixel size from its longest side', () => {
+    expect(getImageResolutionTier('1280x720')).toBe('1K')
+    expect(getImageResolutionTier('1600x1600')).toBe('1K')
+    expect(getImageResolutionTier('2560x1440')).toBe('2K')
+    expect(getImageResolutionTier('2800x1400')).toBe('2K')
+    expect(getImageResolutionTier('3328x1872')).toBe('4K')
   })
 
   it.each(['gpt-image-1', 'openai/gpt-image-1', 'chatgpt-image-latest'])(
@@ -258,5 +297,206 @@ describe('Grok NSFW switch', () => {
 
   it('defaults the switch to off', () => {
     expect(DEFAULT_IMAGE_SETTINGS.nsfw).toBe(false)
+  })
+})
+
+describe('Nano Banana size and resolution', () => {
+  const nano = { ...settings, model: 'gemini-3-pro-image-preview' }
+
+  // Verified against the provider: it rejects `1k` and reads the tier from the
+  // pixel size, so quality keeps its ordinary picture-quality meaning here.
+  // `1k` is documented but rejected upstream, so its synonym carries 1K.
+  it('never sends the tier value the provider rejects', () => {
+    const next = settingsForImageModel(
+      { ...settings, size: '1024x1024' },
+      'nano-banana-pro'
+    )
+    expect(buildImagePayload(next).quality).toBe('standard')
+  })
+
+  it('carries the ratio and tier in the pixel size', () => {
+    expect(
+      buildImagePayload({ ...nano, size: '2752x1536', quality: 'auto' })
+    ).toMatchObject({ size: '2752x1536', quality: '2k' })
+  })
+
+  it('accepts auto and preset sizes for this family', () => {
+    expect(
+      validateImageSettings({ ...nano, size: 'auto', quality: 'standard' }, 1)
+    ).toBeNull()
+    expect(
+      validateImageSettings({ ...nano, size: '2048x2048', quality: 'standard' }, 0)
+    ).toBeNull()
+  })
+
+})
+
+describe('stored settings stay valid for their model', () => {
+  it('repairs a Nano Banana quality saved before the tier steps existed', () => {
+    const restored = normalizeStoredImageSettings({
+      ...DEFAULT_IMAGE_SETTINGS,
+      model: 'nano-banana',
+      prompt: 'A blue ceramic cup',
+      quality: 'auto',
+    })
+    expect(getImageQualities('nano-banana')).toContain(restored.quality)
+    expect(validateImageSettings(restored, 0)).toBeNull()
+  })
+
+  it('leaves a quality that the model still supports untouched', () => {
+    const restored = normalizeStoredImageSettings({
+      ...DEFAULT_IMAGE_SETTINGS,
+      model: 'dall-e-3',
+      prompt: 'A blue ceramic cup',
+      quality: 'hd',
+      size: '1792x1024',
+    })
+    expect(restored.quality).toBe('hd')
+    expect(restored.size).toBe('1792x1024')
+  })
+})
+
+describe('preset sizes follow the provider recommendations', () => {
+  it.each([
+    ['1:1', '1K', '1024x1024'],
+    ['16:9', '1K', '1280x720'],
+    ['9:16', '1K', '720x1280'],
+    ['3:2', '1K', '1536x1024'],
+    ['2:3', '1K', '1024x1536'],
+    ['4:3', '1K', '1152x864'],
+    ['3:4', '1K', '864x1152'],
+    ['1:1', '2K', '2048x2048'],
+    ['16:9', '2K', '2560x1440'],
+    ['3:2', '2K', '2496x1664'],
+    ['4:3', '2K', '2304x1728'],
+    ['5:4', '1K', '1120x896'],
+    ['4:5', '1K', '896x1120'],
+    ['21:9', '1K', '1456x624'],
+    ['5:4', '2K', '2240x1792'],
+    ['4:5', '2K', '1792x2240'],
+    ['21:9', '2K', '3024x1296'],
+    ['5:4', '4K', '2784x2224'],
+    ['4:5', '4K', '2224x2784'],
+    ['21:9', '4K', '3808x1632'],
+    ['1:1', '4K', '2480x2480'],
+    ['16:9', '4K', '3328x1872'],
+    ['9:16', '4K', '1872x3328'],
+    ['3:4', '4K', '2160x2880'],
+  ])('renders %s at %s as %s', (ratio, resolution, size) => {
+    expect(
+      getImagePresetSize(
+        ratio as ImageAspectRatio,
+        resolution as ImageResolution,
+        'gpt-image-2'
+      )
+    ).toBe(size)
+    expect(getImageSizePreset(size, 'gpt-image-2')).toEqual({
+      aspectRatio: ratio,
+      resolution,
+    })
+  })
+
+  it('covers every published ratio', () => {
+    expect([...getImageAspectRatios('gpt-image-2')]).toEqual([
+      '1:1',
+      '2:3',
+      '3:2',
+      '3:4',
+      '4:3',
+      '4:5',
+      '5:4',
+      '9:16',
+      '16:9',
+      '21:9',
+    ])
+  })
+
+  it('never exceeds the largest recommended dimension', () => {
+    for (const ratio of getImageAspectRatios('gpt-image-2')) {
+      for (const resolution of IMAGE_RESOLUTIONS) {
+        const [width, height] = getImagePresetSize(
+          ratio,
+          resolution,
+          'gpt-image-2'
+        )
+          .split('x')
+          .map(Number)
+        expect(Math.max(width, height)).toBeLessThanOrEqual(3808)
+      }
+    }
+  })
+})
+
+describe('Nano Banana runs its own size table', () => {
+  // The provider documents a separate table and returns 422 when the GPT Image
+  // sizes are sent to it.
+  it.each([
+    ['1:1', '1K', '1024x1024'],
+    ['16:9', '1K', '1360x768'],
+    ['16:9', '2K', '2752x1536'],
+    ['16:9', '4K', '5504x3072'],
+    ['3:2', '1K', '1264x848'],
+    ['21:9', '2K', '3168x1344'],
+    ['1:1', '4K', '4096x4096'],
+  ])('renders %s at %s as %s', (ratio, tier, size) => {
+    expect(
+      getImagePresetSize(
+        ratio as ImageAspectRatio,
+        tier as ImageResolution,
+        'nano-banana-pro'
+      )
+    ).toBe(size)
+  })
+
+  // The two upstream paths keep separate whitelists; sending one path's size to
+  // the other is rejected with a 422, so these ratios must not converge.
+  it.each([
+    ['16:9', '1K'],
+    ['16:9', '2K'],
+    ['16:9', '4K'],
+    ['2:3', '1K'],
+    ['3:2', '2K'],
+    ['21:9', '4K'],
+    ['1:1', '4K'],
+  ])('keeps the %s %s size distinct from the GPT Image table', (ratio, tier) => {
+    expect(
+      getImagePresetSize(
+        ratio as ImageAspectRatio,
+        tier as ImageResolution,
+        'nano-banana-pro'
+      )
+    ).not.toBe(
+      getImagePresetSize(
+        ratio as ImageAspectRatio,
+        tier as ImageResolution,
+        'gpt-image-2'
+      )
+    )
+  })
+
+  // Panoramas exist only in the Nano Banana table, so every other model has to
+  // resolve to a real size rather than an undefined one.
+  it.each(['1:4', '4:1', '1:8', '8:1'])(
+    'falls back to a square size when %s is missing from the model table',
+    (ratio) => {
+      const size = getImagePresetSize(
+        ratio as ImageAspectRatio,
+        '2K',
+        'gpt-image-2'
+      )
+
+      expect(size).toBe('2048x2048')
+    }
+  )
+
+  it('offers the panoramas only on Nano Banana v2', () => {
+    for (const model of ['nano-banana-v2', 'gemini-3.1-flash-image']) {
+      expect(getImageAspectRatios(model)).toContain('8:1')
+      expect(getImageAspectRatios(model)).toHaveLength(14)
+    }
+    for (const model of ['nano-banana-pro', 'nano-banana', 'gpt-image-2']) {
+      expect(getImageAspectRatios(model)).not.toContain('8:1')
+      expect(getImageAspectRatios(model)).toHaveLength(10)
+    }
   })
 })

@@ -26,6 +26,8 @@ import { useTranslation } from 'react-i18next'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Combobox } from '@/components/ui/combobox'
+import type { ComboboxInputOption } from '@/components/ui/combobox-input'
+import { getModelCategory } from '@/features/channels/lib/model-categories'
 import { Label } from '@/components/ui/label'
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { Separator } from '@/components/ui/separator'
@@ -233,6 +235,11 @@ export function DrawingSettings(props: DrawingSettingsProps) {
             <Label htmlFor='drawing-model'>{t('Model')}</Label>
             <Combobox
               options={imageModels}
+              // Long model lists are far easier to scan by vendor than as one
+              // alphabetical run.
+              groupBy={(option: ComboboxInputOption) =>
+                getModelCategory(option.value)
+              }
               value={form.watch('model') || ''}
               onValueChange={(model) => {
                 const selectedModel = model ?? ''

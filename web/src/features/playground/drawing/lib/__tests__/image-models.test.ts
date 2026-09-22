@@ -27,6 +27,13 @@ describe('drawing image model classification', () => {
     ['grok-imagine', 'grok-imagine'],
     ['grok/grok-imagine-edit', 'grok-imagine'],
     ['nano-banana', 'nano-banana'],
+    ['nano-banana-pro', 'nano-banana'],
+    ['nano-banana-v2', 'nano-banana'],
+    ['gemini-3.0-pro-image', 'nano-banana'],
+    ['gemini-3.1-flash-image', 'nano-banana'],
+    ['gemini-3-pro-image-preview', 'nano-banana'],
+    ['gemini-2.5-flash-image-preview', 'nano-banana'],
+    ['google/gemini-3-pro-image-preview', 'nano-banana'],
     ['imagen-4.0-generate-001', 'imagen'],
     ['google/imagen-4.0-generate-001', 'imagen'],
     ['black-forest-labs/flux-1.1-pro', 'flux'],
@@ -42,6 +49,21 @@ describe('drawing image model classification', () => {
     expect(getImageModelFamily('nai-diffusion-4-5-full')).toBeNull()
     expect(getImageModelFamily('gpt-5.6')).toBeNull()
     expect(getImageModelFamily('grok-imagine-video')).toBeNull()
+  })
+
+  it('does not mistake Gemini text or embedding models for image models', () => {
+    for (const model of [
+      'gemini-3.5-flash',
+      'gemini-3.6-flash-high',
+      'gemini-3.1-pro-preview',
+      'gemini-3-flash',
+      'gemini-2.5-pro',
+      'gemini-embedding-001',
+      'gemini-embedding-2',
+      'gemini-3.1-flash-lite',
+    ]) {
+      expect(getImageModelFamily(model)).toBeNull()
+    }
   })
 
   it('filters the drawing selector to supported image model families', () => {

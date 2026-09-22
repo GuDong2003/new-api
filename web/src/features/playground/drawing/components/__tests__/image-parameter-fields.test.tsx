@@ -22,12 +22,12 @@ import { FormProvider, useForm } from 'react-hook-form'
 import { initReactI18next, I18nextProvider, setI18n } from 'react-i18next'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import zh from '@/i18n/locales/zh.json'
 import { useDrawingStore } from '@/stores/drawing-store'
 
 import {
   buildImagePayload,
   DEFAULT_IMAGE_SETTINGS,
+  settingsForImageModel,
 } from '../../lib/image-settings'
 import type { ImageSettings } from '../../types'
 import { DrawingSettings } from '../DrawingSettings'
@@ -56,12 +56,13 @@ function ResolutionForm(props: {
   settings?: Partial<ImageSettings>
   onSubmit?: (payload: ReturnType<typeof buildImagePayload>) => void
 }) {
+  // Mirror production, where picking a model runs its settings through
+  // settingsForImageModel before the form ever sees them.
   const form = useForm<ImageSettings>({
-    defaultValues: {
-      ...DEFAULT_IMAGE_SETTINGS,
-      model: 'gpt-image-2.5',
-      ...props.settings,
-    },
+    defaultValues: settingsForImageModel(
+      { ...DEFAULT_IMAGE_SETTINGS, ...props.settings },
+      props.settings?.model ?? 'gpt-image-2.5'
+    ),
   })
   return (
     <FormProvider {...form}>
@@ -104,22 +105,32 @@ describe('Image parameter fields', () => {
     expect(screen.getByRole('option', { name: '透明' })).toBeVisible()
   })
 
-  it('lists the quality steps best first for GPT Image 2.5', () => {
+  // This gateway reads quality as the billed tier, so a separate ladder would
+  // silently change what the request is charged for.
+  it('leaves the tier to the resolution toggles and hides the quality select', () => {
     render(<ResolutionForm />)
-    const options = within(screen.getByLabelText('Image quality')).getAllByRole(
-      'option'
-    )
-    expect(options.map((option) => option.textContent)).toEqual([
-      'Auto',
-      'Maximum',
-      'Extra high',
-      'High',
-      'Medium',
-      'Low',
-    ])
+    expect(screen.queryByLabelText('Image quality')).toBeNull()
+    expect(screen.getByRole('group', { name: 'Image resolution' })).toBeVisible()
   })
 
-  it('omits the extended quality steps for GPT Image 1', () => {
+  it('bills the tier it renders when the resolution changes', async () => {
+    const onSubmit = vi.fn()
+    render(<ResolutionForm onSubmit={onSubmit} />)
+    const user = userEvent.setup()
+    await user.click(
+      within(screen.getByRole('group', { name: 'Image resolution' })).getByRole(
+        'button',
+        { name: '4K' }
+      )
+    )
+    await user.click(screen.getByRole('button', { name: 'Generate' }))
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({ quality: '4k', size: '2480x2480' })
+    )
+  })
+
+
+  it('keeps the OpenAI quality ladder for GPT Image 1', () => {
     render(<ResolutionForm settings={{ model: 'gpt-image-1' }} />)
     const quality = screen.getByLabelText('Image quality')
     expect(
@@ -155,12 +166,12 @@ describe('Image parameter fields', () => {
   })
 
   it.each([
-    ['2:3', '688x1024'],
-    ['3:2', '1024x688'],
-    ['3:4', '768x1024'],
-    ['4:3', '1024x768'],
-    ['9:16', '576x1024'],
-    ['16:9', '1024x576'],
+    ['2:3', '1024x1536'],
+    ['3:2', '1536x1024'],
+    ['3:4', '864x1152'],
+    ['4:3', '1152x864'],
+    ['9:16', '720x1280'],
+    ['16:9', '1280x720'],
   ])('submits the 1K %s preset as %s', async (ratio, size) => {
     const onSubmit = vi.fn()
     render(<ResolutionForm onSubmit={onSubmit} />)
@@ -185,93 +196,22 @@ describe('Image parameter fields', () => {
       'aria-pressed',
       'true'
     )
-    expect(screen.getByRole('status')).toHaveTextContent('2048 × 1152')
+    expect(screen.getByRole('status')).toHaveTextContent('2560 × 1440')
     await user.click(screen.getByRole('button', { name: '4K' }))
-    expect(screen.getByRole('status')).toHaveTextContent('4096 × 2304')
+    expect(screen.getByRole('status')).toHaveTextContent('3328 × 1872')
     await user.click(screen.getByRole('button', { name: 'Generate' }))
     expect(onSubmit).toHaveBeenCalledWith(
-      expect.objectContaining({ size: '4096x2304' })
+      expect.objectContaining({ size: '3328x1872' })
     )
   })
 
-  it('shows Chinese custom inputs without rewriting existing canvas dimensions', async () => {
-    const i18n = createInstance()
-    await i18n.use(initReactI18next).init({
-      lng: 'zh',
-      fallbackLng: 'zh',
-      resources: { zh },
-    })
-    const onSubmit = vi.fn()
-    render(
-      <I18nextProvider i18n={i18n}>
-        <ResolutionForm settings={{ size: '1536x1024' }} onSubmit={onSubmit} />
-      </I18nextProvider>
-    )
-    const user = userEvent.setup()
-    expect(screen.getByRole('group', { name: '画面比例' })).toBeVisible()
-    expect(screen.getByRole('group', { name: '分辨率' })).toBeVisible()
-    expect(screen.getByRole('button', { name: '自定义' })).toHaveAttribute(
-      'aria-pressed',
-      'true'
-    )
-    expect(screen.getByLabelText('宽度')).toHaveValue(1536)
-    expect(screen.getByLabelText('高度')).toHaveValue(1024)
-    expect(screen.getByPlaceholderText('输入宽度')).toBeVisible()
-    expect(screen.getByPlaceholderText('输入高度')).toBeVisible()
-    expect(screen.getByText('支持的分辨率和比例以所选模型为准。')).toBeVisible()
-    await user.click(screen.getByRole('button', { name: 'Generate' }))
-    expect(onSubmit).toHaveBeenLastCalledWith(
-      expect.objectContaining({ size: '1536x1024' })
-    )
-    await user.clear(screen.getByLabelText('宽度'))
-    expect(screen.getByLabelText('宽度')).toHaveAttribute(
-      'aria-invalid',
-      'true'
-    )
-    await user.type(screen.getByLabelText('宽度'), '2048')
-    await user.click(screen.getByRole('button', { name: 'Generate' }))
-    expect(onSubmit).toHaveBeenLastCalledWith(
-      expect.objectContaining({ size: '2048x1024' })
-    )
-  })
 
-  it('keeps custom inputs open even when typed dimensions match a preset', async () => {
+
+  it('hides the automatic ratio for a model that falls back to 1:1', () => {
     render(<ResolutionForm />)
-    const user = userEvent.setup()
-    await user.click(screen.getByRole('button', { name: 'Custom' }))
-    const width = screen.getByLabelText('Width')
-    await user.clear(width)
-    await user.type(width, '1024')
-    expect(width).toBeVisible()
-    expect(screen.getByRole('button', { name: 'Custom' })).toHaveAttribute(
-      'aria-pressed',
-      'true'
-    )
+    expect(screen.queryByRole('button', { name: 'Auto' })).toBeNull()
   })
 
-  it('preserves automatic size and does not imply a fixed resolution is being sent', async () => {
-    const onSubmit = vi.fn()
-    render(<ResolutionForm settings={{ size: 'auto' }} onSubmit={onSubmit} />)
-    const user = userEvent.setup()
-    expect(screen.getByRole('button', { name: 'Auto' })).toHaveAttribute(
-      'aria-pressed',
-      'true'
-    )
-    for (const name of ['1K', '2K', '4K']) {
-      expect(screen.getByRole('button', { name })).toBeDisabled()
-      expect(screen.getByRole('button', { name })).toHaveAttribute(
-        'aria-pressed',
-        'false'
-      )
-    }
-    await user.click(screen.getByRole('button', { name: 'Generate' }))
-    expect(onSubmit).toHaveBeenLastCalledWith(
-      expect.objectContaining({ size: 'auto' })
-    )
-    await user.click(screen.getByRole('button', { name: '1:1' }))
-    expect(screen.getByRole('button', { name: '1K' })).toBeEnabled()
-    expect(screen.getByRole('status')).toHaveTextContent('1024 × 1024')
-  })
 
   it('keeps fixed-size model options selectable without offering unsupported 4K', async () => {
     const onSubmit = vi.fn()
@@ -281,9 +221,10 @@ describe('Image parameter fields', () => {
         onSubmit={onSubmit}
       />
     )
-    const size = screen.getByLabelText('Image resolution')
+    const size = screen.getByLabelText('Image size')
     expect(size).toHaveValue('1792x1024')
-    expect(screen.queryByRole('button', { name: '4K' })).not.toBeInTheDocument()
+    // The tier row stays on screen but cannot be used to change the size.
+    expect(screen.getByRole('button', { name: '4K' })).toBeDisabled()
     const user = userEvent.setup()
     await user.selectOptions(size, '1024x1792')
     await user.click(screen.getByRole('button', { name: 'Generate' }))
@@ -325,8 +266,11 @@ describe('Image parameter fields', () => {
     const user = userEvent.setup()
     await user.click(screen.getByRole('button', { name: '16:9' }))
     await user.click(screen.getByRole('button', { name: '4K' }))
-    expect(useDrawingStore.getState().settings.size).toBe('4096x2304')
-    await user.selectOptions(screen.getByLabelText('Image quality'), 'low')
+    expect(useDrawingStore.getState().settings.size).toBe('3328x1872')
+    await user.selectOptions(
+      screen.getByLabelText('Image output format'),
+      'webp'
+    )
     first.unmount()
 
     const reopened = render(panel)
@@ -338,7 +282,7 @@ describe('Image parameter fields', () => {
       'aria-pressed',
       'true'
     )
-    expect(screen.getByRole('status')).toHaveTextContent('4096 × 2304')
+    expect(screen.getByRole('status')).toHaveTextContent('3328 × 1872')
     reopened.unmount()
     client.clear()
     useDrawingStore.getState().initialize(914)
@@ -377,5 +321,221 @@ describe('Grok NSFW switch', () => {
     expect(
       screen.queryByRole('switch', { name: 'Allow NSFW content' })
     ).toBeNull()
+  })
+})
+
+describe('Nano Banana size controls', () => {
+  const nano = { model: 'gemini-3-pro-image-preview' as const }
+
+  it('offers the aspect ratio and resolution toggles like GPT Image does', () => {
+    render(<ResolutionForm settings={nano} />)
+    expect(
+      screen.getByRole('group', { name: 'Image aspect ratio' })
+    ).toBeVisible()
+    expect(screen.getByRole('group', { name: 'Image resolution' })).toBeVisible()
+  })
+
+  it('omits the custom size option for a model without free-form sizes', () => {
+    render(<ResolutionForm settings={nano} />)
+    expect(
+      within(
+        screen.getByRole('group', { name: 'Image resolution' })
+      ).queryByRole('button', { name: 'Custom' })
+    ).toBeNull()
+  })
+
+  // The provider reads the ratio from the pixel size and renders at its own
+  // native resolution for that tier, so the tier rides along in the size.
+  // Nano Banana has its own size table; the GPT Image 16:9 2K size (2560x1440)
+  // would be rejected upstream.
+  it('submits preset pixels for the chosen ratio and tier', async () => {
+    const onSubmit = vi.fn()
+    render(<ResolutionForm settings={nano} onSubmit={onSubmit} />)
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: '16:9' }))
+    await user.click(
+      within(screen.getByRole('group', { name: 'Image resolution' })).getByRole(
+        'button',
+        { name: '2K' }
+      )
+    )
+    await user.click(screen.getByRole('button', { name: 'Generate' }))
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({ size: '2752x1536' })
+    )
+  })
+
+
+  // `auto` takes its ratio from the reference image, and the provider rejects
+  // it outright for text-to-image.
+  it('hides the automatic ratio until a reference image is being edited', () => {
+    render(<ResolutionForm settings={{ ...nano, mode: 'generate' }} />)
+    expect(screen.queryByRole('button', { name: 'Auto' })).toBeNull()
+  })
+
+  it('offers the automatic ratio while editing a reference image', () => {
+    render(<ResolutionForm settings={{ ...nano, mode: 'edit' }} />)
+    expect(screen.getByRole('button', { name: 'Auto' })).toBeVisible()
+  })
+})
+
+describe('the resolution tiers stay on screen for every model', () => {
+  it.each([
+    ['dall-e-3', '1024x1024', '1K'],
+    ['dall-e-3', '1792x1024', '2K'],
+    ['black-forest-labs/flux-1.1-pro', '1024x1024', '1K'],
+    ['gpt-image-1', '1024x1024', '1K'],
+  ])(
+    'shows %s at %s as a locked %s tier',
+    (model, size, tier) => {
+      render(<ResolutionForm settings={{ model, size }} />)
+      const tiers = screen.getByRole('group', { name: 'Image resolution' })
+      for (const step of ['1K', '2K', '4K']) {
+        const button = within(tiers).getByRole('button', { name: step })
+        expect(button).toBeDisabled()
+        expect(button).toHaveAttribute(
+          'aria-pressed',
+          step === tier ? 'true' : 'false'
+        )
+      }
+    }
+  )
+
+  it('still offers the exact sizes the model supports', () => {
+    render(<ResolutionForm settings={{ model: 'dall-e-3' }} />)
+    const sizes = screen.getByLabelText('Image size')
+    expect(
+      within(sizes)
+        .getAllByRole('option')
+        .map((option) => option.textContent)
+    ).toEqual(['1024 × 1024', '1792 × 1024', '1024 × 1792'])
+  })
+
+  it('keeps the tiers selectable for a model that bills by tier', () => {
+    render(<ResolutionForm />)
+    const tiers = screen.getByRole('group', { name: 'Image resolution' })
+    expect(within(tiers).getByRole('button', { name: '4K' })).toBeEnabled()
+  })
+})
+
+describe('custom pixel dimensions are gone', () => {
+  // Verified against the provider: an exact size is discarded and the model
+  // renders at its own size for the tier, so free-form pixels promised control
+  // that never existed.
+  it.each(['gpt-image-2.5', 'gpt-image-2', 'gemini-3-pro-image-preview'])(
+    'offers only ratios and tiers for %s',
+    (model) => {
+      render(<ResolutionForm settings={{ model }} />)
+      const tiers = screen.getByRole('group', { name: 'Image resolution' })
+      expect(within(tiers).queryByRole('button', { name: 'Custom' })).toBeNull()
+      expect(screen.queryByLabelText('Width')).toBeNull()
+      expect(screen.queryByLabelText('Height')).toBeNull()
+      for (const step of ['1K', '2K', '4K']) {
+        expect(within(tiers).getByRole('button', { name: step })).toBeEnabled()
+      }
+    }
+  )
+})
+
+describe('the published ultrawide and 5:4 ratios are offered', () => {
+  it('renders every ratio the provider publishes', () => {
+    render(<ResolutionForm />)
+    const ratios = screen.getByRole('group', { name: 'Image aspect ratio' })
+    for (const ratio of ['1:1', '4:5', '5:4', '16:9', '21:9']) {
+      expect(within(ratios).getByRole('button', { name: ratio })).toBeVisible()
+    }
+  })
+
+  it.each([
+    ['21:9', '1K', '1456x624'],
+    ['5:4', '2K', '2240x1792'],
+    ['4:5', '4K', '2224x2784'],
+  ])('submits %s at %s as %s', async (ratio, tier, size) => {
+    const onSubmit = vi.fn()
+    render(<ResolutionForm onSubmit={onSubmit} />)
+    const user = userEvent.setup()
+    await user.click(
+      within(screen.getByRole('group', { name: 'Image resolution' })).getByRole(
+        'button',
+        { name: tier }
+      )
+    )
+    await user.click(
+      within(screen.getByRole('group', { name: 'Image aspect ratio' })).getByRole(
+        'button',
+        { name: ratio }
+      )
+    )
+    await user.click(screen.getByRole('button', { name: 'Generate' }))
+    expect(onSubmit).toHaveBeenLastCalledWith(
+      // Quality is untouched by the tier: it is a separate control.
+      expect.objectContaining({ size })
+    )
+  })
+})
+
+describe('the tier row fills its grid', () => {
+  it.each(['gpt-image-2.5', 'gemini-3-pro-image-preview', 'dall-e-3'])(
+    'lays the three tiers out in three columns for %s',
+    (model) => {
+      render(<ResolutionForm settings={{ model }} />)
+      const tiers = screen.getByRole('group', { name: 'Image resolution' })
+      expect(tiers).toHaveClass('grid-cols-3')
+      expect(within(tiers).getAllByRole('button')).toHaveLength(3)
+    }
+  )
+})
+
+describe('the model selector groups by vendor', () => {
+  it('labels each vendor and lists its image models under it', async () => {
+    useDrawingStore.getState().initialize(915)
+    useDrawingStore.getState().hydrate(null)
+    const client = new QueryClient({
+      defaultOptions: { queries: { staleTime: Infinity, retry: false } },
+    })
+    client.setQueryData(
+      ['drawing-groups', 915],
+      [{ value: 'default', label: 'default', ratio: 1 }]
+    )
+    client.setQueryData(
+      ['drawing-models', 915, 'default'],
+      [
+        { value: 'gpt-image-2', label: 'gpt-image-2' },
+        { value: 'dall-e-3', label: 'dall-e-3' },
+        { value: 'nano-banana-pro', label: 'nano-banana-pro' },
+        { value: 'grok-imagine-image-2.0', label: 'grok-imagine-image-2.0' },
+      ]
+    )
+    const view = render(
+      <QueryClientProvider client={client}>
+        <DrawingSettings
+          userId={915}
+          pendingCount={0}
+          onGenerate={vi.fn()}
+          onCancel={vi.fn()}
+          onUploadReferences={vi.fn()}
+          onMaskUpload={vi.fn()}
+          onClearMask={vi.fn()}
+          onDrawMask={vi.fn()}
+        />
+      </QueryClientProvider>
+    )
+    await userEvent.setup().click(
+      screen.getByPlaceholderText('Search models...')
+    )
+
+    for (const vendor of ['OpenAI', 'Gemini', 'xAI']) {
+      expect(screen.getByText(vendor)).toBeVisible()
+    }
+    const openai = screen
+      .getByText('OpenAI')
+      .closest('[data-slot="combobox-group"]') as HTMLElement
+    expect(within(openai).getByText('gpt-image-2')).toBeVisible()
+    expect(within(openai).getByText('dall-e-3')).toBeVisible()
+    expect(within(openai).queryByText('nano-banana-pro')).toBeNull()
+
+    view.unmount()
+    client.clear()
+    useDrawingStore.getState().initialize(915)
   })
 })
