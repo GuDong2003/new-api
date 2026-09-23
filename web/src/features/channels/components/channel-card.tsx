@@ -152,7 +152,9 @@ function ChannelCardComponent({
                 {fieldLabels.test_time}
               </span>
               <div className='overflow-hidden text-sm [&_[data-slot=status-badge]]:!ml-0'>
-                {responseCell ?? <span className='text-muted-foreground'>-</span>}
+                {responseCell ?? (
+                  <span className='text-muted-foreground'>-</span>
+                )}
               </div>
               <div className='overflow-hidden text-sm [&_[data-slot=status-badge]]:!ml-0'>
                 {testCell ?? <span className='text-muted-foreground'>-</span>}
