@@ -164,7 +164,7 @@ func TestResponsesRequestToChatCompletionsRequestInputImagesMarshalAsChatImageUR
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := ResponsesRequestToChatCompletionsRequest(&dto.OpenAIResponsesRequest{
+			got, err := ResponsesRequestToChatCompletionsRequest(context.Background(), &dto.OpenAIResponsesRequest{
 				Model: "gpt-test",
 				Input: mustRawMessage(t, []map[string]any{
 					{
