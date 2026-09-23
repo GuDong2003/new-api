@@ -34,7 +34,10 @@ import {
 } from './upstream-ratio-sync-helpers'
 import type { PricingSyncRow } from './upstream-ratio-sync-table'
 
-export function SyncPriceCell(props: { values: PricingSyncValues }) {
+export function SyncPriceCell(props: {
+  values: PricingSyncValues
+  compareTo?: PricingSyncValues
+}) {
   const { t } = useTranslation()
   const kind = getSyncPriceKind(props.values)
   if (kind === 'unset') {
@@ -81,7 +84,10 @@ export function SyncPriceCell(props: { values: PricingSyncValues }) {
           </div>
         ) : (
           <code className='block text-xs! leading-relaxed break-all whitespace-pre-wrap'>
-            {props.values.billing_expr}
+            {highlightExprDiff(
+              String(props.values.billing_expr),
+              props.compareTo?.billing_expr
+            )}
           </code>
         )}
       </div>
@@ -97,6 +103,26 @@ export function SyncPriceCell(props: { values: PricingSyncValues }) {
     )
   }
   return <SyncPriceMetrics lines={lines} />
+}
+
+// Highlight only aligned raw expressions; a different shape has no reliable
+// positional comparison and must remain readable as plain text.
+function highlightExprDiff(expression: string, base: unknown) {
+  const words = [...expression.matchAll(/\S+|\s+/g)]
+  const baseWords = typeof base === 'string' ? base.match(/\S+|\s+/g) : null
+  if (!baseWords || baseWords.length !== words.length) return expression
+  return words.map((word, index) =>
+    word[0] === baseWords[index] ? (
+      word[0]
+    ) : (
+      <mark
+        key={word.index}
+        className='rounded-sm bg-amber-500/25 text-inherit'
+      >
+        {word[0]}
+      </mark>
+    )
+  )
 }
 
 function SyncPriceMetrics(props: {
@@ -198,7 +224,7 @@ export function SyncSourcePriceCell(props: {
           )}
         </div>
       )}
-      <SyncPriceCell values={values} />
+      <SyncPriceCell values={values} compareTo={props.row.prices.current} />
     </div>
   )
 }
