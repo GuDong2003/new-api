@@ -204,7 +204,11 @@ it('reuses a cached thumbnail after leaving and reopening the gallery', async ()
   expect(thumbnailRequests).toBe(1)
 })
 
-it('falls back to the private original without a thumbnail, and preview reuses it', async () => {
+// A list asks for the preview variant whatever the picture is; the server
+// answers with the original for one it could not downscale, and that gets
+// downscaled and cached here rather than fetched again. The detail view still
+// reads the original, which by then is no longer what the card holds.
+it('asks for a preview even without one, and reads the original for details', async () => {
   const files: unknown[] = []
   api.defaults.adapter = async (config) => {
     if (config.url?.endsWith('/usage')) return response(config, usage)
@@ -237,7 +241,7 @@ it('falls back to the private original without a thumbnail, and preview reuses i
   expect(
     await screen.findByRole('img', { name: 'A quiet forest' })
   ).toBeVisible()
-  expect(files).toEqual([undefined])
+  expect(files).toEqual([{ thumbnail: true }])
   await userEvent.click(
     screen.getByRole('button', { name: 'Preview original' })
   )
@@ -246,7 +250,7 @@ it('falls back to the private original without a thumbnail, and preview reuses i
     'src',
     'blob:private-gallery'
   )
-  expect(files).toEqual([undefined])
+  expect(files).toEqual([{ thumbnail: true }, undefined])
   expect(within(dialog).getByText('noise')).toBeVisible()
   expect(within(dialog).getByText('42')).toBeVisible()
   expect(

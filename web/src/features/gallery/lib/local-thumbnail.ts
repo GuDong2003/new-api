@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import {
+  galleryAssetFingerprint,
   readGalleryThumbnail,
   writeGalleryThumbnail,
 } from './gallery-thumbnail-cache'
@@ -72,6 +73,37 @@ export async function renderLocalThumbnail(blob: Blob): Promise<Blob | null> {
  * Returns a cached or freshly derived preview, or the original when it is
  * already small enough or cannot be downscaled here.
  */
+/**
+ * The preview for a picture the server stores but could not downscale: it
+ * skips a thumbnail for anything too large to decode safely, which a 4K
+ * generation is. Deriving one here costs a single download instead of one per
+ * visit, and it lands in the same cache a server-made preview would.
+ */
+export async function getServerThumbnail(
+  userId: number,
+  assetId: string,
+  download: () => Promise<Blob>,
+  render: (input: Blob) => Promise<Blob | null> = renderLocalThumbnail
+): Promise<Blob> {
+  const fingerprint = galleryAssetFingerprint(assetId)
+  try {
+    const cached = await readGalleryThumbnail(userId, assetId, fingerprint)
+    if (cached) return cached
+  } catch {
+    // Browser storage is an optimisation; failing to read it must not hide the
+    // picture.
+  }
+  const downloaded = await download()
+  // A preview the server made is already this size and needs no second pass,
+  // and a picture that cannot be rasterised here has only the form it arrived
+  // in. Either way the bytes crossed the wire once and are worth keeping.
+  const thumbnail = (await render(downloaded)) ?? downloaded
+  await writeGalleryThumbnail(userId, assetId, fingerprint, thumbnail).catch(
+    () => undefined
+  )
+  return thumbnail
+}
+
 export async function getLocalThumbnail(
   userId: number,
   assetId: string,

@@ -24,6 +24,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { readGalleryThumbnail } from '../lib/gallery-thumbnail-cache'
 import {
   getLocalThumbnail,
+  getServerThumbnail,
   localThumbnailFingerprint,
 } from '../lib/local-thumbnail'
 
@@ -106,4 +107,35 @@ it('shows the original rather than failing when the content is unidentified', as
 
   expect(result).toBe(original)
   expect(render).not.toHaveBeenCalled()
+})
+
+// The server skips a thumbnail for a picture too large to decode safely, and a
+// 4K generation is exactly that. Without one, every visit to the gallery pulled
+// the multi-megabyte original to fill a thumbnail-sized box.
+it('derives a preview for a picture the server has none for, once', async () => {
+  const render = vi.fn().mockResolvedValue(preview)
+  const download = vi.fn().mockResolvedValue(original)
+
+  const first = await getServerThumbnail(9, 'asset-b', download, render)
+  const second = await getServerThumbnail(9, 'asset-b', download, render)
+
+  expect(first).toBe(preview)
+  expect(await second.text()).toBe(await preview.text())
+  expect(download).toHaveBeenCalledTimes(1)
+  expect(render).toHaveBeenCalledTimes(1)
+})
+
+// A preview the server made is already the right size, and a picture this
+// browser cannot rasterise has only the form it arrived in. Both cost a
+// download, so both are worth keeping rather than fetching again next visit.
+it('keeps what it downloaded when there is nothing to downscale', async () => {
+  const download = vi.fn().mockResolvedValue(original)
+  const render = vi.fn().mockResolvedValue(null)
+
+  const first = await getServerThumbnail(9, 'asset-c', download, render)
+  const second = await getServerThumbnail(9, 'asset-c', download, render)
+
+  expect(first).toBe(original)
+  expect(await second.text()).toBe(await original.text())
+  expect(download).toHaveBeenCalledTimes(1)
 })

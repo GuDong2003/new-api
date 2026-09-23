@@ -15,11 +15,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { getGalleryFile } from '../api'
 import type { GalleryIdentity } from '../types'
-import {
-  galleryAssetFingerprint,
-  readGalleryThumbnail,
-  writeGalleryThumbnail,
-} from './gallery-thumbnail-cache'
+import { getServerThumbnail } from './local-thumbnail'
 import { createRequestGate } from './request-gate'
 
 // A screenful of cards would otherwise open a request per tile, so thumbnails
@@ -40,33 +36,15 @@ export async function loadGalleryFile(
 ): Promise<Blob> {
   const userId = identity.userId
   // Originals are too big to keep, and are wanted one at a time anyway.
-  const cacheable = thumbnail && userId !== null
-  if (cacheable) {
-    try {
-      const cached = await readGalleryThumbnail(
-        userId,
-        id,
-        galleryAssetFingerprint(id)
-      )
-      if (cached) return cached
-    } catch {
-      // Browser storage is an optimisation; a failure to read it must not stop
-      // the picture from loading.
-    }
+  if (thumbnail && userId !== null) {
+    // A thumbnail request answers with the original for a picture the server
+    // could not downscale — it skips one for anything too large to decode
+    // safely, which a 4K generation is. Downscaling here keeps a preview of
+    // that picture the same size as every other, and the cache means the
+    // original crosses the wire once rather than on every visit.
+    return getServerThumbnail(userId, id, () =>
+      requestThumbnail(() => getGalleryFile(identity, id, true, signal), signal)
+    )
   }
-  const blob = thumbnail
-    ? await requestThumbnail(
-        () => getGalleryFile(identity, id, true, signal),
-        signal
-      )
-    : await getGalleryFile(identity, id, false, signal)
-  if (cacheable) {
-    await writeGalleryThumbnail(
-      userId,
-      id,
-      galleryAssetFingerprint(id),
-      blob
-    ).catch(() => undefined)
-  }
-  return blob
+  return getGalleryFile(identity, id, false, signal)
 }

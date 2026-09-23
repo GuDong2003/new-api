@@ -36,7 +36,9 @@ export function GalleryImageCard(props: {
   if (props.image.source === 'nai') sourceLabel = t('NAI Canvas')
   if (props.image.source === 'api') sourceLabel = t('API')
   const file = useGalleryImage(props.identity, props.image.id, {
-    preview: props.image.has_thumbnail || Boolean(props.image.localBlob),
+    // A picture the server stores can always be previewed: from the thumbnail
+    // it made, or from one derived here when it could not make one.
+    preview: Boolean(props.image.localBlob) || !props.image.localOnly,
     blob: props.image.localBlob,
     sha256: props.image.localSha256,
     only: props.image.localOnly,
