@@ -20,6 +20,7 @@ import { useTranslation } from 'react-i18next'
 
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
+import { useInView } from '@/hooks/use-in-view'
 
 import { useGalleryImage } from '../hooks/use-gallery-image'
 import type { GalleryIdentity, GalleryImage } from '../types'
@@ -35,7 +36,11 @@ export function GalleryImageCard(props: {
   let sourceLabel = t('Drawing')
   if (props.image.source === 'nai') sourceLabel = t('NAI Canvas')
   if (props.image.source === 'api') sourceLabel = t('API')
+  // A page holds more cards than fit on screen, and each one that fetches on
+  // mount spends a request on a picture nobody has scrolled to yet.
+  const view = useInView<HTMLElement>()
   const file = useGalleryImage(props.identity, props.image.id, {
+    enabled: view.inView,
     // A picture the server stores can always be previewed: from the thumbnail
     // it made, or from one derived here when it could not make one.
     preview: Boolean(props.image.localBlob) || !props.image.localOnly,
@@ -51,7 +56,7 @@ export function GalleryImageCard(props: {
           date: new Date(props.image.expires_at * 1000).toLocaleDateString(),
         })
   return (
-    <article className='flex h-full min-w-0 flex-col gap-1.5'>
+    <article ref={view.ref} className='flex h-full min-w-0 flex-col gap-1.5'>
       <Button
         variant='ghost'
         className='bg-muted/40 h-auto min-h-0 w-full flex-1 overflow-hidden rounded-md p-0'

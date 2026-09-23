@@ -351,3 +351,46 @@ it('opens the canvases tab when the route asks for it', async () => {
     'false'
   )
 })
+
+// Without this the wiring could be removed and every other test would still
+// pass, because a browser with no observer is told everything is in view.
+it('asks for nothing until a card comes into view', async () => {
+  let fileRequests = 0
+  api.defaults.adapter = async (config) => {
+    if (config.url?.endsWith('/usage')) return response(config, usage)
+    if (config.url?.endsWith('/file')) {
+      fileRequests += 1
+      return {
+        ...response(config, {}),
+        data: new Blob(['thumbnail'], { type: 'image/jpeg' }),
+      }
+    }
+    return response(config, {
+      items: [galleryImage],
+      total: 1,
+      page: 1,
+      page_size: 24,
+    })
+  }
+  // An observer that never reports an intersection stands in for a card that
+  // is on the page but below the fold.
+  vi.stubGlobal(
+    'IntersectionObserver',
+    class {
+      observe = vi.fn()
+      disconnect = vi.fn()
+      unobserve = vi.fn()
+      takeRecords = vi.fn()
+    }
+  )
+
+  render(
+    <QueryClientProvider client={client}>
+      <Gallery />
+    </QueryClientProvider>
+  )
+  expect(await screen.findByText('A quiet forest')).toBeVisible()
+  await new Promise((resolve) => setTimeout(resolve, 100))
+
+  expect(fileRequests).toBe(0)
+})

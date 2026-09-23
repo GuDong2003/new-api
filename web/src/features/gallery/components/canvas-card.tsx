@@ -20,6 +20,7 @@ import { useTranslation } from 'react-i18next'
 
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
+import { useInView } from '@/hooks/use-in-view'
 import { cn } from '@/lib/utils'
 
 import { useGalleryImage } from '../hooks/use-gallery-image'
@@ -152,9 +153,11 @@ function CanvasCover(props: {
   className?: string
 }) {
   const { t } = useTranslation()
+  // Four covers a canvas, and a page holds more canvases than fit on screen.
+  const view = useInView<HTMLElement>()
   // A draft the server has never seen is only ever shown from what is in hand.
   const file = useGalleryImage(props.identity, props.id, {
-    enabled: Boolean(props.local) || !props.localOnly,
+    enabled: view.inView && (Boolean(props.local) || !props.localOnly),
     preview: true,
     blob: props.local?.blob,
     sha256: props.local?.sha256,
@@ -164,6 +167,7 @@ function CanvasCover(props: {
   const loading = file.isPending
   return url ? (
     <img
+      ref={view.ref}
       src={url}
       alt=''
       className={cn(
@@ -173,6 +177,7 @@ function CanvasCover(props: {
     />
   ) : (
     <div
+      ref={view.ref}
       className={cn(
         'bg-background relative size-full rounded-md border',
         props.className
