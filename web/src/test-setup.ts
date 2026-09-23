@@ -69,10 +69,18 @@ afterEach(() => {
   cleanup()
 })
 
+// Prefer reduced motion in tests: entrance animations write inline
+// `opacity: 0` on their first frame, and jsdom advances frames through a
+// setTimeout-based rAF shim, so jest-dom visibility assertions would race the
+// animation. The reduced-motion code paths render the same DOM without
+// transient hidden states. Both `(prefers-reduced-motion: reduce)` and the
+// boolean `(prefers-reduced-motion)` form match; `no-preference` does not.
 Object.defineProperty(window, 'matchMedia', {
   configurable: true,
   value: (query: string): MediaQueryList => ({
-    matches: false,
+    matches:
+      query.includes('prefers-reduced-motion') &&
+      !query.includes('no-preference'),
     media: query,
     onchange: null,
     addListener: () => undefined,
