@@ -170,6 +170,7 @@ function CanvasCover(props: {
       ref={view.ref}
       src={url}
       alt=''
+      onError={() => void file.retry()}
       className={cn(
         'bg-background size-full rounded-md border object-cover',
         props.className

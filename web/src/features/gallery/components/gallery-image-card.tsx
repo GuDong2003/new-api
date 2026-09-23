@@ -69,6 +69,7 @@ export function GalleryImageCard(props: {
             alt={props.image.prompt}
             loading='lazy'
             className='size-full rounded-md object-contain'
+            onError={() => void file.retry()}
           />
         ) : (
           <div className='bg-muted flex size-full items-center justify-center rounded-md p-2 text-xs'>

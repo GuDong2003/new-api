@@ -62,6 +62,9 @@ export function useGalleryImage(
   const url = preview.url ?? original.url
   return {
     url,
+    // Whichever form is on screen is the one worth discarding when it will
+    // not decode.
+    retry: preview.url ? preview.retry : original.retry,
     isPending: !url && (preview.isPending || original.isPending),
     // A picture is only unavailable when neither form of it arrived.
     isError: !url && (preview.isError || original.isError),

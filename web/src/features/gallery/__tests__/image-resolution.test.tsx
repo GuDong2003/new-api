@@ -15,7 +15,7 @@ You should have received a copy of the GNU Affero General Public License
 along with this program. If not, see <https://www.gnu.org/licenses/>.
 */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { renderHook, waitFor } from '@testing-library/react'
+import { act, renderHook, waitFor } from '@testing-library/react'
 import { AxiosError } from 'axios'
 import { IDBFactory } from 'fake-indexeddb'
 import type { ReactNode } from 'react'
@@ -135,4 +135,46 @@ it('keeps the preview on screen when the original cannot be fetched', async () =
   await waitFor(() => expect(view.result.current.url).toBe('blob:preview'))
   await waitFor(() => expect(view.result.current.isError).toBe(false))
   expect(view.result.current.url).toBe('blob:preview')
+})
+
+// A preview that will not decode — a cache entry whose bytes went bad, or a
+// Blob a browser no longer honours — leaves a broken picture on screen with
+// nothing to retry it. Discarding what did not work and asking again does.
+it('discards a preview that fails to load and fetches it again', async () => {
+  const view = renderHook(
+    () => useGalleryImage(identity, 'image-4', { preview: true }),
+    { wrapper }
+  )
+
+  await waitFor(() => expect(view.result.current.url).toBe('blob:preview'))
+  expect(served).toEqual(['preview'])
+
+  await act(async () => {
+    await view.result.current.retry()
+  })
+
+  await waitFor(() => expect(served).toEqual(['preview', 'preview']))
+})
+
+// Bytes that will not decode do not start decoding on the second try, and an
+// `onError` that asks again every time would hammer the server for as long as
+// the card is on screen.
+it('asks again only once for a preview that keeps failing', async () => {
+  const view = renderHook(
+    () => useGalleryImage(identity, 'image-5', { preview: true }),
+    { wrapper }
+  )
+
+  await waitFor(() => expect(view.result.current.url).toBe('blob:preview'))
+  await act(async () => {
+    await view.result.current.retry()
+  })
+  await act(async () => {
+    await view.result.current.retry()
+  })
+  await act(async () => {
+    await view.result.current.retry()
+  })
+
+  expect(served).toEqual(['preview', 'preview'])
 })

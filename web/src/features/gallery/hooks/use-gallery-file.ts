@@ -14,10 +14,11 @@ GNU Affero General Public License for more details.
 You should have received a copy of the GNU Affero General Public License
 along with this program. If not, see <https://www.gnu.org/licenses/>.
 */
-import { useQuery } from '@tanstack/react-query'
-import { useLayoutEffect, useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
 import { loadGalleryFile } from '../lib/gallery-file-source'
+import { removeGalleryThumbnail } from '../lib/gallery-thumbnail-cache'
 import { getLocalThumbnail } from '../lib/local-thumbnail'
 import type { GalleryIdentity } from '../types'
 
@@ -42,16 +43,21 @@ export function useGalleryFile(
   const derive = Boolean(
     thumbnail && local?.blob && local?.sha256 && userId !== null
   )
-  const query = useQuery({
-    queryKey: [
+  const sha256 = derive ? local?.sha256 : undefined
+  const key = useMemo(
+    () => [
       'gallery',
       userId,
       identity.sessionId,
       'file',
       id,
       thumbnail,
-      derive ? local?.sha256 : undefined,
+      sha256,
     ],
+    [userId, identity.sessionId, id, thumbnail, sha256]
+  )
+  const query = useQuery({
+    queryKey: key,
     queryFn: ({ signal }) =>
       derive
         ? getLocalThumbnail(
@@ -66,6 +72,21 @@ export function useGalleryFile(
     gcTime: 30 * 60 * 1000,
     staleTime: Infinity,
   })
+  // A preview that will not decode is worth nothing, and a cached one keeps
+  // being handed back. Dropping it is what lets the next ask reach the server.
+  const client = useQueryClient()
+  // Bytes that will not decode do not decode on the second try either, so one
+  // attempt per picture is the difference between recovering and hammering.
+  const retried = useRef(false)
+  const retry = useCallback(async () => {
+    if (retried.current) return
+    retried.current = true
+    if (userId !== null) {
+      await removeGalleryThumbnail(userId, id).catch(() => undefined)
+    }
+    setResource(undefined)
+    await client.refetchQueries({ queryKey: key })
+  }, [client, id, userId, key])
   const [resource, setResource] = useState<{ blob: Blob; url: string }>()
   const blob = query.data ?? local?.blob
   useLayoutEffect(() => {
@@ -76,6 +97,7 @@ export function useGalleryFile(
   }, [blob, enabled, identity.userId, identity.sessionId])
   return {
     ...query,
+    retry,
     isError: !blob && (query.isError || Boolean(local?.only)),
     isPending: !blob && query.isPending && !local?.only,
     url: enabled && resource?.blob === blob ? resource?.url : undefined,
