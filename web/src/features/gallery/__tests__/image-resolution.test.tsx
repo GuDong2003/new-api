@@ -15,7 +15,7 @@ You should have received a copy of the GNU Affero General Public License
 along with this program. If not, see <https://www.gnu.org/licenses/>.
 */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { act, renderHook, waitFor } from '@testing-library/react'
+import { renderHook, waitFor } from '@testing-library/react'
 import { AxiosError } from 'axios'
 import { IDBFactory } from 'fake-indexeddb'
 import type { ReactNode } from 'react'
@@ -84,24 +84,20 @@ const wrapper = ({ children }: { children: ReactNode }) => (
   <QueryClientProvider client={client}>{children}</QueryClientProvider>
 )
 
-it('shows the preview first and replaces it with the original', async () => {
-  holdOriginal = () => undefined
+// A list shows many pictures at once. Fetching each original behind its preview
+// made one page of the gallery pull tens of megabytes for pictures the size of
+// a thumbnail, so a preview is the answer here rather than a stand-in.
+it('stops at the preview when one exists', async () => {
   const view = renderHook(
     () => useGalleryImage(identity, 'image-1', { preview: true }),
     { wrapper }
   )
 
-  // The preview is up while the original is still in flight, so nothing waits
-  // behind the larger download it stands in for.
   await waitFor(() => expect(view.result.current.url).toBe('blob:preview'))
   expect(view.result.current.isPending).toBe(false)
-  expect(served).toEqual(['preview', 'original'])
 
-  await act(async () => {
-    holdOriginal?.()
-  })
-
-  await waitFor(() => expect(view.result.current.url).toBe('blob:original'))
+  await new Promise((resolve) => setTimeout(resolve, 50))
+  expect(served).toEqual(['preview'])
 })
 
 it('goes straight to the original for a picture with no preview', async () => {

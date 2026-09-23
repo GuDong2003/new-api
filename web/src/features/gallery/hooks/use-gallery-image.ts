@@ -14,8 +14,6 @@ GNU Affero General Public License for more details.
 You should have received a copy of the GNU Affero General Public License
 along with this program. If not, see <https://www.gnu.org/licenses/>.
 */
-import { useEffect, useState } from 'react'
-
 import type { GalleryIdentity } from '../types'
 import { useGalleryFile } from './use-gallery-file'
 
@@ -31,12 +29,13 @@ type GalleryImageOptions = {
 }
 
 /**
- * A picture, shown as soon as there is anything of it to show.
+ * A picture at the size a list shows it.
  *
- * The preview goes up first so nothing waits on a blank box, and the original
- * follows and takes its place. The preview is a stand-in for the wait, not the
- * answer: what ends up on screen — and so what a right-click copies or saves —
- * is the picture itself.
+ * A grid puts many pictures on screen at once, and each original behind its
+ * preview cost a page of the gallery tens of megabytes to show thumbnails. The
+ * preview is the answer here, not a stand-in for one: the original belongs to
+ * the surfaces that show a single picture at full size — the detail view and a
+ * download — which read it directly.
  */
 export function useGalleryImage(
   identity: GalleryIdentity,
@@ -51,17 +50,16 @@ export function useGalleryImage(
     enabled && Boolean(options.preview),
     { blob: options.blob, sha256: options.sha256 }
   )
-  // Ask for the original once the preview is up, so the first thing shown is
-  // never held back by the larger download behind it.
-  const [full, setFull] = useState(!options.preview)
-  useEffect(() => {
-    if (preview.url || preview.isError) setFull(true)
-  }, [preview.url, preview.isError])
-  const original = useGalleryFile(identity, id, false, enabled && full, {
-    blob: options.blob,
-    only: options.only,
-  })
-  const url = original.url ?? preview.url
+  // A picture with no preview of its own has only one form to show, and one
+  // whose preview cannot be fetched would otherwise leave an empty card.
+  const original = useGalleryFile(
+    identity,
+    id,
+    false,
+    enabled && (!options.preview || preview.isError),
+    { blob: options.blob, only: options.only }
+  )
+  const url = preview.url ?? original.url
   return {
     url,
     isPending: !url && (preview.isPending || original.isPending),
