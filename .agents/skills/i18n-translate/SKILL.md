@@ -1,16 +1,9 @@
 ---
 name: i18n-translate
 description: >-
-  Complete and maintain frontend i18n translations for this project. Covers
-  finding missing translation keys, detecting untranslated entries, and adding
-  translations for all supported locales (en, zh, zh-TW, fr, ja, ru, vi). Use for any
-  task involving frontend locale files, missing translation keys, untranslated
-  UI text, `t(...)` keys, `useTranslation()`, static i18n keys, button/label/
-  toast/dialog/placeholder/validation copy, or adding/fixing even a single
-  i18n key. Use when review findings mention missing i18n, when new UI text
-  needs translation, or when the user asks to add translations, fix i18n, or
-  complete missing translations. Always load and follow this skill before
-  translating, adding locale keys, or editing frontend i18n files.
+  Use when changing frontend locale files, adding or fixing translation keys,
+  reviewing untranslated UI copy, or working with `t(...)`, `useTranslation()`,
+  static i18n keys, labels, toasts, dialogs, placeholders, or validation text.
 ---
 
 # Frontend i18n Translation Workflow
@@ -25,12 +18,11 @@ description: >-
 ### Hard Constraint: Locale Writes Go Through the Script
 
 - You MUST NOT edit `web/src/i18n/locales/*.json` directly with text-editing tools (StrReplace, Write, search-and-replace, manual JSON edits, etc.). This applies even to a single key.
-- ALL locale writes MUST go through the `add-missing-keys.mjs` script, followed by `bun run i18n:sync`. The script is the only sanctioned way to add or change locale values.
+- ALL locale writes MUST go through `web/scripts/add-missing-keys.mjs`, followed by `bun run i18n:sync`. The script adds only new keys; if an existing translation needs revision, stop and request a separate approved method instead of overwriting it.
 - Why this is mandatory, not optional:
-  - Hand-editing reliably drops one or more of the seven locales (`en`, `zh`, `zh-TW`, `fr`, `ja`, `ru`, `vi`), leaving keys missing in some languages.
-  - Hand-editing breaks the required alphabetical key order and introduces JSON syntax errors (trailing commas, mismatched quotes).
-  - The script writes all seven files atomically with consistent sorting, so the locale set stays in sync by construction.
-- The script does not do the translation for you. You still must reason out each locale's copy and populate the script's `newKeys` object; the script only handles insertion, sorting, and writing. Do not skip the script just because the thinking happens regardless.
+  - Hand-editing can silently drop or alter existing translations, duplicate keys, or protected metadata.
+  - The script validates both active languages and interpolation placeholders, and inserts keys without rewriting existing entries or archived files.
+- The script does not translate copy. Supply considered English and Simplified Chinese values in the input file.
 
 ## Scope Checklist
 
@@ -45,21 +37,21 @@ Do not skip this workflow because the fix is "just one key".
 
 ## Overview
 
-- Locale files: `web/src/i18n/locales/{en,zh,zh-TW,fr,ja,ru,vi}.json`
+- Maintained locale files: `web/src/i18n/locales/{en,zh}.json`. Existing `zh-TW`, `fr`, `ja`, `ru`, `vi` files are archives: keep them but do not load, modify, or add keys to them.
 - Format: flat JSON under `"translation"` key, keys are English source strings
-- Base locale: `en.json` (most keys), fallback: `zh` (Chinese)
-- Sync script: `bun run i18n:sync` (from `web/`)
-- All `t()` calls must have corresponding keys in every locale file
+- Base locale: `en.json`; runtime fallback: English. Legacy Traditional Chinese preferences use `zhCN` (`zh.json`); other retired preferences use English.
+- Sync script: `bun run i18n:sync` (from `web/`) reports on `en` and `zh` without rewriting locale files.
+- All new `t()` keys must exist in both maintained locale files.
 
 ## Small Fix Path
 
 For a single known missing key (still script-only, no direct JSON edits):
 
-1. Confirm the exact key at the call site and verify it is absent from all locale files.
-2. Add the key via `add-missing-keys.mjs`, populating its `newKeys` object for every supported locale: `en`, `zh`, `zh-TW`, `fr`, `ja`, `ru`, `vi`. Even one key goes through the script; do not hand-edit the JSON.
-3. The script preserves the flat `"translation"` object and keeps keys alphabetically sorted automatically.
+1. Confirm the exact key at the call site and check `en.json` and `zh.json` for an existing value.
+2. Supply a JSON input with matching `en` and `zh` keys to `node scripts/add-missing-keys.mjs translations.json` from `web/`. Even one key goes through the script; do not hand-edit the JSON.
+3. The script preserves existing values and formatting and inserts the new key in order.
 4. Run a targeted search for the key in code and locale files.
-5. Run `bun run i18n:sync` to normalize file order. This step is mandatory, not optional.
+5. Run `bun run i18n:sync` and review its report. It never normalizes or rewrites locale files.
 
 ## Workflow
 
@@ -82,8 +74,11 @@ import path from 'node:path'
 const LOCALES_DIR = path.resolve('src/i18n/locales')
 const SRC_DIR = path.resolve('src')
 
-const en = JSON.parse(await fs.readFile(path.join(LOCALES_DIR, 'en.json'), 'utf8'))
-const enKeys = new Set(Object.keys(en.translation))
+const localeKeys = {}
+for (const locale of ['en', 'zh']) {
+  const json = JSON.parse(await fs.readFile(path.join(LOCALES_DIR, `${locale}.json`), 'utf8'))
+  localeKeys[locale] = new Set(Object.keys(json.translation))
+}
 
 const tCallRegex = /\bt\(\s*['"`]([^'"`\n]+?)['"`]\s*[,)]/g
 const tCallMultilineRegex = /\bt\(\s*['"`]([^'"`]+?)['"`]\s*\)/g
@@ -115,16 +110,17 @@ for (const file of files) {
     while ((match = regex.exec(content)) !== null) {
       const key = match[1]
       if (key.startsWith('{{') || key.includes('${')) continue
-      if (!enKeys.has(key)) {
+      const missingLocales = Object.keys(localeKeys).filter(locale => !localeKeys[locale].has(key))
+      if (missingLocales.length) {
         if (!missingKeys.has(key)) missingKeys.set(key, [])
-        missingKeys.get(key).push(relPath)
+        missingKeys.get(key).push(`${relPath} (missing: ${missingLocales.join(', ')})`)
       }
     }
   }
 }
 
 if (missingKeys.size === 0) {
-  console.log('All t() keys found in en.json!')
+  console.log('All t() keys found in en.json and zh.json!')
 } else {
   console.log(`Found ${missingKeys.size} missing keys:\n`)
   for (const [key, files] of [...missingKeys.entries()].sort(([a], [b]) => a.localeCompare(b))) {
@@ -167,7 +163,7 @@ const brandNames = new Set([
   'WeChat','Xinference','Xunfei','AI Proxy','One API',
 ])
 
-const locales = ['fr', 'ja', 'ru', 'zh', 'zh-TW', 'vi']
+const locales = ['zh']
 
 for (const locale of locales) {
   const locFile = JSON.parse(await fs.readFile(path.join(LOCALES_DIR, `${locale}.json`), 'utf8'))
@@ -196,72 +192,24 @@ for (const locale of locales) {
 
 ### Step 4: Add translations
 
-This script is the ONLY sanctioned way to write locale values. You MUST NOT bypass it by hand-filling the JSON files. Create `web/scripts/add-missing-keys.mjs` with this exact structure:
+Use the existing `web/scripts/add-missing-keys.mjs` for new keys only. Supply a JSON file with matching keys for both active languages; for example:
 
-```javascript
-import fs from 'node:fs/promises'
-import path from 'node:path'
-
-const LOCALES_DIR = path.resolve('src/i18n/locales')
-
-function stableStringify(obj) {
-  return JSON.stringify(obj, null, 2) + '\n'
+```json
+{
+  "en": { "Generate image": "Generate image" },
+  "zh": { "Generate image": "生成图片" }
 }
-
-const newKeys = {
-  en: { /* "key": "English value" */ },
-  zh: { /* "key": "中文翻译" */ },
-  'zh-TW': { /* "key": "繁體中文翻譯" */ },
-  fr: { /* "key": "Traduction française" */ },
-  ja: { /* "key": "日本語翻訳" */ },
-  ru: { /* "key": "Русский перевод" */ },
-  vi: { /* "key": "Bản dịch tiếng Việt" */ },
-}
-
-async function main() {
-  let totalAdded = 0
-
-  for (const [locale, trans] of Object.entries(newKeys)) {
-    const filePath = path.join(LOCALES_DIR, `${locale}.json`)
-    const json = JSON.parse(await fs.readFile(filePath, 'utf8'))
-
-    let count = 0
-    for (const [key, value] of Object.entries(trans)) {
-      if (!Object.prototype.hasOwnProperty.call(json.translation, key)) {
-        json.translation[key] = value
-        count++
-      } else if (json.translation[key] !== value) {
-        json.translation[key] = value
-        count++
-      }
-    }
-
-    if (count > 0) {
-      json.translation = Object.fromEntries(
-        Object.entries(json.translation).sort(([a], [b]) => a.localeCompare(b))
-      )
-      await fs.writeFile(filePath, stableStringify(json), 'utf8')
-    }
-
-    console.log(`${locale}: ${count} translations applied`)
-    totalAdded += count
-  }
-
-  console.log(`\nTotal: ${totalAdded} translations applied`)
-}
-
-main().catch((err) => { console.error(err); process.exitCode = 1 })
 ```
 
-Populate the `newKeys` object with actual translations for each locale.
+Run `node scripts/add-missing-keys.mjs translations.json` from `web/`. The script rejects conflicting existing values and mismatched interpolation placeholders. Never replace this script with a whole-file JSON serializer: archived translations, existing values, duplicate keys, and formatting must remain untouched.
 
 ### Step 5: Verify and clean up
 
 ```bash
 cd web
-node scripts/add-missing-keys.mjs   # apply translations
-node scripts/find-missing-keys.mjs  # verify: should say "All t() keys found"
-bun run i18n:sync                   # normalize file order
+node scripts/add-missing-keys.mjs translations.json    # add new keys to en and zh
+node scripts/find-missing-keys.mjs                      # verify both active locales
+bun run i18n:sync                                       # generate report only
 ```
 
 Delete temporary scripts after completion.
@@ -278,19 +226,14 @@ Delete temporary scripts after completion.
 ### Length and Layout Awareness
 
 - Consider whether translated text may overflow the UI before choosing final wording, especially for buttons, table headers, menu items, labels, toasts, dialog titles, tabs, badges, and empty states.
-- For languages that often expand relative to English, especially French, Russian, and Vietnamese, prefer natural but compact wording.
+- Chinese text may be shorter or longer than English; prefer natural but compact wording where space is limited.
 - Do not sacrifice meaning just to shorten text. When the call site has limited space, choose the shortest clear translation that preserves the UI intent.
 - For interpolated variables, counts, model names, provider names, quotas, and dates, consider the longest realistic rendered text, not only the translation string itself.
 
 | Language | Code | Notes |
 |----------|------|-------|
 | English | en | Base locale, key = value |
-| Chinese | zh | Fallback locale, must be complete |
-| Traditional Chinese | zh-TW | Use natural Traditional Chinese wording |
-| French | fr | Many English cognates are valid (e.g., "Configuration") |
-| Japanese | ja | Use katakana for technical loanwords |
-| Russian | ru | Use formal register |
-| Vietnamese | vi | Use standard Vietnamese |
+| Simplified Chinese | zh | Active Chinese locale; use natural Simplified Chinese wording |
 
 **Keep as English (do not translate):**
 - Brand/product names (OpenAI, Claude, Gemini, etc.)
@@ -308,7 +251,7 @@ Delete temporary scripts after completion.
 1. All scripts run from `web/` directory
 2. Use `node scripts/xxx.mjs` (ESM format with top-level await)
 3. Sort keys alphabetically when writing locale files
-4. Always run `bun run i18n:sync` as the final step
+4. Always run `bun run i18n:sync` to review the read-only report after adding translations
 5. Delete temporary scripts after completion
 6. The `{{variable}}` placeholders in keys must be preserved in all translations
 7. NEVER edit `locales/*.json` directly. Any non-script write to a locale file (StrReplace, Write, manual JSON edit) is non-compliant, including single-key fixes.

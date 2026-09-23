@@ -31,10 +31,10 @@ This is an AI API gateway/proxy built with Go. It aggregates 40+ upstream AI pro
 
 ### Frontend (`web/src/i18n/`)
 - Library: `i18next` + `react-i18next` + `i18next-browser-languagedetector`
-- Languages: en (base), zh (fallback), zh-TW, fr, ru, ja, vi
-- Translation files: `web/src/i18n/locales/{lang}.json` — flat JSON, keys are English source strings
+- Active interface languages: English (`en`) and Simplified Chinese (`zhCN`, stored in `zh.json`); English is the runtime fallback. Legacy Chinese variants resolve to Simplified Chinese, and other retired preferences resolve to English.
+- Translation files: `web/src/i18n/locales/{en,zh}.json` — flat JSON with English source strings as keys. Existing `zh-TW`, `fr`, `ru`, `ja`, and `vi` files are retained as archives, not loaded or maintained.
 - Usage: `useTranslation()` hook, call `t('English key')` in components
-- CLI tools: `bun run i18n:sync` (from `web/`)
+- CLI tools: add intentional keys to both active locales through `node scripts/add-missing-keys.mjs translations.json`; `bun run i18n:sync` reports differences without rewriting existing translations (from `web/`).
 
 ## Rules
 
@@ -167,7 +167,7 @@ Inside `relaykit/`, use `kitutil.*` from `relaykit/relayconvert/kitutil/json.go`
   - `bun run dev` for development server
   - `bun run build` for production build
   - `bun run i18n:*` for i18n tooling
-- Frontend UI text must support i18n with `i18next`/`react-i18next`. Use flat JSON locale files in `web/src/i18n/locales/{lang}.json`, with English source strings as keys.
+- Frontend UI text must support English and Simplified Chinese with `i18next`/`react-i18next`. Use flat JSON locale files in `web/src/i18n/locales/{en,zh}.json`, with English source strings as keys. Do not add new strings to archived locales.
 - In React components, use `useTranslation()` and call `t('English key')` for user-facing text.
 - Follow `web/AGENTS.md` for detailed frontend conventions, including TypeScript, component structure, styling, accessibility, testing, and build checks.
 
