@@ -45,6 +45,7 @@ import {
   validateAdvancedCustomConfig,
 } from './advanced-custom'
 import { getDefaultBaseUrl } from './channel-type-config'
+import { supportsResponsesWebSocket } from './responses-websocket'
 
 export function supportsChannelKeyAppend(
   type: number,
@@ -933,7 +934,7 @@ export function buildSettingJSON(formData: ChannelFormValues): string {
     proxy: formData.proxy?.trim() || '',
     pass_through_body_enabled: formData.pass_through_body_enabled || false,
     responses_websocket_enabled:
-      (formData.type === 1 || formData.type === 57) &&
+      supportsResponsesWebSocket(formData.type) &&
       formData.responses_websocket_enabled === true,
     system_prompt: formData.system_prompt || '',
     system_prompt_override: formData.system_prompt_override || false,
