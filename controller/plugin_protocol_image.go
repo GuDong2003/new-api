@@ -102,6 +102,12 @@ func serveTaskPluginImageProtocol(c *gin.Context, pinned pluginruntime.PinnedEnd
 			return
 		}
 	}
+	// The task is terminal and settled. The image task presenting this result
+	// records what the plugin charged and adopts the plugin task.
+	c.Set(pluginImageTaskKey, &pluginImageTaskRef{TaskID: task.TaskID, Success: task.Status == model.TaskStatusSuccess})
+	if task.Status == model.TaskStatusSuccess {
+		common.SetContextKey(c, constant.ContextKeyAsyncImageQuota, task.Quota)
+	}
 	if task.Status == model.TaskStatusFailure {
 		reason := strings.TrimSpace(task.FailReason)
 		if reason == "" {

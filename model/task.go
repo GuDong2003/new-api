@@ -12,6 +12,8 @@ import (
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	commonRelay "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
+
+	"gorm.io/gorm"
 )
 
 type TaskStatus string
@@ -69,6 +71,10 @@ type Task struct {
 	// 禁止返回给用户，内部可能包含key等隐私信息
 	PrivateData TaskPrivateData `json:"-" gorm:"column:private_data;type:json"`
 	Data        json.RawMessage `json:"data" gorm:"type:json"`
+	// ParentTaskID links a task a plugin ran on behalf of another task, such as
+	// the vendor task behind a gateway image task. Task lists show only the
+	// parent, which carries the images the user asked for.
+	ParentTaskID string `json:"-" gorm:"type:varchar(191);index"`
 }
 
 func (t *Task) SetData(data any) {
@@ -282,12 +288,29 @@ func InitTask(platform constant.TaskPlatform, relayInfo *commonRelay.RelayInfo) 
 	return t
 }
 
+// visibleTasks leaves out tasks that ran on behalf of another task; the parent
+// task is the record users and administrators see. A lookup by task ID still
+// finds the task, since a consume log may name it.
+func visibleTasks(query *gorm.DB, queryParams SyncTaskQueryParams) *gorm.DB {
+	if queryParams.TaskID != "" {
+		return query
+	}
+	return query.Where("parent_task_id IS NULL OR parent_task_id = ?", "")
+}
+
+// SetTaskParent hides a plugin task behind the gateway task that presented its
+// result. Only a task of another platform can be adopted, so an image task
+// never hides itself or another image task.
+func SetTaskParent(ctx context.Context, taskID, parentTaskID string) error {
+	return DB.WithContext(ctx).Model(&Task{}).Where("task_id = ? AND platform <> ?", taskID, constant.TaskPlatformImage).Update("parent_task_id", parentTaskID).Error
+}
+
 func TaskGetAllUserTask(userId int, startIdx int, num int, queryParams SyncTaskQueryParams) []*Task {
 	var tasks []*Task
 	var err error
 
 	// 初始化查询构建器
-	query := DB.Where("user_id = ?", userId)
+	query := visibleTasks(DB.Where("user_id = ?", userId), queryParams)
 
 	if queryParams.TaskID != "" {
 		query = query.Where("task_id = ?", queryParams.TaskID)
@@ -325,7 +348,7 @@ func TaskGetAllTasks(startIdx int, num int, queryParams SyncTaskQueryParams) []*
 	var err error
 
 	// 初始化查询构建器
-	query := DB
+	query := visibleTasks(DB, queryParams)
 
 	// 添加过滤条件
 	if queryParams.ChannelID != "" {
@@ -602,7 +625,7 @@ type TaskQuotaUsage struct {
 // TaskCountAllTasks returns total tasks that match the given query params (admin usage)
 func TaskCountAllTasks(queryParams SyncTaskQueryParams) int64 {
 	var total int64
-	query := DB.Model(&Task{})
+	query := visibleTasks(DB.Model(&Task{}), queryParams)
 	if queryParams.ChannelID != "" {
 		query = query.Where("channel_id = ?", queryParams.ChannelID)
 	}
@@ -637,7 +660,7 @@ func TaskCountAllTasks(queryParams SyncTaskQueryParams) int64 {
 // TaskCountAllUserTask returns total tasks for given user
 func TaskCountAllUserTask(userId int, queryParams SyncTaskQueryParams) int64 {
 	var total int64
-	query := DB.Model(&Task{}).Where("user_id = ?", userId)
+	query := visibleTasks(DB.Model(&Task{}).Where("user_id = ?", userId), queryParams)
 	if queryParams.TaskID != "" {
 		query = query.Where("task_id = ?", queryParams.TaskID)
 	}

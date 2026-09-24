@@ -68,12 +68,21 @@ func SetRelayRouter(router *gin.Engine) {
 	// Image generation is billed per image, so the playground gets the same
 	// per-user request limit the relay routes already use.
 	playgroundRouter.Use(middleware.ModelRequestRateLimit())
-	playgroundRouter.Use(middleware.Distribute())
-	playgroundRouter.Use(middleware.ContentAuditCapture())
 	{
-		playgroundRouter.POST("/chat/completions", controller.Playground)
-		playgroundRouter.POST("/images/generations", controller.Playground)
-		playgroundRouter.POST("/images/edits", controller.Playground)
+		playgroundRouter.POST("/chat/completions", middleware.Distribute(), middleware.ContentAuditCapture(), controller.Playground)
+	}
+
+	// The drawing page reaches every image model the public image routes serve,
+	// including those a task plugin claims, so a plugin pins its model before
+	// channel distribution exactly as on /v1/images.
+	playgroundImageRouter := playgroundRouter.Group("/images")
+	playgroundImageRouter.Use(middleware.PinTaskPluginEndpoint())
+	playgroundImageRouter.Use(middleware.PrepareTaskPluginEndpoint())
+	playgroundImageRouter.Use(middleware.Distribute())
+	playgroundImageRouter.Use(middleware.ContentAuditCapture())
+	{
+		playgroundImageRouter.POST("/generations", controller.Playground)
+		playgroundImageRouter.POST("/edits", controller.Playground)
 	}
 
 	// Async image tasks are read straight from the gateway, so they skip channel

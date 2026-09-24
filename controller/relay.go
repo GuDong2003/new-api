@@ -155,29 +155,11 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		}
 	}()
 
-	var syncImageCapture *imageResponseCaptureWriter
 	if relayFormat == types.RelayFormatOpenAIImage {
-		if imageRequest, ok := request.(*dto.ImageRequest); ok && shouldRecordSynchronousImageTask(c, imageRequest) {
-			originalWriter := c.Writer
-			syncImageCapture = &imageResponseCaptureWriter{
-				ResponseWriter: originalWriter,
-				limit:          imageResultBudget(imageRequest),
+		if imageRequest, ok := request.(*dto.ImageRequest); ok {
+			if recordImageTask := captureSynchronousImageTask(c, relayInfo, imageRequest); recordImageTask != nil {
+				defer func() { recordImageTask(newAPIError == nil) }()
 			}
-			c.Writer = syncImageCapture
-			defer func() {
-				c.Writer = originalWriter
-				if newAPIError != nil || syncImageCapture == nil || !syncImageCapture.Written() {
-					return
-				}
-				result, captureErr := synchronousImageResult(syncImageCapture)
-				if captureErr != nil {
-					logger.LogWarn(c, fmt.Sprintf("persist synchronous image task skipped: %v", captureErr))
-					return
-				}
-				if _, taskErr := persistSynchronousImageTask(c, relayInfo, imageRequest, result); taskErr != nil {
-					logger.LogWarn(c, fmt.Sprintf("persist synchronous image task failed: %v", taskErr))
-				}
-			}()
 		}
 	}
 
@@ -456,7 +438,7 @@ func RelayTaskPluginEndpoint(c *gin.Context, fallback gin.HandlerFunc) {
 	case "openai_responses":
 		serveTaskPluginProtocol(c, pinned, defaultPluginProtocolBridgeDeps())
 	case pluginruntime.ProtocolOpenAIImage:
-		serveTaskPluginImageProtocol(c, pinned, defaultPluginProtocolBridgeDeps())
+		serveTaskPluginImageTask(c, pinned, defaultPluginProtocolBridgeDeps())
 	default:
 		fallback(c)
 	}

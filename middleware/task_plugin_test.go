@@ -859,7 +859,8 @@ func TestPrepareTaskPluginEndpointAcceptsRegisteredVideoMultipartBody(t *testing
 
 // The OpenAI Images edits endpoint accepts multipart uploads. Every file of a
 // repeated image[] field is exposed to the decoder with its own ref, and an
-// unclaimed model on the shared endpoint still reaches the ordinary relay.
+// unclaimed model on the shared endpoint still reaches the ordinary relay. The
+// drawing page's /pg image routes reach the same plugins as the public ones.
 func TestPrepareTaskPluginEndpointExposesIndexedRefsForRepeatedImageFiles(t *testing.T) {
 	const key = "endpoint-image-edits-test"
 	_, err := jsplugin.DefaultRegistry.Register(taskProtocolPluginSource(
@@ -885,26 +886,30 @@ func TestPrepareTaskPluginEndpointExposesIndexedRefsForRepeatedImageFiles(t *tes
 	}
 	require.NoError(t, writer.Close())
 
-	router := gin.New()
-	var pinnedProtocol string
-	var taskRequest any
-	router.POST("/v1/images/edits", PinTaskPluginEndpoint(), PrepareTaskPluginEndpoint(), func(c *gin.Context) {
-		if pinned, ok := c.MustGet(jsplugin.ContextKeyPinnedEndpoint).(jsplugin.PinnedEndpoint); ok {
-			pinnedProtocol = pinned.Protocol
-		}
-		taskRequest, _ = c.Get("task_request")
-		c.Status(http.StatusNoContent)
-	})
-	request := httptest.NewRequest(http.MethodPost, "/v1/images/edits", bytes.NewReader(body.Bytes()))
-	request.Header.Set("Content-Type", writer.FormDataContentType())
-	recorder := httptest.NewRecorder()
-	router.ServeHTTP(recorder, request)
+	for _, path := range []string{"/v1/images/edits", "/pg/images/edits"} {
+		t.Run(path, func(t *testing.T) {
+			router := gin.New()
+			var pinnedProtocol string
+			var taskRequest any
+			router.POST(path, PinTaskPluginEndpoint(), PrepareTaskPluginEndpoint(), func(c *gin.Context) {
+				if pinned, ok := c.MustGet(jsplugin.ContextKeyPinnedEndpoint).(jsplugin.PinnedEndpoint); ok {
+					pinnedProtocol = pinned.Protocol
+				}
+				taskRequest, _ = c.Get("task_request")
+				c.Status(http.StatusNoContent)
+			})
+			request := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(body.Bytes()))
+			request.Header.Set("Content-Type", writer.FormDataContentType())
+			recorder := httptest.NewRecorder()
+			router.ServeHTTP(recorder, request)
 
-	require.Equal(t, http.StatusNoContent, recorder.Code, recorder.Body.String())
-	assert.Equal(t, jsplugin.ProtocolOpenAIImage, pinnedProtocol)
-	decoded, ok := taskRequest.(map[string]any)
-	require.True(t, ok)
-	assert.Equal(t, []any{"request_file:image[]", "request_file:image[]#1"}, decoded["refs"])
+			require.Equal(t, http.StatusNoContent, recorder.Code, recorder.Body.String())
+			assert.Equal(t, jsplugin.ProtocolOpenAIImage, pinnedProtocol)
+			decoded, ok := taskRequest.(map[string]any)
+			require.True(t, ok)
+			assert.Equal(t, []any{"request_file:image[]", "request_file:image[]#1"}, decoded["refs"])
+		})
+	}
 
 	unclaimed := gin.New()
 	reachedRelay := false
@@ -915,7 +920,7 @@ func TestPrepareTaskPluginEndpointExposesIndexedRefsForRepeatedImageFiles(t *tes
 	})
 	plain := httptest.NewRequest(http.MethodPost, "/v1/images/generations", strings.NewReader(`{"model":"dall-e-3","prompt":"a cat"}`))
 	plain.Header.Set("Content-Type", "application/json")
-	recorder = httptest.NewRecorder()
+	recorder := httptest.NewRecorder()
 	unclaimed.ServeHTTP(recorder, plain)
 	assert.Equal(t, http.StatusNoContent, recorder.Code)
 	assert.True(t, reachedRelay, "an unclaimed image model keeps the built-in relay")

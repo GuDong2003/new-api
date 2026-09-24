@@ -19,6 +19,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	taskdto "github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
@@ -533,47 +534,75 @@ func TestAsyncImageResult(t *testing.T) {
 	})
 }
 
-func TestFinishAsyncImageTaskPersistsBillingQuota(t *testing.T) {
-	previousDB := model.DB
-	database, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	require.NoError(t, err)
-	connection, err := database.DB()
-	require.NoError(t, err)
-	connection.SetMaxOpenConns(1)
-	t.Cleanup(func() {
-		model.DB = previousDB
-		require.NoError(t, connection.Close())
-	})
-	model.DB = database
-	require.NoError(t, database.AutoMigrate(&model.Task{}))
+// The async image task records the charge of the work it presents. When a task
+// plugin generated the images, the image task adopts the plugin task so task
+// lists show one record per request. A plugin success the image task could not
+// present stays visible instead, and the failed image task shows no charge, so
+// the charge appears exactly once.
+func TestFinishAsyncImageTaskRecordsChargeOnce(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		pluginTask  *pluginImageTaskRef
+		quota       int
+		status      int
+		wantStatus  model.TaskStatus
+		wantQuota   int
+		wantAdopted bool
+	}{
+		{name: "relayed image keeps its billed quota", quota: 5_000_000, status: http.StatusOK, wantStatus: model.TaskStatusSuccess, wantQuota: 5_000_000},
+		{name: "plugin image adopts its plugin task", pluginTask: &pluginImageTaskRef{TaskID: "task_plugin", Success: true}, quota: 5_000_000, status: http.StatusOK, wantStatus: model.TaskStatusSuccess, wantQuota: 5_000_000, wantAdopted: true},
+		{name: "plugin success left unpresented stays visible", pluginTask: &pluginImageTaskRef{TaskID: "task_plugin", Success: true}, quota: 5_000_000, status: http.StatusInternalServerError, wantStatus: model.TaskStatusFailure},
+		{name: "plugin failure is adopted by the failed image task", pluginTask: &pluginImageTaskRef{TaskID: "task_plugin"}, status: http.StatusBadRequest, wantStatus: model.TaskStatusFailure, wantAdopted: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			previousDB := model.DB
+			database, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+			require.NoError(t, err)
+			connection, err := database.DB()
+			require.NoError(t, err)
+			connection.SetMaxOpenConns(1)
+			t.Cleanup(func() {
+				model.DB = previousDB
+				require.NoError(t, connection.Close())
+			})
+			model.DB = database
+			require.NoError(t, database.AutoMigrate(&model.Task{}))
 
-	task := &model.Task{
-		TaskID:     "task_billed",
-		Platform:   constant.TaskPlatformImage,
-		Status:     model.TaskStatusInProgress,
-		Progress:   "0%",
-		SubmitTime: 1700000000,
-	}
-	require.NoError(t, task.Insert())
-	run := &asyncImageRun{
-		keys: map[string]any{
-			string(constant.ContextKeyAsyncImageQuota): 5_000_000,
-		},
-	}
-	recorder := &asyncImageResponseRecorder{
-		header: make(http.Header),
-		limit:  imageResultBudget(nil),
-	}
-	recorder.WriteHeader(http.StatusOK)
-	_, err = recorder.Write([]byte(`{"created":1,"data":[{"url":"https://cdn.example/image.png"}]}`))
-	require.NoError(t, err)
+			task := &model.Task{
+				TaskID:     "task_billed",
+				Platform:   constant.TaskPlatformImage,
+				Status:     model.TaskStatusInProgress,
+				Progress:   "0%",
+				SubmitTime: 1700000000,
+			}
+			require.NoError(t, task.Insert())
+			require.NoError(t, (&model.Task{TaskID: "task_plugin", Platform: "image-bridge", Status: model.TaskStatusSuccess, Quota: tc.quota}).Insert())
+			run := &asyncImageRun{
+				keys:       map[string]any{string(constant.ContextKeyAsyncImageQuota): tc.quota},
+				pluginTask: tc.pluginTask,
+			}
+			recorder := &asyncImageResponseRecorder{
+				header: make(http.Header),
+				limit:  imageResultBudget(nil),
+			}
+			recorder.WriteHeader(tc.status)
+			_, err = recorder.Write([]byte(`{"created":1,"data":[{"url":"https://cdn.example/image.png"}]}`))
+			require.NoError(t, err)
 
-	finishAsyncImageTask(context.Background(), task, run, recorder)
+			finishAsyncImageTask(context.Background(), task, run, recorder)
 
-	var stored model.Task
-	require.NoError(t, database.Where("task_id = ?", task.TaskID).First(&stored).Error)
-	assert.Equal(t, model.TaskStatus(model.TaskStatusSuccess), stored.Status)
-	assert.Equal(t, 5_000_000, stored.Quota)
+			var stored, plugin model.Task
+			require.NoError(t, database.Where("task_id = ?", task.TaskID).First(&stored).Error)
+			assert.Equal(t, tc.wantStatus, stored.Status)
+			assert.Equal(t, tc.wantQuota, stored.Quota)
+			require.NoError(t, database.Where("task_id = ?", "task_plugin").First(&plugin).Error)
+			if tc.wantAdopted {
+				assert.Equal(t, task.TaskID, plugin.ParentTaskID)
+			} else {
+				assert.Empty(t, plugin.ParentTaskID)
+			}
+		})
+	}
 }
 
 func TestFinishAsyncImageTaskPersistsGalleryArtifactsWithoutBase64TaskData(t *testing.T) {
@@ -632,59 +661,162 @@ func TestFinishAsyncImageTaskPersistsGalleryArtifactsWithoutBase64TaskData(t *te
 }
 
 func TestPersistSynchronousImageTaskCreatesGalleryArtifacts(t *testing.T) {
-	previousDB := model.DB
-	previousSecret := common.CryptoSecret
-	previousServerAddress := system_setting.ServerAddress
-	database, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	require.NoError(t, err)
-	connection, err := database.DB()
-	require.NoError(t, err)
-	connection.SetMaxOpenConns(1)
-	t.Setenv("GALLERY_STORAGE_DIR", t.TempDir())
-	t.Cleanup(func() {
-		model.DB = previousDB
-		common.CryptoSecret = previousSecret
-		system_setting.ServerAddress = previousServerAddress
-		require.NoError(t, connection.Close())
-	})
-	model.DB = database
-	common.CryptoSecret = "sync-image-task-test-secret"
-	system_setting.ServerAddress = "https://gateway.example"
-	require.NoError(t, database.AutoMigrate(&model.Task{}))
-	require.NoError(t, model.MigrateGallery(database))
+	for _, tc := range []struct {
+		name       string
+		clientGone bool
+	}{
+		{name: "client still connected"},
+		// A client usually closes the connection as soon as it has its images;
+		// the record of work it was charged for must survive that.
+		{name: "client already disconnected", clientGone: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			previousDB := model.DB
+			previousSecret := common.CryptoSecret
+			previousServerAddress := system_setting.ServerAddress
+			database, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+			require.NoError(t, err)
+			connection, err := database.DB()
+			require.NoError(t, err)
+			connection.SetMaxOpenConns(1)
+			t.Setenv("GALLERY_STORAGE_DIR", t.TempDir())
+			t.Cleanup(func() {
+				model.DB = previousDB
+				common.CryptoSecret = previousSecret
+				system_setting.ServerAddress = previousServerAddress
+				require.NoError(t, connection.Close())
+			})
+			model.DB = database
+			common.CryptoSecret = "sync-image-task-test-secret"
+			system_setting.ServerAddress = "https://gateway.example"
+			require.NoError(t, database.AutoMigrate(&model.Task{}))
+			require.NoError(t, model.MigrateGallery(database))
 
-	c, _ := gin.CreateTestContext(httptest.NewRecorder())
-	c.Request = httptest.NewRequest(http.MethodPost, "/pg/images/generations", nil)
-	c.Set("id", 7)
-	c.Set("group", "default")
-	common.SetContextKey(c, constant.ContextKeyAsyncImageQuota, 12345)
-	info := &relaycommon.RelayInfo{
-		UserId:          7,
-		UsingGroup:      "default",
-		OriginModelName: "gpt-image-1",
-		RelayMode:       relayconstant.RelayModeImagesGenerations,
-		ChannelMeta:     &relaycommon.ChannelMeta{ChannelId: 73},
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			requestContext, cancel := context.WithCancel(context.Background())
+			t.Cleanup(cancel)
+			if tc.clientGone {
+				cancel()
+			}
+			c.Request = httptest.NewRequest(http.MethodPost, "/pg/images/generations", nil).WithContext(requestContext)
+			c.Set("id", 7)
+			c.Set("group", "default")
+			common.SetContextKey(c, constant.ContextKeyAsyncImageQuota, 12345)
+			info := &relaycommon.RelayInfo{
+				UserId:          7,
+				UsingGroup:      "default",
+				OriginModelName: "gpt-image-1",
+				RelayMode:       relayconstant.RelayModeImagesGenerations,
+				ChannelMeta:     &relaycommon.ChannelMeta{ChannelId: 73},
+			}
+			request := &dto.ImageRequest{Prompt: "a white fox"}
+			var picture bytes.Buffer
+			require.NoError(t, png.Encode(&picture, image.NewRGBA(image.Rect(0, 0, 8, 4))))
+			result := json.RawMessage(`{"created":1,"data":[{"url":"","b64_json":"` + base64.StdEncoding.EncodeToString(picture.Bytes()) + `"}]}`)
+
+			task, err := persistSynchronousImageTask(c, info, request, result)
+			require.NoError(t, err)
+			require.NotNil(t, task)
+			assert.Equal(t, model.TaskStatus(model.TaskStatusSuccess), task.Status)
+			assert.Equal(t, 12345, task.Quota)
+			assert.NotEmpty(t, task.PrivateData.GalleryImageIDs["image-0"])
+			assert.NotContains(t, string(task.Data), "b64_json")
+			var stored model.Task
+			require.NoError(t, database.Where("task_id = ?", task.TaskID).First(&stored).Error)
+			assert.Equal(t, task.PrivateData.GalleryImageIDs, stored.PrivateData.GalleryImageIDs)
+		})
 	}
-	request := &dto.ImageRequest{Prompt: "a white fox"}
-	var picture bytes.Buffer
-	require.NoError(t, png.Encode(&picture, image.NewRGBA(image.Rect(0, 0, 8, 4))))
-	result := json.RawMessage(`{"created":1,"data":[{"url":"","b64_json":"` + base64.StdEncoding.EncodeToString(picture.Bytes()) + `"}]}`)
+}
 
-	task, err := persistSynchronousImageTask(c, info, request, result)
-	require.NoError(t, err)
-	require.NotNil(t, task)
-	assert.Equal(t, model.TaskStatus(model.TaskStatusSuccess), task.Status)
-	assert.Equal(t, 12345, task.Quota)
-	assert.NotEmpty(t, task.PrivateData.GalleryImageIDs["image-0"])
-	assert.NotContains(t, string(task.Data), "b64_json")
+// An image a task plugin generated for the drawing page is recorded like any
+// other drawing image: one task in the task lists, carrying the charge the
+// plugin settled, with the images copied to the gallery. The plugin task behind
+// it stays reachable by its ID, which its consume log shows. A failure the
+// image task never presents leaves the plugin task as the only record.
+func TestServeTaskPluginImageTaskKeepsOneTaskPerRequest(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		status     model.TaskStatus
+		wantStatus int
+	}{
+		{"success", model.TaskStatusSuccess, http.StatusOK},
+		{"failure", model.TaskStatusFailure, http.StatusBadRequest},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			database, dialect := openTaskDialectDatabase(t, &model.Task{}, &model.GallerySettings{}, &model.GalleryImage{}, &model.GalleryCanvas{}, &model.GalleryRemoval{})
+			previousDB, previousMain, previousLog := model.DB, common.MainDatabaseType(), common.LogDatabaseType()
+			previousSecret, previousServerAddress := common.CryptoSecret, system_setting.ServerAddress
+			t.Cleanup(func() {
+				model.DB = previousDB
+				common.SetDatabaseTypes(previousMain, previousLog)
+				common.CryptoSecret, system_setting.ServerAddress = previousSecret, previousServerAddress
+			})
+			model.DB = database
+			common.SetDatabaseTypes(dialect, dialect)
+			common.CryptoSecret = "plugin-image-task-test-secret"
+			system_setting.ServerAddress = "https://gateway.example"
+			t.Setenv("GALLERY_STORAGE_DIR", t.TempDir())
+			require.NoError(t, model.MigrateGallery(database))
+
+			pinned := imageProtocolTestEndpoint(t)
+			c, recorder := newImageProtocolTestContext("b64_json")
+			c.Request = httptest.NewRequest(http.MethodPost, "/pg/images/generations", strings.NewReader(`{}`))
+			c.Set("task_request", map[string]any{"model": "image-model", "prompt": "a cat", "n": int64(2)})
+			c.Set("channel_id", 3)
+			var picture bytes.Buffer
+			require.NoError(t, png.Encode(&picture, image.NewRGBA(image.Rect(0, 0, 8, 4))))
+			deps := pluginProtocolTestDeps()
+			deps.downloadImage = func(string) (string, string, error) {
+				return "image/png", base64.StdEncoding.EncodeToString(picture.Bytes()), nil
+			}
+			deps.submit = func(c *gin.Context, info *relaycommon.RelayInfo) (*taskSubmissionOutcome, *taskdto.TaskError) {
+				// The submission retried on another channel before it settled.
+				c.Set("channel_id", 5)
+				outcome := imageProtocolTestOutcome(info, tc.status, "https://cdn.example/1.png", "https://cdn.example/2.png")
+				outcome.Task.ChannelId = 5
+				outcome.Task.Quota = 4321
+				require.NoError(t, outcome.Task.Insert())
+				return outcome, nil
+			}
+
+			serveTaskPluginImageTask(c, pinned, deps)
+			require.Equal(t, tc.wantStatus, recorder.Code, recorder.Body.String())
+
+			userTasks := model.TaskGetAllUserTask(71, 0, 10, model.SyncTaskQueryParams{})
+			allTasks := model.TaskGetAllTasks(0, 10, model.SyncTaskQueryParams{})
+			require.Len(t, userTasks, 1)
+			require.Len(t, allTasks, 1)
+			assert.EqualValues(t, 1, model.TaskCountAllUserTask(71, model.SyncTaskQueryParams{}))
+			assert.EqualValues(t, 1, model.TaskCountAllTasks(model.SyncTaskQueryParams{}))
+			byID := model.SyncTaskQueryParams{TaskID: "task_image"}
+			assert.Len(t, model.TaskGetAllUserTask(71, 0, 10, byID), 1)
+			assert.Len(t, model.TaskGetAllTasks(0, 10, byID), 1)
+			assert.EqualValues(t, 1, model.TaskCountAllUserTask(71, byID))
+			assert.EqualValues(t, 1, model.TaskCountAllTasks(byID))
+			if tc.status == model.TaskStatusFailure {
+				assert.Equal(t, "task_image", userTasks[0].TaskID)
+				return
+			}
+			record := allTasks[0]
+			assert.Equal(t, constant.TaskPlatformImage, record.Platform)
+			assert.Equal(t, model.TaskStatus(model.TaskStatusSuccess), record.Status)
+			assert.Equal(t, 4321, record.Quota)
+			assert.Equal(t, 5, record.ChannelId)
+			assert.Equal(t, "a cat", record.Properties.Input)
+			assert.Equal(t, "drawing", record.PrivateData.GallerySource)
+			assert.Len(t, record.PrivateData.GalleryImageIDs, 2)
+		})
+	}
 }
 
 func TestImageTaskGallerySourceSeparatesAPIAndCanvasGeneration(t *testing.T) {
-	request := &dto.ImageRequest{Model: "gpt-image-1"}
-	assert.Equal(t, "api", imageTaskGallerySource(&relaycommon.RelayInfo{}, request))
-	assert.Equal(t, "drawing", imageTaskGallerySource(&relaycommon.RelayInfo{IsPlayground: true}, request))
-	request.Model = "nai-diffusion-4-full"
-	assert.Equal(t, "nai", imageTaskGallerySource(&relaycommon.RelayInfo{IsPlayground: true}, request))
+	// The drawing page generates with every model family, NovelAI included, so
+	// the source follows where the request came from, not which model served it.
+	for _, modelName := range []string{"gpt-image-1", "nai-diffusion-4-full", "qwen-image"} {
+		request := &dto.ImageRequest{Model: modelName}
+		assert.Equal(t, "api", imageTaskGallerySource(&relaycommon.RelayInfo{}, request), modelName)
+		assert.Equal(t, "drawing", imageTaskGallerySource(&relaycommon.RelayInfo{IsPlayground: true}, request), modelName)
+	}
 }
 
 func TestBuildImageTaskPayload(t *testing.T) {
