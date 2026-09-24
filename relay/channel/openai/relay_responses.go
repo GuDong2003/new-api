@@ -88,36 +88,26 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 		}
 		sendResponsesStreamData(c, streamResponse, data)
 		switch streamResponse.Type {
-		case "response.completed", "response.done":
-			if streamResponse.Response != nil {
-				if streamResponse.Response.Usage != nil {
-					incomingUsage := relayconvert.NormalizeResponsesUsage(streamResponse.Response.Usage)
-					usage = dto.MergeUsageNonZero(usage, incomingUsage)
-				}
-				if !imageCommitted {
-					if relaycommon.IsNonBillableResponsesStatus(streamResponse.Response.Status) {
-						imageCounter.Reset()
-						imageCounter.Commit(info)
-						imageCommitted = true
-					} else {
-						for i := range streamResponse.Response.Output {
-							idx := i
-							imageCounter.Observe(&streamResponse.Response.Output[i], &idx)
-						}
-						imageCounter.Commit(info)
-						imageCommitted = true
-					}
-				}
-			} else if !imageCommitted {
-				imageCounter.Commit(info)
-				imageCommitted = true
+		case "response.completed", "response.done", "response.failed", "response.incomplete", "response.cancelled", "response.canceled":
+			// Failed, incomplete and cancelled terminals carry the usage upstream
+			// bills just like completed ones.
+			if streamResponse.Response != nil && streamResponse.Response.Usage != nil {
+				incomingUsage := relayconvert.NormalizeResponsesUsage(streamResponse.Response.Usage)
+				usage = dto.MergeUsageNonZero(usage, incomingUsage)
 			}
-		case "response.failed", "response.incomplete", "response.cancelled", "response.canceled":
-			if !imageCommitted {
+			if imageCommitted {
+				return
+			}
+			completed := streamResponse.Type == "response.completed" || streamResponse.Type == "response.done"
+			if !completed || (streamResponse.Response != nil && relaycommon.IsNonBillableResponsesStatus(streamResponse.Response.Status)) {
 				imageCounter.Reset()
-				imageCounter.Commit(info)
-				imageCommitted = true
+			} else if streamResponse.Response != nil {
+				for i := range streamResponse.Response.Output {
+					imageCounter.Observe(&streamResponse.Response.Output[i], &i)
+				}
 			}
+			imageCounter.Commit(info)
+			imageCommitted = true
 		case "response.output_text.delta":
 			// 处理输出文本
 			responseTextBuilder.WriteString(streamResponse.Delta)

@@ -194,7 +194,9 @@ func TestOaiResponsesHandlerIncompleteStatusCommitsZeroImageGeneration(t *testin
 	assert.Equal(t, 0, info.ResponsesUsageInfo.BuiltInTools[dto.BuildInToolImageGeneration].CallCount)
 }
 
-func runResponsesImageBillingStream(t *testing.T, events ...string) *relaycommon.RelayInfo {
+// runResponsesStream feeds SSE events through OaiResponsesStreamHandler and
+// returns the usage the stream settles with.
+func runResponsesStream(t *testing.T, info *relaycommon.RelayInfo, events ...string) *dto.Usage {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	oldTimeout := constant.StreamingTimeout
@@ -214,22 +216,29 @@ func runResponsesImageBillingStream(t *testing.T, events ...string) *relaycommon
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
-	c.Set(common.RequestIdKey, "responses-image-billing-test")
-	info := &relaycommon.RelayInfo{
-		OriginModelName: "gpt-5.1",
-		DisablePing:     true,
-		ChannelMeta: &relaycommon.ChannelMeta{
-			UpstreamModelName: "gpt-5.1",
-		},
-	}
+	c.Set(common.RequestIdKey, "responses-billing-test")
+	info.DisablePing = true
 	resp := &http.Response{
 		StatusCode: http.StatusOK,
 		Body:       io.NopCloser(strings.NewReader(body.String())),
 		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
 	}
 
-	_, apiErr := OaiResponsesStreamHandler(c, info, resp)
+	usage, apiErr := OaiResponsesStreamHandler(c, info, resp)
 	require.Nil(t, apiErr)
+	require.NotNil(t, usage)
+	return usage
+}
+
+func runResponsesImageBillingStream(t *testing.T, events ...string) *relaycommon.RelayInfo {
+	t.Helper()
+	info := &relaycommon.RelayInfo{
+		OriginModelName: "gpt-5.1",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			UpstreamModelName: "gpt-5.1",
+		},
+	}
+	runResponsesStream(t, info, events...)
 	require.NotNil(t, info.ResponsesUsageInfo)
 	require.Contains(t, info.ResponsesUsageInfo.BuiltInTools, dto.BuildInToolImageGeneration)
 	return info
@@ -264,4 +273,23 @@ func TestOaiResponsesStreamHandlerDoesNotCountPartialImageEvent(t *testing.T) {
 	)
 
 	assert.Equal(t, 0, info.ResponsesUsageInfo.BuiltInTools[dto.BuildInToolImageGeneration].CallCount)
+}
+
+func TestOaiResponsesStreamHandlerBillsUsageReportedOnEveryTerminalEvent(t *testing.T) {
+	for _, eventType := range []string{"response.completed", "response.done", "response.incomplete", "response.failed", "response.cancelled", "response.canceled"} {
+		t.Run(eventType, func(t *testing.T) {
+			info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "gpt-4o"}}
+			info.SetEstimatePromptTokens(100)
+			usage := runResponsesStream(t, info,
+				`{"type":"response.output_text.delta","delta":"partial output"}`,
+				`{"type":"`+eventType+`","response":{"usage":{"input_tokens":20,"output_tokens":5,"total_tokens":25,"input_tokens_details":{"cached_tokens":4}}}}`,
+			)
+
+			// The reported usage wins over the streamed-text and prompt estimates.
+			assert.Equal(t, 20, usage.PromptTokens)
+			assert.Equal(t, 5, usage.CompletionTokens)
+			assert.Equal(t, 25, usage.TotalTokens)
+			assert.Equal(t, 4, usage.PromptTokensDetails.CachedTokens)
+		})
+	}
 }
