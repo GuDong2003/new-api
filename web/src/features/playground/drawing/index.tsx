@@ -18,13 +18,21 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { ReactFlowProvider } from '@xyflow/react'
 import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
 
 import { ErrorState } from '@/components/error-state'
+import { Button } from '@/components/ui/button'
 import { useCanvasRoute } from '@/features/gallery/hooks/use-canvas-route'
+import { useGalleryIdentity } from '@/features/gallery/hooks/use-gallery-identity'
+import {
+  exportStoredCanvas,
+  LEGACY_NAI_CANVAS_UNCONVERTIBLE,
+} from '@/features/gallery/lib/canvas-projects'
 import { useAuthStore } from '@/stores/auth-store'
 
 import { CanvasLoadingState } from './components/CanvasLoadingState'
 import { DrawingWorkspace } from './components/DrawingWorkspace'
+import { downloadBlob } from './lib/image-assets'
 
 export function Drawing(
   props: { canvasId?: string; focusAssetId?: string } = {}
@@ -44,11 +52,37 @@ function DrawingEntry(props: {
   focusAssetId?: string
 }) {
   const { t } = useTranslation()
+  const identity = useGalleryIdentity()
   const route = useCanvasRoute('drawing', props.canvasId, props.focusAssetId)
+  const canvasId = props.canvasId
+  // A NAI canvas that cannot be converted stays as it was; it can still be
+  // saved to a file.
+  const exportOriginal =
+    route.error === LEGACY_NAI_CANVAS_UNCONVERTIBLE && canvasId ? (
+      <Button
+        size='sm'
+        onClick={async () => {
+          try {
+            downloadBlob(
+              await exportStoredCanvas(identity, canvasId),
+              `new-api-nai-canvas-${canvasId}.json`
+            )
+          } catch {
+            toast.error(t('The canvas could not be exported.'))
+          }
+        }}
+      >
+        {t('Export original')}
+      </Button>
+    ) : undefined
   return (
     <>
       {route.error ? (
-        <ErrorState description={t(route.error)} onRetry={route.retry} />
+        <ErrorState
+          description={t(route.error)}
+          onRetry={route.retry}
+          action={exportOriginal}
+        />
       ) : null}
       {route.loading ? (
         <CanvasLoadingState progress={route.progress} />

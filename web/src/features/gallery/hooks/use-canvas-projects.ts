@@ -127,6 +127,11 @@ export function useCanvasProjects(kind: CanvasKind) {
     }
   }, [userId, sessionId, version])
   const identity: GalleryIdentity = { userId, sessionId }
+  // NAI canvases open in the drawing editor, which upgrades them.
+  const listed = projects.filter(
+    (canvas) =>
+      canvas.kind === kind || (kind === 'drawing' && canvas.kind === 'nai')
+  )
   const binding = canvasEditors.get(kind)
   const state =
     !binding || sameIdentity(binding.identity, identity)
@@ -140,7 +145,7 @@ export function useCanvasProjects(kind: CanvasKind) {
     identity,
     loading,
     version,
-    projects: projects.filter((canvas) => canvas.kind === kind),
+    projects: listed,
     current,
     localStatus: state?.localStatus ?? 'loading',
     localError: state?.error,
@@ -149,11 +154,8 @@ export function useCanvasProjects(kind: CanvasKind) {
       userState?.cloudPause &&
       (state
         ? state.localStatus === 'saved'
-        : projects.some(
-            (canvas) =>
-              canvas.kind === kind &&
-              canvas.revision > 0 &&
-              canvas.localSavedAt > 0
+        : listed.some(
+            (canvas) => canvas.revision > 0 && canvas.localSavedAt > 0
           ))
         ? CANVAS_FULL_MESSAGE
         : null,

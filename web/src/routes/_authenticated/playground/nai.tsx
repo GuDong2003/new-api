@@ -18,6 +18,6 @@ import { createFileRoute, redirect } from '@tanstack/react-router'
 
 export const Route = createFileRoute('/_authenticated/playground/nai')({
   beforeLoad: () => {
-    throw redirect({ to: '/canvas/nai', replace: true })
+    throw redirect({ to: '/canvas/drawing', replace: true })
   },
 })

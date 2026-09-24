@@ -16,7 +16,11 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 */
 import { describe, expect, it } from 'vitest'
 
-import { filterImageModels, getImageModelFamily } from '../image-models'
+import {
+  filterImageModels,
+  getAlibabaImageModel,
+  getImageModelFamily,
+} from '../image-models'
 
 describe('drawing image model classification', () => {
   it.each([
@@ -41,14 +45,33 @@ describe('drawing image model classification', () => {
     ['recraft-v3', 'recraft'],
     ['kolors', 'kolors'],
     ['janus-pro', 'janus'],
+    ['nai-diffusion-4-5-full', 'novelai'],
+    ['qwen-image', 'alibaba'],
+    ['qwen-image-2.0-pro-2026-03-03', 'alibaba'],
+    ['wan2.6-t2i', 'alibaba'],
+    ['wan2.1-imageedit', 'alibaba'],
+    ['z-image-turbo', 'alibaba'],
   ])('recognizes %s as a %s model', (model, family) => {
     expect(getImageModelFamily(model)).toBe(family)
   })
 
-  it('does not treat NAI or text models as generic drawing models', () => {
-    expect(getImageModelFamily('nai-diffusion-4-5-full')).toBeNull()
+  it('does not treat text or video models as drawing models', () => {
     expect(getImageModelFamily('gpt-5.6')).toBeNull()
     expect(getImageModelFamily('grok-imagine-video')).toBeNull()
+    expect(getImageModelFamily('nai-diffusion-9')).toBeNull()
+    expect(getImageModelFamily('qwen-max')).toBeNull()
+    expect(getImageModelFamily('wan2.6-t2v')).toBeNull()
+  })
+
+  it('reads a dated Alibaba snapshot with the limits of its model', () => {
+    expect(getAlibabaImageModel('qwen-image-edit-plus-2025-12-15')).toEqual(
+      getAlibabaImageModel('qwen-image-edit-plus')
+    )
+    expect(getAlibabaImageModel('qwen-image-edit-plus')).toMatchObject({
+      maxImages: 6,
+      minReferences: 1,
+      sizes: [],
+    })
   })
 
   it('does not mistake Gemini text or embedding models for image models', () => {
@@ -66,7 +89,7 @@ describe('drawing image model classification', () => {
     }
   })
 
-  it('filters the drawing selector to supported image model families', () => {
+  it('lists description models and tag models under their own mode', () => {
     const models = [
       { label: 'gpt-5.6', value: 'gpt-5.6' },
       { label: 'gpt-image-1', value: 'gpt-image-1' },
@@ -79,9 +102,14 @@ describe('drawing image model classification', () => {
       { label: 'Kolors', value: 'kolors' },
       { label: 'Janus', value: 'janus-pro' },
       { label: 'NAI', value: 'nai-diffusion-4-5-full' },
+      { label: 'Qwen Image', value: 'qwen-image' },
+      { label: 'Wan', value: 'wan2.6-t2i' },
+      { label: 'Z-Image', value: 'z-image-turbo' },
     ]
 
-    expect(filterImageModels(models).map((model) => model.value)).toEqual([
+    expect(
+      filterImageModels(models, 'description').map((model) => model.value)
+    ).toEqual([
       'gpt-image-1',
       'grok-imagine',
       'nano-banana',
@@ -90,6 +118,14 @@ describe('drawing image model classification', () => {
       'recraft-v3',
       'kolors',
       'janus-pro',
+    ])
+    expect(
+      filterImageModels(models, 'tags').map((model) => model.value)
+    ).toEqual([
+      'nai-diffusion-4-5-full',
+      'qwen-image',
+      'wan2.6-t2i',
+      'z-image-turbo',
     ])
   })
 })

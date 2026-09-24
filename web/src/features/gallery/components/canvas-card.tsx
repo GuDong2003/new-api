@@ -58,7 +58,8 @@ export function CanvasCard(props: {
     full: t('Local draft'),
     synced: t('Synced'),
   }[project.status ?? 'synced']
-  const type = project.kind === 'nai' ? t('NAI Canvas') : t('Drawing')
+  // A NAI canvas opens in the drawing page, which upgrades it.
+  const type = t('Drawing')
   const covers = project.coverAssetIds.slice(0, 4)
   const updated = project.updatedAt
     ? new Date(project.updatedAt * 1000).toLocaleString()

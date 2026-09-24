@@ -132,7 +132,13 @@ func SearchGalleryImages(ctx context.Context, user, page, pageSize int, source, 
 	}
 	result := &GalleryPage{Items: []model.GalleryImage{}, Page: page, PageSize: pageSize}
 	query := model.DB.WithContext(ctx).Model(&model.GalleryImage{}).Where("user_id = ? AND state = ? AND expires_at > ? AND (role IS NULL OR role = ? OR role = ?)", user, "ready", time.Now().Unix(), "", "generated")
-	if source != "" {
+	switch source {
+	case "":
+	case "drawing":
+		// The drawing page absorbed the NAI page; images the NAI page saved
+		// are drawing images now.
+		query = query.Where("source IN ?", []string{"drawing", "nai"})
+	default:
 		query = query.Where("source = ?", source)
 	}
 	if search != "" {

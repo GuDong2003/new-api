@@ -33,9 +33,8 @@ export function GalleryImageCard(props: {
   onOpenCanvas?: () => void
 }) {
   const { t } = useTranslation()
-  let sourceLabel = t('Drawing')
-  if (props.image.source === 'nai') sourceLabel = t('NAI Canvas')
-  if (props.image.source === 'api') sourceLabel = t('API')
+  // The drawing page absorbed the NAI page, so NAI images are drawing images.
+  const sourceLabel = props.image.source === 'api' ? t('API') : t('Drawing')
   // A page holds more cards than fit on screen, and each one that fetches on
   // mount spends a request on a picture nobody has scrolled to yet.
   const view = useInView<HTMLElement>()

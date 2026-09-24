@@ -28,13 +28,16 @@ import {
 } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { ReactFlowProvider } from '@xyflow/react'
-import { AxiosError } from 'axios'
+import {
+  AxiosError,
+  type AxiosResponse,
+  type InternalAxiosRequestConfig,
+} from 'axios'
 import { IDBFactory } from 'fake-indexeddb'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { useCanvasFiles } from '@/features/playground/drawing/hooks/use-canvas-files'
 import { DEFAULT_IMAGE_SETTINGS } from '@/features/playground/drawing/lib/image-settings'
-import { DEFAULT_NAI_SETTINGS } from '@/features/playground/nai/lib/nai-settings'
 import { api } from '@/lib/api'
 import { useAuthStore } from '@/stores/auth-store'
 import { useDrawingStore } from '@/stores/drawing-store'
@@ -51,7 +54,10 @@ import { flushLocalEditors, stopCanvasEditors } from '../lib/canvas-editor'
 import {
   createCanvasProject,
   exportCanvasProject,
+  exportStoredCanvas,
+  LEGACY_NAI_CANVAS_UNCONVERTIBLE,
   openCanvasProject,
+  reloadCanvasProject,
   startCanvasEditor,
 } from '../lib/canvas-projects'
 import * as canvasRepository from '../lib/canvas-repository'
@@ -61,7 +67,7 @@ import {
   updateCanvasUserState,
   updateCanvasCloudState,
 } from '../lib/canvas-repository'
-import { cancelCanvasSession } from '../lib/canvas-sync'
+import { cancelCanvasSession, syncCanvas } from '../lib/canvas-sync'
 import {
   galleryAssetFingerprint,
   writeGalleryThumbnail,
@@ -158,31 +164,46 @@ const renderGallery = (view?: 'images' | 'canvases') =>
 const assetId = '11111111-1111-4111-8111-111111111111'
 
 // A canvas that holds something without holding a picture, for the tests whose
-// subject is the listing around it rather than what is on it.
+// subject is the listing around it rather than what is on it. A `nai` canvas
+// is one the former NAI page saved.
 async function drawnCanvas(kind: CanvasKind, name: string) {
-  const canvas = await createCanvasProject(identity, kind, name)
+  const canvas = await createCanvasProject(identity, 'drawing', name)
+  const node = {
+    id: 'sketch',
+    position: { x: 0, y: 0 },
+    data: { prompt: name, status: 'error', createdAt: 1 },
+  }
   return canvasRepository.saveLocalCanvas(
     {
       ...canvas,
-      document: {
-        ...canvas.document,
-        nodes: [
-          {
-            id: 'sketch',
-            type: kind === 'drawing' ? 'image' : 'nai-image',
-            position: { x: 0, y: 0 },
-            data: {
-              prompt: name,
-              settings:
-                kind === 'drawing'
-                  ? DEFAULT_IMAGE_SETTINGS
-                  : DEFAULT_NAI_SETTINGS,
-              status: 'error',
-              createdAt: 1,
+      kind,
+      document:
+        kind === 'drawing'
+          ? {
+              ...canvas.document,
+              nodes: [
+                {
+                  ...node,
+                  type: 'image',
+                  data: { ...node.data, settings: DEFAULT_IMAGE_SETTINGS },
+                },
+              ],
+            }
+          : {
+              version: 1,
+              viewport: { x: 0, y: 0, zoom: 1 },
+              settings: { model: 'nai-diffusion-4-5-full' },
+              nodes: [
+                {
+                  ...node,
+                  type: 'nai-image',
+                  data: {
+                    ...node.data,
+                    settings: { model: 'nai-diffusion-4-5-full' },
+                  },
+                },
+              ],
             },
-          },
-        ],
-      },
     },
     []
   )
@@ -406,6 +427,218 @@ it('opens a remote canvas from thumbnails the images tab already cached', async 
   expect((await readCanvasAssets(813, canvasId))[0]?.blob.size).toBe(6)
 })
 
+// The NAI page merged into the drawing page. Its canvases open there as drawing
+// canvases prompted with tags, and are kept as drawing canvases from then on.
+it('opens a canvas the NAI page saved as a drawing canvas and keeps it one', async () => {
+  const legacy = await drawnCanvas('nai', 'NAI 画布')
+  await startCanvasEditor(identity, 'drawing')
+
+  await openCanvasProject(identity, legacy.id, undefined, 'drawing')
+
+  expect(useDrawingStore.getState().nodes[0]).toMatchObject({
+    type: 'image',
+    data: {
+      prompt: 'NAI 画布',
+      status: 'error',
+      settings: { generationMode: 'tags', model: 'nai-diffusion-4-5-full' },
+    },
+  })
+  const stored = await loadLocalCanvas(813, legacy.id)
+  expect(stored).toMatchObject({
+    kind: 'drawing',
+    revision: legacy.revision + 1,
+  })
+  expect(stored?.document.nodes).toMatchObject([{ type: 'image' }])
+})
+
+it('uploads a cloud NAI canvas as a drawing canvas after its first open', async () => {
+  const remote = remoteDrawingCanvas(useDrawingStore.getState().settings)
+  const node = (remote.document as { nodes: Record<string, unknown>[] }).nodes
+  const legacy: CanvasRecord = {
+    ...remote,
+    kind: 'nai',
+    document: {
+      version: 1,
+      viewport: { x: 0, y: 0, zoom: 1 },
+      settings: { model: 'nai-diffusion-4-5-full', negativePrompt: 'blur' },
+      nodes: [
+        {
+          ...node[0],
+          type: 'nai-image',
+          data: {
+            ...(node[0].data as Record<string, unknown>),
+            settings: {
+              model: 'nai-diffusion-4-5-full',
+              negativePrompt: 'blur',
+            },
+          },
+        },
+      ],
+    },
+  }
+  serveRemoteDrawingCanvas(legacy)
+  const serve = api.defaults.adapter as (
+    config: InternalAxiosRequestConfig
+  ) => Promise<AxiosResponse>
+  const uploads: Record<string, unknown>[] = []
+  api.defaults.adapter = async (config) => {
+    if (config.url?.endsWith('/usage')) return response(config, usage)
+    if (config.method === 'post' && config.url?.endsWith('/canvases')) {
+      const metadata = JSON.parse(
+        String((config.data as FormData).get('metadata'))
+      )
+      uploads.push(metadata)
+      return response(config, {
+        ...legacy,
+        kind: 'drawing',
+        revision: legacy.revision + 1,
+        document: metadata.document,
+      })
+    }
+    return serve(config)
+  }
+  await startCanvasEditor(identity, 'drawing')
+
+  await openCanvasProject(identity, canvasId, undefined, 'drawing')
+
+  expect(useDrawingStore.getState().nodes[0]?.data.settings).toMatchObject({
+    generationMode: 'tags',
+    negativePrompt: 'blur',
+  })
+  expect(await loadLocalCanvas(813, canvasId)).toMatchObject({
+    kind: 'drawing',
+    status: 'pending',
+    cloudRevision: legacy.revision,
+  })
+  await syncCanvas(identity, canvasId, 'manual')
+  expect(uploads).toMatchObject([
+    { kind: 'drawing', base_revision: legacy.revision },
+  ])
+})
+
+it('reloads the cloud copy of a NAI canvas over its upgraded local copy', async () => {
+  const remote = remoteDrawingCanvas(useDrawingStore.getState().settings)
+  const [node] = (remote.document as { nodes: Record<string, unknown>[] }).nodes
+  const legacy = (prompt: string): CanvasRecord => ({
+    ...remote,
+    kind: 'nai',
+    document: {
+      version: 1,
+      viewport: { x: 0, y: 0, zoom: 1 },
+      settings: { model: 'nai-diffusion-4-5-full' },
+      nodes: [
+        {
+          ...node,
+          type: 'nai-image',
+          data: {
+            ...(node.data as Record<string, unknown>),
+            prompt,
+            settings: { model: 'nai-diffusion-4-5-full' },
+          },
+        },
+      ],
+    },
+  })
+  serveRemoteDrawingCanvas(legacy('本地打开时'))
+  await startCanvasEditor(identity, 'drawing')
+  await openCanvasProject(identity, canvasId, undefined, 'drawing')
+  await updateCanvasCloudState(813, canvasId, (current) => ({
+    ...current,
+    status: 'conflict',
+  }))
+  serveRemoteDrawingCanvas(legacy('云端版本'))
+
+  await reloadCanvasProject(identity, canvasId)
+
+  expect(useDrawingStore.getState().nodes[0]?.data.prompt).toBe('云端版本')
+  expect((await loadLocalCanvas(813, canvasId))?.kind).toBe('drawing')
+})
+
+it('leaves a NAI canvas it cannot convert untouched and exports it as stored', async () => {
+  const original = Uint8Array.from(atob('YWJj'), (char) => char.charCodeAt(0))
+  const digest = await crypto.subtle.digest('SHA-256', original)
+  const sha256 = Array.from(new Uint8Array(digest), (byte) =>
+    byte.toString(16).padStart(2, '0')
+  ).join('')
+  const legacy = await drawnCanvas('nai', 'NAI 画布')
+  const withImage = await canvasRepository.saveLocalCanvas(
+    {
+      ...legacy,
+      document: {
+        ...legacy.document,
+        nodes: [
+          {
+            id: 'sketch',
+            type: 'nai-image',
+            position: { x: 0, y: 0 },
+            data: {
+              prompt: 'NAI 画布',
+              settings: { model: 'nai-diffusion-4-5-full' },
+              status: 'complete',
+              createdAt: 1,
+              asset: {
+                id: assetId,
+                name: 'nai.png',
+                width: 1,
+                height: 1,
+                mimeType: 'image/png',
+              },
+            },
+          },
+        ],
+      },
+    },
+    [
+      {
+        id: assetId,
+        blob: new Blob([original], { type: 'image/png' }),
+        role: 'generated',
+        nodeId: 'sketch',
+        sha256,
+      },
+    ]
+  )
+  // A record this build can no longer read, as damaged browser storage leaves.
+  const damaged = {
+    ...withImage,
+    document: {
+      ...withImage.document,
+      nodes: (withImage.document.nodes as Record<string, unknown>[]).map(
+        (node) => ({ ...node, type: 'unknown-node' })
+      ),
+    },
+  }
+  const database = await new Promise<IDBDatabase>((resolve, reject) => {
+    const opening = indexedDB.open('new-api-gallery-canvases', 1)
+    opening.addEventListener('success', () => resolve(opening.result))
+    opening.addEventListener('error', () => reject(opening.error))
+  })
+  await new Promise<void>((resolve, reject) => {
+    const tx = database.transaction('canvases', 'readwrite')
+    tx.objectStore('canvases').put(damaged, [813, legacy.id])
+    tx.addEventListener('complete', () => resolve())
+    tx.addEventListener('error', () => reject(tx.error))
+  })
+  database.close()
+  await startCanvasEditor(identity, 'drawing')
+
+  await expect(
+    openCanvasProject(identity, legacy.id, undefined, 'drawing')
+  ).rejects.toThrow(LEGACY_NAI_CANVAS_UNCONVERTIBLE)
+
+  expect(await loadLocalCanvas(813, legacy.id)).toEqual(damaged)
+  const exported = JSON.parse(
+    await (await exportStoredCanvas(identity, legacy.id)).text()
+  )
+  expect(exported.nodes[0]).toMatchObject({
+    type: 'unknown-node',
+    data: {
+      prompt: 'NAI 画布',
+      asset: { id: assetId, src: 'data:image/png;base64,YWJj' },
+    },
+  })
+})
+
 it('marks an unuploaded image in a synced canvas local-only until its exact asset appears remotely', async () => {
   const canvas = await localImage()
   await updateCanvasCloudState(813, canvas.id, (current) => ({
@@ -463,8 +696,15 @@ it('filters and paginates local canvases using the same title, source and sort c
     1
   )
   expect(screen.getByTitle(longName)).toBeVisible()
+  // A NAI canvas opens in the drawing page, so it is a drawing canvas.
   await userEvent.click(screen.getByRole('combobox', { name: 'Source' }))
+  expect(
+    screen.queryByRole('option', { name: 'NAI Canvas' })
+  ).not.toBeInTheDocument()
   await userEvent.click(screen.getByRole('option', { name: 'Drawing' }))
+  expect(screen.getByTitle(longName)).toBeVisible()
+  await userEvent.click(screen.getByRole('combobox', { name: 'Source' }))
+  await userEvent.click(screen.getByRole('option', { name: 'API' }))
   expect(await screen.findByText('No canvases')).toBeVisible()
 })
 
@@ -743,7 +983,7 @@ it('closes the create dialog before showing the unsaved changes dialog', async (
   )
 })
 
-it('guards gallery switching when another canvas kind has unsaved changes', async () => {
+it('guards switching to a NAI canvas, which opens in the drawing page', async () => {
   const current = await localImage()
   const target = await drawnCanvas('nai', '目标 NAI 画布')
   await openCanvasProject(identity, current.id)
@@ -764,7 +1004,7 @@ it('guards gallery switching when another canvas kind has unsaved changes', asyn
   )
   await waitFor(() =>
     expect(navigate).toHaveBeenCalledWith({
-      to: '/canvas/nai',
+      to: '/canvas/drawing',
       search: { canvas: target.id, image: undefined },
     })
   )
@@ -852,6 +1092,60 @@ it('discards asynchronous Drawing file import when the selected canvas changes',
   expect((await loadLocalCanvas(813, replacement.id))?.document.nodes).toEqual(
     []
   )
+})
+
+it('imports a canvas file exported from the former NAI page as a drawing canvas', async () => {
+  await startCanvasEditor(identity, 'drawing')
+  const exported = {
+    version: 1,
+    viewport: { x: 0, y: 0, zoom: 1 },
+    settings: { model: 'nai-diffusion-4-5-full', negativePrompt: 'blur' },
+    nodes: [
+      {
+        id: 'nai-node',
+        type: 'nai-image',
+        position: { x: 5, y: 6 },
+        data: {
+          prompt: '白狐',
+          settings: { model: 'nai-diffusion-4-5-full', seed: 42 },
+          status: 'complete',
+          createdAt: 1,
+          asset: {
+            id: assetId,
+            name: 'nai.png',
+            src: 'data:image/png;base64,YWJj',
+            width: 1,
+            height: 1,
+            mimeType: 'image/png',
+          },
+        },
+      },
+    ],
+  }
+  const hook = renderHook(useCanvasFiles, { wrapper: ReactFlowProvider })
+
+  await act(() =>
+    hook.result.current.importCanvas({
+      size: 1,
+      text: async () => JSON.stringify(exported),
+    } as unknown as File)
+  )
+
+  expect(hook.result.current.pendingImport).toMatchObject({
+    settings: { generationMode: 'tags', negativePrompt: 'blur' },
+    edges: [],
+    nodes: [
+      {
+        id: 'nai-node',
+        type: 'image',
+        position: { x: 5, y: 6 },
+        data: {
+          prompt: '白狐',
+          settings: { generationMode: 'tags', seed: 42 },
+        },
+      },
+    ],
+  })
 })
 
 function DeleteHarness() {

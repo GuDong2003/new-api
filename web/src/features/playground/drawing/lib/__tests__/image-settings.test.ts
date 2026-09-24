@@ -605,3 +605,224 @@ describe('Nano Banana runs its own size table', () => {
     }
   })
 })
+
+describe('tag-prompted models', () => {
+  const novelai = settingsForImageModel(
+    {
+      ...DEFAULT_IMAGE_SETTINGS,
+      prompt: '1girl, fox ears',
+      negativePrompt: ' lowres ',
+    },
+    'nai-diffusion-4-5-full'
+  )
+
+  it('sends NovelAI sampling controls in its native parameters object', () => {
+    const payload = buildImagePayload({
+      ...novelai,
+      width: 832,
+      height: 1216,
+      seed: 42,
+      qualityToggle: true,
+      qualityTier: 'light',
+      n: 2,
+    })
+
+    expect(payload).toMatchObject({
+      model: 'nai-diffusion-4-5-full',
+      prompt: '1girl, fox ears',
+      size: '832x1216',
+      n: 2,
+      response_format: 'b64_json',
+      group: 'default',
+      nai: {
+        action: 'generate',
+        parameters: {
+          width: 832,
+          height: 1216,
+          n_samples: 2,
+          seed: 42,
+          negative_prompt: 'lowres',
+          qualityPresetId: 'light',
+          tag_hint_qt: 3,
+        },
+      },
+    })
+  })
+
+  it('leaves the NovelAI seed to the provider when none is set', () => {
+    const payload = buildImagePayload({ ...novelai, seed: null })
+    expect(
+      (payload.nai as { parameters: Record<string, unknown> }).parameters
+    ).not.toHaveProperty('seed')
+  })
+
+  it.each([
+    [
+      'qwen-image',
+      {
+        size: '1328*1328',
+        negative_prompt: 'blurry',
+        prompt_extend: false,
+        seed: 7,
+      },
+      [],
+    ],
+    [
+      'qwen-image-edit-plus',
+      { negative_prompt: 'blurry', seed: 7 },
+      ['size', 'prompt_extend'],
+    ],
+    [
+      'wanx2.1-imageedit',
+      { seed: 7 },
+      ['size', 'negative_prompt', 'prompt_extend'],
+    ],
+  ])('sends only the fields %s accepts', (model, expected, absent) => {
+    const payload = buildImagePayload({
+      ...settingsForImageModel(
+        { ...DEFAULT_IMAGE_SETTINGS, prompt: 'lanterns' },
+        model
+      ),
+      negativePrompt: 'blurry',
+      promptExtend: false,
+      seed: 7,
+    })
+
+    expect(payload).toMatchObject({
+      model,
+      prompt: 'lanterns',
+      response_format: 'b64_json',
+      ...expected,
+    })
+    for (const field of absent) expect(payload).not.toHaveProperty(field)
+  })
+
+  it.each([
+    [
+      { mode: 'edit' as const },
+      'This image model does not support image editing.',
+    ],
+    [{ width: 830 }, 'Image dimensions must be multiples of 64.'],
+    [
+      { width: 2048, height: 2048 },
+      'The image resolution exceeds the NovelAI limit.',
+    ],
+    [{ n: 9 }, 'NovelAI generates up to 8 images per request.'],
+  ])('rejects NovelAI settings %o', (change, message) => {
+    expect(validateImageSettings({ ...novelai, ...change }, 0)).toBe(message)
+    expect(STATIC_I18N_KEYS).toContain(message)
+    expect(enLocale.translation).toHaveProperty([message])
+  })
+
+  it.each([
+    ['qwen-image', { n: 2 }, 0, 'This model supports one image per request.'],
+    ['qwen-image-2.0', { n: 7 }, 0, 'Reduce the image count for this model.'],
+    [
+      'qwen-image',
+      { mode: 'edit' as const },
+      1,
+      'This image model does not support image editing.',
+    ],
+    [
+      'qwen-image-edit',
+      { mode: 'generate' as const },
+      0,
+      'This model edits images. Add a reference image first.',
+    ],
+    ['qwen-image-edit', {}, 4, 'Too many reference images for this model.'],
+    [
+      'qwen-image',
+      { size: '1024x1024' },
+      0,
+      'Choose a size supported by this model.',
+    ],
+    [
+      'wan2.7-image-pro',
+      { size: '4K', mode: 'edit' as const },
+      1,
+      '4K is only available when generating from text.',
+    ],
+    [
+      'qwen-image',
+      { seed: 2147483648 },
+      0,
+      'Enter a seed between 0 and 2147483647.',
+    ],
+  ])(
+    'holds %s to its limits: %o with %i references',
+    (model, change, references, message) => {
+      const next = {
+        ...settingsForImageModel(
+          { ...DEFAULT_IMAGE_SETTINGS, prompt: 'lanterns' },
+          model
+        ),
+        ...change,
+      }
+      expect(validateImageSettings(next, references)).toBe(message)
+      expect(STATIC_I18N_KEYS).toContain(message)
+      expect(enLocale.translation).toHaveProperty([message])
+    }
+  )
+
+  it('accepts the Alibaba models within their limits', () => {
+    for (const [model, references] of [
+      ['qwen-image', 0],
+      ['qwen-image-edit-plus', 3],
+      ['wan2.7-image-pro', 0],
+      ['z-image-turbo', 0],
+    ] as const) {
+      const next = settingsForImageModel(
+        { ...DEFAULT_IMAGE_SETTINGS, prompt: 'lanterns' },
+        model
+      )
+      expect(validateImageSettings(next, references)).toBeNull()
+    }
+  })
+
+  it('adapts the settings to the tag model that is chosen', () => {
+    expect(novelai).toMatchObject({
+      generationMode: 'tags',
+      mode: 'generate',
+      size: '832x1216',
+    })
+    expect(
+      settingsForImageModel({ ...DEFAULT_IMAGE_SETTINGS }, 'qwen-image-edit')
+        .mode
+    ).toBe('edit')
+    expect(
+      settingsForImageModel(
+        { ...DEFAULT_IMAGE_SETTINGS, mode: 'edit' },
+        'wan2.6-t2i'
+      )
+    ).toMatchObject({ mode: 'generate', size: '1024*1024' })
+    // Z-Image bills prompt rewriting as a second image.
+    expect(
+      settingsForImageModel(
+        { ...DEFAULT_IMAGE_SETTINGS, model: 'qwen-image', promptExtend: true },
+        'z-image-turbo'
+      ).promptExtend
+    ).toBe(false)
+    expect(settingsForImageModel(novelai, 'gpt-image-1').generationMode).toBe(
+      'description'
+    )
+  })
+
+  it('stores tag settings only on images prompted with tags', () => {
+    const description = normalizeStoredImageSettings({
+      ...DEFAULT_IMAGE_SETTINGS,
+      model: 'gpt-image-1',
+      prompt: 'A blue ceramic cup',
+    })
+    const tags = normalizeStoredImageSettings({ ...novelai, seed: 42 })
+
+    for (const field of ['generationMode', 'negativePrompt', 'seed', 'steps']) {
+      expect(description).not.toHaveProperty(field)
+    }
+    expect(tags).toMatchObject({
+      generationMode: 'tags',
+      negativePrompt: ' lowres ',
+      seed: 42,
+      steps: 28,
+    })
+  })
+})

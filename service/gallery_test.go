@@ -231,6 +231,9 @@ func TestGalleryCanvasDocumentSettingsBoundaries(t *testing.T) {
 		{"drawing", "outputCompression", float64(-1)},
 		{"drawing", "partialImages", float64(4)},
 		{"drawing", "prompt", strings.Repeat("🦊", 16001)},
+		{"drawing", "generationMode", "sketch"},
+		{"drawing", "promptExtend", "true"},
+		{"drawing", "seed", float64(4294967296)},
 	} {
 		t.Run(tc.kind+"/"+tc.key, func(t *testing.T) {
 			doc := galleryCanvasDocument(t, tc.kind)
@@ -257,6 +260,24 @@ func TestGalleryCanvasDocumentSettingsBoundaries(t *testing.T) {
 		saved, err := service.NormalizeGalleryCanvasDocument("drawing", canvas)
 		require.NoError(t, err)
 		assert.Equal(t, quality, saved.Document["settings"].(map[string]any)["quality"])
+	}
+
+	// The drawing page also generates with tag-prompted models (NovelAI and
+	// Alibaba). Their parameters survive on the canvas and on every node that
+	// used them.
+	tags := galleryCanvasDocument(t, "drawing")
+	var tagSettings, node map[string]any
+	require.NoError(t, common.UnmarshalJsonStr(`{"generationMode":"tags","model":"nai-diffusion-4-5-full","prompt":"1girl, fox ears","negativePrompt":"lowres","width":832,"height":1216,"steps":28,"scale":5,"sampler":"k_euler_ancestral","noiseSchedule":"karras","cfgRescale":0,"seed":null,"n":4,"qualityToggle":true,"qualityTier":"standard","ucPreset":"heavy","smea":true,"smeaDyn":false,"decrisp":false}`, &tagSettings))
+	require.NoError(t, common.UnmarshalJsonStr(`{"id":"qwen-node","type":"image","position":{"x":0,"y":0},"data":{"asset":{"id":"44444444-4444-4444-8444-444444444444","name":"lantern.png","width":1328,"height":1328,"mimeType":"image/png"},"prompt":"a lantern festival","settings":{"generationMode":"tags","model":"qwen-image","negativePrompt":"blurry","size":"1328*1328","n":1,"seed":42,"promptExtend":false},"status":"complete","createdAt":1}}`, &node))
+	tags["settings"], tags["nodes"] = tagSettings, []any{node}
+	tagInfo, err := service.NormalizeGalleryCanvasDocument("drawing", tags)
+	require.NoError(t, err)
+	for key, value := range tagSettings {
+		assert.Equal(t, value, tagInfo.Document["settings"].(map[string]any)[key], key)
+	}
+	nodeSettings := tagInfo.Document["nodes"].([]any)[0].(map[string]any)["data"].(map[string]any)["settings"].(map[string]any)
+	for key, value := range node["data"].(map[string]any)["settings"].(map[string]any) {
+		assert.Equal(t, value, nodeSettings[key], key)
 	}
 }
 
@@ -405,19 +426,25 @@ func TestSaveTaskGalleryImageStoresOriginalAndThumbnail(t *testing.T) {
 }
 
 func TestTaskGalleryImageIsReusedWhenCanvasIsSaved(t *testing.T) {
-	galleryFixture(t, sqlite.Open(filepath.Join(t.TempDir(), "gallery.db")))
-	original := galleryPNG(t)
-	taskImage, err := service.SaveTaskGalleryImageWithSource(context.Background(), 41, "task_canvas", "image-0", "drawing", "gpt-image-1", "fox", "image/png", bytes.NewReader(original))
-	require.NoError(t, err)
+	// Images the NAI page saved before it merged into the drawing page are
+	// drawing images as well.
+	for _, source := range []string{"drawing", "nai"} {
+		t.Run(source, func(t *testing.T) {
+			galleryFixture(t, sqlite.Open(filepath.Join(t.TempDir(), "gallery.db")))
+			original := galleryPNG(t)
+			taskImage, err := service.SaveTaskGalleryImageWithSource(context.Background(), 41, "task_canvas", "image-0", source, "gpt-image-1", "fox", "image/png", bytes.NewReader(original))
+			require.NoError(t, err)
 
-	saved, err := saveCanvasMetadata(t, 41, canvasSaveMetadata(t), []string{"file:" + canvasFixtureAsset, string(original)})
-	require.NoError(t, err)
-	assert.Equal(t, taskImage.ID, saved.AssetIDMap[canvasFixtureAsset])
-	assert.Equal(t, taskImage.ID, saved.Assets[0].ID)
+			saved, err := saveCanvasMetadata(t, 41, canvasSaveMetadata(t), []string{"file:" + canvasFixtureAsset, string(original)})
+			require.NoError(t, err)
+			assert.Equal(t, taskImage.ID, saved.AssetIDMap[canvasFixtureAsset])
+			assert.Equal(t, taskImage.ID, saved.Assets[0].ID)
 
-	var linked model.GalleryImage
-	require.NoError(t, model.DB.Where("id = ?", taskImage.ID).First(&linked).Error)
-	assert.Equal(t, saved.ID, linked.CanvasID)
+			var linked model.GalleryImage
+			require.NoError(t, model.DB.Where("id = ?", taskImage.ID).First(&linked).Error)
+			assert.Equal(t, saved.ID, linked.CanvasID)
+		})
+	}
 }
 
 func TestCanvasDoesNotReuseApiTaskGalleryImage(t *testing.T) {
@@ -1138,6 +1165,16 @@ func TestGalleryCanvasThumbnailActualBytesAndNAICloudRoundtrip(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, nai.Document, reopened.Document)
 	assert.Empty(t, reopened.Assets)
+	// The drawing page upgrades a NAI canvas the first time it saves it, and
+	// nothing turns a drawing canvas back into a NAI canvas.
+	upgrade := map[string]any{"id": nai.ID, "kind": "drawing", "name": "NAI draft", "base_revision": nai.Revision, "mutation_id": "nai-upgrade", "document": galleryCanvasDocument(t, "drawing"), "assets": []any{}}
+	upgraded, err := saveCanvasMetadata(t, 41, upgrade)
+	require.NoError(t, err)
+	assert.Equal(t, "drawing", upgraded.Kind)
+	assert.Equal(t, nai.Revision+1, upgraded.Revision)
+	naiMetadata["base_revision"], naiMetadata["mutation_id"] = upgraded.Revision, "nai-downgrade"
+	_, err = saveCanvasMetadata(t, 41, naiMetadata)
+	assert.ErrorIs(t, err, model.ErrGalleryInvalid)
 }
 
 func TestGalleryCanvasDeletionFailureScrubsPromptAndKeepsBytes(t *testing.T) {
@@ -1265,10 +1302,14 @@ func TestGalleryDatabaseMatrix(t *testing.T) {
 			require.NoError(t, err)
 			require.NotEqual(t, first.ID, other.ID)
 			require.ErrorIs(t, service.DeleteGalleryImage(ctx, 2, first.ID), gorm.ErrRecordNotFound)
-			page, err := service.ListGalleryImages(ctx, 1, 1, 24, "drawing")
-			require.NoError(t, err)
-			require.EqualValues(t, 1, page.Total)
-			require.Len(t, page.Items, 1)
+			// The drawing page absorbed the NAI page, so its filter covers the
+			// images both pages saved; the legacy source still filters exactly.
+			for source, want := range map[string]int{"drawing": 2, "nai": 1} {
+				page, err := service.ListGalleryImages(ctx, 1, 1, 24, source)
+				require.NoError(t, err)
+				require.EqualValues(t, want, page.Total, source)
+				require.Len(t, page.Items, want, source)
+			}
 			require.NoError(t, model.MigrateGallery(model.DB))
 			require.NoError(t, model.MigrateGallery(model.DB))
 			stored, err := service.GetGallerySettings(ctx)
@@ -1317,6 +1358,14 @@ func TestGalleryDatabaseMatrix(t *testing.T) {
 			assert.Equal(t, info.Document, restored.Document)
 			assert.Equal(t, int64(123), restored.UpdatedAt)
 			assert.Equal(t, int64(456), restored.ExpiresAt)
+			for _, kind := range []string{"drawing", "nai"} {
+				require.NoError(t, model.DB.Create(&model.GalleryCanvas{ID: "listed-" + kind, UserID: 1, Kind: kind, Name: kind, State: "ready", DocumentVersion: 1, DocumentJSON: `{"version":1}`, Revision: 1, UpdatedAt: 123, ExpiresAt: time.Now().Unix() + 3600}).Error)
+			}
+			for source, want := range map[string]int64{"drawing": 2, "nai": 1} {
+				listed, err := service.ListGalleryCanvases(ctx, 1, 1, 24, source, "", "updated_desc")
+				require.NoError(t, err)
+				assert.Equal(t, want, listed.Total, source)
+			}
 			longPrompt := strings.Repeat("白狐", 16000)
 			image := model.GalleryImage{ID: "unicode-preview", UserID: 1, SourceID: "unicode-preview", Prompt: longPrompt, NegativePrompt: longPrompt, ParametersJSON: `{"prompt":"` + longPrompt + `"}`}
 			require.NoError(t, model.DB.Create(&image).Error)

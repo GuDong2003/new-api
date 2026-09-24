@@ -68,7 +68,12 @@ func ListGalleryCanvases(ctx context.Context, user, page, pageSize int, source, 
 	defer galleryMu.RUnlock()
 	result := &GalleryCanvasPage{Items: []GalleryCanvasSummary{}, Page: page, PageSize: pageSize}
 	query := model.DB.WithContext(ctx).Model(&model.GalleryCanvas{}).Where("user_id = ? AND state = ? AND expires_at > ?", user, "ready", time.Now().Unix())
-	if source != "" {
+	switch source {
+	case "":
+	case "drawing":
+		// NAI canvases open in the drawing page, which upgrades them on save.
+		query = query.Where("kind IN ?", []string{"drawing", "nai"})
+	default:
 		query = query.Where("kind = ?", source)
 	}
 	if search != "" {
@@ -185,7 +190,10 @@ func SaveGalleryCanvas(ctx context.Context, user int, reader *multipart.Reader) 
 	if previous.State == "deleted" {
 		return nil, model.ErrGalleryCanvasDeleted
 	}
-	if exists && previous.Kind != input.Kind {
+	// A canvas the NAI page saved before it merged into the drawing page is
+	// upgraded once, when the drawing page first saves it. Nothing turns a
+	// drawing canvas back into a NAI canvas.
+	if exists && previous.Kind != input.Kind && (previous.Kind != "nai" || input.Kind != "drawing") {
 		return nil, model.ErrGalleryInvalid
 	}
 	contentHash := galleryCanvasContentHash(input.Name, info.ContentHash)

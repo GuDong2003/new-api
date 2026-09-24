@@ -28,7 +28,12 @@ import {
 import { create } from 'zustand'
 
 import { arrangeImageNodes } from '@/features/playground/drawing/lib/canvas-document'
-import { DEFAULT_IMAGE_SETTINGS } from '@/features/playground/drawing/lib/image-settings'
+import type { ImageGenerationMode } from '@/features/playground/drawing/lib/image-models'
+import {
+  DEFAULT_IMAGE_SETTINGS,
+  imageSettingsSchema,
+  settingsForImageModel,
+} from '@/features/playground/drawing/lib/image-settings'
 import { canConnectReference } from '@/features/playground/drawing/lib/reference-connections'
 import type {
   DrawingDocument,
@@ -42,6 +47,9 @@ type CanvasSnapshot = Pick<
   DrawingDocument,
   'nodes' | 'edges' | 'referenceIds' | 'mask'
 >
+type GenerationModeSettings = Partial<
+  Record<ImageGenerationMode, ImageSettings>
+>
 type DrawingState = DrawingDocument & {
   assetRoles: Record<
     string,
@@ -54,6 +62,9 @@ type DrawingState = DrawingDocument & {
   past: CanvasSnapshot[]
   future: CanvasSnapshot[]
   previewId: string | null
+  // The settings each generation mode was last left with, so switching back
+  // restores that mode's model and parameters.
+  modeSettings: GenerationModeSettings
   initialize: (userId: number, document?: DrawingDocument) => void
   hydrate: (document: DrawingDocument | null) => void
   checkpoint: () => void
@@ -70,6 +81,7 @@ type DrawingState = DrawingDocument & {
     jobId?: string
   ) => void
   updateSettings: (settings: Partial<ImageSettings>) => void
+  switchGenerationMode: (mode: ImageGenerationMode) => void
   setViewport: (viewport: Viewport) => void
   toggleReference: (id: string) => void
   setReferences: (ids: string[]) => void
@@ -81,6 +93,47 @@ type DrawingState = DrawingDocument & {
   arrange: () => void
   clear: () => void
   replaceDocument: (document: DrawingDocument) => void
+}
+
+const MODE_SETTINGS_KEY = 'new-api:drawing-generation-modes'
+
+function readModeSettings(userId: number): GenerationModeSettings {
+  try {
+    const stored = JSON.parse(
+      localStorage.getItem(`${MODE_SETTINGS_KEY}:${userId}`) ?? '{}'
+    ) as Record<string, unknown>
+    const modes: GenerationModeSettings = {}
+    for (const mode of ['description', 'tags'] as const) {
+      const parsed = imageSettingsSchema.safeParse(stored[mode])
+      if (parsed.success) modes[mode] = parsed.data
+    }
+    return modes
+  } catch {
+    return {}
+  }
+}
+
+// The prompt belongs to whichever mode is showing, so it is not remembered.
+function rememberModeSettings(
+  userId: number | null,
+  modes: GenerationModeSettings,
+  settings: ImageSettings
+): GenerationModeSettings {
+  const next = {
+    ...modes,
+    [settings.generationMode]: { ...settings, prompt: '' },
+  }
+  if (userId !== null) {
+    try {
+      localStorage.setItem(
+        `${MODE_SETTINGS_KEY}:${userId}`,
+        JSON.stringify(next)
+      )
+    } catch {
+      // Storage is optional: a mode then starts from its defaults next time.
+    }
+  }
+  return next
 }
 
 function syncModeAfterReferenceChange(
@@ -113,10 +166,12 @@ export const useDrawingStore = create<DrawingState>((set, get) => ({
   referenceIds: [],
   mask: null,
   previewId: null,
+  modeSettings: {},
 
   initialize: (userId, document) =>
     set({
       assetRoles: {},
+      modeSettings: readModeSettings(userId),
       userId,
       canvasId: null,
       ready: Boolean(document),
@@ -363,10 +418,49 @@ export const useDrawingStore = create<DrawingState>((set, get) => ({
       }
     }),
   updateSettings: (settings) =>
-    set((state) => ({
-      settings: { ...state.settings, ...settings },
-      revision: state.revision + 1,
-    })),
+    set((state) => {
+      const next = { ...state.settings, ...settings }
+      return {
+        settings: next,
+        // Reusing another mode's settings leaves the current mode remembered.
+        modeSettings:
+          next.generationMode === state.settings.generationMode
+            ? state.modeSettings
+            : rememberModeSettings(
+                state.userId,
+                state.modeSettings,
+                state.settings
+              ),
+        revision: state.revision + 1,
+      }
+    }),
+  switchGenerationMode: (mode) =>
+    set((state) => {
+      if (state.settings.generationMode === mode) return state
+      const remembered = state.modeSettings[mode]
+      // The prompt, group and reference-driven mode carry over; the model and
+      // its parameters come back as this mode last had them.
+      const settings = settingsForImageModel(
+        {
+          ...DEFAULT_IMAGE_SETTINGS,
+          ...remembered,
+          generationMode: mode,
+          group: state.settings.group,
+          prompt: state.settings.prompt,
+          mode: state.settings.mode,
+        },
+        remembered?.model ?? ''
+      )
+      return {
+        settings,
+        modeSettings: rememberModeSettings(
+          state.userId,
+          state.modeSettings,
+          state.settings
+        ),
+        revision: state.revision + 1,
+      }
+    }),
   setViewport: (viewport) =>
     set((state) => ({ viewport, revision: state.revision + 1 })),
   toggleReference: (id) =>

@@ -16,10 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 */
 import { DEFAULT_IMAGE_SETTINGS } from '@/features/playground/drawing/lib/image-settings'
 import type { DrawingDocument } from '@/features/playground/drawing/types'
-import { DEFAULT_NAI_SETTINGS } from '@/features/playground/nai/lib/nai-settings'
-import type { NaiCanvasDocument } from '@/features/playground/nai/types'
 import { useDrawingStore } from '@/stores/drawing-store'
-import { useNaiDrawingStore } from '@/stores/nai-drawing-store'
 
 import { getCanvasRecord } from '../api'
 import type {
@@ -28,7 +25,11 @@ import type {
   GalleryIdentity,
   LocalCanvas,
 } from '../types'
-import { decodeCanvas, encodeCanvas } from './canvas-document'
+import {
+  decodeCanvas,
+  encodeCanvas,
+  upgradeLegacyNaiCanvasDocument,
+} from './canvas-document'
 import {
   bindEditor,
   canvasOriginalReader,
@@ -63,7 +64,9 @@ import {
   isGalleryIdentityCurrent,
 } from './session'
 
-type EditorDocument = DrawingDocument | NaiCanvasDocument
+/** Shown when a canvas the former NAI page saved cannot become a drawing canvas. */
+export const LEGACY_NAI_CANVAS_UNCONVERTIBLE =
+  'This NAI canvas could not be converted. Export it to keep a copy.'
 
 const openingCanvasProjects = new Map<string, Promise<void>>()
 
@@ -95,21 +98,16 @@ export async function exportCanvasProject(
     type: 'application/json',
   })
 }
-function emptyDocument(kind: CanvasKind): EditorDocument {
-  const common = {
-    version: 1 as const,
+function emptyDocument(): DrawingDocument {
+  return {
+    version: 1,
     nodes: [],
     viewport: { x: 40, y: 40, zoom: 1 },
+    settings: { ...DEFAULT_IMAGE_SETTINGS },
+    edges: [],
+    referenceIds: [],
+    mask: null,
   }
-  return kind === 'drawing'
-    ? {
-        ...common,
-        settings: { ...DEFAULT_IMAGE_SETTINGS },
-        edges: [],
-        referenceIds: [],
-        mask: null,
-      }
-    : { ...common, settings: { ...DEFAULT_NAI_SETTINGS } }
 }
 function initialCanvas(
   identity: GalleryIdentity,
@@ -121,7 +119,7 @@ function initialCanvas(
     id,
     userId: galleryOwner(identity),
     kind,
-    name: kind === 'drawing' ? '新画布' : 'NAI 新画布',
+    name: '新画布',
     document,
     revision: 0,
     cloudRevision: 0,
@@ -147,7 +145,7 @@ export async function createCanvasProject(
       throw new Error('Save or export the current canvas before switching.')
     }
   }
-  const encoded = await encodeCanvas(kind, emptyDocument(kind))
+  const encoded = await encodeCanvas(kind, emptyDocument())
   const canvas = await saveLocalCanvas(
     {
       ...initialCanvas(identity, kind, encoded.document),
@@ -199,6 +197,9 @@ async function downloadCloudCanvas(
     {
       ...(existing ??
         initialCanvas(identity, remote.kind, remote.document, remote.id)),
+      // A cloud copy the NAI page saved replaces a local copy that was
+      // already upgraded; opening it upgrades it again.
+      kind: remote.kind,
       name: remote.name,
       document: remote.document,
       status: 'pending',
@@ -254,6 +255,7 @@ async function openCanvasProjectInternal(
     )
   }
   if (canvas.deleted) throw new Error('Canvas has been deleted.')
+  if (canvas.kind === 'nai') canvas = await upgradeLegacyNaiCanvas(canvas)
   if (expectedKind && canvas.kind !== expectedKind) {
     throw new Error('Canvas type does not match this editor.')
   }
@@ -308,15 +310,7 @@ async function openCanvasProjectInternal(
       true
     )
     assertGalleryIdentity(identity)
-    if (canvas.kind === 'drawing') {
-      useDrawingStore
-        .getState()
-        .initialize(galleryOwner(identity), document as DrawingDocument)
-    } else {
-      useNaiDrawingStore
-        .getState()
-        .initialize(galleryOwner(identity), document as NaiCanvasDocument)
-    }
+    useDrawingStore.getState().initialize(galleryOwner(identity), document)
   }
   await updateCanvasUserState(galleryOwner(identity), (state) => ({
     ...state,
@@ -363,10 +357,80 @@ export function hasUnsavedCanvasChanges(
 export function getUnsavedCanvasKind(
   identity: GalleryIdentity
 ): CanvasKind | null {
-  for (const kind of ['drawing', 'nai'] as const) {
-    if (hasUnsavedCanvasChanges(identity, kind)) return kind
+  return hasUnsavedCanvasChanges(identity, 'drawing') ? 'drawing' : null
+}
+
+/**
+ * A canvas the former NAI page saved becomes a drawing canvas the first time
+ * it opens, and the next upload replaces the cloud copy. When the conversion
+ * fails the stored canvas stays exactly as it was.
+ */
+async function upgradeLegacyNaiCanvas(
+  canvas: LocalCanvas
+): Promise<LocalCanvas> {
+  let document: Record<string, unknown>
+  try {
+    document = upgradeLegacyNaiCanvasDocument(canvas.document)
+  } catch {
+    throw new Error(LEGACY_NAI_CANVAS_UNCONVERTIBLE)
   }
-  return null
+  const upgraded = await saveLocalCanvas(
+    { ...canvas, kind: 'drawing', document },
+    []
+  )
+  notifyCanvasProjects()
+  return upgraded
+}
+
+/**
+ * The stored canvas as a file, with every picture inlined, for a canvas that
+ * cannot be opened. Only known picture positions are filled in, so a document
+ * that no longer parses is still exported as it was stored.
+ */
+export async function exportStoredCanvas(
+  identity: GalleryIdentity,
+  id: string
+): Promise<Blob> {
+  assertGalleryIdentity(identity)
+  const canvas = await loadLocalCanvas(galleryOwner(identity), id)
+  if (!canvas || canvas.deleted) throw new Error('Canvas has been deleted.')
+  const sources = new Map<string, string>()
+  for (const asset of await readCanvasAssets(galleryOwner(identity), id)) {
+    const bytes = new Uint8Array(await asset.blob.arrayBuffer())
+    const chunks: string[] = []
+    for (let offset = 0; offset < bytes.length; offset += 16384) {
+      chunks.push(
+        String.fromCharCode(...bytes.subarray(offset, offset + 16384))
+      )
+    }
+    sources.set(
+      asset.id,
+      `data:${asset.blob.type};base64,${btoa(chunks.join(''))}`
+    )
+  }
+  const inline = (value: unknown) => {
+    const asset = value as { id?: unknown } | null
+    const src =
+      typeof asset?.id === 'string' ? sources.get(asset.id) : undefined
+    return src ? { ...asset, src } : value
+  }
+  const nodes = Array.isArray(canvas.document.nodes)
+    ? canvas.document.nodes.map((node: { data?: Record<string, unknown> }) =>
+        node?.data
+          ? {
+              ...node,
+              data: {
+                ...node.data,
+                ...(node.data.asset ? { asset: inline(node.data.asset) } : {}),
+                ...(node.data.mask ? { mask: inline(node.data.mask) } : {}),
+              },
+            }
+          : node
+      )
+    : canvas.document.nodes
+  return new Blob([JSON.stringify({ ...canvas.document, nodes }, null, 2)], {
+    type: 'application/json',
+  })
 }
 
 /** Restore the last committed browser snapshot without flushing the current editor. */
@@ -388,15 +452,7 @@ export async function discardCanvasChanges(
       true
     )
     assertGalleryIdentity(identity)
-    if (kind === 'drawing') {
-      useDrawingStore
-        .getState()
-        .initialize(galleryOwner(identity), document as DrawingDocument)
-    } else {
-      useNaiDrawingStore
-        .getState()
-        .initialize(galleryOwner(identity), document as NaiCanvasDocument)
-    }
+    useDrawingStore.getState().initialize(galleryOwner(identity), document)
     await updateCanvasUserState(galleryOwner(identity), (state) => ({
       ...state,
       lastOpened: { ...state.lastOpened, [kind]: canvas.id },
@@ -404,17 +460,9 @@ export async function discardCanvasChanges(
     bindEditor(identity, canvas)
     return
   }
-  const document = emptyDocument(kind)
+  const document = emptyDocument()
   const transient = initialCanvas(identity, kind, document)
-  if (kind === 'drawing') {
-    useDrawingStore
-      .getState()
-      .initialize(galleryOwner(identity), document as DrawingDocument)
-  } else {
-    useNaiDrawingStore
-      .getState()
-      .initialize(galleryOwner(identity), document as NaiCanvasDocument)
-  }
+  useDrawingStore.getState().initialize(galleryOwner(identity), document)
   bindEditor(identity, transient)
 }
 export async function reloadCanvasProject(
@@ -532,13 +580,14 @@ async function startEditor(
       canvases.find(
         (canvas) => canvas.kind === kind && canvas.id === state.lastOpened[kind]
       ) ?? canvases.find((canvas) => canvas.kind === kind)
+    // The drawing editor also takes in what the former NAI page kept.
     const migrate = () =>
       migrateLegacyCanvases(
         galleryOwner(identity),
         {
           readOriginal: canvasOriginalReader(identity),
         },
-        [kind]
+        kind === 'drawing' ? ['drawing', 'nai'] : [kind]
       )
     // Existing browser drafts must not depend on legacy originals being online.
     if (local) {
@@ -552,17 +601,9 @@ async function startEditor(
     assertGalleryIdentity(identity)
     const selected = migrated.find((canvas) => canvas.kind === kind)
     if (!selected) {
-      const document = emptyDocument(kind)
+      const document = emptyDocument()
       const transient = initialCanvas(identity, kind, document)
-      if (kind === 'drawing') {
-        useDrawingStore
-          .getState()
-          .initialize(galleryOwner(identity), document as DrawingDocument)
-      } else {
-        useNaiDrawingStore
-          .getState()
-          .initialize(galleryOwner(identity), document as NaiCanvasDocument)
-      }
+      useDrawingStore.getState().initialize(galleryOwner(identity), document)
       bindEditor(identity, transient)
       return
     }

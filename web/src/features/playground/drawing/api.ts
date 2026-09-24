@@ -28,9 +28,11 @@ import {
 import {
   buildImagePayload,
   getImageModelFamily,
+  supportsImageMask,
   supportsImageSizePresets,
   usesImageTask,
   validateImageSettings,
+  type ImagePayload,
 } from './lib/image-settings'
 import { parseImageResponse, readImageStream } from './lib/image-stream'
 import type {
@@ -87,13 +89,17 @@ export async function generateImages(
   )
   if (validation) throw new Error(validation)
   const payload = buildImagePayload(options.settings)
-  let body: Record<string, string | number | boolean> | FormData = payload
+  let body: ImagePayload | FormData = payload
   if (options.settings.mode === 'edit') {
+    // Among Alibaba's models only the Wanx image editor reads a mask.
+    const mask = supportsImageMask(options.settings.model)
+      ? options.mask
+      : undefined
     if (
-      options.mask &&
-      (options.mask.mimeType !== 'image/png' ||
-        options.mask.width !== options.references[0].width ||
-        options.mask.height !== options.references[0].height)
+      mask &&
+      (mask.mimeType !== 'image/png' ||
+        mask.width !== options.references[0].width ||
+        mask.height !== options.references[0].height)
     ) {
       throw new Error(
         'The mask must be a PNG with the same dimensions as the first reference image.'
@@ -122,19 +128,29 @@ export async function generateImages(
         throw new Error('The reference images must total less than 50 MB.')
       }
     }
+    // Alibaba reads each reference inline, up to its 10 MB input limit.
+    if (
+      getImageModelFamily(options.settings.model) === 'alibaba' &&
+      files.some((file) => file.size > 10 * 1024 * 1024)
+    ) {
+      throw new Error('Each reference image must be smaller than 10 MB.')
+    }
     const form = new FormData()
     for (const [key, value] of Object.entries(payload)) {
-      form.append(key, String(value))
+      form.append(
+        key,
+        typeof value === 'object' ? JSON.stringify(value) : String(value)
+      )
     }
     for (const file of files) {
       form.append(files.length === 1 ? 'image' : 'image[]', file)
     }
-    if (options.mask) {
-      const mask = await readImage(options.mask, options.signal)
-      if (mask.size >= 4 * 1024 * 1024) {
+    if (mask) {
+      const file = await readImage(mask, options.signal)
+      if (file.size >= 4 * 1024 * 1024) {
         throw new Error('The mask must be smaller than 4 MB.')
       }
-      form.append('mask', mask)
+      form.append('mask', file)
     }
     body = form
   }
@@ -190,7 +206,7 @@ export async function generateImages(
 
 async function runImageTask(
   endpoint: string,
-  body: Record<string, string | number | boolean> | FormData,
+  body: ImagePayload | FormData,
   outputFormat: string,
   options: GenerateImagesOptions
 ): Promise<ImageGenerationResult> {

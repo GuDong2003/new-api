@@ -52,10 +52,7 @@ export function CanvasEditorHeader(props: {
   const [reloadOpen, setReloadOpen] = useState(false)
   const [replaceOpen, setReplaceOpen] = useState(false)
   const [switchOpen, setSwitchOpen] = useState(false)
-  const [pendingCreate, setPendingCreate] = useState<{
-    name: string
-    kind: CanvasKind
-  } | null>(null)
+  const [pendingCreate, setPendingCreate] = useState<string | null>(null)
   const [title, setTitle] = useState('')
   const [editingTitle, setEditingTitle] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -88,18 +85,15 @@ export function CanvasEditorHeader(props: {
 
   const performCreate = async (name: string) => {
     const created = await canvas.create(name)
-    await navigate({
-      to: props.kind === 'drawing' ? '/canvas/drawing' : '/canvas/nai',
-      search: { canvas: created.id },
-    })
+    await navigate({ to: '/canvas/drawing', search: { canvas: created.id } })
     setCreateOpen(false)
   }
 
-  const submitCreate = (name: string, kind: CanvasKind) => {
+  const submitCreate = (name: string) => {
     if (canvas.hasUnsavedChanges) {
       setCreateOpen(false)
       setError(null)
-      setPendingCreate({ name, kind })
+      setPendingCreate(name)
       setSwitchOpen(true)
       return
     }
@@ -117,7 +111,7 @@ export function CanvasEditorHeader(props: {
         else await canvas.discard()
         setSwitchOpen(false)
         setPendingCreate(null)
-        await performCreate(next.name)
+        await performCreate(next)
       } catch (error) {
         setError(error instanceof Error ? error.message : 'Request failed')
       } finally {
@@ -279,8 +273,6 @@ export function CanvasEditorHeader(props: {
       <CanvasProjectDialog
         open={createOpen}
         mode='create'
-        initialKind={props.kind}
-        fixedKind
         busy={busy}
         error={error}
         onOpenChange={setCreateOpen}

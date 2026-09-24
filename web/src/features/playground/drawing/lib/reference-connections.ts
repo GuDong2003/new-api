@@ -19,7 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { MarkerType, type Connection, type Edge } from '@xyflow/react'
 
 import type { DrawingNode } from '../types'
-import { getImageModelFamily } from './image-settings'
+import { getMaxReferenceImages } from './image-settings'
 
 export function getAvailableReferenceNodes(
   nodes: DrawingNode[],
@@ -49,12 +49,10 @@ export function canConnectReference(
     return false
   }
 
-  const family = getImageModelFamily(target.data.settings.model)
   const references = target.data.referenceIds || []
   if (
-    family === 'dall-e-3' ||
     references.includes(source.id) ||
-    references.length >= (family === 'dall-e-2' ? 1 : 16)
+    references.length >= getMaxReferenceImages(target.data.settings.model)
   ) {
     return false
   }

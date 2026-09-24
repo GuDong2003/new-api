@@ -26,12 +26,8 @@ import {
   saveDrawingDocument,
   loadDrawingDocument,
 } from '../../playground/drawing/lib/canvas-storage'
+import { loadLegacyNaiDocument } from '../../playground/drawing/lib/legacy-nai-document'
 import type { DrawingDocument } from '../../playground/drawing/types'
-import {
-  saveNaiCanvasDocument,
-  loadNaiCanvasDocument,
-} from '../../playground/nai/lib/canvas-storage'
-import type { NaiCanvasDocument } from '../../playground/nai/types'
 import { encodeCanvas, decodeCanvas } from '../lib/canvas-document'
 import { migrateLegacyCanvases } from '../lib/canvas-migration'
 import {
@@ -331,6 +327,7 @@ describe('canvas originals and browser persistence', () => {
 
   it('imports historical Drawing and NAI drafts once, preserves old stores, and keeps unknown origins local and explicit-save', async () => {
     await saveDrawingDocument(41, drawing())
+    // The single canvas the former NAI page kept before canvas projects.
     const nai = {
       version: 1,
       nodes: [
@@ -349,8 +346,22 @@ describe('canvas originals and browser persistence', () => {
       ],
       viewport: { x: 0, y: 0, zoom: 1 },
       settings: { negativePrompt: 'blur' },
-    } as unknown as NaiCanvasDocument
-    await saveNaiCanvasDocument(41, nai)
+    }
+    const legacyStore = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open('new-api-nai-drawing', 1)
+      request.addEventListener('upgradeneeded', () =>
+        request.result.createObjectStore('canvases')
+      )
+      request.addEventListener('error', () => reject(request.error))
+      request.addEventListener('success', () => resolve(request.result))
+    })
+    await new Promise<void>((resolve, reject) => {
+      const transaction = legacyStore.transaction('canvases', 'readwrite')
+      transaction.objectStore('canvases').put(nai, 41)
+      transaction.addEventListener('complete', () => resolve())
+      transaction.addEventListener('error', () => reject(transaction.error))
+    })
+    legacyStore.close()
     await Promise.all([migrateLegacyCanvases(41), migrateLegacyCanvases(41)])
     const canvases = await listLocalCanvases(41)
     expect(canvases).toHaveLength(2)
@@ -369,16 +380,20 @@ describe('canvas originals and browser persistence', () => {
       )
       if (canvas.kind === 'nai') {
         expect(originals[0].id).toMatch(/^[0-9a-f-]{36}$/)
-        const restored = (await decodeCanvas(
-          canvas,
-          originals
-        )) as NaiCanvasDocument
-        expect(restored.nodes[0].data.prompt).toBe('白狐')
+        // A NAI canvas opens as a drawing canvas prompted with tags.
+        const restored = await decodeCanvas(canvas, originals)
+        expect(restored.nodes[0]).toMatchObject({
+          type: 'image',
+          data: {
+            prompt: '白狐',
+            settings: { generationMode: 'tags', negativePrompt: 'blur' },
+          },
+        })
         expect(restored.settings.negativePrompt).toBe('blur')
       }
     }
     expect((await loadDrawingDocument(41))?.nodes).toHaveLength(2)
-    expect((await loadNaiCanvasDocument(41))?.nodes[0].data.asset?.id).toBe(
+    expect((await loadLegacyNaiDocument(41))?.nodes[0].data.asset?.id).toBe(
       'legacy-asset'
     )
     await removeLocalCanvas(41, canvases[0].id)

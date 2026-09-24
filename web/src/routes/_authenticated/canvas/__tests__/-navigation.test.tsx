@@ -41,18 +41,18 @@ import { AuthenticatedLayout } from '@/components/layout/components/authenticate
 import { DirectionProvider } from '@/context/direction-provider'
 import { ThemeCustomizationProvider } from '@/context/theme-customization-provider'
 import { ThemeProvider } from '@/context/theme-provider'
-import { useNaiImageGeneration } from '@/features/playground/nai/hooks/use-nai-image-generation'
-import { DEFAULT_NAI_SETTINGS } from '@/features/playground/nai/lib/nai-settings'
+import { useImageGeneration } from '@/features/playground/drawing/hooks/use-image-generation'
+import { DEFAULT_IMAGE_SETTINGS } from '@/features/playground/drawing/lib/image-settings'
 import { api } from '@/lib/api'
 import { useAuthStore } from '@/stores/auth-store'
 import { useDrawingStore } from '@/stores/drawing-store'
-import { useNaiDrawingStore } from '@/stores/nai-drawing-store'
 
 import { Route as DrawingRoute } from '../../playground/drawing'
 import { Route as NaiRoute } from '../../playground/nai'
 import { Route as PlaygroundRoute } from '../../playground/route'
 import { Route as AuthRoute } from '../../route'
 import { Route as CanvasIndex } from '../index'
+import { Route as NaiCanvasRoute } from '../nai'
 import { Route as CanvasRoute } from '../route'
 
 const adapter = api.defaults.adapter
@@ -63,7 +63,6 @@ type NavigationGuard = (context: {
 let client: QueryClient
 beforeEach(() => {
   useDrawingStore.getState().initialize(0)
-  useNaiDrawingStore.getState().initialize(0)
   localStorage.clear()
   window.localStorage.clear()
   vi.spyOn(window, 'scrollTo').mockImplementation(() => {})
@@ -140,13 +139,19 @@ async function openWorkspace(path: string, shell = false) {
     path: '/',
     beforeLoad: CanvasIndex.options.beforeLoad as NavigationGuard,
   })
-  const pages = ['drawing', 'nai', 'gallery'].map((path) =>
+  const pages = ['drawing', 'gallery'].map((path) =>
     createRoute({
       getParentRoute: () => canvas,
       path,
       component: () => <div>{path} page</div>,
     })
   )
+  const naiCanvas = createRoute({
+    getParentRoute: () => canvas,
+    path: 'nai',
+    validateSearch: NaiCanvasRoute.options.validateSearch,
+    beforeLoad: NaiCanvasRoute.options.beforeLoad as unknown as NavigationGuard,
+  })
   const playground = createRoute({
     getParentRoute: () => authenticated,
     path: 'playground',
@@ -181,7 +186,7 @@ async function openWorkspace(path: string, shell = false) {
   const router = createRouter({
     routeTree: root.addChildren([
       authenticated.addChildren([
-        canvas.addChildren([canvasIndex, ...pages]),
+        canvas.addChildren([canvasIndex, naiCanvas, ...pages]),
         playground.addChildren([drawing, nai, chat]),
         dashboard,
       ]),
@@ -202,16 +207,14 @@ describe('Canvas workspace navigation', () => {
     )
   })
 
-  it('provides three route tabs with current-page state and keyboard navigation', async () => {
+  it('provides the drawing and gallery tabs with current-page state and keyboard navigation', async () => {
     await openWorkspace('/canvas/drawing')
     const nav = screen.getByRole('navigation', { name: 'Infinite Canvas' })
-    expect(within(nav).getAllByRole('link')).toHaveLength(3)
+    expect(within(nav).getAllByRole('link')).toHaveLength(2)
     expect(within(nav).getByRole('link', { name: 'Drawing' })).toHaveAttribute(
       'aria-current',
       'page'
     )
-    await userEvent.click(within(nav).getByRole('link', { name: 'NAI Canvas' }))
-    expect(await screen.findByText('nai page')).toBeVisible()
     const gallery = within(
       screen.getByRole('navigation', { name: 'Infinite Canvas' })
     ).getByRole('link', { name: 'My Gallery' })
@@ -226,7 +229,8 @@ describe('Canvas workspace navigation', () => {
 
   it.each([
     ['/playground/drawing', '/canvas/drawing'],
-    ['/playground/nai', '/canvas/nai'],
+    ['/playground/nai', '/canvas/drawing'],
+    ['/canvas/nai', '/canvas/drawing'],
   ])('redirects legacy %s even with playground disabled', async (from, to) => {
     window.localStorage.setItem(
       'status',
@@ -328,35 +332,50 @@ describe('Canvas workspace navigation', () => {
     expect(await screen.findByText('drawing page')).toBeVisible()
   })
 
-  it('keeps both drawing persistence sessions alive while route tabs change', async () => {
-    const router = await openWorkspace('/canvas/drawing', true)
-    await waitFor(() =>
-      expect(
-        useDrawingStore.getState().ready && useNaiDrawingStore.getState().ready
-      ).toBe(true)
+  it('keeps a NAI canvas link on the drawing page with its canvas and image', async () => {
+    const canvasId = '11111111-1111-4111-8111-111111111111'
+    const imageId = '22222222-2222-4222-8222-222222222222'
+    const router = await openWorkspace(
+      `/canvas/nai?canvas=${canvasId}&image=${imageId}`
     )
+    await waitFor(() =>
+      expect(router.state.location.pathname).toBe('/canvas/drawing')
+    )
+    expect(router.state.location.search).toEqual({
+      canvas: canvasId,
+      image: imageId,
+    })
+  })
+
+  it('keeps the drawing persistence session alive while route tabs change', async () => {
+    const router = await openWorkspace('/canvas/drawing', true)
+    await waitFor(() => expect(useDrawingStore.getState().ready).toBe(true))
     act(() => {
       useDrawingStore
         .getState()
         .updateSettings({ prompt: 'Drawing draft stays' })
-      useNaiDrawingStore
-        .getState()
-        .updateSettings({ prompt: 'NAI draft stays' })
     })
-    await act(() => router.navigate({ to: '/canvas/nai' }))
     await act(() => router.navigate({ to: '/canvas/gallery' }))
     await act(() => router.navigate({ to: '/canvas/drawing' }))
     expect(useDrawingStore.getState().settings.prompt).toBe(
       'Drawing draft stays'
     )
-    expect(useNaiDrawingStore.getState().settings.prompt).toBe(
-      'NAI draft stays'
-    )
   })
 
-  it('keeps an active NAI generation alive while leaving and returning to the canvas route', async () => {
+  it('keeps an active tag generation alive while leaving and returning to the canvas route', async () => {
     const router = await openWorkspace('/canvas/drawing', true)
-    await waitFor(() => expect(useNaiDrawingStore.getState().ready).toBe(true))
+    await waitFor(() => expect(useDrawingStore.getState().ready).toBe(true))
+    // The browser decodes the returned picture to measure it.
+    vi.stubGlobal(
+      'Image',
+      class extends EventTarget {
+        naturalWidth = 832
+        naturalHeight = 1216
+        set src(value: string) {
+          if (value) queueMicrotask(() => this.dispatchEvent(new Event('load')))
+        }
+      }
+    )
 
     let finish!: (value: unknown) => void
     vi.spyOn(api, 'post').mockImplementation(
@@ -365,25 +384,35 @@ describe('Canvas workspace navigation', () => {
           finish = resolve
         })
     )
-    const hook = renderHook(useNaiImageGeneration)
-    act(() =>
-      hook.result.current.generate({
-        ...DEFAULT_NAI_SETTINGS,
-        model: 'nai-diffusion-4-5-full',
-        prompt: '一只狐狸',
-      })
-    )
+    const hook = renderHook(useImageGeneration)
+    act(() => {
+      hook.result.current.generate(
+        {
+          ...DEFAULT_IMAGE_SETTINGS,
+          generationMode: 'tags',
+          model: 'nai-diffusion-4-5-full',
+          prompt: '一只狐狸',
+        },
+        { x: 0, y: 0 }
+      )
+    })
     await waitFor(() => expect(finish).toBeTypeOf('function'))
 
     await act(() => router.navigate({ to: '/dashboard' }))
     await act(() => router.navigate({ to: '/canvas/drawing' }))
-    await act(async () => finish({ data: { data: [{ b64_json: 'YWJj' }] } }))
+    // A gateway answering with the image itself instead of an accepted task.
+    await act(async () =>
+      finish({
+        headers: { 'content-type': 'application/json' },
+        data: new Response(JSON.stringify({ data: [{ b64_json: 'YWJj' }] }))
+          .body,
+      })
+    )
 
     await waitFor(() =>
-      expect(useNaiDrawingStore.getState().nodes[0]?.data.status).toBe(
-        'complete'
-      )
+      expect(useDrawingStore.getState().nodes[0]?.data.status).toBe('complete')
     )
     hook.unmount()
+    vi.unstubAllGlobals()
   })
 })

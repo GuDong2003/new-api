@@ -113,3 +113,90 @@ describe('DrawingSettings reference prompt interactions', () => {
     expect(prompt).toHaveValue('Use @1 (A.png)')
   })
 })
+
+describe('DrawingSettings generation modes', () => {
+  function renderModes() {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: Infinity } },
+    })
+    client.setQueryData(
+      ['drawing-groups', 852],
+      [{ value: 'default', label: 'default', ratio: 1 }]
+    )
+    client.setQueryData(
+      ['drawing-models', 852, 'default'],
+      [
+        { value: 'gpt-image-1', label: 'gpt-image-1' },
+        { value: 'nai-diffusion-4-5-full', label: 'nai-diffusion-4-5-full' },
+        { value: 'qwen-image', label: 'qwen-image' },
+      ]
+    )
+    render(
+      <QueryClientProvider client={client}>
+        <DrawingSettings
+          userId={852}
+          pendingCount={0}
+          onGenerate={vi.fn()}
+          onCancel={vi.fn()}
+          onUploadReferences={vi.fn()}
+          onMaskUpload={vi.fn()}
+          onClearMask={vi.fn()}
+          onDrawMask={vi.fn()}
+        />
+      </QueryClientProvider>
+    )
+  }
+
+  beforeEach(() => {
+    localStorage.clear()
+    useDrawingStore.getState().initialize(852)
+    useDrawingStore.getState().updateSettings({ model: 'gpt-image-1' })
+  })
+
+  it('switches between description and tag models, explaining each mode', async () => {
+    const user = userEvent.setup()
+    renderModes()
+    const description = screen.getByRole('button', { name: 'Description mode' })
+    const tags = screen.getByRole('button', { name: 'Tag mode' })
+    expect(description).toHaveAttribute('aria-pressed', 'true')
+    expect(tags).toHaveAttribute('aria-pressed', 'false')
+
+    await user.hover(tags)
+    expect(
+      await screen.findByText(
+        "Write what you want and don't want as separate tags or phrases, and adjust the seed and other parameters."
+      )
+    ).toBeInTheDocument()
+
+    await user.click(tags)
+    expect(useDrawingStore.getState().settings.model).toBe(
+      'nai-diffusion-4-5-full'
+    )
+    expect(tags).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByLabelText('Positive prompt')).toBeInTheDocument()
+    expect(screen.getByLabelText('Negative prompt')).toBeInTheDocument()
+    expect(screen.getByLabelText('Width')).toHaveValue(832)
+    expect(screen.getByLabelText('Sampler')).toHaveValue('k_euler_ancestral')
+
+    await user.click(description)
+    expect(useDrawingStore.getState().settings.model).toBe('gpt-image-1')
+    expect(screen.getByLabelText('Prompt')).toBeInTheDocument()
+    expect(screen.queryByLabelText('Negative prompt')).not.toBeInTheDocument()
+  })
+
+  it('offers the controls an Alibaba text-to-image model accepts', async () => {
+    useDrawingStore.getState().switchGenerationMode('tags')
+    useDrawingStore.getState().updateSettings({
+      model: 'qwen-image',
+      size: '1328*1328',
+    })
+    renderModes()
+
+    expect(screen.getByLabelText('Image size')).toHaveValue('1328*1328')
+    expect(screen.getByText('Prompt rewriting')).toBeInTheDocument()
+    expect(screen.getByLabelText('Seed')).toBeInTheDocument()
+    // Qwen-Image only generates from text, so it takes no references.
+    expect(screen.queryByText('Reference images')).not.toBeInTheDocument()
+    expect(screen.getByRole('option', { name: 'Image editing' })).toBeDisabled()
+  })
+})

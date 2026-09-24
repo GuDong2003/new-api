@@ -1,5 +1,3 @@
-import type { DrawingDocument } from '../../playground/drawing/types'
-import type { NaiCanvasDocument } from '../../playground/nai/types'
 import { getGalleryFile, readRemoteCanvasOriginal } from '../api'
 import type { CanvasKind, GalleryIdentity } from '../types'
 import { decodeCanvas, encodeCanvas } from './canvas-document'
@@ -93,10 +91,7 @@ async function persistCanvasGenerationResultUnsafe(options: {
   })
   if (!changed || !isGalleryIdentityCurrent(options.identity)) return false
 
-  const nextDocument =
-    options.kind === 'drawing'
-      ? ({ ...document, nodes } as DrawingDocument)
-      : ({ ...document, nodes } as NaiCanvasDocument)
+  const nextDocument = { ...document, nodes }
   const existingAssets = await readCanvasAssets(userId, canvas.id)
   const existingRoles = Object.fromEntries(
     existingAssets.map((asset) => [

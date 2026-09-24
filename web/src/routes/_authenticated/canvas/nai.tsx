@@ -16,22 +16,19 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { createFileRoute } from '@tanstack/react-router'
+import { createFileRoute, redirect } from '@tanstack/react-router'
 import { z } from 'zod'
-
-import { NaiDrawing } from '@/features/playground/nai/components/NaiDrawingWorkspace'
 
 const canvasSearchSchema = z.object({
   canvas: z.string().uuid().optional().catch(undefined),
   image: z.string().uuid().optional().catch(undefined),
 })
 
+// The NAI canvas merged into the drawing page, which opens and upgrades a NAI
+// canvas. Links to a NAI canvas keep working.
 export const Route = createFileRoute('/_authenticated/canvas/nai')({
   validateSearch: canvasSearchSchema,
-  component: NaiRoute,
+  beforeLoad: ({ search }) => {
+    throw redirect({ to: '/canvas/drawing', search, replace: true })
+  },
 })
-
-function NaiRoute() {
-  const search = Route.useSearch()
-  return <NaiDrawing canvasId={search.canvas} focusAssetId={search.image} />
-}

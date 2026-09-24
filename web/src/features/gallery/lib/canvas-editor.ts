@@ -19,11 +19,8 @@ import type {
   DrawingDocument,
   ImageAsset,
 } from '@/features/playground/drawing/types'
-import { cancelNaiGenerationJobs } from '@/features/playground/nai/hooks/use-nai-image-generation'
-import type { NaiCanvasDocument } from '@/features/playground/nai/types'
 import { useAuthStore } from '@/stores/auth-store'
 import { useDrawingStore } from '@/stores/drawing-store'
-import { useNaiDrawingStore } from '@/stores/nai-drawing-store'
 
 import { getGalleryFile, readRemoteCanvasOriginal } from '../api'
 import type { CanvasKind, GalleryIdentity, LocalCanvas } from '../types'
@@ -52,7 +49,6 @@ import {
   isGalleryIdentityCurrent,
 } from './session'
 
-type EditorDocument = DrawingDocument | NaiCanvasDocument
 export type CanvasLocalStatus = 'loading' | 'saving' | 'saved' | 'error'
 const states: Partial<
   Record<
@@ -74,8 +70,9 @@ export function updateState(
   states[kind] = value
   notifyCanvasProjects()
 }
-export function storeFor(kind: CanvasKind) {
-  return kind === 'drawing' ? useDrawingStore : useNaiDrawingStore
+// Every canvas opens in the drawing editor; a NAI canvas is upgraded first.
+export function storeFor(_kind: CanvasKind) {
+  return useDrawingStore
 }
 export const sameIdentity = (a: GalleryIdentity, b: GalleryIdentity) =>
   a.userId === b.userId && a.sessionId === b.sessionId
@@ -108,9 +105,9 @@ function content(document: Record<string, unknown>) {
 }
 
 function remapEditorDocument(
-  document: EditorDocument,
+  document: DrawingDocument,
   ids: Readonly<Record<string, string>>
-): EditorDocument {
+): DrawingDocument {
   const asset = (value: ImageAsset) => ({
     ...value,
     id: ids[value.id] ?? value.id,
@@ -122,15 +119,13 @@ function remapEditorDocument(
       data: {
         ...node.data,
         ...(node.data.asset ? { asset: asset(node.data.asset) } : {}),
-        ...('mask' in node.data && node.data.mask
-          ? { mask: asset(node.data.mask) }
-          : {}),
+        ...(node.data.mask ? { mask: asset(node.data.mask) } : {}),
       },
     })),
-    ...('mask' in document && document.mask
+    ...(document.mask
       ? { mask: { ...document.mask, asset: asset(document.mask.asset) } }
       : {}),
-  } as EditorDocument
+  }
 }
 export function bindEditor(identity: GalleryIdentity, initial: LocalCanvas) {
   const kind = initial.kind
@@ -141,11 +136,7 @@ export function bindEditor(identity: GalleryIdentity, initial: LocalCanvas) {
   let timer: ReturnType<typeof setTimeout> | undefined
   let queue = Promise.resolve()
   const controller = new AbortController()
-  if (kind === 'drawing') {
-    useDrawingStore.setState({ canvasId: initial.id })
-  } else {
-    useNaiDrawingStore.setState({ canvasId: initial.id })
-  }
+  useDrawingStore.setState({ canvasId: initial.id })
   updateState(kind, { canvas: initial, localStatus: 'saved' })
   const save = async () => {
     if (!active || !isGalleryIdentityCurrent(identity)) return
@@ -272,8 +263,7 @@ export function bindEditor(identity: GalleryIdentity, initial: LocalCanvas) {
     window.removeEventListener('pagehide', leave)
     document.removeEventListener('visibilitychange', visibility)
     if (store.getState().canvasId === initial.id) {
-      if (kind === 'drawing') useDrawingStore.setState({ canvasId: null })
-      else useNaiDrawingStore.setState({ canvasId: null })
+      useDrawingStore.setState({ canvasId: null })
     }
     if (canvasEditors.get(kind)?.canvasId === initial.id) {
       canvasEditors.delete(kind)
@@ -319,30 +309,28 @@ export function bindEditor(identity: GalleryIdentity, initial: LocalCanvas) {
           // Prune only the deleted resource from the *latest* editor. Its other
           // unsaved settings/positions must not be replaced by the IDB snapshot.
           state.removeNodes(nodeIds)
-          if (kind === 'drawing') {
-            const drawing = useDrawingStore.getState()
-            useDrawingStore.setState({
-              past: [],
-              future: [],
-              nodes: drawing.nodes.map((node) => ({
-                ...node,
-                data: {
-                  ...node.data,
-                  referenceIds: node.data.referenceIds?.filter(
-                    (id) => !nodeIds.includes(id)
-                  ),
-                  mask:
-                    node.data.mask && removed.has(node.data.mask.id)
-                      ? undefined
-                      : node.data.mask,
-                },
-              })),
-              mask:
-                drawing.mask && removed.has(drawing.mask.asset.id)
-                  ? null
-                  : drawing.mask,
-            })
-          } else useNaiDrawingStore.setState({ past: [], future: [] })
+          const drawing = useDrawingStore.getState()
+          useDrawingStore.setState({
+            past: [],
+            future: [],
+            nodes: drawing.nodes.map((node) => ({
+              ...node,
+              data: {
+                ...node.data,
+                referenceIds: node.data.referenceIds?.filter(
+                  (id) => !nodeIds.includes(id)
+                ),
+                mask:
+                  node.data.mask && removed.has(node.data.mask.id)
+                    ? undefined
+                    : node.data.mask,
+              },
+            })),
+            mask:
+              drawing.mask && removed.has(drawing.mask.asset.id)
+                ? null
+                : drawing.mask,
+          })
           if (timer) clearTimeout(timer)
           timer = setTimeout(() => {
             void flush()
@@ -364,43 +352,25 @@ export function bindEditor(identity: GalleryIdentity, initial: LocalCanvas) {
           }>) {
             if (node.data.asset) delete assetRoles[node.data.asset.id]
           }
-          if (kind === 'drawing') {
-            const current = useDrawingStore.getState()
-            const snapshot = (value: (typeof current.past)[number]) => {
-              const remapped = remapEditorDocument(
-                { ...current, ...value },
-                idMap
-              ) as DrawingDocument
-              return {
-                nodes: remapped.nodes,
-                edges: remapped.edges,
-                referenceIds: remapped.referenceIds,
-                mask: remapped.mask,
-              }
+          const current = useDrawingStore.getState()
+          const snapshot = (value: (typeof current.past)[number]) => {
+            const remapped = remapEditorDocument(
+              { ...current, ...value },
+              idMap
+            )
+            return {
+              nodes: remapped.nodes,
+              edges: remapped.edges,
+              referenceIds: remapped.referenceIds,
+              mask: remapped.mask,
             }
-            useDrawingStore.setState({
-              ...(mapped as DrawingDocument),
-              assetRoles,
-              past: current.past.map(snapshot),
-              future: current.future.map(snapshot),
-            })
-          } else {
-            const current = useNaiDrawingStore.getState()
-            const snapshot = (value: (typeof current.past)[number]) => ({
-              nodes: (
-                remapEditorDocument(
-                  { ...current, ...value },
-                  idMap
-                ) as NaiCanvasDocument
-              ).nodes,
-            })
-            useNaiDrawingStore.setState({
-              ...(mapped as NaiCanvasDocument),
-              assetRoles,
-              past: current.past.map(snapshot),
-              future: current.future.map(snapshot),
-            })
           }
+          useDrawingStore.setState({
+            ...mapped,
+            assetRoles,
+            past: current.past.map(snapshot),
+            future: current.future.map(snapshot),
+          })
         }
         updateState(kind, {
           canvas: event.canvas,
@@ -442,12 +412,7 @@ useAuthStore.subscribe((state, previous) => {
       previous.auth.user?.id ?? null,
       previous.auth.session?.sid ?? null
     )
-    cancelNaiGenerationJobs(
-      previous.auth.user?.id ?? null,
-      previous.auth.session?.sid ?? null
-    )
     useDrawingStore.getState().initialize(state.auth.user?.id ?? 0)
-    useNaiDrawingStore.getState().initialize(state.auth.user?.id ?? 0)
     delete states.drawing
     delete states.nai
     notifyCanvasProjects()

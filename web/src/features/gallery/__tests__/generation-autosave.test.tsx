@@ -23,12 +23,9 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 
 import { useImageGeneration } from '@/features/playground/drawing/hooks/use-image-generation'
 import { DEFAULT_IMAGE_SETTINGS } from '@/features/playground/drawing/lib/image-settings'
-import { useNaiImageGeneration } from '@/features/playground/nai/hooks/use-nai-image-generation'
-import { DEFAULT_NAI_SETTINGS } from '@/features/playground/nai/lib/nai-settings'
 import { api } from '@/lib/api'
 import { useAuthStore } from '@/stores/auth-store'
 import { useDrawingStore } from '@/stores/drawing-store'
-import { useNaiDrawingStore } from '@/stores/nai-drawing-store'
 
 import { deleteCanvasNodes } from '../components/canvas-node-deletion'
 import { deleteCanvasProject } from '../lib/canvas-deletion'
@@ -55,6 +52,17 @@ import { login, required, response, usage } from './fixtures'
 const identity = { userId: 813, sessionId: 'gallery-session' }
 const png =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aKn0AAAAASUVORK5CYII='
+// NovelAI generates on the drawing page with tag prompts.
+const tagSettings = {
+  ...DEFAULT_IMAGE_SETTINGS,
+  generationMode: 'tags' as const,
+  model: 'nai-diffusion-4-5-full',
+  prompt: '一只狐狸',
+}
+const imageResponse = () => ({
+  headers: { 'content-type': 'application/json' },
+  data: new Response(JSON.stringify({ data: [{ b64_json: png }] })).body,
+})
 const adapter = api.defaults.adapter
 let posts: string[]
 beforeEach(() => {
@@ -233,9 +241,9 @@ it('does not cloud-sync a canvas while its image generation is in flight', async
   hook.unmount()
 })
 
-it('keeps a pending NAI generation alive while arranging the canvas', async () => {
-  await createCanvasProject(identity, 'nai')
-  await startCanvasEditor(identity, 'nai')
+it('keeps a pending tag generation alive while arranging the canvas', async () => {
+  await createCanvasProject(identity, 'drawing')
+  await startCanvasEditor(identity, 'drawing')
   let signal: { aborted: boolean } | undefined
   let finish!: (value: unknown) => void
   vi.spyOn(api, 'post').mockImplementation((_url, _data, config) => {
@@ -244,32 +252,26 @@ it('keeps a pending NAI generation alive while arranging the canvas', async () =
       finish = resolve
     })
   })
-  const hook = renderHook(useNaiImageGeneration)
-  act(() =>
-    hook.result.current.generate({
-      ...DEFAULT_NAI_SETTINGS,
-      model: 'nai-diffusion-4-5-full',
-      prompt: '一只狐狸',
-      n: 1,
-    })
-  )
-  await waitFor(() =>
-    expect(useNaiDrawingStore.getState().nodes).toHaveLength(1)
-  )
-  const node = useNaiDrawingStore.getState().nodes[0]
+  const hook = renderHook(useImageGeneration)
+  act(() => {
+    hook.result.current.generate(tagSettings, { x: 0, y: 0 })
+  })
+  await waitFor(() => expect(useDrawingStore.getState().nodes).toHaveLength(1))
+  const node = useDrawingStore.getState().nodes[0]
   const jobId = node.data.jobId
 
-  act(() => useNaiDrawingStore.getState().arrange())
+  act(() => useDrawingStore.getState().arrange())
 
   expect(signal?.aborted).toBe(false)
-  expect(useNaiDrawingStore.getState().nodes[0].data).toMatchObject({
+  expect(useDrawingStore.getState().nodes[0].data).toMatchObject({
     status: 'pending',
     jobId,
   })
-  await act(async () => finish({ data: { data: [{ b64_json: png }] } }))
+  await act(async () => finish(imageResponse()))
   await waitFor(() =>
-    expect(useNaiDrawingStore.getState().nodes[0].data.status).toBe('complete')
+    expect(useDrawingStore.getState().nodes[0].data.status).toBe('complete')
   )
+  hook.unmount()
 })
 
 it('keeps a pending drawing generation alive while deleting its node', async () => {
@@ -303,37 +305,6 @@ it('keeps a pending drawing generation alive while deleting its node', async () 
     })
   })
   expect(useDrawingStore.getState().nodes).toEqual([])
-  expect((await loadLocalCanvas(813, canvas.id))?.deleted).toBe(false)
-})
-
-it('keeps a pending NAI generation alive while deleting its node', async () => {
-  const canvas = await createCanvasProject(identity, 'nai')
-  await startCanvasEditor(identity, 'nai')
-  let signal: { aborted: boolean } | undefined
-  let finish!: (value: unknown) => void
-  vi.spyOn(api, 'post').mockImplementation((_url, _data, config) => {
-    signal = config?.signal
-    return new Promise((resolve) => {
-      finish = resolve
-    })
-  })
-  const hook = renderHook(useNaiImageGeneration)
-  act(() =>
-    hook.result.current.generate({
-      ...DEFAULT_NAI_SETTINGS,
-      model: 'nai-diffusion-4-5-full',
-      prompt: '一只狐狸',
-      n: 1,
-    })
-  )
-  await waitFor(() => expect(signal).toBeDefined())
-  const nodeId = useNaiDrawingStore.getState().nodes[0].id
-
-  await deleteCanvasNodes('nai', [nodeId])
-
-  expect(signal?.aborted).toBe(false)
-  await act(async () => finish({ data: { data: [{ b64_json: png }] } }))
-  expect(useNaiDrawingStore.getState().nodes).toEqual([])
   expect((await loadLocalCanvas(813, canvas.id))?.deleted).toBe(false)
 })
 
@@ -382,52 +353,6 @@ it('stores a drawing result on its original canvas while another canvas is open'
   await openCanvasProject(identity, source.id)
   await waitFor(() =>
     expect(useDrawingStore.getState().nodes[0].data.status).toBe('complete')
-  )
-  hook.unmount()
-})
-
-it('stores a NAI result on its original canvas while another canvas is open', async () => {
-  const source = await createCanvasProject(identity, 'nai', '源 NAI 画布')
-  await startCanvasEditor(identity, 'nai')
-  let signal: { aborted: boolean } | undefined
-  let finish!: (value: unknown) => void
-  vi.spyOn(api, 'post').mockImplementation((_url, _data, config) => {
-    signal = config?.signal
-    return new Promise((resolve) => {
-      finish = resolve
-    })
-  })
-  const hook = renderHook(useNaiImageGeneration)
-  act(() =>
-    hook.result.current.generate({
-      ...DEFAULT_NAI_SETTINGS,
-      model: 'nai-diffusion-4-5-full',
-      prompt: '一只狐狸',
-      n: 1,
-    })
-  )
-  await waitFor(() => expect(signal).toBeDefined())
-  const nodeId = useNaiDrawingStore.getState().nodes[0].id
-  const target = await createCanvasProject(identity, 'nai', '目标 NAI 画布')
-  await openCanvasProject(identity, target.id)
-
-  expect(signal?.aborted).toBe(false)
-  await act(async () => finish({ data: { data: [{ b64_json: png }] } }))
-
-  await waitFor(async () => {
-    const stored = await loadLocalCanvas(813, source.id)
-    expect(stored?.document.nodes).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          id: nodeId,
-          data: expect.objectContaining({ status: 'complete' }),
-        }),
-      ])
-    )
-  })
-  await openCanvasProject(identity, source.id)
-  await waitFor(() =>
-    expect(useNaiDrawingStore.getState().nodes[0].data.status).toBe('complete')
   )
   hook.unmount()
 })
@@ -489,14 +414,13 @@ it('acquires remote originals through the captured private transport, with no cl
   expect(urls).toEqual(['/api/gallery/original'])
 })
 
-it('exports a portable NAI document even when local storage is unavailable', async () => {
-  const { useNaiDrawingStore } = await import('@/stores/nai-drawing-store')
-  useNaiDrawingStore.getState().initialize(813)
-  useNaiDrawingStore.getState().hydrate(null)
-  useNaiDrawingStore.getState().addNodes([
+it('exports a portable canvas document even when local storage is unavailable', async () => {
+  useDrawingStore.getState().initialize(813)
+  useDrawingStore.getState().hydrate(null)
+  useDrawingStore.getState().addNodes([
     {
-      id: 'nai-node',
-      type: 'nai-image',
+      id: 'tag-node',
+      type: 'image',
       position: { x: 9, y: 10 },
       data: {
         asset: {
@@ -508,7 +432,7 @@ it('exports a portable NAI document even when local storage is unavailable', asy
           mimeType: 'image/png',
         },
         prompt: '便携导出',
-        settings: useNaiDrawingStore.getState().settings,
+        settings: { ...tagSettings, negativePrompt: 'noise' },
         status: 'complete',
         createdAt: 1,
       },
@@ -517,52 +441,59 @@ it('exports a portable NAI document even when local storage is unavailable', asy
   vi.spyOn(indexedDB, 'open').mockImplementation(() => {
     throw new Error('storage blocked')
   })
-  const blob = await exportCanvasProject(identity, 'nai')
+  const blob = await exportCanvasProject(identity, 'drawing')
   const document = JSON.parse(await blob.text())
   expect(document.nodes[0]).toMatchObject({
     position: { x: 9, y: 10 },
     data: {
       prompt: '便携导出',
       asset: { src: `data:image/png;base64,${png}` },
+      settings: { generationMode: 'tags', negativePrompt: 'noise' },
     },
   })
 })
 
-it('saves NAI generated originals and settings locally without an independent image publication', async () => {
-  const canvas = await createCanvasProject(identity, 'nai')
-  await startCanvasEditor(identity, 'nai')
-  vi.spyOn(api, 'post').mockResolvedValue({
-    data: { data: [{ b64_json: png }] },
-  })
-  const hook = renderHook(useNaiImageGeneration)
+it('saves tag generated originals and settings locally without an independent image publication', async () => {
+  const canvas = await createCanvasProject(identity, 'drawing')
+  await startCanvasEditor(identity, 'drawing')
+  vi.spyOn(api, 'post').mockImplementation(async () => imageResponse())
+  const hook = renderHook(useImageGeneration)
   act(() => {
-    hook.result.current.generate({
-      ...DEFAULT_NAI_SETTINGS,
-      model: 'nai-diffusion-4-5-full',
-      prompt: '狐狸',
-      negativePrompt: 'noise',
-      seed: 42,
-    })
+    hook.result.current.generate(
+      { ...tagSettings, prompt: '狐狸', negativePrompt: 'noise', seed: 42 },
+      { x: 0, y: 0 }
+    )
   })
   await waitFor(() =>
-    expect(useNaiDrawingStore.getState().nodes[0].data.status).toBe('complete')
+    expect(useDrawingStore.getState().nodes[0].data.status).toBe('complete')
   )
   await flushLocalEditors(identity)
   const assets = await readCanvasAssets(813, canvas.id)
   expect(assets).toHaveLength(1)
   expect(assets[0]).toMatchObject({
     role: 'generated',
-    nodeId: useNaiDrawingStore.getState().nodes[0].id,
+    nodeId: useDrawingStore.getState().nodes[0].id,
   })
   expect((await loadLocalCanvas(813, canvas.id))?.document.nodes).toMatchObject(
-    [{ data: { settings: { seed: 42, negativePrompt: 'noise' } } }]
+    [
+      {
+        data: {
+          settings: {
+            generationMode: 'tags',
+            seed: 42,
+            negativePrompt: 'noise',
+          },
+        },
+      },
+    ]
   )
   expect(posts).toEqual([])
+  hook.unmount()
 })
 
-it('discards NAI results after the captured session changes', async () => {
-  const canvas = await createCanvasProject(identity, 'nai')
-  await startCanvasEditor(identity, 'nai')
+it('discards generation results after the captured session changes', async () => {
+  const canvas = await createCanvasProject(identity, 'drawing')
+  await startCanvasEditor(identity, 'drawing')
   let finish!: (value: unknown) => void
   vi.spyOn(api, 'post').mockImplementation(
     () =>
@@ -570,20 +501,17 @@ it('discards NAI results after the captured session changes', async () => {
         finish = resolve
       })
   )
-  const hook = renderHook(useNaiImageGeneration)
+  const hook = renderHook(useImageGeneration)
   act(() => {
-    hook.result.current.generate({
-      ...DEFAULT_NAI_SETTINGS,
-      model: 'nai-diffusion-4-5-full',
-      prompt: '狐狸',
-    })
+    hook.result.current.generate(tagSettings, { x: 0, y: 0 })
   })
   act(() => {
     login(813, 'replacement')
   })
   await act(async () => {
-    finish({ data: { data: [{ b64_json: png }] } })
+    finish(imageResponse())
   })
   expect(await readCanvasAssets(813, canvas.id)).toEqual([])
   expect(posts).toEqual([])
+  hook.unmount()
 })

@@ -28,8 +28,6 @@ import { flushCanvasSession } from '@/features/gallery/lib/canvas-sync'
 import { cancelGallerySaves } from '@/features/gallery/lib/save-queue'
 import { DrawingPersistence } from '@/features/playground/drawing/hooks/use-drawing-persistence'
 import { cancelImageGenerationJobs } from '@/features/playground/drawing/hooks/use-image-generation'
-import { NaiDrawingPersistence } from '@/features/playground/nai/hooks/use-nai-drawing-persistence'
-import { cancelNaiGenerationJobs } from '@/features/playground/nai/hooks/use-nai-image-generation'
 import { getCookie } from '@/lib/cookies'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/auth-store'
@@ -72,7 +70,6 @@ export function AuthenticatedLayout(props: AuthenticatedLayoutProps) {
       (previous.userId !== userId || previous.sessionId !== sessionId)
     ) {
       cancelImageGenerationJobs(previous.userId, previous.sessionId)
-      cancelNaiGenerationJobs(previous.userId, previous.sessionId)
       cancelGallerySaves(previous.userId, previous.sessionId)
     }
     previousIdentity.current = { userId, sessionId }
@@ -81,7 +78,6 @@ export function AuthenticatedLayout(props: AuthenticatedLayoutProps) {
   return (
     <LayoutProvider>
       <DrawingPersistence userId={userId} />
-      <NaiDrawingPersistence userId={userId} />
       <SearchProvider>
         <SidebarProvider defaultOpen={defaultOpen} className='flex-col'>
           <SkipToMain />

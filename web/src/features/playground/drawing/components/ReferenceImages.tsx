@@ -32,6 +32,10 @@ import { useDrawingStore } from '@/stores/drawing-store'
 import type { ImageAsset } from '../types'
 
 type ReferenceImagesProps = {
+  // How many references the selected model reads; 16 unless it says otherwise.
+  limit?: number
+  // Whether the selected model can repaint under a mask.
+  maskable?: boolean
   onUpload: (files: File[]) => void
   mask?: ImageAsset
   onMaskUpload: (file: File) => void
@@ -53,20 +57,21 @@ export function ReferenceImages(props: ReferenceImagesProps) {
     )
     return node?.data.asset ? [{ id, asset: node.data.asset }] : []
   })
+  const limit = props.limit ?? 16
   return (
     <div className='space-y-3'>
       <div className='flex items-center justify-between gap-2'>
         <Label>
           {t('Reference images')}{' '}
           <span className='text-muted-foreground font-normal'>
-            {references.length}/16
+            {references.length}/{limit}
           </span>
         </Label>
         <Button
           type='button'
           variant='ghost'
           size='sm'
-          disabled={references.length >= 16}
+          disabled={references.length >= limit}
           onClick={() => upload.current?.click()}
         >
           <HugeiconsIcon icon={ImageAdd01Icon} size={15} aria-hidden='true' />
@@ -143,7 +148,7 @@ export function ReferenceImages(props: ReferenceImagesProps) {
           </div>
         ))}
       </div>
-      {references.length > 0 && (
+      {references.length > 0 && props.maskable !== false && (
         <>
           <div className='flex flex-wrap gap-2'>
             <Button

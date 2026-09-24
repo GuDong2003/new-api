@@ -19,7 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { t } from 'i18next'
 
 import { loadDrawingDocument } from '../../playground/drawing/lib/canvas-storage'
-import { loadNaiCanvasDocument } from '../../playground/nai/lib/canvas-storage'
+import { loadLegacyNaiDocument } from '../../playground/drawing/lib/legacy-nai-document'
 import type { CanvasKind, LocalCanvas } from '../types'
 import { encodeCanvas, type CanvasCodecContext } from './canvas-document'
 import {
@@ -47,7 +47,7 @@ export async function migrateLegacyCanvases(
     const document =
       kind === 'drawing'
         ? await loadDrawingDocument(userId)
-        : await loadNaiCanvasDocument(userId)
+        : await loadLegacyNaiDocument(userId)
     if (!document) continue
     const roles = { ...context.roles }
     for (const node of document.nodes) {

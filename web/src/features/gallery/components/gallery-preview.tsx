@@ -30,9 +30,8 @@ export function GalleryPreview(props: {
   onClose: () => void
 }) {
   const { t } = useTranslation()
-  let sourceLabel = t('Drawing')
-  if (props.image.source === 'nai') sourceLabel = t('NAI Canvas')
-  if (props.image.source === 'api') sourceLabel = t('API')
+  // The drawing page absorbed the NAI page, so NAI images are drawing images.
+  const sourceLabel = props.image.source === 'api' ? t('API') : t('Drawing')
   const file = useGalleryFile(props.identity, props.image.id, false, true, {
     blob: props.image.localBlob,
     only: props.image.localOnly,

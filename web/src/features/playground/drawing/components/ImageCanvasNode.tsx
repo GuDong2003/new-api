@@ -48,7 +48,7 @@ import {
   CANVAS_NODE_MIN_WIDTH,
 } from '../lib/canvas-geometry'
 import { downloadBlob } from '../lib/image-assets'
-import { getImageModelFamily } from '../lib/image-settings'
+import { getMaxReferenceImages } from '../lib/image-settings'
 import type { DrawingNode } from '../types'
 import {
   ImageGenerationElapsed,
@@ -82,7 +82,7 @@ export const ImageCanvasNode = memo(function ImageCanvasNode(
   const canReceive =
     props.isConnectable &&
     !pending &&
-    getImageModelFamily(props.data.settings.model) !== 'dall-e-3'
+    getMaxReferenceImages(props.data.settings.model) > 0
   const canReference = props.isConnectable && complete && Boolean(asset)
   return (
     <>

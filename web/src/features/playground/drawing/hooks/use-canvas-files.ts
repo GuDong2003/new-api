@@ -36,6 +36,10 @@ import {
   CANVAS_NODE_WIDTH,
 } from '../lib/canvas-geometry'
 import { downloadBlob, imageFileToAsset } from '../lib/image-assets'
+import {
+  convertLegacyNaiDocument,
+  parseLegacyNaiDocument,
+} from '../lib/legacy-nai-document'
 import type { DrawingDocument, DrawingNode, ImageAsset } from '../types'
 
 export function useCanvasFiles() {
@@ -125,7 +129,20 @@ export function useCanvasFiles() {
       if (file.size > 200 * 1024 * 1024) {
         throw new Error('Canvas files must be smaller than 200 MB.')
       }
-      const document = parseDrawingDocument(JSON.parse(await file.text()))
+      const input: unknown = JSON.parse(await file.text())
+      let document: DrawingDocument
+      try {
+        document = parseDrawingDocument(input)
+      } catch (error) {
+        // A canvas exported from the former NAI page opens as a drawing canvas.
+        try {
+          document = parseDrawingDocument(
+            convertLegacyNaiDocument(parseLegacyNaiDocument(input))
+          )
+        } catch {
+          throw error
+        }
+      }
       assertCanvasTarget('drawing', target)
       pendingImportTarget.current = target
       setPendingImport(document)

@@ -19,6 +19,8 @@ For commercial licensing, please contact support@quantumnous.com
 import { z } from 'zod'
 
 import {
+  getAlibabaImageModel,
+  getImageGenerationMode,
   getImageModelFamily as classifyImageModelFamily,
   type ImageModelFamily,
 } from './image-models'
@@ -66,9 +68,60 @@ export const imageSettingsSchema = z.object({
   partialImages: z.number().int().min(0).max(3).default(1),
   user: z.string().max(512).default(''),
   nsfw: z.boolean().default(false),
+  // Tag prompting: NovelAI and Alibaba's image models.
+  generationMode: z.enum(['description', 'tags']).default('description'),
+  negativePrompt: z.string().max(32000).default(''),
+  width: z.number().int().min(64).max(2048).default(832),
+  height: z.number().int().min(64).max(2048).default(1216),
+  steps: z.number().int().min(1).max(50).default(28),
+  scale: z.number().min(0).max(30).default(5),
+  sampler: z
+    .enum([
+      'k_euler_ancestral',
+      'k_euler',
+      'k_dpmpp_2s_ancestral',
+      'k_dpmpp_2m',
+      'k_dpmpp_sde',
+      'ddim_v3',
+    ])
+    .default('k_euler_ancestral'),
+  noiseSchedule: z
+    .enum(['native', 'karras', 'exponential', 'polyexponential'])
+    .default('karras'),
+  cfgRescale: z.number().min(0).max(1).default(0),
+  seed: z.number().int().min(0).max(4294967295).nullable().default(null),
+  qualityToggle: z.boolean().default(false),
+  qualityTier: z.enum(['standard', 'light']).default('standard'),
+  ucPreset: z.enum(['heavy', 'light', 'humanFocus', 'none']).default('none'),
+  smea: z.boolean().default(false),
+  smeaDyn: z.boolean().default(false),
+  decrisp: z.boolean().default(false),
+  promptExtend: z.boolean().default(true),
 })
 
 export const DEFAULT_IMAGE_SETTINGS = imageSettingsSchema.parse({})
+
+// Settings only a tag-prompted model reads. A description-prompted image does
+// not store them, so its saved settings stay exactly what they always were.
+const TAG_SETTING_FIELDS = [
+  'generationMode',
+  'negativePrompt',
+  'width',
+  'height',
+  'steps',
+  'scale',
+  'sampler',
+  'noiseSchedule',
+  'cfgRescale',
+  'seed',
+  'qualityToggle',
+  'qualityTier',
+  'ucPreset',
+  'smea',
+  'smeaDyn',
+  'decrisp',
+  'promptExtend',
+] as const
 
 export function normalizeStoredImageSettings(
   settings: z.infer<typeof imageSettingsSchema>
@@ -85,11 +138,24 @@ export function normalizeStoredImageSettings(
   // Per-field parsing cannot see the model, so a document saved before a family
   // changed its supported values would restore into a state that fails
   // validation. Re-apply the model's own constraints here.
-  return settingsForImageModel(parsed, parsed.model)
+  const stored: Record<string, unknown> = settingsForImageModel(
+    parsed,
+    parsed.model
+  )
+  if (stored.generationMode !== 'tags') {
+    for (const field of TAG_SETTING_FIELDS) delete stored[field]
+  }
+  // Parsing a stored document restores the defaults of the omitted fields.
+  return stored as z.infer<typeof imageSettingsSchema>
 }
 
 export function getImageSizes(model: string): string[] {
   const family = getImageModelFamily(model)
+  // NovelAI takes its size as a width and height of its own.
+  if (family === 'novelai') return []
+  if (family === 'alibaba') {
+    return [...(getAlibabaImageModel(model)?.sizes ?? [])]
+  }
   if (family === 'dall-e-2') return ['256x256', '512x512', '1024x1024']
   if (family === 'dall-e-3') return ['1024x1024', '1792x1024', '1024x1792']
   if (family === 'imagen') {
@@ -159,7 +225,49 @@ export function getMaxImagesPerRequest(model: string): number {
   if (family === 'dall-e-3' || family === 'imagen' || family === 'seedream') {
     return 1
   }
+  if (family === 'novelai') return 8
+  if (family === 'alibaba') return getAlibabaImageModel(model)?.maxImages ?? 1
   return supportsImageSizePresets(model) ? 1 : 10
+}
+
+/**
+ * How many reference images a model can edit from. Zero means it only
+ * generates from text; DALL·E 2 edits exactly one image.
+ */
+export function getMaxReferenceImages(model: string): number {
+  const family = getImageModelFamily(model)
+  if (
+    family === 'dall-e-3' ||
+    family === 'imagen' ||
+    family === 'seedream' ||
+    family === 'novelai'
+  ) {
+    return 0
+  }
+  if (family === 'dall-e-2') return 1
+  if (family === 'alibaba') {
+    return getAlibabaImageModel(model)?.maxReferences ?? 0
+  }
+  return 16
+}
+
+/** Some Alibaba models only edit, so they cannot start from text alone. */
+export function requiresReferenceImages(model: string): boolean {
+  return (getAlibabaImageModel(model)?.minReferences ?? 0) > 0
+}
+
+/** Among Alibaba's models only the Wanx image editor repaints under a mask. */
+export function supportsImageMask(model: string): boolean {
+  if (getImageModelFamily(model) !== 'alibaba') return true
+  return getAlibabaImageModel(model)?.mask ?? false
+}
+
+/**
+ * The seed range a tag-prompted model accepts. NovelAI takes any unsigned
+ * 32-bit value; Alibaba stops at the signed 32-bit maximum.
+ */
+export function getMaxImageSeed(model: string): number {
+  return getImageModelFamily(model) === 'alibaba' ? 2147483647 : 4294967295
 }
 
 /**
@@ -176,7 +284,10 @@ export function supportsImageStreaming(model: string): boolean {
  * has no equivalent, so Nano Banana has nothing to carry it.
  */
 export function supportsImageUserIdentifier(model: string): boolean {
-  return getImageModelFamily(model) !== 'nano-banana'
+  const family = getImageModelFamily(model)
+  return (
+    family !== 'nano-banana' && family !== 'novelai' && family !== 'alibaba'
+  )
 }
 
 /**
@@ -387,8 +498,15 @@ export function getImageQualities(model: string): string[] {
   if (family === 'imagen' || family === 'flux') return ['standard', 'hd']
   if (family === 'seedream') return ['standard']
   // Gemini defines no quality: its output is described entirely by the size,
-  // so there is nothing to offer and nothing to send.
-  if (supportsAutomaticImageSize(model)) return []
+  // so there is nothing to offer and nothing to send. Tag-prompted models have
+  // sampling controls instead.
+  if (
+    supportsAutomaticImageSize(model) ||
+    family === 'novelai' ||
+    family === 'alibaba'
+  ) {
+    return []
+  }
   // Listed best first, after `auto`, which stays the default for every family.
   // GPT Image 2 added the two rungs above `high`; gpt-image-1 stops there.
   if (supportsImageSizePresetTable(model)) {
@@ -403,6 +521,29 @@ export function settingsForImageModel(
 ): z.infer<typeof imageSettingsSchema> {
   const next = { ...DEFAULT_IMAGE_SETTINGS, ...settings, model }
   const family = getImageModelFamily(model)
+  const classified = classifyImageModelFamily(model)
+  if (classified) next.generationMode = getImageGenerationMode(classified)
+  next.n = Math.min(next.n, getMaxImagesPerRequest(model))
+  if (family === 'novelai') {
+    // NovelAI sizes the image from its width and height and only generates.
+    next.size = `${next.width}x${next.height}`
+    next.mode = 'generate'
+    return next
+  }
+  if (family === 'alibaba') {
+    const profile = getAlibabaImageModel(model)
+    const sizes = getImageSizes(model)
+    if (sizes.length && !sizes.includes(next.size)) next.size = sizes[0]
+    if (!profile?.maxReferences) next.mode = 'generate'
+    else if (profile.minReferences) next.mode = 'edit'
+    if (next.seed !== null) {
+      next.seed = Math.min(next.seed, getMaxImageSeed(model))
+    }
+    if (profile && settings.model !== model) {
+      next.promptExtend = profile.promptExtendByDefault
+    }
+    return next
+  }
   const qualities = getImageQualities(model)
   if (qualities.length && !qualities.includes(next.quality)) {
     next.quality = qualities[0] as typeof next.quality
@@ -425,7 +566,6 @@ export function settingsForImageModel(
   if (family === 'dall-e-3' || family === 'imagen' || family === 'seedream') {
     next.mode = 'generate'
   }
-  next.n = Math.min(next.n, getMaxImagesPerRequest(model))
   return next
 }
 
@@ -441,6 +581,12 @@ export function validateImageSettings(
   if (!settings.model.trim()) return 'Select an image model.'
   if (!settings.group) return 'Select a group.'
   const family = getImageModelFamily(settings.model)
+  if (family === 'novelai') {
+    return validateNovelAIImageSettings(settings)
+  }
+  if (family === 'alibaba') {
+    return validateAlibabaImageSettings(settings, referenceCount)
+  }
   if (family === 'dall-e-3' && settings.n !== 1) {
     return 'DALL·E 3 supports one image per request.'
   }
@@ -517,6 +663,63 @@ export function validateImageSettings(
   return null
 }
 
+function validateNovelAIImageSettings(
+  settings: z.infer<typeof imageSettingsSchema>
+): string | null {
+  if (settings.mode === 'edit') {
+    return 'This image model does not support image editing.'
+  }
+  if (settings.n > getMaxImagesPerRequest(settings.model)) {
+    return 'NovelAI generates up to 8 images per request.'
+  }
+  if (settings.width % 64 || settings.height % 64) {
+    return 'Image dimensions must be multiples of 64.'
+  }
+  if (settings.width * settings.height > 3145728) {
+    return 'The image resolution exceeds the NovelAI limit.'
+  }
+  return null
+}
+
+function validateAlibabaImageSettings(
+  settings: z.infer<typeof imageSettingsSchema>,
+  referenceCount: number
+): string | null {
+  const profile = getAlibabaImageModel(settings.model)
+  if (!profile) return 'Select an image model.'
+  if (settings.n > profile.maxImages) {
+    return profile.maxImages === 1
+      ? 'This model supports one image per request.'
+      : 'Reduce the image count for this model.'
+  }
+  const references = settings.mode === 'edit' ? referenceCount : 0
+  if (settings.mode === 'edit') {
+    if (!profile.maxReferences) {
+      return 'This image model does not support image editing.'
+    }
+    if (referenceCount === 0) return 'Add a reference image before editing.'
+    if (referenceCount > profile.maxReferences) {
+      return 'Too many reference images for this model.'
+    }
+  }
+  if (references < profile.minReferences) {
+    return 'This model edits images. Add a reference image first.'
+  }
+  if (profile.sizes.length && !profile.sizes.includes(settings.size)) {
+    return 'Choose a size supported by this model.'
+  }
+  if (settings.size === '4K' && references > 0) {
+    return '4K is only available when generating from text.'
+  }
+  if (
+    settings.seed !== null &&
+    settings.seed > getMaxImageSeed(settings.model)
+  ) {
+    return 'Enter a seed between 0 and 2147483647.'
+  }
+  return null
+}
+
 // A streamed request is watched on its open connection and keeps returning
 // partial previews. Everything else is submitted as a durable gateway task, and
 // one task carries exactly one image.
@@ -526,10 +729,17 @@ export function usesImageTask(
   return buildImagePayload(settings).stream !== true
 }
 
+export type ImagePayload = Record<
+  string,
+  string | number | boolean | Record<string, unknown>
+>
+
 export function buildImagePayload(
   settings: z.infer<typeof imageSettingsSchema>
-): Record<string, string | number | boolean> {
+): ImagePayload {
   const family = getImageModelFamily(settings.model)
+  if (family === 'novelai') return buildNovelAIImagePayload(settings)
+  if (family === 'alibaba') return buildAlibabaImagePayload(settings)
   const payload: Record<string, string | number | boolean> = {
     model: settings.model,
     prompt: settings.prompt.trim(),
@@ -565,5 +775,68 @@ export function buildImagePayload(
     payload.response_format = settings.responseFormat
     if (family === 'dall-e-3') payload.style = settings.style
   }
+  return payload
+}
+
+// NovelAI reads its sampling controls from the native `nai.parameters` object.
+function buildNovelAIImagePayload(
+  settings: z.infer<typeof imageSettingsSchema>
+): ImagePayload {
+  let qualityTagHint = 0
+  if (settings.qualityToggle) {
+    qualityTagHint = settings.qualityTier === 'light' ? 3 : 1
+  }
+  const parameters: Record<string, unknown> = {
+    params_version: 4,
+    width: settings.width,
+    height: settings.height,
+    steps: settings.steps,
+    scale: settings.scale,
+    sampler: settings.sampler,
+    noise_schedule: settings.noiseSchedule,
+    cfg_rescale: settings.cfgRescale,
+    n_samples: settings.n,
+    negative_prompt: settings.negativePrompt.trim(),
+    ucPresetId: settings.ucPreset,
+    qualityPresetId: settings.qualityToggle ? settings.qualityTier : 'none',
+    tag_hint_qt: qualityTagHint,
+    legacy: false,
+    dynamic_thresholding: settings.decrisp,
+    add_original_image: false,
+    sm: settings.smea,
+    sm_dyn: settings.smeaDyn,
+    image_format: 'png',
+  }
+  if (settings.seed !== null) parameters.seed = settings.seed
+  return {
+    model: settings.model,
+    prompt: settings.prompt.trim(),
+    size: `${settings.width}x${settings.height}`,
+    n: settings.n,
+    response_format: 'b64_json',
+    group: settings.group,
+    nai: { action: 'generate', parameters },
+  }
+}
+
+// The alibaba task plugin reads these OpenAI Images fields for every Alibaba
+// image model, in JSON and in multipart edits alike.
+function buildAlibabaImagePayload(
+  settings: z.infer<typeof imageSettingsSchema>
+): ImagePayload {
+  const profile = getAlibabaImageModel(settings.model)
+  const payload: ImagePayload = {
+    model: settings.model,
+    prompt: settings.prompt.trim(),
+    group: settings.group,
+    n: settings.n,
+    response_format: 'b64_json',
+  }
+  if (profile?.sizes.length) payload.size = settings.size
+  if (profile?.negativePrompt && settings.negativePrompt.trim()) {
+    payload.negative_prompt = settings.negativePrompt.trim()
+  }
+  if (profile?.promptExtend) payload.prompt_extend = settings.promptExtend
+  if (settings.seed !== null) payload.seed = settings.seed
   return payload
 }

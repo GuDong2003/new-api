@@ -38,7 +38,6 @@ function CanvasLayout() {
   })
   const tabs = [
     { to: '/canvas/drawing', title: t('Drawing') },
-    { to: '/canvas/nai', title: t('NAI Canvas') },
     { to: '/canvas/gallery', title: t('My Gallery') },
   ] as const
 

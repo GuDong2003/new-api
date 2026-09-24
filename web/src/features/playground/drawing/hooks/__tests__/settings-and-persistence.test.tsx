@@ -125,7 +125,78 @@ describe('Drawing settings and persistence', () => {
         'imagen-4.0-generate-001'
       )
     )
+
+    // The tag mode lists NovelAI and Alibaba's models instead.
+    act(() => useDrawingStore.getState().switchGenerationMode('tags'))
+    await waitFor(() =>
+      expect(
+        hook.result.current.imageModels.map((model) => model.value)
+      ).toEqual(['nai-diffusion-4-5-full'])
+    )
+    await waitFor(() =>
+      expect(useDrawingStore.getState().settings).toMatchObject({
+        generationMode: 'tags',
+        model: 'nai-diffusion-4-5-full',
+        prompt: 'A cup',
+      })
+    )
     hook.unmount()
     client.clear()
+  })
+
+  it('brings back what each generation mode was left with, sharing the prompt', () => {
+    localStorage.clear()
+    const store = useDrawingStore.getState()
+    store.initialize(814)
+    store.hydrate(null)
+    store.updateSettings({
+      model: 'gpt-image-1',
+      prompt: 'A fox',
+      size: '1536x1024',
+      quality: 'high',
+    })
+
+    act(() => useDrawingStore.getState().switchGenerationMode('tags'))
+    expect(useDrawingStore.getState().settings).toMatchObject({
+      generationMode: 'tags',
+      model: '',
+      prompt: 'A fox',
+    })
+    useDrawingStore.getState().updateSettings({
+      model: 'nai-diffusion-4-5-full',
+      negativePrompt: 'blur',
+      seed: 7,
+      prompt: '1girl, fox ears',
+    })
+
+    act(() => useDrawingStore.getState().switchGenerationMode('description'))
+    expect(useDrawingStore.getState().settings).toMatchObject({
+      generationMode: 'description',
+      model: 'gpt-image-1',
+      size: '1536x1024',
+      quality: 'high',
+      prompt: '1girl, fox ears',
+    })
+
+    act(() => useDrawingStore.getState().switchGenerationMode('tags'))
+    expect(useDrawingStore.getState().settings).toMatchObject({
+      model: 'nai-diffusion-4-5-full',
+      negativePrompt: 'blur',
+      seed: 7,
+    })
+  })
+
+  it('remembers the other generation mode for the same person after a reload', () => {
+    localStorage.clear()
+    useDrawingStore.getState().initialize(815)
+    useDrawingStore.getState().updateSettings({ model: 'gpt-image-1' })
+    act(() => useDrawingStore.getState().switchGenerationMode('tags'))
+
+    useDrawingStore.getState().initialize(815)
+    expect(useDrawingStore.getState().modeSettings.description?.model).toBe(
+      'gpt-image-1'
+    )
+    useDrawingStore.getState().initialize(816)
+    expect(useDrawingStore.getState().modeSettings).toEqual({})
   })
 })

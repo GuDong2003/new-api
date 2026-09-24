@@ -31,14 +31,27 @@ import { Label } from '@/components/ui/label'
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { Separator } from '@/components/ui/separator'
 import { Textarea } from '@/components/ui/textarea'
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import { getModelCategory } from '@/features/channels/lib/model-categories'
 import { useDrawingStore } from '@/stores/drawing-store'
 
 import { useImageOptions } from '../hooks/use-image-options'
 import {
+  getAlibabaImageModel,
+  type ImageGenerationMode,
+} from '../lib/image-models'
+import {
   getImageModelFamily,
+  getMaxReferenceImages,
+  requiresReferenceImages,
   settingsForImageModel,
   imageSettingsSchema,
+  supportsImageMask,
   validateImageSettings,
 } from '../lib/image-settings'
 import { getAvailableReferenceNodes } from '../lib/reference-connections'
@@ -46,6 +59,24 @@ import { formatReferenceMention } from '../lib/reference-mentions'
 import type { ImageAsset, ImageSettings } from '../types'
 import { ImageParameterFields } from './ImageParameterFields'
 import { ReferenceImages } from './ReferenceImages'
+import { TagParameterFields } from './TagParameterFields'
+
+const GENERATION_MODES: {
+  value: ImageGenerationMode
+  label: string
+  hint: string
+}[] = [
+  {
+    value: 'description',
+    label: 'Description mode',
+    hint: 'Describe the image in a paragraph and let the model handle the details.',
+  },
+  {
+    value: 'tags',
+    label: 'Tag mode',
+    hint: "Write what you want and don't want as separate tags or phrases, and adjust the seed and other parameters.",
+  },
+]
 
 type DrawingSettingsProps = {
   userId: number
@@ -65,6 +96,9 @@ export function DrawingSettings(props: DrawingSettingsProps) {
   const nodes = useDrawingStore((state) => state.nodes)
   const referenceIds = useDrawingStore((state) => state.referenceIds)
   const updateSettings = useDrawingStore((state) => state.updateSettings)
+  const switchGenerationMode = useDrawingStore(
+    (state) => state.switchGenerationMode
+  )
   const { groups, models, imageModels } = useImageOptions(props.userId)
   const references = getAvailableReferenceNodes(nodes, referenceIds).flatMap(
     (node) => (node.data.asset ? [{ id: node.id, asset: node.data.asset }] : [])
@@ -86,6 +120,12 @@ export function DrawingSettings(props: DrawingSettingsProps) {
     }
   }, [settings, form])
   const family = getImageModelFamily(settings.model)
+  const tagMode = settings.generationMode === 'tags'
+  const maxReferences = getMaxReferenceImages(settings.model)
+  // NovelAI always takes a negative prompt; Alibaba's image editor does not.
+  const negativePrompt =
+    family === 'novelai' ||
+    Boolean(getAlibabaImageModel(settings.model)?.negativePrompt)
   const unavailable =
     groups.isPending ||
     models.isPending ||
@@ -170,12 +210,28 @@ export function DrawingSettings(props: DrawingSettingsProps) {
         })}
       >
         <div className='min-h-0 flex-1 space-y-5 overflow-y-auto p-4'>
-          <div className='space-y-1'>
-            <h2 className='text-sm font-semibold'>{t('Image generation')}</h2>
-            <p className='text-muted-foreground text-xs'>
-              {t('Create and refine images on your canvas.')}
-            </p>
-          </div>
+          <ToggleGroup
+            aria-label={t('Generation mode')}
+            value={[settings.generationMode]}
+            onValueChange={(values) => {
+              const mode = values[0] as ImageGenerationMode | undefined
+              // One mode is always selected; pressing the active one keeps it.
+              if (mode) switchGenerationMode(mode)
+            }}
+            variant='outline'
+            size='sm'
+            spacing={1}
+            className='grid w-full grid-cols-2 gap-1.5'
+          >
+            {GENERATION_MODES.map((mode) => (
+              <Tooltip key={mode.value}>
+                <TooltipTrigger render={<ToggleGroupItem value={mode.value} />}>
+                  {t(mode.label)}
+                </TooltipTrigger>
+                <TooltipContent>{t(mode.hint)}</TooltipContent>
+              </Tooltip>
+            ))}
+          </ToggleGroup>
           <div className='grid grid-cols-2 gap-3'>
             <div className='space-y-1.5'>
               <Label htmlFor='drawing-mode'>{t('Mode')}</Label>
@@ -184,17 +240,13 @@ export function DrawingSettings(props: DrawingSettingsProps) {
                 className='w-full'
                 {...form.register('mode')}
               >
-                <NativeSelectOption value='generate'>
+                <NativeSelectOption
+                  value='generate'
+                  disabled={requiresReferenceImages(settings.model)}
+                >
                   {t('Text to image')}
                 </NativeSelectOption>
-                <NativeSelectOption
-                  value='edit'
-                  disabled={
-                    family === 'dall-e-3' ||
-                    family === 'imagen' ||
-                    family === 'seedream'
-                  }
-                >
+                <NativeSelectOption value='edit' disabled={maxReferences === 0}>
                   {t('Image editing')}
                 </NativeSelectOption>
               </NativeSelect>
@@ -281,15 +333,21 @@ export function DrawingSettings(props: DrawingSettingsProps) {
             </Alert>
           )}
           <div className='space-y-1.5'>
-            <Label htmlFor='drawing-prompt'>{t('Prompt')}</Label>
+            <Label htmlFor='drawing-prompt'>
+              {tagMode ? t('Positive prompt') : t('Prompt')}
+            </Label>
             <div className='relative'>
               <Textarea
                 id='drawing-prompt'
                 className='min-h-32 resize-y text-sm leading-relaxed'
                 maxLength={32000}
-                placeholder={t(
-                  'Describe your image, including subject, composition, lighting and style.'
-                )}
+                placeholder={
+                  tagMode
+                    ? t('List what you want to see, as tags or short phrases.')
+                    : t(
+                        'Describe your image, including subject, composition, lighting and style.'
+                      )
+                }
                 {...promptField}
                 ref={(element) => {
                   promptField.ref(element)
@@ -381,17 +439,40 @@ export function DrawingSettings(props: DrawingSettingsProps) {
               )}
             </div>
           </div>
-          <ReferenceImages
-            onUpload={props.onUploadReferences}
-            mask={props.mask}
-            onMaskUpload={props.onMaskUpload}
-            onClearMask={props.onClearMask}
-            onDrawMask={props.onDrawMask}
-          />
+          {tagMode && negativePrompt && (
+            <div className='space-y-1.5'>
+              <Label htmlFor='drawing-negative-prompt'>
+                {t('Negative prompt')}
+              </Label>
+              <Textarea
+                id='drawing-negative-prompt'
+                className='min-h-20 resize-y text-sm leading-relaxed'
+                maxLength={32000}
+                placeholder={t('Optional negative prompt')}
+                {...form.register('negativePrompt')}
+              />
+            </div>
+          )}
+          {/* A tag model that only generates from text has no use for references. */}
+          {(!tagMode || maxReferences > 0) && (
+            <ReferenceImages
+              limit={tagMode ? maxReferences : undefined}
+              maskable={supportsImageMask(settings.model)}
+              onUpload={props.onUploadReferences}
+              mask={props.mask}
+              onMaskUpload={props.onMaskUpload}
+              onClearMask={props.onClearMask}
+              onDrawMask={props.onDrawMask}
+            />
+          )}
           <Separator />
-          <ImageParameterFields
-            onSizeChange={(size) => updateSettings({ size })}
-          />
+          {tagMode ? (
+            <TagParameterFields onChange={updateSettings} />
+          ) : (
+            <ImageParameterFields
+              onSizeChange={(size) => updateSettings({ size })}
+            />
+          )}
           {Object.keys(form.formState.errors).length > 0 && (
             <p role='alert' className='text-destructive text-xs'>
               {t(

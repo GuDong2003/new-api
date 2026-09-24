@@ -95,8 +95,9 @@ it('shows combined usage, filters sources and paginates server results', async (
     'aria-valuetext',
     '1.0 / 200 MiB'
   )
+  // Images the former NAI page saved are listed as drawing images.
   await userEvent.click(screen.getByRole('combobox', { name: 'Source' }))
-  await userEvent.click(screen.getByRole('option', { name: 'NAI Canvas' }))
+  await userEvent.click(screen.getByRole('option', { name: 'Drawing' }))
   await waitFor(() => expect(lists).toContainEqual({ page: 1, page_size: 24 }))
   await userEvent.click(screen.getByRole('button', { name: 'Go to next page' }))
   await waitFor(() => expect(lists).toContainEqual({ page: 2, page_size: 24 }))

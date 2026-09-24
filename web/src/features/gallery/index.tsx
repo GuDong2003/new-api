@@ -69,12 +69,7 @@ import {
 } from './lib/gallery-collection'
 import { removeGalleryThumbnail } from './lib/gallery-thumbnail-cache'
 import { galleryOwner } from './lib/session'
-import type {
-  CanvasKind,
-  CanvasSummary,
-  GalleryIdentity,
-  GalleryImage,
-} from './types'
+import type { CanvasSummary, GalleryIdentity, GalleryImage } from './types'
 
 export { GallerySettingsSection } from './components/gallery-settings-section'
 
@@ -83,14 +78,8 @@ const galleryIdentityKey = (identity: GalleryIdentity) =>
   `${identity.userId}:${identity.sessionId}`
 
 type PendingCanvasAction =
-  | {
-      type: 'open'
-      id: string
-      kind: CanvasKind
-      image?: string
-      sourceKind: CanvasKind
-    }
-  | { type: 'create'; name: string; kind: CanvasKind; sourceKind: CanvasKind }
+  | { type: 'open'; id: string; image?: string }
+  | { type: 'create'; name: string }
 
 export type GalleryView = 'images' | 'canvases'
 
@@ -157,12 +146,9 @@ function GalleryContent(props: {
   const deletionCursor =
     galleryDeletionCursors.get(galleryIdentityKey(props.identity)) ?? 0
   const deletionEvents = getCanvasDeletionEvents(props.identity, deletionCursor)
+  // NAI canvases are listed and opened as drawing canvases.
   const drawing = useCanvasProjects('drawing')
-  const nai = useCanvasProjects('nai')
-  const localProjects = useMemo(
-    () => [...drawing.projects, ...nai.projects],
-    [drawing.projects, nai.projects]
-  )
+  const localProjects = drawing.projects
   const key = ['gallery', props.identity.userId, props.identity.sessionId]
   const usage = useQuery({
     queryKey: [...key, 'usage'],
@@ -214,7 +200,7 @@ function GalleryContent(props: {
           ),
         }))
       ),
-    enabled: !drawing.loading && !nai.loading,
+    enabled: !drawing.loading,
     retry: false,
     staleTime: Infinity,
     gcTime: 30 * 60 * 1000,
@@ -294,19 +280,20 @@ function GalleryContent(props: {
   const hiddenProjects = new Set([
     ...removedProjects,
     ...drawing.pendingCanvasRemovals.map((item) => item.canvasId),
-    ...nai.pendingCanvasRemovals.map((item) => item.canvasId),
     ...deletionEvents.map((event) => event.canvasId),
   ])
   const hiddenImages = new Set([
     ...removedImages,
     ...drawing.pendingAssetRemovals.map((item) => item.assetId),
-    ...nai.pendingAssetRemovals.map((item) => item.assetId),
     ...deletionEvents
       .filter((event) => event.assetId)
       .map((event) => event.assetId as string),
   ])
+  // The drawing page absorbed the NAI page, so NAI items are drawing items.
   const matches = (kind: string, title: string) =>
-    (source === 'all' || source === kind) &&
+    (source === 'all' ||
+      source === kind ||
+      (source === 'drawing' && kind === 'nai')) &&
     title.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase())
   const projectNames = new Map(
     localProjects.map((project) => [project.id, project.name])
@@ -428,7 +415,7 @@ function GalleryContent(props: {
   const pages = Math.max(1, Math.ceil(total / metrics.pageSize))
   const currentPage = Math.min(page, pages)
   const offset = (currentPage - 1) * metrics.pageSize
-  const status = drawing.statusText || nai.statusText
+  const status = drawing.statusText
   const run = async (action: () => Promise<unknown>) => {
     setBusy(true)
     setError(null)
@@ -455,54 +442,40 @@ function GalleryContent(props: {
       )
     )
   }
-  const projectFor = (kind: CanvasKind) => (kind === 'drawing' ? drawing : nai)
-  const navigateToCanvas = async (
-    id: string,
-    kind: CanvasKind,
-    image?: string
-  ) => {
-    await navigate({
-      to: kind === 'drawing' ? '/canvas/drawing' : '/canvas/nai',
-      search: { canvas: id, image },
-    })
-  }
+  // Every canvas opens in the drawing page, which upgrades a NAI canvas.
   // Go to the canvas first and let it download there. Waiting here left
   // someone staring at the gallery, with the canvas's own progress bar unable
   // to show until the very moment it was no longer needed.
-  const openProjectNow = (id: string, kind: CanvasKind, image?: string) =>
-    navigateToCanvas(id, kind, image)
-  const createProjectNow = async (name: string, kind: CanvasKind) => {
-    const canvas = await projectFor(kind).create(name)
-    setDialog(null)
-    await navigateToCanvas(canvas.id, kind)
+  const openProjectNow = async (id: string, image?: string) => {
+    await navigate({ to: '/canvas/drawing', search: { canvas: id, image } })
   }
-  const openProject = (id: string, kind: CanvasKind, image?: string) => {
-    const sourceKind = getUnsavedCanvasKind(identity)
-    if (sourceKind) {
+  const createProjectNow = async (name: string) => {
+    const canvas = await drawing.create(name)
+    setDialog(null)
+    await openProjectNow(canvas.id)
+  }
+  const openProject = (id: string, image?: string) => {
+    if (getUnsavedCanvasKind(identity)) {
       setError(null)
-      setPendingCanvasAction({ type: 'open', id, kind, image, sourceKind })
+      setPendingCanvasAction({ type: 'open', id, image })
       return
     }
     void run(async () => {
-      await openProjectNow(id, kind, image)
+      await openProjectNow(id, image)
     })
   }
-  const submitDialog = (name: string, kind: CanvasKind) => {
-    const sourceKind = getUnsavedCanvasKind(identity)
-    if (dialog === 'create' && sourceKind) {
+  const submitDialog = (name: string) => {
+    if (dialog === 'create' && getUnsavedCanvasKind(identity)) {
       setDialog(null)
       setError(null)
-      setPendingCanvasAction({ type: 'create', name, kind, sourceKind })
+      setPendingCanvasAction({ type: 'create', name })
       return
     }
     void run(async () => {
       if (dialog === 'create') {
-        await createProjectNow(name, kind)
+        await createProjectNow(name)
       } else if (renameTarget) {
-        await (renameTarget.kind === 'drawing' ? drawing : nai).rename(
-          renameTarget.id,
-          name
-        )
+        await drawing.rename(renameTarget.id, name)
         setDialog(null)
         setRenameTarget(null)
       }
@@ -512,17 +485,16 @@ function GalleryContent(props: {
   const resolveCanvasAction = (decision: 'save' | 'discard') => {
     if (!pendingCanvasAction) return
     const action = pendingCanvasAction
-    const project = projectFor(action.sourceKind)
     void (async () => {
       setBusy(true)
       setError(null)
       try {
-        if (decision === 'save') await project.save()
-        else await project.discard()
+        if (decision === 'save') await drawing.save()
+        else await drawing.discard()
         if (action.type === 'open') {
-          await openProjectNow(action.id, action.kind, action.image)
+          await openProjectNow(action.id, action.image)
         } else {
-          await createProjectNow(action.name, action.kind)
+          await createProjectNow(action.name)
         }
         setPendingCanvasAction(null)
         await invalidate()
@@ -538,7 +510,7 @@ function GalleryContent(props: {
     const target = deleteTarget
     const userId = props.identity.userId
     void run(async () => {
-      await (target.kind === 'drawing' ? drawing : nai).deleteProject(target.id)
+      await drawing.deleteProject(target.id)
       if (userId !== null) {
         await Promise.all(
           imageItems
@@ -570,10 +542,7 @@ function GalleryContent(props: {
     const userId = props.identity.userId
     void run(async () => {
       if (image.canvas_id) {
-        await (image.source === 'drawing' ? drawing : nai).deleteResource(
-          image.canvas_id,
-          image.id
-        )
+        await drawing.deleteResource(image.canvas_id, image.id)
       } else {
         await deleteGalleryImage(props.identity, image.id)
         await checkCanvasCapacity(props.identity, true)
@@ -588,10 +557,7 @@ function GalleryContent(props: {
     })
   }
   const loading =
-    (activeQuery.isPending && !total) ||
-    drawing.loading ||
-    nai.loading ||
-    local.isPending
+    (activeQuery.isPending && !total) || drawing.loading || local.isPending
   return (
     <main
       id='content'
@@ -662,7 +628,6 @@ function GalleryContent(props: {
                     {
                       all: t('All'),
                       drawing: t('Drawing'),
-                      nai: t('NAI Canvas'),
                       api: t('API'),
                     }[source]
                   }
@@ -672,7 +637,6 @@ function GalleryContent(props: {
                 <SelectGroup>
                   <SelectItem value='all'>{t('All')}</SelectItem>
                   <SelectItem value='drawing'>{t('Drawing')}</SelectItem>
-                  <SelectItem value='nai'>{t('NAI Canvas')}</SelectItem>
                   <SelectItem value='api'>{t('API')}</SelectItem>
                 </SelectGroup>
               </SelectContent>
@@ -753,11 +717,7 @@ function GalleryContent(props: {
                         image.canvas_id
                           ? () => {
                               if (image.canvas_id) {
-                                openProject(
-                                  image.canvas_id,
-                                  image.source === 'nai' ? 'nai' : 'drawing',
-                                  image.id
-                                )
+                                openProject(image.canvas_id, image.id)
                               }
                             }
                           : undefined
@@ -800,7 +760,7 @@ function GalleryContent(props: {
                       key={project.id}
                       identity={props.identity}
                       project={project}
-                      onOpen={() => openProject(project.id, project.kind)}
+                      onOpen={() => openProject(project.id)}
                       onRename={() => {
                         setRenameTarget(project)
                         setDialog('rename')
@@ -860,7 +820,6 @@ function GalleryContent(props: {
         open={dialog !== null}
         mode={dialog ?? 'create'}
         initialName={renameTarget?.name}
-        initialKind={renameTarget?.kind}
         busy={busy}
         error={error}
         onOpenChange={(open) => {

@@ -23,15 +23,16 @@ import {
   serializeDrawingDocument,
 } from '../../playground/drawing/lib/canvas-document'
 import { isSafeImageSource } from '../../playground/drawing/lib/image-assets'
+import {
+  convertLegacyNaiDocument,
+  parseLegacyNaiDocument,
+  serializeLegacyNaiDocument,
+  type LegacyNaiDocument,
+} from '../../playground/drawing/lib/legacy-nai-document'
 import type {
   DrawingDocument,
   ImageAsset,
 } from '../../playground/drawing/types'
-import {
-  parseNaiCanvasDocument,
-  serializeNaiCanvasDocument,
-} from '../../playground/nai/lib/canvas-storage'
-import type { NaiCanvasDocument } from '../../playground/nai/types'
 import type {
   CanvasAssetRef,
   CanvasAssetRole,
@@ -41,7 +42,9 @@ import type {
 } from '../types'
 import { adoptCanvasObjectUrls } from './canvas-object-urls'
 
-type EditorDocument = DrawingDocument | NaiCanvasDocument
+// A stored canvas is a drawing document, or a NAI document the former NAI page
+// saved; the NAI kind is only ever read, and opens as a drawing document.
+type StoredDocument = DrawingDocument | LegacyNaiDocument
 export type CanvasCodecContext = {
   roles?: Readonly<Record<string, { role: CanvasAssetRole; nodeId: string }>>
   existingAssets?: readonly CanvasBinary[]
@@ -91,7 +94,7 @@ function mapDocumentAssets(
   input: unknown,
   map: (asset: ImageAsset, nodeId: string, mask: boolean) => unknown
 ): unknown {
-  const document = input as EditorDocument
+  const document = input as StoredDocument
   return {
     ...document,
     nodes: document.nodes.map((node) => ({
@@ -117,11 +120,11 @@ function mapDocumentAssets(
   }
 }
 
-function parseDocument(kind: CanvasKind, input: unknown): EditorDocument {
+function parseDocument(kind: CanvasKind, input: unknown): StoredDocument {
   const parsed =
     kind === 'drawing'
       ? parseDrawingDocument(input)
-      : parseNaiCanvasDocument(input)
+      : parseLegacyNaiDocument(input)
   for (const node of parsed.nodes) {
     if (node.data.usage) node.data.usage = usageSchema.parse(node.data.usage)
   }
@@ -150,7 +153,7 @@ export function normalizeCanvasDocument(
   const serialized =
     kind === 'drawing'
       ? serializeDrawingDocument(parsed as DrawingDocument)
-      : serializeNaiCanvasDocument(parsed as NaiCanvasDocument)
+      : serializeLegacyNaiDocument(parsed as LegacyNaiDocument)
   return mapDocumentAssets(serialized, (asset) => {
     if (!uuid.test(asset.id)) throw new Error('Invalid canvas asset ID.')
     return descriptor(asset)
@@ -194,9 +197,25 @@ export function remapCanvasDocumentAssetIds(
   )
 }
 
+/**
+ * The stored drawing document for a stored NAI document: same assets, nodes
+ * and settings. Throws when the NAI document cannot be read.
+ */
+export function upgradeLegacyNaiCanvasDocument(
+  input: Record<string, unknown>
+): Record<string, unknown> {
+  const legacy = parseLegacyNaiDocument(
+    mapDocumentAssets(normalizeCanvasDocument('nai', input), (asset) => ({
+      ...asset,
+      src: placeholder,
+    }))
+  )
+  return normalizeCanvasDocument('drawing', convertLegacyNaiDocument(legacy))
+}
+
 export async function encodeCanvas(
   kind: CanvasKind,
-  document: EditorDocument,
+  document: StoredDocument,
   context: CanvasCodecContext = {}
 ): Promise<{ document: Record<string, unknown>; assets: CanvasBinary[] }> {
   const sources = new Map<
@@ -297,7 +316,7 @@ export async function decodeCanvas(
   canvas: LocalCanvas,
   assets: CanvasBinary[],
   display = false
-): Promise<EditorDocument> {
+): Promise<DrawingDocument> {
   const normalized = normalizeCanvasDocument(canvas.kind, canvas.document)
   const sources = new Map<string, string>()
   for (const id of canvasDocumentAssetIds(normalized)) {
@@ -323,7 +342,7 @@ export async function decodeCanvas(
     canvas.kind,
     mapDocumentAssets(normalized, (asset) => ({ ...asset, src: placeholder }))
   )
-  return mapDocumentAssets(parsed, (asset) => {
+  const decoded = mapDocumentAssets(parsed, (asset) => {
     const src = sources.get(asset.id)
     if (!src) throw new Error('Canvas original is unavailable.')
     return {
@@ -333,7 +352,10 @@ export async function decodeCanvas(
         ? { previewOnly: true }
         : {}),
     }
-  }) as EditorDocument
+  })
+  return canvas.kind === 'nai'
+    ? convertLegacyNaiDocument(decoded as LegacyNaiDocument)
+    : (decoded as DrawingDocument)
 }
 
 export function pruneCanvasDocumentAsset(
@@ -344,7 +366,7 @@ export function pruneCanvasDocumentAsset(
   const document = normalizeCanvasDocument(
     kind,
     input
-  ) as unknown as EditorDocument
+  ) as unknown as StoredDocument
   const removedNodes = new Set(
     document.nodes
       .filter((node) => node.data.asset?.id === assetId)

@@ -91,6 +91,12 @@ func galleryAssetChecksum(root string, asset *model.GalleryImage) (string, error
 
 func resolveGalleryCanvasAssets(ctx context.Context, root string, user int, canvasID, kind string, manifest map[string]GalleryCanvasSaveAsset, info *GalleryCanvasDocumentInfo) (map[string]*model.GalleryImage, map[string]string, error) {
 	assets, remap := map[string]*model.GalleryImage{}, map[string]string{}
+	sources := []string{kind}
+	if kind == "drawing" {
+		// Images a NAI canvas saved stay reusable once that canvas is upgraded
+		// to a drawing canvas.
+		sources = append(sources, "nai")
+	}
 	for _, ref := range info.Assets {
 		requested := manifest[ref.ID]
 		var asset model.GalleryImage
@@ -104,7 +110,7 @@ func resolveGalleryCanvasAssets(ctx context.Context, root string, user int, canv
 		if errors.Is(err, gorm.ErrRecordNotFound) && requested.Role != "mask" {
 			// Legacy reuse is byte identity only, never prompt/name/time similarity.
 			var candidates []model.GalleryImage
-			if err = model.DB.WithContext(ctx).Where("user_id = ? AND source = ? AND (canvas_id = ? OR canvas_id IS NULL) AND state = ? AND expires_at > ? AND bytes = ?", user, kind, "", "ready", time.Now().Unix(), requested.Bytes).Order("id ASC").Find(&candidates).Error; err != nil {
+			if err = model.DB.WithContext(ctx).Where("user_id = ? AND source IN ? AND (canvas_id = ? OR canvas_id IS NULL) AND state = ? AND expires_at > ? AND bytes = ?", user, sources, "", "ready", time.Now().Unix(), requested.Bytes).Order("id ASC").Find(&candidates).Error; err != nil {
 				return nil, nil, model.ErrGalleryUnavailable
 			}
 			for _, candidate := range candidates {

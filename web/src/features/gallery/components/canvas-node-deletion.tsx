@@ -20,7 +20,6 @@ import { useTranslation } from 'react-i18next'
 import { ConfirmDialog } from '@/components/confirm-dialog'
 import { useAuthStore } from '@/stores/auth-store'
 import { useDrawingStore } from '@/stores/drawing-store'
-import { useNaiDrawingStore } from '@/stores/nai-drawing-store'
 
 import { deleteCanvasResource } from '../lib/canvas-deletion'
 import {
@@ -97,8 +96,7 @@ export async function deleteCanvasNodes(
   }
   assertCanvasTarget(kind, target)
   storeFor(kind).getState().removeNodes(ids)
-  if (kind === 'drawing') useDrawingStore.setState({ past: [], future: [] })
-  else useNaiDrawingStore.setState({ past: [], future: [] })
+  useDrawingStore.setState({ past: [], future: [] })
 }
 
 export function useCanvasNodeDeletion(kind: CanvasKind) {

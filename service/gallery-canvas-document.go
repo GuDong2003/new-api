@@ -100,42 +100,57 @@ func normalizeCanvasSettings(kind string, input map[string]any) (map[string]any,
 		{name: "model", typeName: "string", trim: true, fallback: ""},
 		{name: "prompt", typeName: "string", max: 32000, fallback: ""},
 	}
-	if kind == "drawing" {
-		fields = append(fields,
-			canvasDocumentField{name: "mode", typeName: "string", values: []string{"generate", "edit"}, fallback: "generate"},
-			canvasDocumentField{name: "size", typeName: "string", fallback: "1024x1024"},
-			canvasDocumentField{name: "quality", typeName: "string", values: []string{"auto", "low", "medium", "high", "xhigh", "max", "standard", "hd"}, fallback: "auto"},
-			canvasDocumentField{name: "n", typeName: "integer", min: 1, max: 10, fallback: float64(1)},
-			canvasDocumentField{name: "background", typeName: "string", values: []string{"auto", "transparent", "opaque"}, fallback: "auto"},
-			canvasDocumentField{name: "outputFormat", typeName: "string", values: []string{"png", "jpeg", "webp"}, fallback: "png"},
-			canvasDocumentField{name: "outputCompression", typeName: "integer", max: 100, fallback: float64(100)},
-			canvasDocumentField{name: "moderation", typeName: "string", values: []string{"auto", "low"}, fallback: "auto"},
-			canvasDocumentField{name: "responseFormat", typeName: "string", values: []string{"b64_json", "url"}, fallback: "b64_json"},
-			canvasDocumentField{name: "style", typeName: "string", values: []string{"vivid", "natural"}, fallback: "vivid"},
-			canvasDocumentField{name: "inputFidelity", typeName: "string", values: []string{"default", "high", "low"}, fallback: "default"},
-			canvasDocumentField{name: "stream", typeName: "boolean", fallback: false},
-			canvasDocumentField{name: "partialImages", typeName: "integer", max: 3, fallback: float64(1)},
-			canvasDocumentField{name: "user", typeName: "string", max: 512, fallback: ""},
-		)
-	} else {
-		fields = append(fields,
-			canvasDocumentField{name: "negativePrompt", typeName: "string", max: 32000, fallback: ""},
-			canvasDocumentField{name: "width", typeName: "integer", min: 64, max: 2048, fallback: float64(832)},
-			canvasDocumentField{name: "height", typeName: "integer", min: 64, max: 2048, fallback: float64(1216)},
-			canvasDocumentField{name: "steps", typeName: "integer", min: 1, max: 50, fallback: float64(28)},
-			canvasDocumentField{name: "scale", typeName: "number", max: 30, fallback: float64(5)},
-			canvasDocumentField{name: "sampler", typeName: "string", values: []string{"k_euler_ancestral", "k_euler", "k_dpmpp_2s_ancestral", "k_dpmpp_2m", "k_dpmpp_sde", "ddim_v3"}, fallback: "k_euler_ancestral"},
-			canvasDocumentField{name: "noiseSchedule", typeName: "string", values: []string{"native", "karras", "exponential", "polyexponential"}, fallback: "karras"},
-			canvasDocumentField{name: "cfgRescale", typeName: "number", max: 1, fallback: float64(0)},
-			canvasDocumentField{name: "seed", typeName: "integer", max: 4294967295, nullable: true},
-			canvasDocumentField{name: "n", typeName: "integer", min: 1, max: 8, fallback: float64(1)},
-			canvasDocumentField{name: "qualityToggle", typeName: "boolean", fallback: false},
-			canvasDocumentField{name: "qualityTier", typeName: "string", values: []string{"standard", "light"}, fallback: "standard"},
-			canvasDocumentField{name: "ucPreset", typeName: "string", values: []string{"heavy", "light", "humanFocus", "none"}, fallback: "none"},
-			canvasDocumentField{name: "smea", typeName: "boolean", fallback: false},
-			canvasDocumentField{name: "smeaDyn", typeName: "boolean", fallback: false},
-			canvasDocumentField{name: "decrisp", typeName: "boolean", fallback: false},
-		)
+	// NAI canvases, and tag-prompted nodes on a drawing canvas, keep these
+	// NovelAI parameters.
+	naiFields := []canvasDocumentField{
+		{name: "negativePrompt", typeName: "string", max: 32000, fallback: ""},
+		{name: "width", typeName: "integer", min: 64, max: 2048, fallback: float64(832)},
+		{name: "height", typeName: "integer", min: 64, max: 2048, fallback: float64(1216)},
+		{name: "steps", typeName: "integer", min: 1, max: 50, fallback: float64(28)},
+		{name: "scale", typeName: "number", max: 30, fallback: float64(5)},
+		{name: "sampler", typeName: "string", values: []string{"k_euler_ancestral", "k_euler", "k_dpmpp_2s_ancestral", "k_dpmpp_2m", "k_dpmpp_sde", "ddim_v3"}, fallback: "k_euler_ancestral"},
+		{name: "noiseSchedule", typeName: "string", values: []string{"native", "karras", "exponential", "polyexponential"}, fallback: "karras"},
+		{name: "cfgRescale", typeName: "number", max: 1, fallback: float64(0)},
+		{name: "seed", typeName: "integer", max: 4294967295, nullable: true},
+		{name: "n", typeName: "integer", min: 1, max: 8, fallback: float64(1)},
+		{name: "qualityToggle", typeName: "boolean", fallback: false},
+		{name: "qualityTier", typeName: "string", values: []string{"standard", "light"}, fallback: "standard"},
+		{name: "ucPreset", typeName: "string", values: []string{"heavy", "light", "humanFocus", "none"}, fallback: "none"},
+		{name: "smea", typeName: "boolean", fallback: false},
+		{name: "smeaDyn", typeName: "boolean", fallback: false},
+		{name: "decrisp", typeName: "boolean", fallback: false},
+	}
+	if kind != "drawing" {
+		return normalizeCanvasFields(input, append(fields, naiFields...))
+	}
+	fields = append(fields,
+		canvasDocumentField{name: "mode", typeName: "string", values: []string{"generate", "edit"}, fallback: "generate"},
+		canvasDocumentField{name: "size", typeName: "string", fallback: "1024x1024"},
+		canvasDocumentField{name: "quality", typeName: "string", values: []string{"auto", "low", "medium", "high", "xhigh", "max", "standard", "hd"}, fallback: "auto"},
+		canvasDocumentField{name: "n", typeName: "integer", min: 1, max: 10, fallback: float64(1)},
+		canvasDocumentField{name: "background", typeName: "string", values: []string{"auto", "transparent", "opaque"}, fallback: "auto"},
+		canvasDocumentField{name: "outputFormat", typeName: "string", values: []string{"png", "jpeg", "webp"}, fallback: "png"},
+		canvasDocumentField{name: "outputCompression", typeName: "integer", max: 100, fallback: float64(100)},
+		canvasDocumentField{name: "moderation", typeName: "string", values: []string{"auto", "low"}, fallback: "auto"},
+		canvasDocumentField{name: "responseFormat", typeName: "string", values: []string{"b64_json", "url"}, fallback: "b64_json"},
+		canvasDocumentField{name: "style", typeName: "string", values: []string{"vivid", "natural"}, fallback: "vivid"},
+		canvasDocumentField{name: "inputFidelity", typeName: "string", values: []string{"default", "high", "low"}, fallback: "default"},
+		canvasDocumentField{name: "stream", typeName: "boolean", fallback: false},
+		canvasDocumentField{name: "partialImages", typeName: "integer", max: 3, fallback: float64(1)},
+		canvasDocumentField{name: "user", typeName: "string", max: 512, fallback: ""},
+		// The drawing page also generates with tag-prompted models: NovelAI and
+		// Alibaba's image models. Their parameters are optional, so nodes of
+		// other models carry none of them.
+		canvasDocumentField{name: "generationMode", typeName: "string", values: []string{"description", "tags"}, optional: true},
+		canvasDocumentField{name: "promptExtend", typeName: "boolean", optional: true},
+	)
+	for _, field := range naiFields {
+		// n keeps the drawing page's wider range above.
+		if field.name == "n" {
+			continue
+		}
+		field.optional = true
+		fields = append(fields, field)
 	}
 	return normalizeCanvasFields(input, fields)
 }

@@ -28,6 +28,9 @@ import { settingsForImageModel } from '../lib/image-settings'
 export function useImageOptions(userId: number) {
   const group = useDrawingStore((state) => state.settings.group)
   const model = useDrawingStore((state) => state.settings.model)
+  const generationMode = useDrawingStore(
+    (state) => state.settings.generationMode
+  )
   const groups = useQuery({
     queryKey: ['drawing-groups', userId],
     queryFn: getUserGroups,
@@ -38,8 +41,8 @@ export function useImageOptions(userId: number) {
     enabled: Boolean(group),
   })
   const imageModels = useMemo(
-    () => filterImageModels(models.data || []),
-    [models.data]
+    () => filterImageModels(models.data || [], generationMode),
+    [models.data, generationMode]
   )
   useEffect(() => {
     if (
@@ -57,9 +60,11 @@ export function useImageOptions(userId: number) {
     const modelStillAvailable = imageModels.some((item) => item.value === model)
     if (modelStillAvailable) return
     const preferred =
-      imageModels.find((item) =>
-        /gpt-image|dall-e|chatgpt-image/.test(item.value)
-      ) || imageModels[0]
+      (generationMode === 'description' &&
+        imageModels.find((item) =>
+          /gpt-image|dall-e|chatgpt-image/.test(item.value)
+        )) ||
+      imageModels[0]
     if (preferred) {
       const state = useDrawingStore.getState()
       state.updateSettings(
@@ -68,6 +73,6 @@ export function useImageOptions(userId: number) {
     } else if (model) {
       useDrawingStore.getState().updateSettings({ model: '' })
     }
-  }, [imageModels, models.isSuccess, model])
+  }, [imageModels, models.isSuccess, model, generationMode])
   return { groups, models, imageModels }
 }
