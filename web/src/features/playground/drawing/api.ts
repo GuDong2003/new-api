@@ -59,6 +59,9 @@ export type GenerateImagesOptions = {
   onTask?: (taskId: string) => void
   // Resumes an already accepted task instead of submitting a new request.
   taskId?: string
+  // Answers on this request even without streaming, for images a task could
+  // not keep.
+  direct?: boolean
 }
 
 export type ImageGenerationResult = {
@@ -157,7 +160,7 @@ export async function generateImages(
   options.signal.throwIfAborted()
   const endpoint =
     options.settings.mode === 'edit' ? '/pg/images/edits' : IMAGE_TASK_ENDPOINT
-  if (usesImageTask(options.settings)) {
+  if (usesImageTask(options.settings) && !options.direct) {
     // Without live previews there is nothing to watch on the connection, so the
     // request becomes a durable task: it survives reloads, proxy idle timeouts
     // and long provider queues.

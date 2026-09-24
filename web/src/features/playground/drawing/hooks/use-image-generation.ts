@@ -20,6 +20,7 @@ import { useCallback, useSyncExternalStore } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
+import { getGalleryUsage } from '@/features/gallery/api'
 import { readCanvasNodeOriginal } from '@/features/gallery/hooks/use-canvas-node-image'
 import { persistCanvasGenerationResult } from '@/features/gallery/lib/canvas-generation'
 import { useAuthStore } from '@/stores/auth-store'
@@ -28,7 +29,11 @@ import { useDrawingStore } from '@/stores/drawing-store'
 import { generateImages } from '../api'
 import { positionGeneratedImageNodes } from '../lib/canvas-document'
 import { imageSourceToAsset } from '../lib/image-assets'
-import { validateImageSettings } from '../lib/image-settings'
+import {
+  returnsInlineImages,
+  usesImageTask,
+  validateImageSettings,
+} from '../lib/image-settings'
 import { getAvailableReferenceNodes } from '../lib/reference-connections'
 import type { DrawingNode, ImageAsset, ImageSettings } from '../types'
 
@@ -51,8 +56,14 @@ type GenerationInput = {
   // Set when reattaching to a task the gateway already accepted; the request is
   // then polled instead of submitted again.
   taskId?: string
+  // Set when the images are answered on the request instead of as a task.
+  direct?: boolean
 }
 type Translate = (key: string) => string
+
+// The gateway holds at most 8 MiB of base64 for any one image of a task, so
+// this much room always stores the decoded image and its thumbnail.
+const GALLERY_BYTES_PER_TASK_IMAGE = 8 << 20
 
 // Keep network jobs alive while authenticated routes are changing. The drawing
 // store owns the visible nodes; this module owns only the request lifecycle.
@@ -92,15 +103,66 @@ function notifyJobListeners() {
   for (const listener of jobListeners) listener()
 }
 
+/**
+ * Whether the gallery has room for this job's images once the tasks still
+ * running have stored theirs. A task keeps base64 images only by storing them
+ * there, and the gateway drops what the gallery cannot take.
+ */
+async function galleryKeepsTaskImages(
+  input: GenerationInput
+): Promise<boolean> {
+  let images = input.job.nodeIds.length
+  for (const other of activeJobs.values()) {
+    if (
+      other !== input &&
+      other.userId === input.userId &&
+      other.sessionId === input.sessionId &&
+      !other.direct &&
+      usesImageTask(other.settings)
+    ) {
+      images += other.job.nodeIds.length
+    }
+  }
+  try {
+    const usage = await getGalleryUsage(
+      { userId: input.userId, sessionId: input.sessionId },
+      input.job.controller.signal,
+      {
+        required_images: images,
+        required_bytes: images * GALLERY_BYTES_PER_TASK_IMAGE,
+      }
+    )
+    return usage.can_save
+  } catch {
+    // A job never outlives the session that started it, even before the
+    // layout gets to cancel it.
+    const sessionId = useAuthStore.getState().auth.session?.sid ?? null
+    if (sessionId !== input.sessionId) abortImageJob(input.job, 'lifecycle')
+    input.job.controller.signal.throwIfAborted()
+    // Without an answer the task could still lose the images.
+    return false
+  }
+}
+
 async function executeImageJob(
   input: GenerationInput,
   translate: Translate
 ): Promise<void> {
   try {
+    if (
+      input.taskId === undefined &&
+      usesImageTask(input.settings) &&
+      returnsInlineImages(input.settings)
+    ) {
+      // The images are paid for either way, so a batch the gallery cannot
+      // keep is answered on the request rather than lost with the task.
+      input.direct = !(await galleryKeepsTaskImages(input))
+    }
     const result = await generateImages({
       settings: input.settings,
       references: input.references,
       mask: input.mask,
+      direct: input.direct,
       // A canvas opened from the gallery shows previews while its originals
       // arrive. What is sent upstream is always the original.
       readImage: (asset, signal) =>

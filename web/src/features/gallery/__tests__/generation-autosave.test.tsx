@@ -505,6 +505,7 @@ it('discards generation results after the captured session changes', async () =>
   act(() => {
     hook.result.current.generate(tagSettings, { x: 0, y: 0 })
   })
+  await waitFor(() => expect(api.post).toHaveBeenCalled())
   act(() => {
     login(813, 'replacement')
   })

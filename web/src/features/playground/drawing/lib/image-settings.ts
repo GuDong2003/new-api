@@ -729,6 +729,15 @@ export function usesImageTask(
   return buildImagePayload(settings).stream !== true
 }
 
+/** Whether the gateway answers with the images themselves rather than links. */
+export function returnsInlineImages(
+  settings: z.infer<typeof imageSettingsSchema>
+): boolean {
+  // GPT Image has no link form; it always answers with base64.
+  if (getImageModelFamily(settings.model) === 'gpt-image') return true
+  return buildImagePayload(settings).response_format === 'b64_json'
+}
+
 export type ImagePayload = Record<
   string,
   string | number | boolean | Record<string, unknown>

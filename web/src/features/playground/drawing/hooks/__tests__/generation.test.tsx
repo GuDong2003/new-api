@@ -18,11 +18,17 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, renderHook, waitFor } from '@testing-library/react'
-import type { GenericAbortSignal } from 'axios'
+import {
+  AxiosError,
+  type AxiosResponse,
+  type GenericAbortSignal,
+  type InternalAxiosRequestConfig,
+} from 'axios'
 import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { login } from '@/features/gallery/__tests__/fixtures'
+import { login, response, usage } from '@/features/gallery/__tests__/fixtures'
+import type { GalleryUsage } from '@/features/gallery/types'
 import { api } from '@/lib/api'
 import { useAuthStore } from '@/stores/auth-store'
 import { useDrawingStore } from '@/stores/drawing-store'
@@ -36,9 +42,32 @@ import {
 } from '../use-image-generation'
 
 const decoders: EventTarget[] = []
+const adapter = api.defaults.adapter
+// What the gallery answers when asked for room, or why it cannot answer.
+let galleryUsage: GalleryUsage | AxiosError
+const galleryRequests: unknown[] = []
 beforeEach(() => {
   login()
   decoders.length = 0
+  galleryUsage = usage
+  galleryRequests.length = 0
+  api.defaults.adapter = async (config) => {
+    if (config.url !== '/api/gallery/usage') {
+      throw new AxiosError(
+        'not found',
+        '',
+        config,
+        {},
+        {
+          ...response(config, {}),
+          status: 404,
+        }
+      )
+    }
+    galleryRequests.push(config.params)
+    if (galleryUsage instanceof AxiosError) throw galleryUsage
+    return response(config, galleryUsage)
+  }
   useDrawingStore.getState().initialize(813)
   useDrawingStore.getState().hydrate(null)
   vi.stubGlobal(
@@ -68,6 +97,7 @@ beforeEach(() => {
 })
 afterEach(() => {
   useAuthStore.getState().auth.reset()
+  api.defaults.adapter = adapter
   vi.unstubAllGlobals()
 })
 
@@ -729,5 +759,214 @@ describe('Image generation jobs', () => {
     expect(api.post).toHaveBeenCalledTimes(1)
     hook.unmount()
     client.clear()
+  })
+})
+
+// A task keeps base64 images only by storing them in the gallery; the gateway
+// drops what the gallery cannot take. Those batches are answered on the
+// connection instead, so the paid images still reach the canvas.
+describe('Image generation while the gallery is short of room', () => {
+  function renderGeneration() {
+    const client = new QueryClient()
+    const hook = renderHook(useImageGeneration, {
+      wrapper: (props: { children: ReactNode }) => (
+        <QueryClientProvider client={client}>
+          {props.children}
+        </QueryClientProvider>
+      ),
+    })
+    return {
+      hook,
+      done: () => {
+        hook.unmount()
+        client.clear()
+      },
+    }
+  }
+
+  it.each([
+    [
+      'cannot keep them',
+      () => {
+        galleryUsage = {
+          ...usage,
+          can_save: false,
+          reason: 'Gallery storage limit reached.',
+        }
+      },
+    ],
+    [
+      'cannot be reached',
+      () => {
+        galleryUsage = new AxiosError('Network Error', 'ERR_NETWORK')
+      },
+    ],
+  ])(
+    'answers base64 images on the connection when the gallery %s',
+    async (_, arrange) => {
+      arrange()
+      const generation = renderGeneration()
+      const decoderIndex = decoders.length
+
+      act(() =>
+        generation.hook.result.current.generate(
+          {
+            ...DEFAULT_IMAGE_SETTINGS,
+            model: 'gpt-image-1',
+            prompt: 'A cup',
+            n: 2,
+          },
+          { x: 0, y: 0 }
+        )
+      )
+      await waitFor(() => expect(decoders.length).toBe(decoderIndex + 2))
+      await act(async () => {
+        for (const decoder of decoders.slice(decoderIndex)) {
+          decoder.dispatchEvent(new Event('load'))
+        }
+      })
+      await waitFor(() =>
+        expect(generation.hook.result.current.pendingCount).toBe(0)
+      )
+
+      expect(api.post).toHaveBeenCalledWith(
+        '/pg/images/generations',
+        expect.anything(),
+        expect.not.objectContaining({ params: expect.anything() })
+      )
+      expect(
+        useDrawingStore.getState().nodes.map((node) => node.data.status)
+      ).toEqual(['complete', 'complete'])
+      generation.done()
+    }
+  )
+
+  it('submits base64 images as a task while the gallery can keep the batch', async () => {
+    const generation = renderGeneration()
+
+    act(() =>
+      generation.hook.result.current.generate(
+        {
+          ...DEFAULT_IMAGE_SETTINGS,
+          model: 'gpt-image-1',
+          prompt: 'A cup',
+          n: 2,
+        },
+        { x: 0, y: 0 }
+      )
+    )
+    await waitFor(() => expect(api.post).toHaveBeenCalled())
+
+    expect(galleryRequests).toEqual([
+      expect.objectContaining({ required_images: 2 }),
+    ])
+    expect(api.post).toHaveBeenCalledWith(
+      '/pg/images/generations',
+      expect.anything(),
+      expect.objectContaining({ params: { async: 'true' } })
+    )
+    act(() => generation.hook.result.current.cancel())
+    generation.done()
+  })
+
+  it('submits linked images as a task even when the gallery is full', async () => {
+    galleryUsage = {
+      ...usage,
+      can_save: false,
+      reason: 'Gallery storage limit reached.',
+    }
+    const generation = renderGeneration()
+
+    act(() =>
+      generation.hook.result.current.generate(
+        {
+          ...DEFAULT_IMAGE_SETTINGS,
+          model: 'dall-e-3',
+          quality: 'standard',
+          prompt: 'A cup',
+          responseFormat: 'url',
+        },
+        { x: 0, y: 0 }
+      )
+    )
+    await waitFor(() => expect(api.post).toHaveBeenCalled())
+
+    expect(api.post).toHaveBeenCalledWith(
+      '/pg/images/generations',
+      expect.anything(),
+      expect.objectContaining({ params: { async: 'true' } })
+    )
+    expect(galleryRequests).toEqual([])
+    act(() => generation.hook.result.current.cancel())
+    generation.done()
+  })
+
+  it('does not submit a generation when the session changes while the gallery is asked', async () => {
+    const answer = api.defaults.adapter as (
+      config: InternalAxiosRequestConfig
+    ) => Promise<AxiosResponse>
+    api.defaults.adapter = async (config) => {
+      // Signing in elsewhere lands between the question and the answer.
+      login(813, 'replacement')
+      return answer(config)
+    }
+    const generation = renderGeneration()
+
+    act(() =>
+      generation.hook.result.current.generate(
+        { ...DEFAULT_IMAGE_SETTINGS, model: 'gpt-image-1', prompt: 'A cup' },
+        { x: 0, y: 0 }
+      )
+    )
+    await waitFor(() => expect(galleryRequests).toHaveLength(1))
+    // Everything after the gallery answer runs on promises, which one timer
+    // turn drains.
+    await act(() => new Promise((resolve) => setTimeout(resolve, 0)))
+
+    expect(api.post).not.toHaveBeenCalled()
+    generation.done()
+  })
+
+  it('asks the gallery for room for images that running tasks will store', async () => {
+    vi.mocked(api.post).mockImplementation(async () => ({
+      headers: { 'content-type': 'application/json' },
+      data: new Response(
+        JSON.stringify({ task_id: 'task_running', status: 'queued' })
+      ).body,
+    }))
+    vi.spyOn(api, 'get').mockResolvedValue({
+      data: { task_id: 'task_running', status: 'in_progress' },
+    })
+    const generation = renderGeneration()
+    const settings = {
+      ...DEFAULT_IMAGE_SETTINGS,
+      model: 'gpt-image-1',
+      prompt: 'A cup',
+    }
+
+    act(() =>
+      generation.hook.result.current.generate(
+        { ...settings, n: 2 },
+        { x: 0, y: 0 }
+      )
+    )
+    await waitFor(() =>
+      expect(useDrawingStore.getState().nodes[0].data.taskId).toBe(
+        'task_running'
+      )
+    )
+    act(() =>
+      generation.hook.result.current.generate(
+        { ...settings, n: 1 },
+        { x: 400, y: 0 }
+      )
+    )
+    await waitFor(() => expect(galleryRequests).toHaveLength(2))
+
+    expect(galleryRequests[1]).toEqual(
+      expect.objectContaining({ required_images: 3 })
+    )
+    act(() => generation.hook.result.current.cancel())
+    generation.done()
   })
 })
