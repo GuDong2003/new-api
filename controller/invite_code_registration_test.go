@@ -29,6 +29,7 @@ func setupInviteRegistrationTest(t *testing.T) {
 	previousInviteRegistrationEnabled := common.InviteRegistrationEnabled
 	previousEmailVerificationEnabled := common.EmailVerificationEnabled
 	previousGenerateDefaultToken := constant.GenerateDefaultToken
+	previousRedisEnabled := common.RedisEnabled
 
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
@@ -40,6 +41,8 @@ func setupInviteRegistrationTest(t *testing.T) {
 	common.InviteRegistrationEnabled = true
 	common.EmailVerificationEnabled = false
 	constant.GenerateDefaultToken = false
+	// RedisEnabled defaults to true, and no Redis client exists in this test.
+	common.RedisEnabled = false
 
 	t.Cleanup(func() {
 		model.DB = previousDB
@@ -49,6 +52,7 @@ func setupInviteRegistrationTest(t *testing.T) {
 		common.InviteRegistrationEnabled = previousInviteRegistrationEnabled
 		common.EmailVerificationEnabled = previousEmailVerificationEnabled
 		constant.GenerateDefaultToken = previousGenerateDefaultToken
+		common.RedisEnabled = previousRedisEnabled
 	})
 }
 
