@@ -482,8 +482,10 @@ export function bindEditor(identity: GalleryIdentity, initial: LocalCanvas) {
       void flush()
     }, 2000)
   })
+  // Leaving saves locally at once, but a tab is hidden far more often than a
+  // canvas is worth uploading, so the cloud copy keeps to the timer's interval.
   const leave = () => {
-    void flush().then(() => syncCanvas(identity, initial.id, 'leave'))
+    void flush().then(() => syncCanvas(identity, initial.id, 'timer'))
   }
   // Coming back to this tab shows what another tab saved meanwhile.
   const visibility = () => {

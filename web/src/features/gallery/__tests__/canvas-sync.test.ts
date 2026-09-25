@@ -328,6 +328,40 @@ it('leaves untouched new drafts local-only and uploads dirty timer changes at mo
   expect(posts()).toHaveLength(2)
 })
 
+it.each([
+  [
+    'the tab is hidden',
+    () => {
+      const hidden = vi
+        .spyOn(document, 'visibilityState', 'get')
+        .mockReturnValue('hidden')
+      document.dispatchEvent(new Event('visibilitychange'))
+      hidden.mockRestore()
+    },
+  ],
+  ['the page is left', () => window.dispatchEvent(new Event('pagehide'))],
+])(
+  'saves locally at once when %s but uploads to the cloud at most once per five minutes',
+  async (_, leave) => {
+    const canvas = await createCanvasProject(identity, 'drawing')
+    await startCanvasEditor(identity, 'drawing')
+    useDrawingStore.getState().updateSettings({ prompt: '第一次编辑' })
+    await flushLocalEditors(identity)
+    await syncCanvas(identity, canvas.id, 'manual')
+    expect(posts()).toHaveLength(1)
+
+    useDrawingStore.getState().updateSettings({ prompt: '离开前的编辑' })
+    leave()
+    await flushLocalEditors(identity)
+    await syncCanvas(identity, canvas.id, 'timer')
+
+    expect(
+      required(await loadLocalCanvas(813, canvas.id)).document.settings
+    ).toMatchObject({ prompt: '离开前的编辑' })
+    expect(posts()).toHaveLength(1)
+  }
+)
+
 // The cloud leaves out an original whose file it lost, which asks the browser
 // for it again. A preview cannot stand in for that original.
 it('keeps the cloud copy waiting when an original the cloud lost is held here only as a preview', async () => {
