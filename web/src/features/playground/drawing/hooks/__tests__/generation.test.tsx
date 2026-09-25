@@ -927,6 +927,34 @@ describe('Image generation while the gallery is short of room', () => {
     generation.done()
   })
 
+  it('asks the gallery for room that fits a 4K image before submitting it as a task', async () => {
+    const generation = renderGeneration()
+
+    act(() =>
+      generation.hook.result.current.generate(
+        {
+          ...DEFAULT_IMAGE_SETTINGS,
+          model: 'gpt-image-2',
+          prompt: 'A cup',
+          size: '3840x2160',
+          n: 1,
+        },
+        { x: 0, y: 0 }
+      )
+    )
+    await waitFor(() => expect(galleryRequests).toHaveLength(1))
+    act(() => generation.hook.result.current.cancel())
+    generation.done()
+
+    const room = galleryRequests[0] as {
+      required_images: number
+      required_bytes: number
+    }
+    expect(room.required_images).toBe(1)
+    // An uncompressed render with alpha is the most its PNG can take.
+    expect(room.required_bytes).toBeGreaterThanOrEqual(3840 * 2160 * 4)
+  })
+
   it('asks the gallery for room for images that running tasks will store', async () => {
     vi.mocked(api.post).mockImplementation(async () => ({
       headers: { 'content-type': 'application/json' },

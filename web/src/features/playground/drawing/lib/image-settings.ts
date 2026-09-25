@@ -738,6 +738,22 @@ export function returnsInlineImages(
   return buildImagePayload(settings).response_format === 'b64_json'
 }
 
+/**
+ * The most gallery room one generated image may take: its pixels stored
+ * uncompressed with alpha, which a PNG only exceeds by its framing, plus a
+ * megabyte for the thumbnail and metadata. An automatic size is taken to stay
+ * within 2048 × 2048.
+ */
+export function getMaxImageGalleryBytes(
+  settings: z.infer<typeof imageSettingsSchema>
+): number {
+  const size = /^(\d+)[x*](\d+)$/.exec(
+    String(buildImagePayload(settings).size ?? '')
+  )
+  const pixels = size ? Number(size[1]) * Number(size[2]) : 2048 * 2048
+  return pixels * 4 + (1 << 20)
+}
+
 export type ImagePayload = Record<
   string,
   string | number | boolean | Record<string, unknown>

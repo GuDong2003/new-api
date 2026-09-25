@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"math"
 	"net/http"
@@ -31,6 +32,7 @@ import (
 
 	"github.com/bytedance/gopkg/util/gopool"
 	"github.com/gin-gonic/gin"
+	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
 
@@ -48,7 +50,6 @@ const (
 	imageTaskStatusCompleted  = "completed"
 	imageTaskStatusFailed     = "failed"
 	imageTaskStatusUnknown    = "unknown"
-	imageTaskArtifactMaxBytes = 10 << 20
 )
 
 // asyncImageRequestTimeout bounds one detached generation. constant.TaskTimeoutMinutes
@@ -63,21 +64,30 @@ const asyncImagePluginRunMargin = 2 * time.Minute
 // downloading URL results into the gallery.
 const imageTaskPersistTimeout = 2 * time.Minute
 
-// asyncImageInlineImageBudget is a conservative per-image estimate for an inline
-// base64 result; a 1024x1024 PNG lands near 1.5 MB once base64 expands it.
-const asyncImageInlineImageBudget = 2 << 20
+// imageTaskArtifactMaxBytes is the largest single image a task keeps. The
+// drawing page offers 4K sizes, and a detailed 4K PNG lands at 15–40 MB.
+const imageTaskArtifactMaxBytes = 48 << 20
+
+// asyncImageInlineImageBudget is the room one inline image takes in a buffered
+// result: the base64 form of the largest image a task keeps, plus the JSON
+// around it.
+const asyncImageInlineImageBudget = ((imageTaskArtifactMaxBytes+2)/3)*4 + 64<<10
+
+// imageResultMaxBudget bounds the buffered copy of any one response however
+// many images it asks for, which also keeps the budget within int everywhere.
+const imageResultMaxBudget = 1 << 30
 
 // imageResultBudget caps the buffered copy of one provider response. Inline
-// base64 is the only payload that grows with the requested count, so the budget
-// follows n rather than a fixed ceiling: every batch is generated
-// asynchronously instead of being turned away for its size. The buffer is never
-// persisted as-is — persistImageTaskArtifacts swaps base64 for gallery URLs and
-// stripImageTaskBase64 drops inline payloads on the fallback — so what this
-// bounds is memory, multiplied by asyncImageSlots concurrent runs.
+// base64 is the only payload that grows with the requested images, so each one
+// gets room for the largest image a task keeps: a 4K render is stored instead
+// of failing after the upstream call was already charged. The buffer grows only
+// as the response arrives, and it is never persisted as-is —
+// persistImageTaskArtifacts swaps base64 for gallery URLs and
+// stripImageTaskBase64 drops inline payloads on the fallback.
 //
-// The floor covers a single image and leaves URL results their existing
-// headroom. MySQL's default max_allowed_packet is 4 MB on 5.7, so a MySQL
-// deployment keeps the tighter floor.
+// URL results carry no image bytes and keep the floor. MySQL's default
+// max_allowed_packet is 4 MB on 5.7, so a MySQL deployment keeps the tighter
+// floor.
 func imageResultBudget(request *dto.ImageRequest) int {
 	floor := 8 << 20
 	if common.UsingMainDatabase(common.DatabaseTypeMySQL) {
@@ -93,7 +103,7 @@ func imageResultBudget(request *dto.ImageRequest) int {
 		// multiply into a negative budget.
 		count = min(uint64(*request.N), uint64(dto.MaxImageN))
 	}
-	return max(floor, int(count)*asyncImageInlineImageBudget)
+	return int(min(count*asyncImageInlineImageBudget, imageResultMaxBudget))
 }
 
 // asyncImageSlots bounds detached image runs. An accepted task is not held open
@@ -520,7 +530,8 @@ func finishAsyncImageTask(ctx context.Context, task *model.Task, run *asyncImage
 			// represents a successful upstream generation.
 			logger.LogWarn(ctx, fmt.Sprintf("persist async image artifacts for task %s failed: %v", task.TaskID, persistErr))
 			task.Data = stripImageTaskBase64(result)
-			task.PrivateData.ResultURL = firstAsyncImageURL(result)
+			// Only a real link: an inline data URL here is the whole image again.
+			task.PrivateData.ResultURL = firstAsyncImageURL(task.Data)
 		} else {
 			task.Data = storedResult
 			task.PrivateData.GalleryImageIDs = imageIDs
@@ -544,15 +555,18 @@ func persistImageTaskArtifacts(ctx context.Context, task *model.Task, result jso
 	if task == nil || task.UserId <= 0 {
 		return nil, nil, errors.New("image task owner is invalid")
 	}
-	var response dto.ImageResponse
-	if err := common.Unmarshal(result, &response); err != nil {
-		return nil, nil, fmt.Errorf("decode image result: %w", err)
+	// Each image is read out of the result on its own and decoded straight into
+	// the gallery. Decoding the whole response would hold every image a second
+	// time, and a 4K PNG alone runs to tens of megabytes.
+	if !gjson.ValidBytes(result) {
+		return nil, nil, errors.New("decode image result: invalid JSON")
 	}
-	if len(response.Data) == 0 {
+	count := int(gjson.GetBytes(result, "data.#").Int())
+	if count == 0 {
 		return nil, nil, errors.New("image result contains no images")
 	}
 
-	imageIDs := make(map[string]string, len(response.Data))
+	imageIDs := make(map[string]string, count)
 	gallerySource := task.PrivateData.GallerySource
 	if gallerySource == "" {
 		gallerySource = "api"
@@ -567,25 +581,28 @@ func persistImageTaskArtifacts(ctx context.Context, task *model.Task, result jso
 		}
 	}()
 
-	sanitized := make([]dto.ImageData, len(response.Data))
-	for index, item := range response.Data {
+	sanitized := make([]dto.ImageData, count)
+	for index := range count {
 		artifactKey := fmt.Sprintf("image-%d", index)
+		item := "data." + strconv.Itoa(index)
+		inline := strings.TrimSpace(gjson.GetBytes(result, item+".b64_json").String())
+		link := strings.TrimSpace(gjson.GetBytes(result, item+".url").String())
 		var galleryImage *model.GalleryImage
 		var err error
-		if strings.TrimSpace(item.B64Json) != "" {
-			data, decodeErr := decodeAsyncImageBase64(item.B64Json)
+		if inline != "" {
+			content, decodeErr := asyncImageBase64Reader(inline)
 			if decodeErr != nil {
 				return nil, nil, decodeErr
 			}
-			galleryImage, err = service.SaveTaskGalleryImageWithSource(ctx, task.UserId, task.TaskID, artifactKey, gallerySource, task.Properties.OriginModelName, task.Properties.Input, "", bytes.NewReader(data))
-		} else if strings.TrimSpace(item.Url) != "" {
-			if data, isDataURL, decodeErr := decodeAsyncImageDataURL(item.Url); isDataURL {
+			galleryImage, err = service.SaveTaskGalleryImageWithSource(ctx, task.UserId, task.TaskID, artifactKey, gallerySource, task.Properties.OriginModelName, task.Properties.Input, "", content)
+		} else if link != "" {
+			if content, isDataURL, decodeErr := asyncImageDataURLReader(link); isDataURL {
 				if decodeErr != nil {
 					return nil, nil, decodeErr
 				}
-				galleryImage, err = service.SaveTaskGalleryImageWithSource(ctx, task.UserId, task.TaskID, artifactKey, gallerySource, task.Properties.OriginModelName, task.Properties.Input, "", bytes.NewReader(data))
+				galleryImage, err = service.SaveTaskGalleryImageWithSource(ctx, task.UserId, task.TaskID, artifactKey, gallerySource, task.Properties.OriginModelName, task.Properties.Input, "", content)
 			} else {
-				galleryImage, err = service.SaveTaskGalleryImageFromURLWithSource(ctx, task.UserId, task.TaskID, artifactKey, gallerySource, task.Properties.OriginModelName, task.Properties.Input, item.Url)
+				galleryImage, err = service.SaveTaskGalleryImageFromURLWithSource(ctx, task.UserId, task.TaskID, artifactKey, gallerySource, task.Properties.OriginModelName, task.Properties.Input, link)
 			}
 		} else {
 			return nil, nil, fmt.Errorf("image result %s has no image data", artifactKey)
@@ -598,14 +615,15 @@ func persistImageTaskArtifacts(ctx context.Context, task *model.Task, result jso
 		if urlErr != nil {
 			return nil, nil, urlErr
 		}
-		sanitized[index] = dto.ImageData{Url: contentURL, RevisedPrompt: item.RevisedPrompt}
+		sanitized[index] = dto.ImageData{Url: contentURL, RevisedPrompt: gjson.GetBytes(result, item+".revised_prompt").String()}
 	}
 
 	encodedData, err := common.Marshal(sanitized)
 	if err != nil {
 		return nil, nil, err
 	}
-	sanitizedResult, err := sjson.SetRawBytes(bytes.Clone(result), "data", encodedData)
+	// sjson builds a new document and leaves the result as it is.
+	sanitizedResult, err := sjson.SetRawBytes(result, "data", encodedData)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -619,31 +637,32 @@ func persistImageTaskArtifacts(ctx context.Context, task *model.Task, result jso
 	return json.RawMessage(sanitizedResult), imageIDs, nil
 }
 
-func decodeAsyncImageBase64(value string) ([]byte, error) {
+// asyncImageBase64Reader decodes one inline image while the gallery copies it,
+// so the decoded image never sits in memory beside its base64 form. Providers
+// pad the encoding or leave the padding off, and a streaming decoder has to be
+// told which: an unpadded length that is not a multiple of four is raw.
+func asyncImageBase64Reader(value string) (io.Reader, error) {
 	value = strings.TrimSpace(value)
-	if value == "" || len(value) > ((imageTaskArtifactMaxBytes+2)/3)*4+4 {
+	if value == "" || len(value) > base64.StdEncoding.EncodedLen(imageTaskArtifactMaxBytes)+4 {
 		return nil, errors.New("base64 image exceeds the gallery size limit")
 	}
-	data, err := base64.StdEncoding.DecodeString(value)
-	if err != nil {
-		data, err = base64.RawStdEncoding.DecodeString(value)
+	encoding := base64.StdEncoding
+	if (len(value)-strings.Count(value, "\n")-strings.Count(value, "\r"))%4 != 0 {
+		encoding = base64.RawStdEncoding
 	}
-	if err != nil || len(data) == 0 || len(data) > imageTaskArtifactMaxBytes {
-		return nil, errors.New("invalid base64 image data")
-	}
-	return data, nil
+	return base64.NewDecoder(encoding, strings.NewReader(value)), nil
 }
 
-func decodeAsyncImageDataURL(value string) ([]byte, bool, error) {
-	if !strings.HasPrefix(strings.ToLower(value), "data:") {
+func asyncImageDataURLReader(value string) (io.Reader, bool, error) {
+	if len(value) < len("data:") || !strings.EqualFold(value[:len("data:")], "data:") {
 		return nil, false, nil
 	}
 	header, payload, ok := strings.Cut(value, ",")
 	if !ok || !strings.HasPrefix(strings.ToLower(header), "data:image/") || !strings.HasSuffix(strings.ToLower(header), ";base64") {
 		return nil, true, errors.New("unsupported image data URL")
 	}
-	data, err := decodeAsyncImageBase64(payload)
-	return data, true, err
+	content, err := asyncImageBase64Reader(payload)
+	return content, true, err
 }
 
 func failAsyncImageTask(ctx context.Context, task *model.Task, reason string) {
@@ -661,14 +680,16 @@ func failAsyncImageTask(ctx context.Context, task *model.Task, reason string) {
 // stored on the task, or reports why the run cannot be stored.
 func asyncImageResult(r *asyncImageResponseRecorder) (json.RawMessage, error) {
 	if r.overflow {
-		return nil, fmt.Errorf("image result exceeds the %d MB async limit, retry without async", r.limit>>20)
+		return nil, fmt.Errorf("image result exceeds the %d MB an image task can keep", r.limit>>20)
 	}
 	body := r.body.Bytes()
 	if status := r.statusCode(); status != http.StatusOK {
 		return nil, fmt.Errorf("upstream returned %d: %s", status, asyncImageErrorMessage(body))
 	}
 	if common.GetJsonType(body) == "object" {
-		return json.RawMessage(bytes.Clone(body)), nil
+		// Nothing writes to the recorder any more, so the result shares its
+		// buffer instead of holding every image a second time.
+		return json.RawMessage(body), nil
 	}
 	if strings.HasPrefix(r.header.Get("Content-Type"), "text/event-stream") {
 		return collapseAsyncImageStream(body)

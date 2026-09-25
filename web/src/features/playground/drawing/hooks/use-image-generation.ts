@@ -30,6 +30,7 @@ import { generateImages } from '../api'
 import { positionGeneratedImageNodes } from '../lib/canvas-document'
 import { imageSourceToAsset } from '../lib/image-assets'
 import {
+  getMaxImageGalleryBytes,
   returnsInlineImages,
   usesImageTask,
   validateImageSettings,
@@ -60,10 +61,6 @@ type GenerationInput = {
   direct?: boolean
 }
 type Translate = (key: string) => string
-
-// The gateway holds at most 8 MiB of base64 for any one image of a task, so
-// this much room always stores the decoded image and its thumbnail.
-const GALLERY_BYTES_PER_TASK_IMAGE = 8 << 20
 
 // Keep network jobs alive while authenticated routes are changing. The drawing
 // store owns the visible nodes; this module owns only the request lifecycle.
@@ -112,6 +109,7 @@ async function galleryKeepsTaskImages(
   input: GenerationInput
 ): Promise<boolean> {
   let images = input.job.nodeIds.length
+  let bytes = images * getMaxImageGalleryBytes(input.settings)
   for (const other of activeJobs.values()) {
     if (
       other !== input &&
@@ -121,16 +119,15 @@ async function galleryKeepsTaskImages(
       usesImageTask(other.settings)
     ) {
       images += other.job.nodeIds.length
+      bytes +=
+        other.job.nodeIds.length * getMaxImageGalleryBytes(other.settings)
     }
   }
   try {
     const usage = await getGalleryUsage(
       { userId: input.userId, sessionId: input.sessionId },
       input.job.controller.signal,
-      {
-        required_images: images,
-        required_bytes: images * GALLERY_BYTES_PER_TASK_IMAGE,
-      }
+      { required_images: images, required_bytes: bytes }
     )
     return usage.can_save
   } catch {
