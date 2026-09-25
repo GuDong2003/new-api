@@ -727,13 +727,21 @@ func redactContentAuditValue(value any, depth int) any {
 	}
 	switch value := value.(type) {
 	case map[string]any:
+		// A binary part is known only by the type its sender wrote, so it loses
+		// just the payload it carries. Text beside it stays: a request, message
+		// or Gemini part merely declared an image still reaches the model whole.
+		binaryPart := false
 		if kind, ok := value["type"].(string); ok {
 			switch kind {
 			case "image", "image_url", "input_image", "image_generation_call", "input_audio", "audio", "file", "input_file", "base64":
-				return map[string]any{"type": kind, "omitted": "binary"}
+				binaryPart = true
 			}
 		}
 		for key, child := range value {
+			if _, raw := child.(string); raw && binaryPart && (key == "data" || key == "result") {
+				value[key] = map[string]any{"omitted": "binary"}
+				continue
+			}
 			if contentAuditSecretField(key) {
 				value[key] = "[redacted]"
 				continue
@@ -743,7 +751,9 @@ func redactContentAuditValue(value any, depth int) any {
 				continue
 			}
 			if contentAuditAttachmentField(key) {
-				value[key] = map[string]any{"omitted": "attachment"}
+				if !contentAuditUploadMarkers(child) {
+					value[key] = map[string]any{"omitted": "attachment"}
+				}
 				continue
 			}
 			lower := strings.ToLower(strings.ReplaceAll(key, "_", ""))
@@ -1085,6 +1095,39 @@ func (r *contentAuditBoundedReader) Read(data []byte) (int, error) {
 	return n, err
 }
 
+// addContentAuditFormValue records one form part. A field sent more than once,
+// like the image[] files of a multi-reference edit, becomes a list in arrival
+// order rather than keeping only its last part.
+func addContentAuditFormValue(values map[string]any, name string, value any) {
+	switch existing := values[name].(type) {
+	case nil:
+		values[name] = value
+	case []any:
+		values[name] = append(existing, value)
+	default:
+		values[name] = []any{existing, value}
+	}
+}
+
+// contentAuditUploadMarkers reports whether a value is what the multipart
+// capture recorded in place of uploaded files. Only that capture counts sizes
+// as int64, so no request body can pass its own content off as one.
+func contentAuditUploadMarkers(value any) bool {
+	switch value := value.(type) {
+	case map[string]any:
+		_, sized := value["bytes"].(int64)
+		return len(value) == 2 && value["omitted"] == "attachment" && sized
+	case []any:
+		for _, item := range value {
+			if !contentAuditUploadMarkers(item) {
+				return false
+			}
+		}
+		return len(value) > 0
+	}
+	return false
+}
+
 func captureContentAuditRequest(reader io.Reader, contentType string, limit int) (json.RawMessage, int64, bool) {
 	mediaType, parameters, _ := mime.ParseMediaType(contentType)
 	if mediaType == "multipart/form-data" {
@@ -1113,7 +1156,7 @@ func captureContentAuditRequest(reader io.Reader, contentType string, limit int)
 			if part.FileName() != "" || contentAuditAttachmentField(name) {
 				n, err := io.Copy(io.Discard, io.LimitReader(part, contentAuditMaxScan-observed))
 				observed += n
-				values[name] = map[string]any{"omitted": "attachment", "bytes": n}
+				addContentAuditFormValue(values, name, map[string]any{"omitted": "attachment", "bytes": n})
 				if err != nil || observed >= contentAuditMaxScan {
 					truncated = true
 					break
@@ -1128,10 +1171,11 @@ func captureContentAuditRequest(reader io.Reader, contentType string, limit int)
 				break
 			}
 			stored += len(data) + len(name)
-			values[name] = string(data)
+			var value any = string(data)
 			if contentAuditSecretField(name) {
-				values[name] = "[redacted]"
+				value = "[redacted]"
 			}
+			addContentAuditFormValue(values, name, value)
 		}
 		return contentAuditSnapshot(values, limit, &truncated), observed, truncated
 	}

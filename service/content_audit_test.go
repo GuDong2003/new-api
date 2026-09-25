@@ -2905,6 +2905,73 @@ func TestContentAuditMultipartAndStreamAggregateLimits(t *testing.T) {
 	assert.Contains(t, string(snapshot), "omitted")
 }
 
+// A multi-reference edit sends its files under one repeated field. Each one is
+// recorded with its size, in order, instead of the last file standing in for
+// all of them; a file field named image keeps its size too.
+func TestContentAuditMultipartRecordsEveryAttachment(t *testing.T) {
+	var body bytes.Buffer
+	form := multipart.NewWriter(&body)
+	require.NoError(t, form.WriteField("prompt", "combine"))
+	for _, upload := range []struct{ field, content string }{
+		{"image[]", "first-reference"},
+		{"image[]", "second"},
+		{"image", "single"},
+	} {
+		part, err := form.CreateFormFile(upload.field, "reference.png")
+		require.NoError(t, err)
+		_, err = part.Write([]byte(upload.content))
+		require.NoError(t, err)
+	}
+	require.NoError(t, form.Close())
+
+	snapshot, _, truncated := captureContentAuditRequest(bytes.NewReader(body.Bytes()), form.FormDataContentType(), 64<<10)
+
+	require.False(t, truncated)
+	var captured map[string]any
+	require.NoError(t, common.Unmarshal(snapshot, &captured))
+	assert.Equal(t, map[string]any{
+		"prompt": "combine",
+		"image[]": []any{
+			map[string]any{"omitted": "attachment", "bytes": float64(15)},
+			map[string]any{"omitted": "attachment", "bytes": float64(6)},
+		},
+		"image": map[string]any{"omitted": "attachment", "bytes": float64(6)},
+	}, captured)
+}
+
+// A binary part is recognised by its type, which the client writes. Declaring
+// a request, a message or a Gemini part an image must not hide the text the
+// model still reads, while the binary a real part carries stays out.
+func TestContentAuditTypedPartsKeepTheirText(t *testing.T) {
+	picture := base64.StdEncoding.EncodeToString(contentAuditTestPNG(t))
+	var form bytes.Buffer
+	writer := multipart.NewWriter(&form)
+	require.NoError(t, writer.WriteField("type", "image"))
+	require.NoError(t, writer.WriteField("prompt", "multipart instructions"))
+	require.NoError(t, writer.Close())
+	for _, tc := range []struct {
+		name, contentType, body string
+		visible                 []string
+	}{
+		{"typed request", "application/json", `{"type":"image","messages":[{"role":"user","content":"request instructions"}]}`, []string{"request instructions"}},
+		{"typed multipart request", writer.FormDataContentType(), form.String(), []string{"multipart instructions"}},
+		{"typed message", "application/json", `{"messages":[{"role":"user","type":"image","content":"message instructions"}]}`, []string{"message instructions"}},
+		{"typed gemini part", "application/json", `{"contents":[{"role":"user","parts":[{"type":"image","text":"part instructions"}]}]}`, []string{"part instructions"}},
+		{"claude image", "application/json", fmt.Sprintf(`{"messages":[{"role":"user","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":%q}},{"type":"text","text":"describe it"}]}]}`, picture), []string{"describe it", "image/png"}},
+		{"earlier generated image", "application/json", fmt.Sprintf(`{"input":[{"type":"image_generation_call","id":"ig-1","result":%q,"revised_prompt":"a red fox"}]}`, picture), []string{"ig-1", "a red fox"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			snapshot, _, truncated := captureContentAuditRequest(strings.NewReader(tc.body), tc.contentType, 64<<10)
+
+			require.False(t, truncated)
+			for _, text := range tc.visible {
+				assert.Contains(t, string(snapshot), text)
+			}
+			assert.NotContains(t, string(snapshot), picture)
+		})
+	}
+}
+
 func TestContentAuditUpstreamStreamFailureIsPartial(t *testing.T) {
 	r, _, _ := contentAuditTestRuntime(t)
 	response := []byte("data: {\"choices\":[{\"delta\":{\"content\":\"partial reply\"}}]}\n\n")
