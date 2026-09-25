@@ -189,6 +189,8 @@ func removeGalleryRecord(ctx context.Context, root string, record *model.Gallery
 
 // Validate the full original container without allocating its decoded pixels.
 // Large valid originals remain available even when thumbnail decoding is unsafe.
+// The picture must be whole, but bytes past its end are kept: phone galleries
+// and photo editors append their own data there, which every decoder ignores.
 func validateGalleryOriginal(root, id string, size int64) (string, int, int, error) {
 	f, err := openGalleryFile(root, id, "original")
 	if err != nil {
@@ -240,7 +242,7 @@ func validateGalleryOriginal(root, id string, size int64) (string, int, int, err
 			return invalid()
 		}
 		remaining := int64(binary.LittleEndian.Uint32(header[4:8])) - 4
-		if remaining < 0 || remaining+12 != size {
+		if remaining < 0 || remaining+12 > size {
 			return invalid()
 		}
 		pixels := false
@@ -322,9 +324,6 @@ func validateGalleryOriginal(root, id string, size int64) (string, int, int, err
 			scan = marker == 0xda
 			pixels = pixels || scan
 		}
-	}
-	if _, err = r.ReadByte(); err != io.EOF {
-		return invalid()
 	}
 	return "image/" + format, config.Width, config.Height, nil
 }

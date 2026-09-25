@@ -19,6 +19,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -1404,6 +1405,10 @@ func TestGalleryRejectsMalformedAndForbiddenInputs(t *testing.T) {
 	galleryFixture(t, sqlite.Open(filepath.Join(t.TempDir(), "gallery.db")))
 	ctx := context.Background()
 	data := galleryPNG(t)
+	var jpegData bytes.Buffer
+	require.NoError(t, jpeg.Encode(&jpegData, image.NewRGBA(image.Rect(0, 0, 4, 2)), nil))
+	webpData, err := base64.StdEncoding.DecodeString("UklGRiIAAABXRUJQVlA4IBYAAAAwAQCdASoBAAEADsD+JaQAA3AAAAAA")
+	require.NoError(t, err)
 	valid := `{"source":"drawing","source_id":"job","model":"test","parameters":{}}`
 	for name, reader := range map[string]*multipart.Reader{
 		"missing metadata":   galleryMultipart(t, "", []string{"file", string(data)}),
@@ -1412,6 +1417,8 @@ func TestGalleryRejectsMalformedAndForbiddenInputs(t *testing.T) {
 		"invalid source":     galleryMultipart(t, `{"source":"api","source_id":"job"}`, []string{"file", string(data)}),
 		"invalid bytes":      galleryMultipart(t, valid, []string{"file", "not an image"}),
 		"truncated PNG":      galleryMultipart(t, valid, []string{"file", string(data[:len(data)-8])}),
+		"truncated JPEG":     galleryMultipart(t, valid, []string{"file", string(jpegData.Bytes()[:jpegData.Len()-2])}),
+		"truncated WebP":     galleryMultipart(t, valid, []string{"file", string(webpData[:len(webpData)-2])}),
 		"private URL":        galleryMultipart(t, valid, []string{"url", "http://127.0.0.1/image.png"}),
 		"metadata URL":       galleryMultipart(t, valid, []string{"url", "http://169.254.169.254/latest/meta-data/"}),
 		"credentials URL":    galleryMultipart(t, valid, []string{"url", "https://secret:password@example.com/image.png"}),
@@ -1575,7 +1582,17 @@ func TestGalleryOriginalFormatsThumbnailFallbackAndDeletionRetry(t *testing.T) {
 	require.NoError(t, png.Encode(&widePNG, image.NewRGBA(image.Rect(0, 0, 9000, 1))))
 	webpData, err := base64.StdEncoding.DecodeString("UklGRiIAAABXRUJQVlA4IBYAAAAwAQCdASoBAAEADsD+JaQAA3AAAAAA")
 	require.NoError(t, err)
-	for name, data := range map[string][]byte{"jpeg": jpegData.Bytes(), "webp": webpData, "wide": widePNG.Bytes()} {
+	// Phone galleries and photo editors append their own data past a picture's
+	// end, which every decoder ignores.
+	editorData := []byte("\x00\x00{\"originalFileSubPath\":\"/edit/parametric/files/origin_1781178600.png\"}")
+	for name, data := range map[string][]byte{
+		"jpeg":                  jpegData.Bytes(),
+		"webp":                  webpData,
+		"wide":                  widePNG.Bytes(),
+		"png-with-editor-data":  slices.Concat(galleryPNG(t), editorData),
+		"jpeg-with-editor-data": slices.Concat(jpegData.Bytes(), editorData),
+		"webp-with-editor-data": slices.Concat(webpData, editorData),
+	} {
 		t.Run(name, func(t *testing.T) {
 			saved, err := gallerySave(t, 1, "drawing", name, data)
 			require.NoError(t, err)
