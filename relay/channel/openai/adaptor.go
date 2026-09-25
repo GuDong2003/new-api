@@ -6,11 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
 	"net/url"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -653,65 +655,22 @@ func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInf
 				}
 			}
 
-			// Process all image files
+			// If multiple images, use image[] as the field name
+			fieldName := "image"
+			if len(imageFiles) > 1 {
+				fieldName = "image[]"
+			}
 			for i, fileHeader := range imageFiles {
-				file, err := fileHeader.Open()
-				if err != nil {
-					return nil, fmt.Errorf("failed to open image file %d: %w", i, err)
+				if err := writeImageFormFile(writer, fieldName, fileHeader); err != nil {
+					return nil, fmt.Errorf("failed to forward image file %d: %w", i, err)
 				}
-
-				// If multiple images, use image[] as the field name
-				fieldName := "image"
-				if len(imageFiles) > 1 {
-					fieldName = "image[]"
-				}
-
-				// Determine MIME type based on file extension
-				mimeType := detectImageMimeType(fileHeader.Filename)
-
-				// Create a form file with the appropriate content type
-				h := make(textproto.MIMEHeader)
-				h.Set("Content-Disposition", fmt.Sprintf(`form-data; name="%s"; filename="%s"`, fieldName, fileHeader.Filename))
-				h.Set("Content-Type", mimeType)
-
-				part, err := writer.CreatePart(h)
-				if err != nil {
-					return nil, fmt.Errorf("create form part failed for image %d: %w", i, err)
-				}
-
-				if _, err := io.Copy(part, file); err != nil {
-					return nil, fmt.Errorf("copy file failed for image %d: %w", i, err)
-				}
-
-				// 复制完立即关闭，避免在循环内使用 defer 占用资源
-				_ = file.Close()
 			}
 
 			// Handle mask file if present
 			if maskFiles, exists := mf.File["mask"]; exists && len(maskFiles) > 0 {
-				maskFile, err := maskFiles[0].Open()
-				if err != nil {
-					return nil, errors.New("failed to open mask file")
+				if err := writeImageFormFile(writer, "mask", maskFiles[0]); err != nil {
+					return nil, fmt.Errorf("failed to forward mask file: %w", err)
 				}
-				// 复制完立即关闭，避免在循环内使用 defer 占用资源
-
-				// Determine MIME type for mask file
-				mimeType := detectImageMimeType(maskFiles[0].Filename)
-
-				// Create a form file with the appropriate content type
-				h := make(textproto.MIMEHeader)
-				h.Set("Content-Disposition", fmt.Sprintf(`form-data; name="mask"; filename="%s"`, maskFiles[0].Filename))
-				h.Set("Content-Type", mimeType)
-
-				maskPart, err := writer.CreatePart(h)
-				if err != nil {
-					return nil, errors.New("create form file failed for mask")
-				}
-
-				if _, err := io.Copy(maskPart, maskFile); err != nil {
-					return nil, errors.New("copy mask file failed")
-				}
-				_ = maskFile.Close()
 			}
 		} else {
 			return nil, errors.New("no multipart form data found")
@@ -732,6 +691,63 @@ func isJSONRequest(c *gin.Context) bool {
 		return false
 	}
 	return strings.HasPrefix(c.Request.Header.Get("Content-Type"), "application/json")
+}
+
+// formFilenameEscaper keeps a client's filename inside the quoted parameter of
+// a rebuilt part: quotes and backslashes are escaped as mime/multipart escapes
+// them, and line breaks, which would start a header of their own, are dropped.
+var formFilenameEscaper = strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\r", "", "\n", "")
+
+// imageFileExtensions lists the extensions each recognised image type goes by.
+// The first is added to a filename that carries none of them.
+var imageFileExtensions = map[string][]string{
+	"image/png":  {".png"},
+	"image/jpeg": {".jpg", ".jpeg"},
+	"image/webp": {".webp"},
+	"image/gif":  {".gif"},
+}
+
+// writeImageFormFile copies one uploaded image into the rebuilt edit form. The
+// content decides its type: a canvas picture can arrive named without an
+// extension, and one a provider answered as JPEG can be declared as PNG. Only
+// content that is not recognised keeps its declared type, and then the type
+// its extension suggests.
+func writeImageFormFile(writer *multipart.Writer, fieldName string, fileHeader *multipart.FileHeader) error {
+	file, err := fileHeader.Open()
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	head := make([]byte, 512)
+	n, err := io.ReadFull(file, head)
+	if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
+		return err
+	}
+	head = head[:n]
+
+	filename := fileHeader.Filename
+	mimeType := http.DetectContentType(head)
+	declared, _, _ := mime.ParseMediaType(fileHeader.Header.Get("Content-Type"))
+	switch extensions := imageFileExtensions[mimeType]; {
+	case extensions != nil:
+		if !slices.Contains(extensions, strings.ToLower(filepath.Ext(filename))) {
+			filename += extensions[0]
+		}
+	case imageFileExtensions[declared] != nil:
+		mimeType = declared
+	default:
+		mimeType = detectImageMimeType(filename)
+	}
+
+	h := make(textproto.MIMEHeader)
+	h.Set("Content-Disposition", fmt.Sprintf(`form-data; name="%s"; filename="%s"`, fieldName, formFilenameEscaper.Replace(filename)))
+	h.Set("Content-Type", mimeType)
+	part, err := writer.CreatePart(h)
+	if err != nil {
+		return err
+	}
+	_, err = io.Copy(part, io.MultiReader(bytes.NewReader(head), file))
+	return err
 }
 
 // detectImageMimeType determines the MIME type based on the file extension
