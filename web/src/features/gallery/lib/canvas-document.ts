@@ -32,6 +32,7 @@ import {
   serializeLegacyNaiDocument,
   type LegacyNaiDocument,
 } from '../../playground/drawing/lib/legacy-nai-document'
+import { renumberReferenceMentions } from '../../playground/drawing/lib/reference-mentions'
 import type {
   DrawingDocument,
   ImageAsset,
@@ -208,6 +209,7 @@ type MergedNode = {
     mask?: { id: string }
     referenceIds?: string[]
     status?: string
+    prompt?: unknown
   }
 } & Record<string, unknown>
 type MergedEdge = { id?: string; source: string; target: string }
@@ -216,7 +218,7 @@ type MergedDrawing = {
   edges: MergedEdge[]
   referenceIds: string[]
   mask: { referenceId: string; asset: { id: string } } | null
-  settings: unknown
+  settings: { prompt?: unknown } | null
 }
 
 /**
@@ -282,13 +284,23 @@ export function mergeCanvasDocuments(
     ) {
       return node
     }
-    // A mask belongs to the references it was drawn for.
+    // A mask belongs to the references it was drawn for, and the prompt
+    // numbers them by their order.
     const { mask: _mask, ...data } = node.data
     return {
       ...node,
       data: {
         ...data,
         ...(node.data.referenceIds ? { referenceIds: remaining } : {}),
+        ...(typeof data.prompt === 'string'
+          ? {
+              prompt: renumberReferenceMentions(
+                data.prompt,
+                references,
+                remaining
+              ),
+            }
+          : {}),
       },
     }
   })
@@ -305,20 +317,34 @@ export function mergeCanvasDocuments(
       (edge) => !baseEdges.has(edgeId(edge)) && !ourEdges.has(edgeId(edge))
     ),
   ].filter((edge) => ids.has(edge.source) && ids.has(edge.target))
+  const shown = new Set(
+    nodes
+      .filter((node) => node.data.status === 'complete' && node.data.asset)
+      .map((node) => node.id)
+  )
   const complete = new Set(
     cleaned
       .filter((node) => node.data.status === 'complete' && node.data.asset)
       .map((node) => node.id)
   )
-  const referenceIds = pick(
-    was.referenceIds,
-    ours.referenceIds,
-    other.referenceIds
-  ).filter((id) => complete.has(id))
+  const picked = pick(was.referenceIds, ours.referenceIds, other.referenceIds)
+  const referenceIds = picked.filter((id) => complete.has(id))
+  const settings = pick(was.settings, ours.settings, other.settings)
   const mask = pick(was.mask, ours.mask, other.mask)
   return {
     ...mine,
-    settings: pick(was.settings, ours.settings, other.settings),
+    // The composer numbers the references it shows.
+    settings:
+      typeof settings?.prompt === 'string'
+        ? {
+            ...settings,
+            prompt: renumberReferenceMentions(
+              settings.prompt,
+              picked.filter((id) => shown.has(id)),
+              referenceIds
+            ),
+          }
+        : settings,
     referenceIds,
     mask:
       mask &&
@@ -568,6 +594,11 @@ export function pruneCanvasDocumentAsset(
       .filter((node) => node.data.asset?.id === assetId)
       .map((node) => node.id)
   )
+  const shown = new Set(
+    document.nodes
+      .filter((node) => node.data.status === 'complete' && node.data.asset)
+      .map((node) => node.id)
+  )
   document.nodes = document.nodes.filter(
     (node) => !removedNodes.has(node.id)
   ) as typeof document.nodes
@@ -575,6 +606,16 @@ export function pruneCanvasDocumentAsset(
     document.edges = document.edges.filter(
       (edge) => !removedNodes.has(edge.source) && !removedNodes.has(edge.target)
     )
+    // The composer and each image number their references by order.
+    const shownReferences = document.referenceIds.filter((id) => shown.has(id))
+    document.settings = {
+      ...document.settings,
+      prompt: renumberReferenceMentions(
+        document.settings.prompt,
+        shownReferences,
+        shownReferences.filter((id) => !removedNodes.has(id))
+      ),
+    }
     document.referenceIds = document.referenceIds.filter(
       (id) => !removedNodes.has(id)
     )
@@ -596,6 +637,11 @@ export function pruneCanvasDocumentAsset(
       if (node.data.referenceIds) {
         node.data.referenceIds = references.filter(
           (id) => !removedNodes.has(id)
+        )
+        node.data.prompt = renumberReferenceMentions(
+          node.data.prompt,
+          references,
+          node.data.referenceIds
         )
       }
     }

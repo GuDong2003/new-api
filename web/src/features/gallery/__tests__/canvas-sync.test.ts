@@ -598,6 +598,53 @@ it('deletes one shared original without discarding unrelated unsaved edits or al
   ).toMatchObject({ prompt: '删除时仍在编辑' })
 })
 
+// A retry sends an image's own prompt with the references it still has, so a
+// deleted original unbinds the mention that named it and moves the rest up.
+it('renumbers the prompt of an image whose reference original is deleted', async () => {
+  const canvas = await createCanvasProject(identity, 'drawing')
+  await startCanvasEditor(identity, 'drawing')
+  addOriginal()
+  addOriginal(targetId)
+  const state = useDrawingStore.getState()
+  state.addNodes(
+    [
+      {
+        id: 'edited',
+        type: 'image',
+        position: { x: 60, y: 12 },
+        data: {
+          prompt: '把@2 (image.png)的角色放进@1 (image.png)',
+          referenceIds: [`node-${sourceId}`, `node-${targetId}`],
+          settings: { ...state.settings, mode: 'edit' },
+          status: 'error',
+          createdAt: 3,
+        },
+      },
+    ],
+    [
+      { id: 'source-edited', source: `node-${sourceId}`, target: 'edited' },
+      { id: 'target-edited', source: `node-${targetId}`, target: 'edited' },
+    ]
+  )
+  await flushLocalEditors(identity)
+  const renumbered = {
+    referenceIds: [`node-${targetId}`],
+    prompt: '把@1 (image.png)的角色放进@? (image.png)',
+  }
+
+  await deleteCanvasResource(identity, canvas.id, sourceId)
+
+  expect(
+    useDrawingStore.getState().nodes.find((node) => node.id === 'edited')?.data
+  ).toMatchObject(renumbered)
+  await flushLocalEditors(identity)
+  const stored = required(await loadLocalCanvas(813, canvas.id)).document
+    .nodes as Array<{ id: string; data: Record<string, unknown> }>
+  expect(stored.find((node) => node.id === 'edited')?.data).toMatchObject(
+    renumbered
+  )
+})
+
 describe('an original this browser cannot download yet', () => {
   const link = 'https://images.example/final.png'
   // The type the server hands the original back in, or nothing while it cannot.

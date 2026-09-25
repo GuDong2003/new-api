@@ -244,6 +244,65 @@ describe('canvas originals and browser persistence', () => {
     expect((await loadLocalCanvas(41, saved.id))?.name).toBe('测试画布')
   })
 
+  // A request numbers its references by their order, so a deleted original
+  // unbinds the mentions that named it, in the composer and in every image
+  // that used it, and moves the mentions after it up.
+  it('renumbers the prompt mentions of the references a deleted original takes away', async () => {
+    const document = drawing()
+    const [original] = document.nodes
+    document.nodes = [
+      original,
+      {
+        ...original,
+        id: 'other',
+        data: {
+          ...original.data,
+          asset: { ...asset, id: otherId, name: '另一张.png' },
+        },
+      },
+      {
+        ...original,
+        id: 'edited',
+        data: {
+          prompt: '把@2 (另一张.png)的角色放进@1 (原图.png)',
+          referenceIds: ['source', 'other'],
+          settings: original.data.settings,
+          status: 'error',
+          createdAt: 3,
+        },
+      },
+    ]
+    document.edges = []
+    document.mask = null
+    document.referenceIds = ['source', 'other']
+    document.settings = {
+      ...document.settings,
+      prompt: '@1 (原图.png) 和 @2 (另一张.png)',
+    }
+    const encoded = await encodeCanvas('drawing', document, {
+      roles: {
+        [originalId]: { role: 'generated', nodeId: 'source' },
+        [otherId]: { role: 'reference', nodeId: 'other' },
+      },
+    })
+    const saved = await saveLocalCanvas(local(encoded.document), encoded.assets)
+
+    const removed = await removeLocalCanvasAsset(41, saved.id, originalId)
+
+    const restored = (await decodeCanvas(
+      removed,
+      await readCanvasAssets(41, saved.id)
+    )) as DrawingDocument
+    expect(restored.referenceIds).toEqual(['other'])
+    expect(restored.settings.prompt).toBe('@? (原图.png) 和 @1 (另一张.png)')
+    expect(
+      restored.nodes.find((node) => node.id === 'edited')?.data
+    ).toMatchObject({
+      referenceIds: ['other'],
+      prompt: '把@1 (另一张.png)的角色放进@? (原图.png)',
+    })
+  })
+
   it('explicit asset deletion prunes duplicates, edges and masks while preserving other images and blocking stale writes', async () => {
     const document = drawing()
     document.nodes.push({

@@ -69,4 +69,35 @@ describe('merging what two tabs saved', () => {
       },
     ])
   })
+
+  // A request numbers its references by their order, so an original deleted
+  // elsewhere unbinds the mentions that named it and moves the rest up.
+  it('renumbers the prompt mentions of references an original deleted elsewhere takes away', () => {
+    const saved = {
+      ...drawing([
+        node('a', { asset: asset('a') }),
+        node('b', { asset: asset('b') }),
+        node('edited', {
+          status: 'error',
+          prompt: '@1 (a.png) 和 @2 (b.png)',
+          referenceIds: ['a', 'b'],
+        }),
+      ]),
+      referenceIds: ['a', 'b'],
+      settings: { prompt: '把@2 (b.png)放进@1 (a.png)' },
+    }
+
+    const merged = mergeCanvasDocuments(saved, saved, saved, ['a'])
+
+    expect(merged.referenceIds).toEqual(['b'])
+    expect(merged.settings).toEqual({ prompt: '把@1 (b.png)放进@? (a.png)' })
+    expect(
+      (merged.nodes as ReturnType<typeof node>[]).find(
+        (item) => item.id === 'edited'
+      )?.data
+    ).toMatchObject({
+      referenceIds: ['b'],
+      prompt: '@? (a.png) 和 @1 (b.png)',
+    })
+  })
 })

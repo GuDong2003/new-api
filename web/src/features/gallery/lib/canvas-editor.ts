@@ -15,6 +15,7 @@ You should have received a copy of the GNU Affero General Public License
 along with this program. If not, see <https://www.gnu.org/licenses/>.
 */
 import { cancelImageGenerationJobs } from '@/features/playground/drawing/hooks/use-image-generation'
+import { renumberReferenceMentions } from '@/features/playground/drawing/lib/reference-mentions'
 import type {
   DrawingDocument,
   ImageAsset,
@@ -252,19 +253,28 @@ export function bindEditor(identity: GalleryIdentity, initial: LocalCanvas) {
     useDrawingStore.setState({
       past: [],
       future: [],
-      nodes: drawing.nodes.map((node) => ({
-        ...node,
-        data: {
-          ...node.data,
-          referenceIds: node.data.referenceIds?.filter(
-            (id) => !nodeIds.includes(id)
-          ),
-          mask:
-            node.data.mask && removed.has(node.data.mask.id)
-              ? undefined
-              : node.data.mask,
-        },
-      })),
+      nodes: drawing.nodes.map((node) => {
+        const referenceIds = node.data.referenceIds?.filter(
+          (id) => !nodeIds.includes(id)
+        )
+        return {
+          ...node,
+          data: {
+            ...node.data,
+            referenceIds,
+            // A retry sends this prompt with the references that remain.
+            prompt: renumberReferenceMentions(
+              node.data.prompt,
+              node.data.referenceIds ?? [],
+              referenceIds ?? []
+            ),
+            mask:
+              node.data.mask && removed.has(node.data.mask.id)
+                ? undefined
+                : node.data.mask,
+          },
+        }
+      }),
       mask:
         drawing.mask && removed.has(drawing.mask.asset.id)
           ? null
