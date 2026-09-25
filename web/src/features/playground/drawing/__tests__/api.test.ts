@@ -16,6 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { AxiosError, type AxiosResponse } from 'axios'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { api } from '@/lib/api'
@@ -41,7 +42,34 @@ const DALL_E_SETTINGS = {
   prompt: 'A cup',
 }
 
+// An answer that is not a success. A proxy that replaces the gateway's reply
+// answers with an HTML page; the gateway itself answers with JSON.
+function failedAnswer(status: number, data: unknown): AxiosError {
+  return new AxiosError(
+    `Request failed with status code ${status}`,
+    'ERR_BAD_RESPONSE',
+    undefined,
+    undefined,
+    { status, statusText: '', headers: {}, data } as AxiosResponse
+  )
+}
+
+const droppedConnection = () => new AxiosError('Network Error', 'ERR_NETWORK')
+const taskNotFound = () =>
+  failedAnswer(404, {
+    error: { message: 'image task not found', code: 'task_not_found' },
+  })
+
+function proposedTaskId(config: unknown): string {
+  return String(
+    (config as { headers?: Record<string, string> } | undefined)?.headers?.[
+      'X-Image-Task-Id'
+    ]
+  )
+}
+
 afterEach(() => {
+  vi.useRealTimers()
   vi.restoreAllMocks()
 })
 
@@ -243,6 +271,170 @@ describe('Image request transport', () => {
         onPartial: vi.fn(),
       })
     ).rejects.toThrow('The prompt was rejected.')
+  })
+
+  it('names the task it submits and reads that task back', async () => {
+    let proposed = ''
+    vi.spyOn(api, 'post').mockImplementation(async (_url, _body, config) => {
+      proposed = proposedTaskId(config)
+      return streamed({ task_id: proposed, status: 'queued' })
+    })
+    const poll = vi.spyOn(api, 'get').mockImplementation(async () => ({
+      data: {
+        task_id: proposed,
+        status: 'completed',
+        data: [{ url: 'https://cdn.example/named.png' }],
+      },
+    }))
+
+    const result = await generateImages({
+      settings: DALL_E_SETTINGS,
+      references: [],
+      signal: new AbortController().signal,
+      onPartial: vi.fn(),
+    })
+
+    expect(proposed).toMatch(/^task_[0-9A-Za-z]{32}$/)
+    expect(poll).toHaveBeenCalledWith(
+      `/pg/images/generations/${proposed}`,
+      expect.anything()
+    )
+    expect(result.images[0].src).toBe('https://cdn.example/named.png')
+  })
+
+  it('finds its task after a proxy error page replaced the submission reply', async () => {
+    let proposed = ''
+    vi.spyOn(api, 'post').mockImplementation(async (_url, _body, config) => {
+      proposed = proposedTaskId(config)
+      throw failedAnswer(
+        524,
+        new Response('<!DOCTYPE html><title>A timeout occurred</title>').body
+      )
+    })
+    const poll = vi
+      .spyOn(api, 'get')
+      .mockRejectedValueOnce(taskNotFound())
+      .mockResolvedValueOnce({
+        data: {
+          task_id: proposed,
+          status: 'completed',
+          data: [{ url: 'https://cdn.example/recovered.png' }],
+        },
+      })
+    const onTask = vi.fn()
+
+    const result = await generateImages({
+      settings: DALL_E_SETTINGS,
+      references: [],
+      signal: new AbortController().signal,
+      onPartial: vi.fn(),
+      onTask,
+    })
+
+    expect(onTask).toHaveBeenCalledWith(proposed)
+    expect(poll).toHaveBeenLastCalledWith(
+      `/pg/images/generations/${proposed}`,
+      expect.anything()
+    )
+    expect(result.images[0].src).toBe('https://cdn.example/recovered.png')
+  })
+
+  it('says the request never reached the server once its task never appears', async () => {
+    vi.useFakeTimers()
+    vi.spyOn(api, 'post').mockRejectedValue(droppedConnection())
+    vi.spyOn(api, 'get').mockRejectedValue(taskNotFound())
+
+    const outcome = expect(
+      generateImages({
+        settings: DALL_E_SETTINGS,
+        references: [],
+        signal: new AbortController().signal,
+        onPartial: vi.fn(),
+      })
+    ).rejects.toThrow(
+      'The request did not reach the server (Network Error). Check your network and try again.'
+    )
+    await vi.advanceTimersByTimeAsync(4 * 60 * 1000)
+    await outcome
+  })
+
+  it("shows the gateway's own refusal without looking for a task", async () => {
+    vi.spyOn(api, 'post').mockRejectedValue(
+      failedAnswer(
+        403,
+        new Response(
+          JSON.stringify({ error: { message: 'Insufficient quota.' } })
+        ).body
+      )
+    )
+    const poll = vi.spyOn(api, 'get')
+
+    await expect(
+      generateImages({
+        settings: DALL_E_SETTINGS,
+        references: [],
+        signal: new AbortController().signal,
+        onPartial: vi.fn(),
+      })
+    ).rejects.toThrow('Insufficient quota.')
+    expect(poll).not.toHaveBeenCalled()
+  })
+
+  it('explains each cause a failed task met, in order', async () => {
+    vi.spyOn(api, 'post').mockResolvedValue(
+      streamed({ task_id: 'task_refused', status: 'queued' })
+    )
+    vi.spyOn(api, 'get').mockResolvedValue({
+      data: {
+        task_id: 'task_refused',
+        status: 'failed',
+        data: [],
+        error: { message: 'upstream returned 524: The origin web server…' },
+        failure_reasons: [
+          {
+            kind: 'content_policy',
+            status: 502,
+            message: '提示词有安全风险，请调整提示词重试',
+          },
+          { kind: 'timeout', status: 524 },
+        ],
+      },
+    })
+
+    await expect(
+      generateImages({
+        settings: DALL_E_SETTINGS,
+        references: [],
+        signal: new AbortController().signal,
+        onPartial: vi.fn(),
+      })
+    ).rejects.toThrow(
+      '提示词有安全风险，请调整提示词重试\nAfter a retry: The upstream service timed out.'
+    )
+  })
+
+  it('keeps watching its task through a dropped connection', async () => {
+    vi.spyOn(api, 'post').mockResolvedValue(
+      streamed({ task_id: 'task_flaky', status: 'queued' })
+    )
+    vi.spyOn(api, 'get')
+      .mockRejectedValueOnce(droppedConnection())
+      .mockResolvedValueOnce({
+        data: {
+          task_id: 'task_flaky',
+          status: 'completed',
+          data: [{ url: 'https://cdn.example/flaky.png' }],
+        },
+      })
+
+    const result = await generateImages({
+      settings: DALL_E_SETTINGS,
+      references: [],
+      signal: new AbortController().signal,
+      onPartial: vi.fn(),
+    })
+
+    expect(result.images[0].src).toBe('https://cdn.example/flaky.png')
   })
 
   it('resumes an accepted task without submitting a new request', async () => {

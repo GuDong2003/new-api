@@ -132,6 +132,9 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	// Async image generation is preferred but never required: when a task cannot
 	// be accepted the request continues below on the synchronous path.
 	if relayFormat == types.RelayFormatOpenAIImage {
+		if newAPIError = acceptProposedImageTaskID(c); newAPIError != nil {
+			return
+		}
 		if imageRequest, ok := request.(*dto.ImageRequest); ok && isAsyncImageRequest(c, imageRequest) {
 			if submitAsyncImageTask(c, relayInfo, imageRequest) {
 				return
@@ -232,6 +235,9 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 		newAPIError = service.NormalizeViolationFeeError(newAPIError)
 		relayInfo.LastError = newAPIError
+		if relayFormat == types.RelayFormatOpenAIImage {
+			recordImageAttemptFailure(c, newAPIError)
+		}
 
 		decision := decideRelayRetry(c, newAPIError, common.RetryTimes-retryParam.GetRetry())
 		service.RecordPolicyFailure(c, channel.Id, newAPIError, decision)

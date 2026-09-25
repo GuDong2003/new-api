@@ -88,6 +88,8 @@ var passthroughSkipHeaderNamesLower = map[string]struct{}{
 	"host":            {},
 	"content-length":  {},
 	"accept-encoding": {},
+	// Names the gateway's own image task; a provider has no use for it.
+	"x-image-task-id": {},
 
 	// Do not passthrough credentials by wildcard/regex.
 	"authorization":  {},

@@ -123,6 +123,10 @@ func sweepTimedOutTasks(ctx context.Context) {
 // the environment is loaded and would silently read zero rows before that.
 const maxInterruptedImageTaskSweep = 1000
 
+// ImageTaskInterruptedReason is the failure recorded for an image task a
+// restart cut short. The image task API recognises it to tell the owner why.
+const ImageTaskInterruptedReason = "image generation was interrupted by a service restart"
+
 // FailInterruptedImageTasks closes out async image tasks this node was running
 // when it stopped. Their generation lived in the process, not upstream, so a
 // restart can never finish them; failing them right away lets the owner retry
@@ -140,7 +144,7 @@ func FailInterruptedImageTasks(ctx context.Context) {
 		task.Status = model.TaskStatusFailure
 		task.Progress = "100%"
 		task.FinishTime = now
-		task.FailReason = "image generation was interrupted by a service restart"
+		task.FailReason = ImageTaskInterruptedReason
 		won, err := task.UpdateWithStatus(fromStatus)
 		if err != nil {
 			logger.LogError(ctx, fmt.Sprintf("FailInterruptedImageTasks update error for task %s: %v", task.TaskID, err))

@@ -13,6 +13,8 @@ import (
 	"math"
 	"net/http"
 	"path"
+	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -119,6 +121,62 @@ const maxAsyncImageFailReason = 200
 // not accept the replayed request as a new async submission.
 const asyncImageRunningKey = "async_image_running"
 
+// asyncImageQueueTimeoutReason is the failure of a task that never got a free
+// upstream slot.
+const asyncImageQueueTimeoutReason = "image task timed out while queued"
+
+// imageTaskIDHeader lets a caller name the task its image request creates. A
+// caller that loses the reply to its submission, as behind a proxy error page,
+// then still knows where the task is, instead of reporting a failure while the
+// image is generated and billed anyway.
+const imageTaskIDHeader = "X-Image-Task-Id"
+
+// proposedImageTaskIDKey carries an accepted caller-chosen task ID from the
+// submission check to wherever the task row is created.
+const proposedImageTaskIDKey = "proposed_image_task_id"
+
+// imageTaskIDPattern is the shape of a task ID the gateway generates itself.
+var imageTaskIDPattern = regexp.MustCompile(`^task_[0-9A-Za-z]{32}$`)
+
+// Kinds of image task failure, named for what the owner can do about each.
+const (
+	imageFailureContentPolicy = "content_policy"
+	imageFailureTimeout       = "timeout"
+	imageFailureUnavailable   = "unavailable"
+	imageFailureTaskLost      = "task_lost"
+	imageFailureQueueTimeout  = "queue_timeout"
+	imageFailureInterrupted   = "interrupted"
+	imageFailureTooLarge      = "result_too_large"
+	imageFailureOther         = "other"
+)
+
+// imageTaskFailure is one cause of a failed image task. Message is the
+// provider's own explanation, kept only when it is the reason itself rather
+// than proxy boilerplate the kind already says better.
+type imageTaskFailure struct {
+	Kind    string `json:"kind"`
+	Status  int    `json:"status,omitempty"`
+	Message string `json:"message,omitempty"`
+}
+
+// imageAttemptFailuresKey collects why each relay attempt of an image request
+// failed. A failed task reports all of them: the first provider's refusal is
+// often the reason, and a retry elsewhere only adds a timeout on top.
+const imageAttemptFailuresKey = "image_attempt_failures"
+
+// maxImageTaskFailures bounds the causes one task keeps.
+const maxImageTaskFailures = 8
+
+var (
+	imageRefusalCodes = []string{"content_policy_violation", "moderation_blocked", "content_filter", "sensitive_words_detected"}
+	imageRefusalWords = []string{"安全风险", "违规", "违禁", "敏感", "审核", "更换提示词", "safety", "moderation", "content policy", "content_policy"}
+	imageTimeoutWords = []string{"timeout", "timed out", "deadline exceeded", "超时"}
+	// requestIDSuffix is what the relay appends to the message it answers with.
+	requestIDSuffix = regexp.MustCompile(`\s*\(request id: [^)]*\)\s*$`)
+	// upstreamFailureReason is how a failed task's reason quotes the answer it got.
+	upstreamFailureReason = regexp.MustCompile(`(?s)^upstream returned (\d{3}): (.*)$`)
+)
+
 func imageTaskStatus(status string) string {
 	switch model.TaskStatus(status) {
 	case model.TaskStatusNotStart, model.TaskStatusSubmitted, model.TaskStatusQueued:
@@ -183,6 +241,8 @@ type asyncImageRun struct {
 	keys       map[string]any
 	channelID  int
 	pluginTask *pluginImageTaskRef
+	// failures holds why each relay attempt failed, in order.
+	failures []imageTaskFailure
 }
 
 var (
@@ -223,6 +283,7 @@ func asyncImageEngine() *gin.Engine {
 					run.channelID = c.GetInt("channel_id")
 					run.keys[string(constant.ContextKeyAsyncImageQuota)] = common.GetContextKeyInt(c, constant.ContextKeyAsyncImageQuota)
 					run.pluginTask = pluginImageTaskFromContext(c)
+					run.failures, _ = c.Value(imageAttemptFailuresKey).([]imageTaskFailure)
 				}
 			},
 		)
@@ -343,6 +404,38 @@ func imageTaskGallerySource(info *relaycommon.RelayInfo, _ *dto.ImageRequest) st
 	return "drawing"
 }
 
+// acceptProposedImageTaskID checks the task ID a caller chose for its image
+// request. It must look like one the gateway generates and must not name any
+// existing task: task IDs are not unique in the database, and some reads find a
+// task by its ID alone. The replay of an accepted task created its row already.
+func acceptProposedImageTaskID(c *gin.Context) *types.NewAPIError {
+	proposed := strings.TrimSpace(c.GetHeader(imageTaskIDHeader))
+	if proposed == "" || c.GetBool(asyncImageRunningKey) {
+		return nil
+	}
+	if !imageTaskIDPattern.MatchString(proposed) {
+		return types.NewErrorWithStatusCode(errors.New("image task id must be task_ followed by 32 letters or digits"), types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
+	}
+	_, exists, err := model.GetByOnlyTaskId(proposed)
+	if err != nil {
+		return types.NewErrorWithStatusCode(err, types.ErrorCodeQueryDataError, http.StatusInternalServerError, types.ErrOptionWithSkipRetry())
+	}
+	if exists {
+		return types.NewErrorWithStatusCode(errors.New("image task id is already in use"), types.ErrorCodeInvalidRequest, http.StatusConflict, types.ErrOptionWithSkipRetry())
+	}
+	c.Set(proposedImageTaskIDKey, proposed)
+	return nil
+}
+
+// imageTaskID names the task this request creates: the one its caller chose,
+// or a fresh one.
+func imageTaskID(c *gin.Context) string {
+	if proposed := c.GetString(proposedImageTaskIDKey); proposed != "" {
+		return proposed
+	}
+	return model.GenerateTaskID()
+}
+
 // submitAsyncImageTask persists the task, hands the request to a detached
 // replay, and answers the caller with the task handle. It runs before
 // pre-consume: the detached relay owns the entire billing lifecycle.
@@ -362,7 +455,7 @@ func submitAsyncImageTask(c *gin.Context, info *relaycommon.RelayInfo, request *
 	// fallback still uses the selected channel as its first attempt.
 	now := time.Now().Unix()
 	task := &model.Task{
-		TaskID:     model.GenerateTaskID(),
+		TaskID:     imageTaskID(c),
 		Platform:   constant.TaskPlatformImage,
 		UserId:     info.UserId,
 		Group:      info.UsingGroup,
@@ -425,7 +518,7 @@ func submitAsyncImageTask(c *gin.Context, info *relaycommon.RelayInfo, request *
 		select {
 		case asyncImageSlots <- struct{}{}:
 		case <-runContext.Done():
-			failAsyncImageTask(finishContext, task, "image task timed out while queued")
+			failAsyncImageTask(finishContext, task, asyncImageQueueTimeoutReason)
 			return
 		}
 		defer func() { <-asyncImageSlots }()
@@ -487,13 +580,15 @@ func buildAsyncImageRequest(original *http.Request, body common.BodyStorage, ctx
 	replay.MultipartForm = nil
 	replay.Form = nil
 	replay.PostForm = nil
-	// Strip every async marker so the replay cannot be accepted as a new
-	// submission even if the context flag is ever lost.
+	// Strip every async marker, and the task name the submission was accepted
+	// under, so the replay cannot be accepted as a new submission even if the
+	// context flag is ever lost.
 	query := replay.URL.Query()
 	query.Del("async")
 	replay.URL.RawQuery = query.Encode()
 	replay.Header.Del("Prefer")
 	replay.Header.Del("X-Image-Async")
+	replay.Header.Del(imageTaskIDHeader)
 	return replay, nil
 }
 
@@ -516,6 +611,7 @@ func finishAsyncImageTask(ctx context.Context, task *model.Task, run *asyncImage
 	if err != nil {
 		task.Status = model.TaskStatusFailure
 		task.FailReason = truncateAsyncImageText(err.Error())
+		task.Data = imageTaskFailureData(run, recorder, err)
 		if run.pluginTask != nil && run.pluginTask.Success {
 			// The plugin task keeps its charge and its images visible, so this
 			// failure must not show the same charge a second time.
@@ -676,6 +772,71 @@ func failAsyncImageTask(ctx context.Context, task *model.Task, reason string) {
 	}
 }
 
+// classifyImageFailure sorts one failure by what its owner can do about it: a
+// refused prompt, a timeout, an unavailable provider, a provider that lost the
+// task, or anything else.
+func classifyImageFailure(status int, code, message string) imageTaskFailure {
+	message = strings.TrimSpace(requestIDSuffix.ReplaceAllString(message, ""))
+	lower := strings.ToLower(message)
+	mentions := func(words []string) bool {
+		return slices.ContainsFunc(words, func(word string) bool { return strings.Contains(lower, word) })
+	}
+	failure := imageTaskFailure{Status: status}
+	switch {
+	case slices.Contains(imageRefusalCodes, code) || mentions(imageRefusalWords):
+		failure.Kind, failure.Message = imageFailureContentPolicy, truncateAsyncImageText(message)
+	case status == http.StatusRequestTimeout || status == http.StatusGatewayTimeout || status == 524 || mentions(imageTimeoutWords):
+		failure.Kind = imageFailureTimeout
+	case status == http.StatusNotFound && strings.Contains(lower, "task not found"):
+		failure.Kind = imageFailureTaskLost
+	case status == http.StatusTooManyRequests || status == http.StatusBadGateway || status == http.StatusServiceUnavailable || (status >= 520 && status <= 527):
+		failure.Kind = imageFailureUnavailable
+	default:
+		failure.Kind, failure.Message = imageFailureOther, truncateAsyncImageText(message)
+	}
+	return failure
+}
+
+// recordImageAttemptFailure notes why one relay attempt of an image request
+// failed, in the words that attempt would have answered with. A repeat of the
+// cause just before it adds nothing.
+func recordImageAttemptFailure(c *gin.Context, err *types.NewAPIError) {
+	shown := err.ToOpenAIError()
+	code := ""
+	if shown.Code != nil {
+		code = fmt.Sprint(shown.Code)
+	}
+	failure := classifyImageFailure(err.StatusCode, code, shown.Message)
+	failures, _ := c.Value(imageAttemptFailuresKey).([]imageTaskFailure)
+	if len(failures) >= maxImageTaskFailures || (len(failures) > 0 && failures[len(failures)-1] == failure) {
+		return
+	}
+	c.Set(imageAttemptFailuresKey, append(failures, failure))
+}
+
+// imageTaskFailureData records why a finished image task failed. A relay that
+// answered with an error failed every attempt it made, so each attempt's cause
+// is kept in order; any other failure lies in the answer itself.
+func imageTaskFailureData(run *asyncImageRun, recorder *asyncImageResponseRecorder, err error) json.RawMessage {
+	var failures []imageTaskFailure
+	status := recorder.statusCode()
+	switch {
+	case recorder.overflow:
+		failures = []imageTaskFailure{{Kind: imageFailureTooLarge}}
+	case status != http.StatusOK && len(run.failures) > 0:
+		failures = run.failures
+	case status != http.StatusOK:
+		failures = []imageTaskFailure{classifyImageFailure(status, "", asyncImageErrorMessage(recorder.body.Bytes()))}
+	default:
+		failures = []imageTaskFailure{classifyImageFailure(0, "", err.Error())}
+	}
+	data, marshalErr := common.Marshal(map[string][]imageTaskFailure{"failure_reasons": failures})
+	if marshalErr != nil {
+		return nil
+	}
+	return data
+}
+
 // asyncImageResult normalizes a detached response into the provider JSON object
 // stored on the task, or reports why the run cannot be stored.
 func asyncImageResult(r *asyncImageResponseRecorder) (json.RawMessage, error) {
@@ -773,6 +934,10 @@ func captureSynchronousImageTask(c *gin.Context, info *relaycommon.RelayInfo, re
 // async handling, task record and gallery copy as a relayed image request. The
 // plugin generates and bills the images; this layer only presents them.
 func serveTaskPluginImageTask(c *gin.Context, pinned pluginruntime.PinnedEndpoint, deps pluginProtocolBridgeDeps) {
+	if apiErr := acceptProposedImageTaskID(c); apiErr != nil {
+		c.JSON(apiErr.StatusCode, gin.H{"error": apiErr.ToOpenAIError()})
+		return
+	}
 	info, request := pluginImageTaskRequest(c, pinned)
 	if isAsyncImageRequest(c, request) && submitAsyncImageTask(c, info, request) {
 		return
@@ -854,7 +1019,7 @@ func pluginImageTaskRequest(c *gin.Context, pinned pluginruntime.PinnedEndpoint)
 func persistSynchronousImageTask(c *gin.Context, info *relaycommon.RelayInfo, request *dto.ImageRequest, result json.RawMessage) (*model.Task, error) {
 	now := time.Now().Unix()
 	task := &model.Task{
-		TaskID:     model.GenerateTaskID(),
+		TaskID:     imageTaskID(c),
 		Platform:   constant.TaskPlatformImage,
 		UserId:     info.UserId,
 		Group:      info.UsingGroup,
@@ -1077,8 +1242,44 @@ func buildImageTaskPayload(task *model.Task, statusURL string) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
+		reasons, err := common.Marshal(imageTaskFailures(task))
+		if err != nil {
+			return nil, err
+		}
+		payload, err = sjson.SetRawBytes(payload, "failure_reasons", reasons)
+		if err != nil {
+			return nil, err
+		}
 	}
 	return payload, nil
+}
+
+// imageTaskFailures lists why a failed image task failed. A task this gateway
+// finished records its causes; one that failed without recording any, or before
+// causes were recorded at all, is read from its failure reason.
+func imageTaskFailures(task *model.Task) []imageTaskFailure {
+	var recorded struct {
+		FailureReasons []imageTaskFailure `json:"failure_reasons"`
+	}
+	if common.GetJsonType(task.Data) == "object" && common.Unmarshal(task.Data, &recorded) == nil && len(recorded.FailureReasons) > 0 {
+		return recorded.FailureReasons
+	}
+	reason := strings.TrimSpace(task.FailReason)
+	switch {
+	case reason == "":
+		return []imageTaskFailure{}
+	case reason == service.ImageTaskInterruptedReason:
+		return []imageTaskFailure{{Kind: imageFailureInterrupted}}
+	case reason == asyncImageQueueTimeoutReason:
+		return []imageTaskFailure{{Kind: imageFailureQueueTimeout}}
+	case strings.HasPrefix(reason, "image result exceeds"):
+		return []imageTaskFailure{{Kind: imageFailureTooLarge}}
+	}
+	if quoted := upstreamFailureReason.FindStringSubmatch(reason); quoted != nil {
+		status, _ := strconv.Atoi(quoted[1])
+		return []imageTaskFailure{classifyImageFailure(status, "", quoted[2])}
+	}
+	return []imageTaskFailure{classifyImageFailure(0, "", reason)}
 }
 
 func asyncImageProgress(progress string) int {

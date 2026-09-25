@@ -17,7 +17,14 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { ReactFlowProvider, type NodeProps } from '@xyflow/react'
 import { describe, expect, it, vi } from 'vitest'
@@ -279,6 +286,45 @@ describe('Canvas image result', () => {
       'Image generation failed.'
     )
     expect(screen.getByRole('alert')).toHaveTextContent('insufficient quota')
+  })
+
+  it('shows each cause of a failed generation on a line of its own', () => {
+    useDrawingStore.getState().initialize(815)
+    useDrawingStore.getState().addNodes([
+      {
+        id: 'failed-image-with-causes',
+        type: 'image',
+        position: { x: 0, y: 0 },
+        data: {
+          prompt: 'A cup',
+          settings: {
+            ...DEFAULT_IMAGE_SETTINGS,
+            model: 'gpt-image-1',
+            prompt: 'A cup',
+          },
+          createdAt: 1,
+          status: 'error',
+          error:
+            '提示词有安全风险，请调整提示词重试\nAfter a retry: The upstream service timed out.',
+        },
+      },
+    ])
+
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <ReactFlowProvider>
+          <RetryImageCard />
+        </ReactFlowProvider>
+      </QueryClientProvider>
+    )
+
+    const alert = screen.getByRole('alert')
+    expect(
+      within(alert).getByText('提示词有安全风险，请调整提示词重试')
+    ).toBeTruthy()
+    expect(
+      within(alert).getByText('After a retry: The upstream service timed out.')
+    ).toBeTruthy()
   })
 
   it('shows the final image even if its earlier streaming preview failed to load', () => {

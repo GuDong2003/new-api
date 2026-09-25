@@ -217,7 +217,16 @@ export const ImageCanvasNode = memo(function ImageCanvasNode(
                   </span>
                   {props.data.error &&
                     props.data.error !== 'Image generation failed.' && (
-                      <span className='mt-1 block'>{t(props.data.error)}</span>
+                      <span className='mt-1 block'>
+                        {/* A failure that met several causes lists one per line. */}
+                        {t(props.data.error)
+                          .split('\n')
+                          .map((line) => (
+                            <span key={line} className='block'>
+                              {line}
+                            </span>
+                          ))}
+                      </span>
                     )}
                 </p>
               )}

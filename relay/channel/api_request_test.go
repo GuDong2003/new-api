@@ -216,7 +216,7 @@ func TestInitChannelMetaClearsInheritedRuntimeHeadersForActiveClaudeCode(t *test
 	require.Equal(t, "preserved", disabledInfo.RuntimeHeadersOverride["x-inherited"])
 }
 
-func TestProcessHeaderOverride_PassthroughSkipsAcceptEncoding(t *testing.T) {
+func TestProcessHeaderOverride_PassthroughSkipsAcceptEncodingAndImageTaskID(t *testing.T) {
 	t.Parallel()
 
 	gin.SetMode(gin.TestMode)
@@ -225,6 +225,9 @@ func TestProcessHeaderOverride_PassthroughSkipsAcceptEncoding(t *testing.T) {
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 	ctx.Request.Header.Set("X-Trace-Id", "trace-123")
 	ctx.Request.Header.Set("Accept-Encoding", "gzip")
+	// The canvas names its image task for the gateway; a provider has no use
+	// for the name.
+	ctx.Request.Header.Set("X-Image-Task-Id", "task_0123456789abcdefghijABCDEFGHIJ01")
 
 	info := &relaycommon.RelayInfo{
 		IsChannelTest: false,
@@ -241,6 +244,8 @@ func TestProcessHeaderOverride_PassthroughSkipsAcceptEncoding(t *testing.T) {
 
 	_, hasAcceptEncoding := headers["accept-encoding"]
 	require.False(t, hasAcceptEncoding)
+	_, hasImageTaskID := headers["x-image-task-id"]
+	require.False(t, hasImageTaskID)
 }
 
 func TestProcessHeaderOverride_PassHeadersTemplateSetsRuntimeHeaders(t *testing.T) {

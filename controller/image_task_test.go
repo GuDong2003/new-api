@@ -1075,4 +1075,318 @@ func TestBuildImageTaskPayload(t *testing.T) {
 		assert.Equal(t, "upstream returned 500", response.Error.Message)
 		assert.Equal(t, "image_task_failed", response.Error.Code)
 	})
+
+	t.Run("failed task lists the causes it recorded", func(t *testing.T) {
+		task := &model.Task{
+			TaskID:     "task_refused",
+			Status:     model.TaskStatusFailure,
+			Progress:   "100%",
+			SubmitTime: 1700000000,
+			FailReason: "upstream returned 524: The origin web server did not return a complete response",
+			Data:       json.RawMessage(`{"failure_reasons":[{"kind":"content_policy","status":502,"message":"提示词有安全风险，请调整提示词重试"},{"kind":"timeout","status":524}]}`),
+		}
+
+		payload, err := buildImageTaskPayload(task, "/pg/images/generations/task_refused")
+		require.NoError(t, err)
+
+		var response struct {
+			Data           []any              `json:"data"`
+			FailureReasons []imageTaskFailure `json:"failure_reasons"`
+		}
+		require.NoError(t, common.Unmarshal(payload, &response))
+		assert.Empty(t, response.Data)
+		assert.Equal(t, []imageTaskFailure{
+			{Kind: imageFailureContentPolicy, Status: http.StatusBadGateway, Message: "提示词有安全风险，请调整提示词重试"},
+			{Kind: imageFailureTimeout, Status: 524},
+		}, response.FailureReasons)
+	})
+
+	// Tasks that failed before their causes were recorded, or on a path that
+	// records none, still name what went wrong.
+	for _, tc := range []struct {
+		name   string
+		reason string
+		want   []imageTaskFailure
+	}{
+		{name: "an upstream timeout", reason: "upstream returned 524: The origin web server did not return a complete response within the 120-second Proxy Read Timeout window. (request id: abc)", want: []imageTaskFailure{{Kind: imageFailureTimeout, Status: 524}}},
+		{name: "an upstream refusal", reason: "upstream returned 502: 提示词有安全风险，请调整提示词重试 (request id: abc)", want: []imageTaskFailure{{Kind: imageFailureContentPolicy, Status: http.StatusBadGateway, Message: "提示词有安全风险，请调整提示词重试"}}},
+		{name: "a service restart", reason: service.ImageTaskInterruptedReason, want: []imageTaskFailure{{Kind: imageFailureInterrupted}}},
+		{name: "a full queue", reason: asyncImageQueueTimeoutReason, want: []imageTaskFailure{{Kind: imageFailureQueueTimeout}}},
+		{name: "an oversized result", reason: "image result exceeds the 64 MB an image task can keep", want: []imageTaskFailure{{Kind: imageFailureTooLarge}}},
+		{name: "no reason at all", want: []imageTaskFailure{}},
+	} {
+		t.Run("failed task derives its cause from "+tc.name, func(t *testing.T) {
+			task := &model.Task{TaskID: "task_legacy", Status: model.TaskStatusFailure, Progress: "100%", SubmitTime: 1700000000, FailReason: tc.reason}
+
+			payload, err := buildImageTaskPayload(task, "/pg/images/generations/task_legacy")
+			require.NoError(t, err)
+
+			var response struct {
+				FailureReasons []imageTaskFailure `json:"failure_reasons"`
+			}
+			require.NoError(t, common.Unmarshal(payload, &response))
+			assert.Equal(t, tc.want, response.FailureReasons)
+		})
+	}
+}
+
+// imageRelayFixture serves image requests for user 7 through one OpenAI
+// channel backed by upstream, with the billing and gallery state a relayed
+// image request needs. finished reports each task that reaches a final status.
+type imageRelayFixture struct {
+	engine   *gin.Engine
+	database *gorm.DB
+	finished chan model.TaskStatus
+}
+
+func newImageRelayFixture(t *testing.T, upstream http.HandlerFunc) *imageRelayFixture {
+	t.Helper()
+	previousDB := model.DB
+	previousDatabase := common.MainDatabaseType()
+	previousRedisEnabled := common.RedisEnabled
+	previousCountToken, previousSensitive := constant.CountToken, setting.CheckSensitiveEnabled
+	previousMaxBody := constant.MaxRequestBodyMB
+	previousLog, previousBatch := common.LogConsumeEnabled, common.BatchUpdateEnabled
+	previousFreePreConsume := operation_setting.GetQuotaSetting().EnableFreeModelPreConsume
+	previousPrices := ratio_setting.ModelPrice2JSONString()
+	constant.CountToken, setting.CheckSensitiveEnabled = false, false
+	constant.MaxRequestBodyMB = 128
+	common.LogConsumeEnabled, common.BatchUpdateEnabled = false, false
+	operation_setting.GetQuotaSetting().EnableFreeModelPreConsume = false
+	common.SetMainDatabaseType(common.DatabaseTypeSQLite)
+	common.RedisEnabled = false
+	require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(`{"async-image-test":0.02}`))
+
+	database, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	connection, err := database.DB()
+	require.NoError(t, err)
+	connection.SetMaxOpenConns(1)
+	server := httptest.NewServer(upstream)
+	t.Cleanup(func() {
+		server.Close()
+		model.DB = previousDB
+		common.SetMainDatabaseType(previousDatabase)
+		common.RedisEnabled = previousRedisEnabled
+		constant.CountToken, setting.CheckSensitiveEnabled = previousCountToken, previousSensitive
+		constant.MaxRequestBodyMB = previousMaxBody
+		common.LogConsumeEnabled, common.BatchUpdateEnabled = previousLog, previousBatch
+		operation_setting.GetQuotaSetting().EnableFreeModelPreConsume = previousFreePreConsume
+		require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(previousPrices))
+		require.NoError(t, connection.Close())
+	})
+	require.NoError(t, database.AutoMigrate(&model.Task{}, &model.User{}, &model.Channel{}, &model.UserSubscription{}))
+	require.NoError(t, model.MigrateGallery(database))
+	model.DB = database
+	require.NoError(t, database.Create(&model.User{Id: 7, Username: "image-owner", Group: "default", Quota: 100_000_000}).Error)
+	channel := &model.Channel{
+		Id: 73, Name: "image channel", Type: constant.ChannelTypeOpenAI,
+		Key: "test-key", BaseURL: &server.URL, Status: common.ChannelStatusEnabled,
+		ModelMapping: common.GetPointer(`{"async-image-test":"upstream-image"}`),
+	}
+	require.NoError(t, database.Create(channel).Error)
+	finished := make(chan model.TaskStatus, 4)
+	require.NoError(t, database.Callback().Update().After("gorm:commit_or_rollback_transaction").Register("test:image-task-finished", func(tx *gorm.DB) {
+		task, ok := tx.Statement.Dest.(*model.Task)
+		if ok && (task.Status == model.TaskStatusSuccess || task.Status == model.TaskStatusFailure) {
+			finished <- task.Status
+		}
+	}))
+
+	engine := gin.New()
+	engine.POST("/pg/images/generations", middleware.RelayPanicRecover(), middleware.BodyStorageCleanup(), func(c *gin.Context) {
+		c.Set("id", 7)
+		c.Set("group", "default")
+		c.Set("user_group", "default")
+		require.Nil(t, middleware.SetupContextForSelectedChannel(c, channel, "async-image-test"))
+		Relay(c, types.RelayFormatOpenAIImage)
+	})
+	engine.GET("/pg/images/generations/:task_id", func(c *gin.Context) {
+		c.Set("id", 7)
+		ImageTaskFetch(c)
+	})
+	return &imageRelayFixture{engine: engine, database: database, finished: finished}
+}
+
+func (f *imageRelayFixture) generate(t *testing.T, target, taskID string) *httptest.ResponseRecorder {
+	t.Helper()
+	request := httptest.NewRequest(http.MethodPost, target, strings.NewReader(`{"model":"async-image-test","prompt":"a cup","group":"default","n":1,"stream":false}`))
+	request.Header.Set("Content-Type", "application/json")
+	if taskID != "" {
+		request.Header.Set(imageTaskIDHeader, taskID)
+	}
+	recorder := httptest.NewRecorder()
+	f.engine.ServeHTTP(recorder, request)
+	return recorder
+}
+
+func (f *imageRelayFixture) awaitFinish(t *testing.T) model.TaskStatus {
+	t.Helper()
+	select {
+	case status := <-f.finished:
+		return status
+	case <-time.After(5 * time.Second):
+		t.Fatal("background image task did not finish")
+		return ""
+	}
+}
+
+// A caller that loses the reply to its submission, as behind a proxy error page,
+// can only find the task again if it chose the task's name before sending.
+func TestImageTaskSubmissionUsesTheTaskIDItsCallerProposed(t *testing.T) {
+	const proposed = "task_0123456789abcdefghijABCDEFGHIJ01"
+	for _, tc := range []struct {
+		name      string
+		target    string
+		taskID    string
+		existing  bool
+		wantCode  int
+		wantTasks int64
+	}{
+		{name: "an async submission creates its task under the proposed id", target: "/pg/images/generations?async=true", taskID: proposed, wantCode: http.StatusAccepted, wantTasks: 1},
+		{name: "a synchronous request records its task under the proposed id", target: "/pg/images/generations", taskID: proposed, wantCode: http.StatusOK, wantTasks: 1},
+		{name: "an id another task already uses is refused", target: "/pg/images/generations?async=true", taskID: proposed, existing: true, wantCode: http.StatusConflict, wantTasks: 1},
+		{name: "an id the gateway would never generate is refused", target: "/pg/images/generations?async=true", taskID: "task_short", wantCode: http.StatusBadRequest},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			forwarded := make(chan string, 4)
+			fixture := newImageRelayFixture(t, func(w http.ResponseWriter, r *http.Request) {
+				forwarded <- r.Header.Get(imageTaskIDHeader)
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(w, `{"created":1,"data":[{"url":"https://example.com/generated.png"}]}`)
+			})
+			if tc.existing {
+				require.NoError(t, fixture.database.Create(&model.Task{TaskID: proposed, UserId: 8, Platform: constant.TaskPlatformImage, Status: model.TaskStatusSuccess}).Error)
+			}
+
+			recorder := fixture.generate(t, tc.target, tc.taskID)
+
+			require.Equal(t, tc.wantCode, recorder.Code, recorder.Body.String())
+			if tc.wantCode == http.StatusAccepted {
+				var accepted struct {
+					TaskID string `json:"task_id"`
+				}
+				require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &accepted))
+				assert.Equal(t, proposed, accepted.TaskID)
+				assert.Equal(t, model.TaskStatus(model.TaskStatusSuccess), fixture.awaitFinish(t))
+			}
+			var tasks int64
+			require.NoError(t, fixture.database.Model(&model.Task{}).Count(&tasks).Error)
+			assert.Equal(t, tc.wantTasks, tasks)
+			if tc.wantCode >= http.StatusBadRequest {
+				assert.Empty(t, forwarded, "a refused request never reaches the provider")
+				return
+			}
+			var owned int64
+			require.NoError(t, fixture.database.Model(&model.Task{}).Where("task_id = ? AND user_id = ?", proposed, 7).Count(&owned).Error)
+			assert.Equal(t, int64(1), owned)
+			assert.Empty(t, <-forwarded, "the task name stays with the gateway")
+		})
+	}
+}
+
+// The provider's own refusal is the reason its owner can act on, so a failed
+// task hands it back instead of only the last transport error.
+func TestAsyncImageTaskReportsWhyTheProviderRefused(t *testing.T) {
+	fixture := newImageRelayFixture(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = io.WriteString(w, `{"error":{"message":"提示词有安全风险，请调整提示词重试","type":"upstream_error"}}`)
+	})
+
+	recorder := fixture.generate(t, "/pg/images/generations?async=true", "")
+	require.Equal(t, http.StatusAccepted, recorder.Code, recorder.Body.String())
+	var accepted struct {
+		TaskID string `json:"task_id"`
+	}
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &accepted))
+	require.Equal(t, model.TaskStatus(model.TaskStatusFailure), fixture.awaitFinish(t))
+
+	fetch := httptest.NewRecorder()
+	fixture.engine.ServeHTTP(fetch, httptest.NewRequest(http.MethodGet, "/pg/images/generations/"+accepted.TaskID, nil))
+	require.Equal(t, http.StatusOK, fetch.Code)
+	var payload struct {
+		Status         string             `json:"status"`
+		FailureReasons []imageTaskFailure `json:"failure_reasons"`
+	}
+	require.NoError(t, common.Unmarshal(fetch.Body.Bytes(), &payload))
+	assert.Equal(t, "failed", payload.Status)
+	assert.Equal(t, []imageTaskFailure{{Kind: imageFailureContentPolicy, Status: http.StatusBadGateway, Message: "提示词有安全风险，请调整提示词重试"}}, payload.FailureReasons)
+}
+
+func TestClassifyImageFailure(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		status  int
+		code    string
+		message string
+		want    imageTaskFailure
+	}{
+		{name: "a provider refusing the prompt keeps its own words", status: http.StatusBadGateway, message: "提示词有安全风险，请调整提示词重试", want: imageTaskFailure{Kind: imageFailureContentPolicy, Status: http.StatusBadGateway, Message: "提示词有安全风险，请调整提示词重试"}},
+		{name: "a prompt the provider will not draw is a refusal", status: http.StatusUnprocessableEntity, message: "当前提示词暂时无法生成，请更换提示词后重试", want: imageTaskFailure{Kind: imageFailureContentPolicy, Status: http.StatusUnprocessableEntity, Message: "当前提示词暂时无法生成，请更换提示词后重试"}},
+		{name: "an OpenAI moderation code is a refusal", status: http.StatusBadRequest, code: "moderation_blocked", message: "Your request was rejected.", want: imageTaskFailure{Kind: imageFailureContentPolicy, Status: http.StatusBadRequest, Message: "Your request was rejected."}},
+		{name: "a proxy timeout page is a timeout", status: 524, message: "The origin web server did not return a complete response within the 120-second Proxy Read Timeout window.", want: imageTaskFailure{Kind: imageFailureTimeout, Status: 524}},
+		{name: "a request that ran out of time is a timeout", status: http.StatusInternalServerError, message: "Post \"https://upstream.example/v1/images/generations\": context deadline exceeded", want: imageTaskFailure{Kind: imageFailureTimeout, Status: http.StatusInternalServerError}},
+		{name: "a proxy bad gateway page is an unavailable provider", status: http.StatusBadGateway, message: "The origin web server returned an invalid or incomplete response to Cloudflare.", want: imageTaskFailure{Kind: imageFailureUnavailable, Status: http.StatusBadGateway}},
+		{name: "a rate limited provider is unavailable", status: http.StatusTooManyRequests, message: "rate limit exceeded", want: imageTaskFailure{Kind: imageFailureUnavailable, Status: http.StatusTooManyRequests}},
+		{name: "a provider that lost its own task says so", status: http.StatusNotFound, message: "task not found", want: imageTaskFailure{Kind: imageFailureTaskLost, Status: http.StatusNotFound}},
+		{name: "anything else keeps the provider's words without the request id", status: http.StatusBadRequest, message: "invalid image for image edits (request id: 20260926)", want: imageTaskFailure{Kind: imageFailureOther, Status: http.StatusBadRequest, Message: "invalid image for image edits"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, classifyImageFailure(tc.status, tc.code, tc.message))
+		})
+	}
+}
+
+func TestFinishAsyncImageTaskRecordsWhyItFailed(t *testing.T) {
+	refusal := imageTaskFailure{Kind: imageFailureContentPolicy, Status: http.StatusBadGateway, Message: "提示词有安全风险，请调整提示词重试"}
+	timeout := imageTaskFailure{Kind: imageFailureTimeout, Status: 524}
+	for _, tc := range []struct {
+		name     string
+		attempts []imageTaskFailure
+		status   int
+		body     string
+		limit    int
+		want     []imageTaskFailure
+	}{
+		{name: "every attempt's cause is kept in order", attempts: []imageTaskFailure{refusal, timeout}, status: 524, body: `{"error":{"message":"The origin web server did not return a complete response (request id: r1)"}}`, want: []imageTaskFailure{refusal, timeout}},
+		{name: "an answer too large to keep says so", status: http.StatusOK, body: `{"created":1,"data":[{"b64_json":"` + strings.Repeat("A", 64) + `"}]}`, limit: 16, want: []imageTaskFailure{{Kind: imageFailureTooLarge}}},
+		{name: "without recorded attempts the answer names the cause", status: http.StatusBadRequest, body: `{"error":{"message":"invalid image for image edits (request id: r2)"}}`, want: []imageTaskFailure{{Kind: imageFailureOther, Status: http.StatusBadRequest, Message: "invalid image for image edits"}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			previousDB := model.DB
+			database, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+			require.NoError(t, err)
+			connection, err := database.DB()
+			require.NoError(t, err)
+			connection.SetMaxOpenConns(1)
+			t.Cleanup(func() {
+				model.DB = previousDB
+				require.NoError(t, connection.Close())
+			})
+			model.DB = database
+			require.NoError(t, database.AutoMigrate(&model.Task{}))
+			task := &model.Task{TaskID: "task_failing", Platform: constant.TaskPlatformImage, Status: model.TaskStatusInProgress, Progress: "0%", SubmitTime: 1700000000}
+			require.NoError(t, task.Insert())
+			limit := tc.limit
+			if limit == 0 {
+				limit = imageResultBudget(nil)
+			}
+			recorder := &asyncImageResponseRecorder{header: make(http.Header), limit: limit}
+			recorder.WriteHeader(tc.status)
+			_, err = recorder.Write([]byte(tc.body))
+			require.NoError(t, err)
+
+			finishAsyncImageTask(context.Background(), task, &asyncImageRun{keys: map[string]any{}, failures: tc.attempts}, recorder)
+
+			var stored model.Task
+			require.NoError(t, database.Where("task_id = ?", task.TaskID).First(&stored).Error)
+			assert.Equal(t, model.TaskStatus(model.TaskStatusFailure), stored.Status)
+			var recorded struct {
+				FailureReasons []imageTaskFailure `json:"failure_reasons"`
+			}
+			require.NoError(t, common.Unmarshal(stored.Data, &recorded))
+			assert.Equal(t, tc.want, recorded.FailureReasons)
+		})
+	}
 }

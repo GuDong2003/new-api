@@ -82,6 +82,13 @@ export type ImageTaskStatus =
   | 'completed'
   | 'failed'
   | 'unknown'
+// One cause of a failed task, in the order its attempts met them. The message
+// is the provider's own explanation, sent only when it is the reason itself.
+export type ImageTaskFailureReason = {
+  kind: string
+  status?: number
+  message?: string
+}
 // A finished task carries the provider payload, so it parses like a direct
 // image response once the task fields are ignored.
 export type ImageTaskResponse = ImageResponse & {
@@ -89,4 +96,5 @@ export type ImageTaskResponse = ImageResponse & {
   status?: ImageTaskStatus
   progress?: number
   status_url?: string
+  failure_reasons?: ImageTaskFailureReason[]
 }
