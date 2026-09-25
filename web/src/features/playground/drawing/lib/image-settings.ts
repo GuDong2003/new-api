@@ -24,6 +24,7 @@ import {
   getImageModelFamily as classifyImageModelFamily,
   type ImageModelFamily,
 } from './image-models'
+import { mentionsOnlySentReferences } from './reference-mentions'
 
 export type { ImageModelFamily } from './image-models'
 
@@ -580,6 +581,15 @@ export function validateImageSettings(
   if (!settings.prompt.trim()) return 'Enter a prompt to generate an image.'
   if (!settings.model.trim()) return 'Select an image model.'
   if (!settings.group) return 'Select a group.'
+  // Text to image sends none of the selected references.
+  if (
+    !mentionsOnlySentReferences(
+      settings.prompt,
+      settings.mode === 'edit' ? referenceCount : 0
+    )
+  ) {
+    return "The prompt mentions a reference image that this request does not send. Remove the mention or insert the image again; to change a canvas image's prompt, use Reuse prompt and settings."
+  }
   const family = getImageModelFamily(settings.model)
   if (family === 'novelai') {
     return validateNovelAIImageSettings(settings)

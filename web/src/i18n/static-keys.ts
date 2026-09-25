@@ -51,6 +51,7 @@ export const STATIC_I18N_KEYS = [
   'Prompts for this model must be 4,000 characters or fewer.',
   'Each reference image must be smaller than 20 MB.',
   'The reference images must total less than 50 MB.',
+  "The prompt mentions a reference image that this request does not send. Remove the mention or insert the image again; to change a canvas image's prompt, use Reuse prompt and settings.",
   // Tag-prompted drawing: NovelAI and Alibaba image models.
   'Description mode',
   'Tag mode',

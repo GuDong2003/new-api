@@ -34,7 +34,11 @@ import {
   imageSettingsSchema,
   settingsForImageModel,
 } from '@/features/playground/drawing/lib/image-settings'
-import { canConnectReference } from '@/features/playground/drawing/lib/reference-connections'
+import {
+  canConnectReference,
+  getAvailableReferenceNodes,
+} from '@/features/playground/drawing/lib/reference-connections'
+import { renumberReferenceMentions } from '@/features/playground/drawing/lib/reference-mentions'
 import type {
   DrawingDocument,
   DrawingMask,
@@ -43,10 +47,14 @@ import type {
   ImageSettings,
 } from '@/features/playground/drawing/types'
 
+// The composer prompt rides along so undo can give back mentions exactly, even
+// of images that share a name. A snapshot rebuilt without it, as a cloud remap
+// of asset IDs does, has its mentions followed instead.
 type CanvasSnapshot = Pick<
   DrawingDocument,
   'nodes' | 'edges' | 'referenceIds' | 'mask'
->
+> & { prompt?: string }
+type ReferenceList = Pick<DrawingDocument, 'nodes' | 'referenceIds'>
 type GenerationModeSettings = Partial<
   Record<ImageGenerationMode, ImageSettings>
 >
@@ -86,6 +94,7 @@ type DrawingState = DrawingDocument & {
   toggleReference: (id: string) => void
   setReferences: (ids: string[]) => void
   reorderReferences: (sourceId: string, targetId: string) => void
+  reuseNodeSettings: (id: string) => void
   setMask: (mask: DrawingMask | null) => void
   setPreview: (id: string | null) => void
   undo: () => void
@@ -150,6 +159,53 @@ function syncModeAfterReferenceChange(
   return settings
 }
 
+// A request numbers its references by their order, so once the composer's
+// references change, the prompt's mentions move with the images they named.
+function followReferenceMentions(
+  settings: ImageSettings,
+  previous: ReferenceList,
+  next: ReferenceList
+): ImageSettings {
+  const previousIds = getAvailableReferenceNodes(
+    previous.nodes,
+    previous.referenceIds
+  ).map((node) => node.id)
+  const nextIds = getAvailableReferenceNodes(next.nodes, next.referenceIds).map(
+    (node) => node.id
+  )
+  if (
+    previousIds.length === nextIds.length &&
+    previousIds.every((id, index) => id === nextIds[index])
+  ) {
+    return settings
+  }
+  const prompt = renumberReferenceMentions(
+    settings.prompt,
+    previousIds,
+    nextIds
+  )
+  return prompt === settings.prompt ? settings : { ...settings, prompt }
+}
+
+// Undo and redo give back the prompt the snapshot kept when only reference
+// changes moved its mentions since, which restores even mentions left unbound.
+// A prompt edited in between keeps the edits and has its mentions followed.
+function settingsAfterRestore(
+  settings: ImageSettings,
+  current: ReferenceList,
+  snapshot: CanvasSnapshot
+): ImageSettings {
+  const kept = snapshot.prompt
+  if (
+    kept !== undefined &&
+    followReferenceMentions({ ...settings, prompt: kept }, snapshot, current)
+      .prompt === settings.prompt
+  ) {
+    return { ...settings, prompt: kept }
+  }
+  return followReferenceMentions(settings, current, snapshot)
+}
+
 export const useDrawingStore = create<DrawingState>((set, get) => ({
   assetRoles: {},
   version: 1,
@@ -209,6 +265,7 @@ export const useDrawingStore = create<DrawingState>((set, get) => ({
           edges: state.edges,
           referenceIds: state.referenceIds,
           mask: state.mask,
+          prompt: state.settings.prompt,
         },
       ],
       future: [],
@@ -231,10 +288,14 @@ export const useDrawingStore = create<DrawingState>((set, get) => ({
         ),
         referenceIds,
         mask: state.mask && ids.has(state.mask.referenceId) ? state.mask : null,
-        settings: syncModeAfterReferenceChange(
-          state.settings,
-          state.referenceIds.length,
-          referenceIds.length
+        settings: followReferenceMentions(
+          syncModeAfterReferenceChange(
+            state.settings,
+            state.referenceIds.length,
+            referenceIds.length
+          ),
+          state,
+          { nodes, referenceIds }
         ),
         revision:
           state.revision +
@@ -308,6 +369,12 @@ export const useDrawingStore = create<DrawingState>((set, get) => ({
             data: {
               ...node.data,
               referenceIds,
+              // A retry sends this prompt with the references that remain.
+              prompt: renumberReferenceMentions(
+                node.data.prompt,
+                references,
+                referenceIds
+              ),
               settings: {
                 ...node.data.settings,
                 mode: referenceIds.length ? 'edit' : 'generate',
@@ -353,9 +420,10 @@ export const useDrawingStore = create<DrawingState>((set, get) => ({
     get().checkpoint()
     const removed = new Set(ids)
     set((state) => {
+      const nodes = state.nodes.filter((node) => !removed.has(node.id))
       const referenceIds = state.referenceIds.filter((id) => !removed.has(id))
       return {
-        nodes: state.nodes.filter((node) => !removed.has(node.id)),
+        nodes,
         edges: state.edges.filter(
           (edge) => !removed.has(edge.source) && !removed.has(edge.target)
         ),
@@ -364,10 +432,14 @@ export const useDrawingStore = create<DrawingState>((set, get) => ({
           state.mask && !removed.has(state.mask.referenceId)
             ? state.mask
             : null,
-        settings: syncModeAfterReferenceChange(
-          state.settings,
-          state.referenceIds.length,
-          referenceIds.length
+        settings: followReferenceMentions(
+          syncModeAfterReferenceChange(
+            state.settings,
+            state.referenceIds.length,
+            referenceIds.length
+          ),
+          state,
+          { nodes, referenceIds }
         ),
         revision: state.revision + 1,
       }
@@ -470,10 +542,14 @@ export const useDrawingStore = create<DrawingState>((set, get) => ({
         return {
           referenceIds,
           mask: state.mask?.referenceId === id ? null : state.mask,
-          settings: syncModeAfterReferenceChange(
-            state.settings,
-            state.referenceIds.length,
-            referenceIds.length
+          settings: followReferenceMentions(
+            syncModeAfterReferenceChange(
+              state.settings,
+              state.referenceIds.length,
+              referenceIds.length
+            ),
+            state,
+            { nodes: state.nodes, referenceIds }
           ),
           revision: state.revision + 1,
         }
@@ -487,16 +563,23 @@ export const useDrawingStore = create<DrawingState>((set, get) => ({
       ) {
         return state
       }
+      const referenceIds = [...state.referenceIds, id]
       return {
-        referenceIds: [...state.referenceIds, id],
-        settings: syncModeAfterReferenceChange(
-          state.settings,
-          state.referenceIds.length,
-          state.referenceIds.length + 1
+        referenceIds,
+        settings: followReferenceMentions(
+          syncModeAfterReferenceChange(
+            state.settings,
+            state.referenceIds.length,
+            referenceIds.length
+          ),
+          state,
+          { nodes: state.nodes, referenceIds }
         ),
         revision: state.revision + 1,
       }
     }),
+  // Replaces the whole list, so its caller owns the prompt that goes with it;
+  // appending, as an upload does, moves no mention.
   setReferences: (ids) =>
     set((state) => {
       const referenceIds = [...new Set(ids)]
@@ -533,9 +616,35 @@ export const useDrawingStore = create<DrawingState>((set, get) => ({
       return {
         referenceIds,
         mask: state.mask?.referenceId === referenceIds[0] ? state.mask : null,
+        settings: followReferenceMentions(state.settings, state, {
+          nodes: state.nodes,
+          referenceIds,
+        }),
         revision: state.revision + 1,
       }
     }),
+  reuseNodeSettings: (id) => {
+    const state = get()
+    const node = state.nodes.find((item) => item.id === id)
+    if (!node) return
+    const nodeReferenceIds = node.data.referenceIds || []
+    const referenceIds = nodeReferenceIds.filter((referenceId) =>
+      state.nodes.some((item) => item.id === referenceId)
+    )
+    state.updateSettings({
+      ...node.data.settings,
+      // The image's mentions count through its own references; carry them
+      // over to the ones the composer can bring back.
+      prompt: renumberReferenceMentions(
+        node.data.prompt,
+        nodeReferenceIds,
+        getAvailableReferenceNodes(state.nodes, referenceIds).map(
+          (item) => item.id
+        )
+      ),
+    })
+    get().setReferences(referenceIds)
+  },
   setMask: (mask) => set((state) => ({ mask, revision: state.revision + 1 })),
   setPreview: (previewId) => set({ previewId }),
   undo: () =>
@@ -543,11 +652,18 @@ export const useDrawingStore = create<DrawingState>((set, get) => ({
       const snapshot = state.past.at(-1)
       if (!snapshot) return state
       return {
-        ...snapshot,
-        settings: syncModeAfterReferenceChange(
-          state.settings,
-          state.referenceIds.length,
-          snapshot.referenceIds.length
+        nodes: snapshot.nodes,
+        edges: snapshot.edges,
+        referenceIds: snapshot.referenceIds,
+        mask: snapshot.mask,
+        settings: settingsAfterRestore(
+          syncModeAfterReferenceChange(
+            state.settings,
+            state.referenceIds.length,
+            snapshot.referenceIds.length
+          ),
+          state,
+          snapshot
         ),
         past: state.past.slice(0, -1),
         future: [
@@ -556,6 +672,7 @@ export const useDrawingStore = create<DrawingState>((set, get) => ({
             edges: state.edges,
             referenceIds: state.referenceIds,
             mask: state.mask,
+            prompt: state.settings.prompt,
           },
           ...state.future,
         ],
@@ -567,11 +684,18 @@ export const useDrawingStore = create<DrawingState>((set, get) => ({
       const snapshot = state.future[0]
       if (!snapshot) return state
       return {
-        ...snapshot,
-        settings: syncModeAfterReferenceChange(
-          state.settings,
-          state.referenceIds.length,
-          snapshot.referenceIds.length
+        nodes: snapshot.nodes,
+        edges: snapshot.edges,
+        referenceIds: snapshot.referenceIds,
+        mask: snapshot.mask,
+        settings: settingsAfterRestore(
+          syncModeAfterReferenceChange(
+            state.settings,
+            state.referenceIds.length,
+            snapshot.referenceIds.length
+          ),
+          state,
+          snapshot
         ),
         future: state.future.slice(1),
         past: [
@@ -581,6 +705,7 @@ export const useDrawingStore = create<DrawingState>((set, get) => ({
             edges: state.edges,
             referenceIds: state.referenceIds,
             mask: state.mask,
+            prompt: state.settings.prompt,
           },
         ],
         revision: state.revision + 1,
@@ -600,10 +725,14 @@ export const useDrawingStore = create<DrawingState>((set, get) => ({
       edges: [],
       referenceIds: [],
       mask: null,
-      settings: syncModeAfterReferenceChange(
-        state.settings,
-        state.referenceIds.length,
-        0
+      settings: followReferenceMentions(
+        syncModeAfterReferenceChange(
+          state.settings,
+          state.referenceIds.length,
+          0
+        ),
+        state,
+        { nodes: [], referenceIds: [] }
       ),
       revision: state.revision + 1,
     }))

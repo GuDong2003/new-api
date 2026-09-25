@@ -826,3 +826,47 @@ describe('tag-prompted models', () => {
     })
   })
 })
+
+describe('Reference mentions at the request boundary', () => {
+  // A retry sends a canvas image's own prompt, which only Reuse prompt and
+  // settings can edit, so the message names both ways out.
+  const MENTION_ERROR =
+    "The prompt mentions a reference image that this request does not send. Remove the mention or insert the image again; to change a canvas image's prompt, use Reuse prompt and settings."
+  const edit = { ...settings, mode: 'edit' as const }
+
+  it('rejects an unbound mention before the request is sent', () => {
+    expect(
+      validateImageSettings(
+        { ...edit, prompt: '把@? (B.png)的角色放进@1 (A.png)' },
+        1
+      )
+    ).toBe(MENTION_ERROR)
+  })
+
+  it('rejects a mention numbered past the references an edit sends', () => {
+    expect(
+      validateImageSettings({ ...edit, prompt: '@1 (A.png) 和 @2 (B.png)' }, 1)
+    ).toBe(MENTION_ERROR)
+  })
+
+  it('rejects mentions when text-to-image sends no references', () => {
+    expect(
+      validateImageSettings({ ...settings, prompt: '参考 @1 (A.png)' }, 1)
+    ).toBe(MENTION_ERROR)
+  })
+
+  it('accepts mentions of every reference an edit sends', () => {
+    expect(
+      validateImageSettings({ ...edit, prompt: '@1 (A.png) 和 @2 (B.png)' }, 2)
+    ).toBeNull()
+  })
+
+  // Returned as a plain string, so only the static key registry carries it to
+  // the locale files.
+  it('registers the mention message for translation', () => {
+    const message = validateImageSettings({ ...edit, prompt: '@? (B.png)' }, 1)
+
+    expect(STATIC_I18N_KEYS).toContain(message)
+    expect(enLocale.translation).toHaveProperty([message as string])
+  })
+})

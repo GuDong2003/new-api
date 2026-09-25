@@ -355,18 +355,9 @@ export const ImageCanvasNode = memo(function ImageCanvasNode(
               variant='ghost'
               title={t('Reuse prompt and settings')}
               aria-label={t('Reuse prompt and settings')}
-              onClick={() => {
-                const state = useDrawingStore.getState()
-                state.updateSettings({
-                  ...props.data.settings,
-                  prompt: props.data.prompt,
-                })
-                state.setReferences(
-                  (props.data.referenceIds || []).filter((id) =>
-                    state.nodes.some((node) => node.id === id)
-                  )
-                )
-              }}
+              onClick={() =>
+                useDrawingStore.getState().reuseNodeSettings(props.id)
+              }
             >
               <HugeiconsIcon
                 icon={ArrowReloadHorizontalIcon}

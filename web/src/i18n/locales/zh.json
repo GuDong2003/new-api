@@ -33,6 +33,7 @@
     "Replace": "替换",
     "Swap width and height": "交换宽高",
     "Tag mode": "标签生图",
+    "The prompt mentions a reference image that this request does not send. Remove the mention or insert the image again; to change a canvas image's prompt, use Reuse prompt and settings.": "提示词里提到的参考图不会随本次请求发送。请删除这处提及或重新插入该图片；画布图片的提示词可通过“复用提示词与参数”修改。",
     "The response already started, so channels cannot be switched": "响应已开始返回，无法切换渠道",
     "The returned image could not be downloaded.": "返回的图片无法下载。",
     "This discards the version stored in the cloud. The canvas on screen becomes the one everywhere.": "这会舍弃云端保存的版本，当前屏幕上的画布将成为各端唯一的版本。",

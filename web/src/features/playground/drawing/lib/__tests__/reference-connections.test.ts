@@ -185,6 +185,203 @@ describe('Image reference connections', () => {
   })
 })
 
+describe('Prompt mentions follow the reference list', () => {
+  function withReferences(
+    node: DrawingNode,
+    prompt: string,
+    referenceIds: string[]
+  ): DrawingNode {
+    return {
+      ...node,
+      data: {
+        ...node.data,
+        prompt,
+        referenceIds,
+        settings: { ...node.data.settings, prompt, mode: 'edit' },
+      },
+    }
+  }
+
+  // Every image one model generates is named after the model, so names alone
+  // cannot tell such references apart.
+  function named(id: string, name: string): DrawingNode {
+    const node = imageNode(id)
+    return {
+      ...node,
+      data: {
+        ...node.data,
+        asset: node.data.asset && { ...node.data.asset, name },
+      },
+    }
+  }
+  const SAME_NAMED_PROMPT = '把@1 (gpt-image-2-1)的角色放进@2 (gpt-image-2-1)'
+
+  it('restores same-named mentions exactly when undo reverses a clear', () => {
+    const store = useDrawingStore.getState()
+    store.addNodes([named('X1', 'gpt-image-2-1'), named('X2', 'gpt-image-2-1')])
+    store.setReferences(['X1', 'X2'])
+    store.updateSettings({ prompt: SAME_NAMED_PROMPT })
+    store.clear()
+    expect(useDrawingStore.getState().settings.prompt).toBe(
+      '把@? (gpt-image-2-1)的角色放进@? (gpt-image-2-1)'
+    )
+
+    store.undo()
+
+    expect(useDrawingStore.getState().settings.prompt).toBe(SAME_NAMED_PROMPT)
+  })
+
+  it('restores same-named mentions through undoing and redoing each deletion', () => {
+    const store = useDrawingStore.getState()
+    store.addNodes([named('X1', 'gpt-image-2-1'), named('X2', 'gpt-image-2-1')])
+    store.setReferences(['X1', 'X2'])
+    store.updateSettings({ prompt: SAME_NAMED_PROMPT })
+    store.removeNodes(['X1'])
+    store.removeNodes(['X2'])
+
+    store.undo()
+    store.undo()
+    expect(useDrawingStore.getState().referenceIds).toEqual(['X1', 'X2'])
+    expect(useDrawingStore.getState().settings.prompt).toBe(SAME_NAMED_PROMPT)
+
+    store.redo()
+    expect(useDrawingStore.getState().settings.prompt).toBe(
+      '把@? (gpt-image-2-1)的角色放进@1 (gpt-image-2-1)'
+    )
+  })
+
+  it('keeps the edits and renumbers the bound mentions when the prompt changed after the deletion', () => {
+    const store = useDrawingStore.getState()
+    store.addNodes([imageNode('A'), imageNode('B')])
+    store.setReferences(['A', 'B'])
+    store.updateSettings({ prompt: '@1 (A.png) 和 @2 (B.png)' })
+    store.removeNodes(['A'])
+    store.updateSettings({ prompt: '@? (A.png) 和 @1 (B.png)，再加点雾' })
+
+    store.undo()
+
+    expect(useDrawingStore.getState().settings.prompt).toBe(
+      '@? (A.png) 和 @2 (B.png)，再加点雾'
+    )
+  })
+
+  it('leaves same-named mentions unbound instead of guessing when their images are selected again', () => {
+    const store = useDrawingStore.getState()
+    store.addNodes([named('X1', 'gpt-image-2-1'), named('X2', 'gpt-image-2-1')])
+    store.setReferences(['X1', 'X2'])
+    store.updateSettings({ prompt: SAME_NAMED_PROMPT })
+
+    for (const id of ['X1', 'X2', 'X1', 'X2']) store.toggleReference(id)
+
+    expect(useDrawingStore.getState().referenceIds).toEqual(['X1', 'X2'])
+    expect(useDrawingStore.getState().settings.prompt).toBe(
+      '把@? (gpt-image-2-1)的角色放进@? (gpt-image-2-1)'
+    )
+  })
+
+  it('renumbers the composer prompt when references are reordered', () => {
+    const store = useDrawingStore.getState()
+    store.addNodes([imageNode('A'), imageNode('B')])
+    store.setReferences(['A', 'B'])
+    store.updateSettings({ prompt: '把@2 (B.png)的角色放进@1 (A.png)' })
+
+    store.reorderReferences('B', 'A')
+
+    expect(useDrawingStore.getState().settings.prompt).toBe(
+      '把@1 (B.png)的角色放进@2 (A.png)'
+    )
+  })
+
+  it('unbinds the mention of a reference taken off the list and shifts the ones after it', () => {
+    const store = useDrawingStore.getState()
+    store.addNodes([imageNode('A'), imageNode('B'), imageNode('C')])
+    store.setReferences(['A', 'B', 'C'])
+    store.updateSettings({ prompt: '@1 (A.png) @2 (B.png) @3 (C.png)' })
+
+    store.toggleReference('B')
+
+    expect(useDrawingStore.getState().settings.prompt).toBe(
+      '@1 (A.png) @? (B.png) @2 (C.png)'
+    )
+  })
+
+  it('numbers the mentions again when undo brings a deleted reference back', () => {
+    const store = useDrawingStore.getState()
+    store.addNodes([imageNode('A'), imageNode('B'), imageNode('C')])
+    store.setReferences(['A', 'B', 'C'])
+    store.updateSettings({ prompt: '@1 (A.png) @2 (B.png) @3 (C.png)' })
+    store.removeNodes(['B'])
+    expect(useDrawingStore.getState().settings.prompt).toBe(
+      '@1 (A.png) @? (B.png) @2 (C.png)'
+    )
+
+    store.undo()
+
+    expect(useDrawingStore.getState().referenceIds).toEqual(['A', 'B', 'C'])
+    expect(useDrawingStore.getState().settings.prompt).toBe(
+      '@1 (A.png) @2 (B.png) @3 (C.png)'
+    )
+  })
+
+  it("renumbers an image's own prompt when one of its reference connections is removed", () => {
+    const store = useDrawingStore.getState()
+    const target = withReferences(
+      imageNode('C', 'error'),
+      '@1 (A.png) 和 @2 (B.png)',
+      ['A', 'B']
+    )
+    store.addNodes(
+      [imageNode('A'), imageNode('B'), target],
+      [
+        { id: 'A-C', source: 'A', target: 'C' },
+        { id: 'B-C', source: 'B', target: 'C' },
+      ]
+    )
+
+    store.changeEdges([{ type: 'remove', id: 'A-C' }])
+
+    expect(useDrawingStore.getState().nodes[2].data).toMatchObject({
+      referenceIds: ['B'],
+      prompt: '@? (A.png) 和 @1 (B.png)',
+    })
+  })
+
+  it("reuses an image's prompt numbered for its own references, whatever the composer held", () => {
+    const store = useDrawingStore.getState()
+    const source = withReferences(imageNode('C'), '@1 (A.png) 和 @2 (B.png)', [
+      'A',
+      'B',
+    ])
+    store.addNodes([imageNode('A'), imageNode('B'), source])
+    store.setReferences(['B', 'A'])
+    store.updateSettings({ prompt: '先前的 @1 (B.png)' })
+
+    store.reuseNodeSettings('C')
+
+    expect(useDrawingStore.getState().referenceIds).toEqual(['A', 'B'])
+    expect(useDrawingStore.getState().settings.prompt).toBe(
+      '@1 (A.png) 和 @2 (B.png)'
+    )
+  })
+
+  it("carries a reused prompt's mentions over to the references that still exist", () => {
+    const store = useDrawingStore.getState()
+    const source = withReferences(imageNode('C'), '@1 (A.png) 和 @2 (B.png)', [
+      'A',
+      'B',
+    ])
+    store.addNodes([imageNode('A'), imageNode('B'), source])
+    store.removeNodes(['A'])
+
+    store.reuseNodeSettings('C')
+
+    expect(useDrawingStore.getState().referenceIds).toEqual(['B'])
+    expect(useDrawingStore.getState().settings.prompt).toBe(
+      '@? (A.png) 和 @1 (B.png)'
+    )
+  })
+})
+
 describe('Reference edge appearance', () => {
   const edge = (id: string, target: string, selected = false): Edge => ({
     id,

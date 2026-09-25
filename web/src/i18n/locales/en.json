@@ -33,6 +33,7 @@
     "Replace": "Replace",
     "Swap width and height": "Swap width and height",
     "Tag mode": "Tag mode",
+    "The prompt mentions a reference image that this request does not send. Remove the mention or insert the image again; to change a canvas image's prompt, use Reuse prompt and settings.": "The prompt mentions a reference image that this request does not send. Remove the mention or insert the image again; to change a canvas image's prompt, use Reuse prompt and settings.",
     "The response already started, so channels cannot be switched": "The response already started, so channels cannot be switched",
     "The returned image could not be downloaded.": "The returned image could not be downloaded.",
     "This discards the version stored in the cloud. The canvas on screen becomes the one everywhere.": "This discards the version stored in the cloud. The canvas on screen becomes the one everywhere.",
