@@ -804,30 +804,32 @@ For commercial licensing, please contact support@quantumnous.com
    * letters. Stretching it to the whole card sent the colour travelling far
    * outside them, which no amount of retiming could bring back together.
    *
-   * Height is what gives the glow room, not width: it fills the picture area
-   * the way the original fills its own. */
-  flex: 1 1 auto;
+   * The height is the template's too: 120px at its 1.6em type. The colour is a
+   * ring that grows with the box's diagonal, so a box stretched to a tall node
+   * drew it letters away from the one lighting up, and further for narrow
+   * Latin letters than for Chinese ones. Type and spacing are the template's
+   * as well, so a theme's font does not change the letters it is timed to. */
+  flex: none;
   align-self: center;
-  min-height: 4.7em;
   width: auto;
+  height: 4.6875em;
+  font-family: 'Poppins', sans-serif;
   font-size: 1.25rem;
   color: var(--foreground);
   font-weight: 600;
-  letter-spacing: 0.01em;
   user-select: none;
 }
 
 /* The picture area with nothing in it yet: the word is the only thing there is
  * to show, so it takes the room. Sized against the box rather than in fixed
  * pixels, because a node can be dragged to any size. Width sets it so the word
- * spans the card; height caps it so the glow is never clipped. */
+ * spans the card; height caps it so the box, 4.6875em tall, stays inside. */
 .drawing-generation-fill {
   container-type: size;
 }
 
 .drawing-generation-fill .drawing-generation {
-  font-size: min(17cqw, 27cqh);
-  min-height: 0;
+  font-size: min(17cqw, 20cqh);
 }
 
 .drawing-generation-letter {

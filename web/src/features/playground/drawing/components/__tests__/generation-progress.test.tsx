@@ -16,10 +16,14 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, render, screen } from '@testing-library/react'
 import { ReactFlowProvider, type NodeProps } from '@xyflow/react'
 import i18n from 'i18next'
+import postcss from 'postcss'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { useDrawingStore } from '@/stores/drawing-store'
@@ -213,4 +217,38 @@ it('lights a translation of another length over that same span', () => {
   } finally {
     i18n.addResource('en', 'translation', 'Generating', 'Generating')
   }
+})
+
+// The colour behind the word is a ring sized to the box around the letters, so
+// the box is what keeps the ring as close to the lit letter as in the template.
+it('keeps the template box around the word however tall the node is', () => {
+  const declarations = new Map<string, Map<string, string>>()
+  postcss
+    .parse(
+      readFileSync(
+        resolve(import.meta.dirname, '../../../../../styles/index.css'),
+        'utf8'
+      )
+    )
+    .walkRules((rule) => {
+      const values = declarations.get(rule.selector) ?? new Map()
+      rule.walkDecls((declaration) => {
+        values.set(declaration.prop, declaration.value)
+      })
+      declarations.set(rule.selector, values)
+    })
+  const box = declarations.get('.drawing-generation')
+  const filled = declarations.get(
+    '.drawing-generation-fill .drawing-generation'
+  )
+
+  // 120px at the template's 1.6em type, never stretched to the picture area.
+  expect(box?.get('height')).toBe('4.6875em')
+  expect(box?.get('flex')).toBe('none')
+  // A node with nothing in it yet only enlarges the type, and the box still fits.
+  expect([...(filled?.keys() ?? [])]).toEqual(['font-size'])
+  const heightCap = Number(
+    /([\d.]+)cqh/.exec(filled?.get('font-size') ?? '')?.[1]
+  )
+  expect(heightCap * 4.6875).toBeLessThanOrEqual(100)
 })
