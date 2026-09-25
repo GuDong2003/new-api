@@ -107,6 +107,20 @@ func resolveGalleryCanvasAssets(ctx context.Context, root string, user int, canv
 		if err == nil && (asset.UserID != user || asset.State != "ready" || asset.ExpiresAt <= time.Now().Unix() || (asset.CanvasID != "" && asset.CanvasID != canvasID)) {
 			return nil, nil, gorm.ErrRecordNotFound
 		}
+		// A record whose original was lost gives way to the picture this save
+		// uploads again.
+		if err == nil {
+			lost, e := galleryOriginalLost(root, asset.ID)
+			if e != nil {
+				return nil, nil, e
+			}
+			if lost {
+				if e = removeGalleryRecord(ctx, root, &asset); e != nil {
+					return nil, nil, e
+				}
+				asset, err = model.GalleryImage{}, gorm.ErrRecordNotFound
+			}
+		}
 		// Only a generated picture takes over a gallery copy of itself. A
 		// reference is the owner's own upload; sharing that copy would let
 		// deleting it from the gallery take the reference off the canvas.
@@ -117,6 +131,13 @@ func resolveGalleryCanvasAssets(ctx context.Context, root string, user int, canv
 				return nil, nil, model.ErrGalleryUnavailable
 			}
 			for _, candidate := range candidates {
+				lost, e := galleryOriginalLost(root, candidate.ID)
+				if e != nil {
+					return nil, nil, e
+				}
+				if lost {
+					continue
+				}
 				checksum := candidate.SHA256
 				if checksum == "" {
 					checksum, err = galleryAssetChecksum(root, &candidate)

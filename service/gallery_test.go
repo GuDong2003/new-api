@@ -988,6 +988,68 @@ func TestGalleryCanvasSnapshotCannotOmitOriginalAndCountAdmission(t *testing.T) 
 	assert.Equal(t, saved.Document, loaded.Document)
 }
 
+// A restore from a snapshot that carries the database but not the images leaves
+// records whose originals are gone. They no longer count as originals: the
+// browser still holding a picture uploads it again.
+func TestGalleryCanvasRecoversFromOriginalsLostWithTheirFiles(t *testing.T) {
+	t.Run("asks for a lost original again and keeps the upload", func(t *testing.T) {
+		galleryFixture(t, sqlite.Open(filepath.Join(t.TempDir(), "gallery.db")))
+		ctx := context.Background()
+		original := galleryPNG(t)
+		metadata := canvasSaveMetadata(t)
+		_, err := saveCanvasMetadata(t, 41, metadata, []string{"file:" + canvasFixtureAsset, string(original)})
+		require.NoError(t, err)
+		require.NoError(t, os.Remove(filepath.Join(os.Getenv("GALLERY_STORAGE_DIR"), "gallery-"+canvasFixtureAsset+".original")))
+
+		loaded, err := service.GetGalleryCanvas(ctx, 41, canvasFixtureID)
+		require.NoError(t, err)
+		assert.Empty(t, loaded.Assets)
+
+		metadata["base_revision"], metadata["mutation_id"] = loaded.Revision, "restored"
+		restored, err := saveCanvasMetadata(t, 41, metadata, []string{"file:" + canvasFixtureAsset, string(original)})
+		require.NoError(t, err)
+		assert.Len(t, restored.Assets, 1)
+		f, _, err := service.OpenGalleryImage(ctx, 41, canvasFixtureAsset, false)
+		require.NoError(t, err)
+		data, err := io.ReadAll(f)
+		require.NoError(t, f.Close())
+		require.NoError(t, err)
+		assert.Equal(t, original, data)
+	})
+
+	t.Run("lets a lost original leave the canvas without a deletion", func(t *testing.T) {
+		galleryFixture(t, sqlite.Open(filepath.Join(t.TempDir(), "gallery.db")))
+		metadata := canvasSaveMetadata(t)
+		_, err := saveCanvasMetadata(t, 41, metadata, []string{"file:" + canvasFixtureAsset, string(galleryPNG(t))})
+		require.NoError(t, err)
+		require.NoError(t, os.Remove(filepath.Join(os.Getenv("GALLERY_STORAGE_DIR"), "gallery-"+canvasFixtureAsset+".original")))
+
+		metadata["base_revision"], metadata["mutation_id"] = 1, "dropped"
+		metadata["document"] = galleryCanvasDocument(t, "drawing")
+		metadata["assets"] = []any{}
+		saved, err := saveCanvasMetadata(t, 41, metadata)
+		require.NoError(t, err)
+		assert.Empty(t, saved.Assets)
+		count, _, _, err := model.GalleryTotals(context.Background(), 41)
+		require.NoError(t, err)
+		assert.Zero(t, count)
+	})
+
+	t.Run("does not take over a gallery copy whose file was lost", func(t *testing.T) {
+		galleryFixture(t, sqlite.Open(filepath.Join(t.TempDir(), "gallery.db")))
+		original := galleryPNG(t)
+		copied, err := gallerySave(t, 41, "drawing", "job-lost", original)
+		require.NoError(t, err)
+		require.NoError(t, os.Remove(filepath.Join(os.Getenv("GALLERY_STORAGE_DIR"), "gallery-"+copied.ID+".original")))
+
+		saved, err := saveCanvasMetadata(t, 41, canvasSaveMetadata(t), []string{"file:" + canvasFixtureAsset, string(original)})
+		require.NoError(t, err)
+		assert.Empty(t, saved.AssetIDMap)
+		require.Len(t, saved.Assets, 1)
+		assert.Equal(t, canvasFixtureAsset, saved.Assets[0].ID)
+	})
+}
+
 func TestGalleryCanvasFailedStagingRetainsOnlyUnremovedPhysicalBytes(t *testing.T) {
 	galleryFixture(t, sqlite.Open(filepath.Join(t.TempDir(), "gallery.db")))
 	ctx := context.Background()

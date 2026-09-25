@@ -125,7 +125,19 @@ func galleryCanvasRecordLocked(ctx context.Context, user int, id string) (*model
 	if err = model.DB.WithContext(ctx).Where("user_id = ? AND canvas_id = ? AND state = ? AND expires_at > ?", user, id, "ready", time.Now().Unix()).Order("id ASC").Find(&assets).Error; err != nil {
 		return nil, model.ErrGalleryUnavailable
 	}
+	root, err := galleryRoot()
+	if err != nil {
+		return nil, err
+	}
 	for _, asset := range assets {
+		// Leaving out an original whose file was lost asks the browser for it.
+		lost, err := galleryOriginalLost(root, asset.ID)
+		if err != nil {
+			return nil, err
+		}
+		if lost {
+			continue
+		}
 		record.Assets = append(record.Assets, model.GalleryCanvasRemoteAsset{ID: asset.ID, Role: asset.Role, NodeID: asset.NodeID, SHA256: asset.SHA256, Bytes: asset.Bytes, Width: asset.Width, Height: asset.Height, MIMEType: asset.MIMEType, HasThumbnail: asset.HasThumbnail})
 	}
 	return &record, nil
@@ -238,13 +250,21 @@ func SaveGalleryCanvas(ctx context.Context, user int, reader *multipart.Reader) 
 	if err != nil {
 		return nil, err
 	}
-	// Only masks can disappear as a normal content edit. Originals require DELETE.
+	// Only masks can disappear as a normal content edit. Originals require
+	// DELETE, unless the file was lost and nothing is left to protect.
 	var oldAssets []model.GalleryImage
 	if err = model.DB.WithContext(ctx).Where("user_id = ? AND canvas_id = ? AND state = ?", user, input.ID, "ready").Find(&oldAssets).Error; err != nil {
 		return nil, model.ErrGalleryUnavailable
 	}
 	for _, old := range oldAssets {
-		if _, present := assets[old.ID]; !present && old.Role != "mask" {
+		if _, present := assets[old.ID]; present || old.Role == "mask" {
+			continue
+		}
+		lost, err := galleryOriginalLost(root, old.ID)
+		if err != nil {
+			return nil, err
+		}
+		if !lost {
 			return nil, model.ErrGalleryCanvasConflict
 		}
 	}

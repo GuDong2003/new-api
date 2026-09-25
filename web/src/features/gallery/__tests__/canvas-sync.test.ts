@@ -328,6 +328,60 @@ it('leaves untouched new drafts local-only and uploads dirty timer changes at mo
   expect(posts()).toHaveLength(2)
 })
 
+// The cloud leaves out an original whose file it lost, which asks the browser
+// for it again. A preview cannot stand in for that original.
+it('keeps the cloud copy waiting when an original the cloud lost is held here only as a preview', async () => {
+  const canvas = await createCanvasProject(identity, 'drawing')
+  await syncCanvas(identity, canvas.id, 'manual')
+  expect(posts()).toHaveLength(1)
+  const current = required(await loadLocalCanvas(813, canvas.id))
+  await saveLocalCanvas(
+    {
+      ...current,
+      document: {
+        ...current.document,
+        nodes: [
+          {
+            id: `node-${sourceId}`,
+            type: 'image',
+            position: { x: 0, y: 0 },
+            data: {
+              asset: {
+                id: sourceId,
+                name: 'image.png',
+                src: 'data:image/png;base64,AA==',
+                width: 1,
+                height: 1,
+                mimeType: 'image/png',
+              },
+              settings: {},
+              prompt: '',
+              status: 'complete',
+              createdAt: 1,
+            },
+          },
+        ],
+      },
+    },
+    [
+      {
+        id: sourceId,
+        role: 'generated',
+        nodeId: `node-${sourceId}`,
+        sha256: 'a'.repeat(64),
+        previewOnly: true,
+        blob: new Blob([Uint8Array.from(atob(png), (c) => c.charCodeAt(0))], {
+          type: 'image/jpeg',
+        }),
+      },
+    ]
+  )
+
+  await syncCanvas(identity, canvas.id, 'manual')
+
+  expect(posts()).toHaveLength(1)
+})
+
 it('keeps transaction failures visibly unsaved and the last complete document intact', async () => {
   const canvas = await createCanvasProject(identity, 'drawing')
   const other = await createCanvasProject(identity, 'drawing')

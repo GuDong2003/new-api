@@ -122,6 +122,25 @@ func (w *galleryWriter) Close() error {
 	return nil
 }
 
+// galleryOriginalLost reports whether a record's original file is gone, as after
+// a restore from a snapshot that carries the database but not the images. Such
+// a record no longer counts as an original; the browser that still holds the
+// picture uploads it again.
+func galleryOriginalLost(root, id string) (bool, error) {
+	path, err := galleryFilePath(root, id, "original")
+	if err != nil {
+		return false, err
+	}
+	_, err = os.Lstat(path)
+	if os.IsNotExist(err) {
+		return true, nil
+	}
+	if err != nil {
+		return false, model.ErrGalleryUnavailable
+	}
+	return false, nil
+}
+
 func openGalleryFile(root, id, kind string) (*os.File, error) {
 	path, err := galleryFilePath(root, id, kind)
 	if err != nil {

@@ -300,6 +300,9 @@ async function upload(
             existing.id === asset.id && existing.sha256 === asset.sha256
         )
     )
+    // The cloud leaves out an original whose file it lost. A preview cannot
+    // replace it; a browser that holds the original uploads it again.
+    if (newAssets.some((asset) => asset.previewOnly)) return
     const metadata: CanvasSaveMetadata = {
       id,
       kind: canvas.kind,
