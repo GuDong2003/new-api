@@ -22,14 +22,10 @@ import { useAuthStore } from '@/stores/auth-store'
 import { useDrawingStore } from '@/stores/drawing-store'
 
 import { deleteCanvasResource } from '../lib/canvas-deletion'
-import {
-  flushLocalEditors,
-  getCanvasEditorState,
-  sameIdentity,
-  storeFor,
-} from '../lib/canvas-editor'
+import { flushLocalEditors, sameIdentity, storeFor } from '../lib/canvas-editor'
 import { canvasEditors } from '../lib/canvas-events'
-import { assertGalleryIdentity } from '../lib/session'
+import { readCanvasAssets } from '../lib/canvas-repository'
+import { assertGalleryIdentity, galleryOwner } from '../lib/session'
 import type { CanvasKind, GalleryIdentity } from '../types'
 
 export const CanvasNodeDeletionContext = createContext<(ids: string[]) => void>(
@@ -79,15 +75,33 @@ export async function deleteCanvasNodes(
   assertCanvasTarget(kind, target)
   await flushLocalEditors(target.identity)
   assertCanvasTarget(kind, target)
-  if (getCanvasEditorState(kind)?.localStatus !== 'saved') {
-    throw new Error('Save or export the current canvas before switching.')
-  }
+  // Only a stored original has a shared copy to delete. One that never reached
+  // storage leaves with its node, and may be the reason the canvas cannot save,
+  // so a failed save must not keep it on the canvas.
+  const stored = new Set(
+    (
+      await readCanvasAssets(galleryOwner(target.identity), target.canvasId)
+    ).map((asset) => asset.id)
+  )
+  assertCanvasTarget(kind, target)
+  const nodes = storeFor(kind).getState().nodes
+  // An original another node still shows stays with that node.
+  const shown = new Set(
+    nodes
+      .filter((node) => !ids.includes(node.id))
+      .flatMap((node) => [node.data.asset?.id, node.data.mask?.id])
+  )
   const assets = [
     ...new Set(
-      storeFor(kind)
-        .getState()
-        .nodes.filter((node) => ids.includes(node.id))
-        .flatMap((node) => (node.data.asset ? [node.data.asset.id] : []))
+      nodes
+        .filter((node) => ids.includes(node.id))
+        .flatMap((node) =>
+          node.data.asset &&
+          stored.has(node.data.asset.id) &&
+          !shown.has(node.data.asset.id)
+            ? [node.data.asset.id]
+            : []
+        )
     ),
   ]
   for (const id of assets) {

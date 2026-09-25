@@ -22,7 +22,10 @@ import {
   parseDrawingDocument,
   serializeDrawingDocument,
 } from '../../playground/drawing/lib/canvas-document'
-import { isSafeImageSource } from '../../playground/drawing/lib/image-assets'
+import {
+  IMAGE_MIME_TYPES,
+  isSafeImageSource,
+} from '../../playground/drawing/lib/image-assets'
 import {
   convertLegacyNaiDocument,
   parseLegacyNaiDocument,
@@ -183,6 +186,151 @@ export function isCanvasDocumentEmpty(
   return !Array.isArray(nodes) || nodes.length === 0
 }
 
+/** Text equal for equal stored documents, whatever order their keys are in. */
+export function documentKey(document: unknown): string {
+  return (
+    JSON.stringify(document, (_key, value) =>
+      value && typeof value === 'object' && !Array.isArray(value)
+        ? Object.fromEntries(
+            Object.keys(value)
+              .sort()
+              .map((key) => [key, value[key]])
+          )
+        : value
+    ) ?? ''
+  )
+}
+
+type MergedNode = {
+  id: string
+  data: {
+    asset?: { id: string }
+    mask?: { id: string }
+    referenceIds?: string[]
+    status?: string
+  }
+} & Record<string, unknown>
+type MergedEdge = { id?: string; source: string; target: string }
+type MergedDrawing = {
+  nodes: MergedNode[]
+  edges: MergedEdge[]
+  referenceIds: string[]
+  mask: { referenceId: string; asset: { id: string } } | null
+  settings: unknown
+}
+
+/**
+ * A stored drawing canvas once the edits of two tabs meet: `base` is what this
+ * tab last read from storage, `mine` holds its edits since and `theirs` what
+ * another tab stored meanwhile. A change only one side made is kept. Where both
+ * changed the same thing, the same side wins in either tab, so tabs saving in
+ * turn settle on one document instead of trading theirs forever. Originals in
+ * `removedAssetIds` never come back.
+ */
+export function mergeCanvasDocuments(
+  base: Record<string, unknown>,
+  mine: Record<string, unknown>,
+  theirs: Record<string, unknown>,
+  removedAssetIds: readonly string[]
+): Record<string, unknown> {
+  const was = base as unknown as MergedDrawing
+  const ours = mine as unknown as MergedDrawing
+  const other = theirs as unknown as MergedDrawing
+  const pick = <T>(before: T, left: T, right: T): T => {
+    if (documentKey(left) === documentKey(before)) return right
+    if (documentKey(right) === documentKey(before)) return left
+    return documentKey(left) <= documentKey(right) ? left : right
+  }
+  const baseNodes = new Map(was.nodes.map((node) => [node.id, node]))
+  const ourNodes = new Set(ours.nodes.map((node) => node.id))
+  const otherNodes = new Map(other.nodes.map((node) => [node.id, node]))
+  const nodes: MergedNode[] = []
+  for (const node of ours.nodes) {
+    const before = baseNodes.get(node.id)
+    const after = otherNodes.get(node.id)
+    if (!before || !after) {
+      // Added here, or deleted there after this tab changed it again.
+      if (!before || documentKey(node) !== documentKey(before)) nodes.push(node)
+      continue
+    }
+    // Field by field, so a result landing there and a move here both stay.
+    const keys = new Set([
+      ...Object.keys(before),
+      ...Object.keys(node),
+      ...Object.keys(after),
+    ])
+    nodes.push(
+      Object.fromEntries(
+        [...keys].map((key) => [key, pick(before[key], node[key], after[key])])
+      ) as MergedNode
+    )
+  }
+  for (const node of other.nodes) {
+    if (!ourNodes.has(node.id) && !baseNodes.has(node.id)) nodes.push(node)
+  }
+  const removed = new Set(removedAssetIds)
+  const kept = nodes.filter(
+    (node) => !node.data.asset || !removed.has(node.data.asset.id)
+  )
+  const ids = new Set(kept.map((node) => node.id))
+  const cleaned = kept.map((node) => {
+    const references = node.data.referenceIds ?? []
+    const remaining = references.filter((id) => ids.has(id))
+    if (
+      remaining.length === references.length &&
+      !(node.data.mask && removed.has(node.data.mask.id))
+    ) {
+      return node
+    }
+    // A mask belongs to the references it was drawn for.
+    const { mask: _mask, ...data } = node.data
+    return {
+      ...node,
+      data: {
+        ...data,
+        ...(node.data.referenceIds ? { referenceIds: remaining } : {}),
+      },
+    }
+  })
+  const edgeId = (edge: MergedEdge) =>
+    edge.id ?? `${edge.source}->${edge.target}`
+  const baseEdges = new Set(was.edges.map(edgeId))
+  const ourEdges = new Set(ours.edges.map(edgeId))
+  const otherEdges = new Set(other.edges.map(edgeId))
+  const edges = [
+    ...ours.edges.filter(
+      (edge) => !baseEdges.has(edgeId(edge)) || otherEdges.has(edgeId(edge))
+    ),
+    ...other.edges.filter(
+      (edge) => !baseEdges.has(edgeId(edge)) && !ourEdges.has(edgeId(edge))
+    ),
+  ].filter((edge) => ids.has(edge.source) && ids.has(edge.target))
+  const complete = new Set(
+    cleaned
+      .filter((node) => node.data.status === 'complete' && node.data.asset)
+      .map((node) => node.id)
+  )
+  const referenceIds = pick(
+    was.referenceIds,
+    ours.referenceIds,
+    other.referenceIds
+  ).filter((id) => complete.has(id))
+  const mask = pick(was.mask, ours.mask, other.mask)
+  return {
+    ...mine,
+    settings: pick(was.settings, ours.settings, other.settings),
+    referenceIds,
+    mask:
+      mask &&
+      mask.referenceId === referenceIds[0] &&
+      !removed.has(mask.asset.id)
+        ? mask
+        : null,
+    nodes: cleaned,
+    edges,
+  }
+}
+
 export function remapCanvasDocumentAssetIds(
   kind: CanvasKind,
   document: Record<string, unknown>,
@@ -246,6 +394,8 @@ export async function encodeCanvas(
   })
   const normalized = normalizeCanvasDocument(kind, prepared)
   const assets: CanvasBinary[] = []
+  // The type an original arrived in wins over the one its asset claimed.
+  const types = new Map<string, string>()
   for (const [oldId, source] of sources) {
     context.signal?.throwIfAborted()
     const existing = context.existingAssets?.find((item) => item.id === oldId)
@@ -254,55 +404,94 @@ export async function encodeCanvas(
     if (!role || (!source.mask && role === 'mask')) {
       throw new Error('Canvas original role is required.')
     }
-    let blob: Blob
-    if (existing && !existing.previewOnly) {
+    const id = ids.get(oldId)
+    if (!id) throw new Error('Invalid canvas asset ID.')
+    const nodeId = relation?.nodeId ?? source.nodeId
+    const src = source.asset.src
+    let blob: Blob | undefined
+    if (existing && !existing.previewOnly && !existing.remoteSource) {
       blob = existing.blob
-    } else if (existing?.previewOnly && context.readOriginal) {
-      blob = await context.readOriginal(
-        source.asset,
-        context.signal,
-        'gallery-preview'
-      )
     } else if (
-      source.asset.src.startsWith('data:') &&
-      isSafeImageSource(source.asset.src)
+      !existing?.previewOnly &&
+      src.startsWith('data:') &&
+      isSafeImageSource(src)
     ) {
-      const bytes = Uint8Array.from(
-        atob(source.asset.src.split(',')[1]),
-        (char) => char.charCodeAt(0)
+      const type = src.slice(5, src.indexOf(';'))
+      // A data source names its own type; one its asset contradicts is corrupt.
+      if (type !== source.asset.mimeType) {
+        throw new Error('Invalid canvas original bytes.')
+      }
+      const bytes = Uint8Array.from(atob(src.split(',')[1]), (char) =>
+        char.charCodeAt(0)
       )
-      blob = new Blob([bytes], {
-        type: source.asset.src.slice(5, source.asset.src.indexOf(';')),
-      })
+      blob = new Blob([bytes], { type })
     } else if (
-      context.readOriginal &&
-      (isSafeImageSource(source.asset.src) ||
-        source.asset.src.startsWith('blob:'))
+      existing?.previewOnly ||
+      isSafeImageSource(src) ||
+      src.startsWith('blob:')
     ) {
-      blob = await context.readOriginal(source.asset, context.signal)
+      if (context.readOriginal) {
+        try {
+          blob = await context.readOriginal(
+            source.asset,
+            context.signal,
+            existing?.previewOnly ? 'gallery-preview' : undefined
+          )
+        } catch {
+          context.signal?.throwIfAborted()
+        }
+      }
+      // An original out of reach must not cost the rest of the canvas its
+      // local save: a preview stays until its original arrives, and a link is
+      // kept until a later save can download it.
+      if (!blob && existing?.previewOnly) {
+        assets.push({ ...existing, id, role, nodeId })
+        continue
+      }
+      if (!blob && /^https?:\/\//i.test(src)) {
+        assets.push({
+          id,
+          blob: new Blob([], { type: source.asset.mimeType }),
+          role,
+          nodeId,
+          sha256: '',
+          remoteSource: src,
+        })
+        continue
+      }
+      if (!blob) throw new Error('Canvas original is unavailable.')
     } else {
       throw new Error('Canvas original reader is required.')
     }
     const bytes = await blob.arrayBuffer()
     context.signal?.throwIfAborted()
-    if (!bytes.byteLength || blob.type !== source.asset.mimeType) {
+    if (!bytes.byteLength || !IMAGE_MIME_TYPES.includes(blob.type)) {
       throw new Error('Invalid canvas original bytes.')
     }
+    if (blob.type !== source.asset.mimeType) types.set(id, blob.type)
     const digest = await crypto.subtle.digest('SHA-256', bytes)
     const sha256 = Array.from(new Uint8Array(digest), (byte) =>
       byte.toString(16).padStart(2, '0')
     ).join('')
-    const id = ids.get(oldId)
-    if (!id) throw new Error('Invalid canvas asset ID.')
     assets.push({
       id,
       blob: new Blob([bytes], { type: blob.type }),
       role,
-      nodeId: relation?.nodeId ?? source.nodeId,
+      nodeId,
       sha256,
     })
   }
-  return { document: normalized, assets }
+  if (!types.size) return { document: normalized, assets }
+  return {
+    document: normalizeCanvasDocument(
+      kind,
+      mapDocumentAssets(prepared, (asset) => ({
+        ...asset,
+        mimeType: types.get(asset.id) ?? asset.mimeType,
+      }))
+    ),
+    assets,
+  }
 }
 
 /**
@@ -319,11 +508,18 @@ export async function decodeCanvas(
 ): Promise<DrawingDocument> {
   const normalized = normalizeCanvasDocument(canvas.kind, canvas.document)
   const sources = new Map<string, string>()
+  const urls: string[] = []
   for (const id of canvasDocumentAssetIds(normalized)) {
     const binary = assets.find((asset) => asset.id === id)
     if (!binary) throw new Error('Canvas original is unavailable.')
+    if (binary.remoteSource) {
+      sources.set(id, binary.remoteSource)
+      continue
+    }
     if (display) {
-      sources.set(id, URL.createObjectURL(binary.blob))
+      const url = URL.createObjectURL(binary.blob)
+      urls.push(url)
+      sources.set(id, url)
       continue
     }
     const bytes = new Uint8Array(await binary.blob.arrayBuffer())
@@ -335,7 +531,7 @@ export async function decodeCanvas(
     }
     sources.set(id, `data:${binary.blob.type};base64,${btoa(chunks.join(''))}`)
   }
-  if (display) adoptCanvasObjectUrls(canvas.kind, [...sources.values()])
+  if (display) adoptCanvasObjectUrls(canvas.kind, urls)
   // Parse the small descriptors first, avoiding the old reference-upload size
   // ceiling for generated originals. Hydration never changes their bytes.
   const parsed = parseDocument(

@@ -65,12 +65,20 @@ export async function replayCanvasRemovals(
         remote.state !== 'deleted' &&
         (!assetId || !remote.removed_asset_ids.includes(assetId))
       ) {
-        remote = await deleteCanvasRecord(
-          identity,
-          item.canvasId,
-          remote.revision,
-          assetId
-        )
+        try {
+          remote = await deleteCanvasRecord(
+            identity,
+            item.canvasId,
+            remote.revision,
+            assetId
+          )
+        } catch (error) {
+          // The cloud holds nothing to remove: the original never reached this
+          // canvas there, or its copy has already gone. A retry cannot succeed,
+          // and the pending removal would keep the canvas from ever uploading.
+          if (canvasResponseStatus(error) !== 404) throw error
+          remote = null
+        }
       }
       assertGalleryIdentity(identity)
       await updateCanvasUserState(galleryOwner(identity), (current) => ({

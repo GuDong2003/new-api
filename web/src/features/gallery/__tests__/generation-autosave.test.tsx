@@ -18,8 +18,13 @@ import { Blob as NodeBlob } from 'node:buffer'
 import { webcrypto } from 'node:crypto'
 
 import { act, renderHook, waitFor } from '@testing-library/react'
+import {
+  AxiosError,
+  type AxiosResponse,
+  type InternalAxiosRequestConfig,
+} from 'axios'
 import { IDBFactory } from 'fake-indexeddb'
-import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { useImageGeneration } from '@/features/playground/drawing/hooks/use-image-generation'
 import { DEFAULT_IMAGE_SETTINGS } from '@/features/playground/drawing/lib/image-settings'
@@ -137,7 +142,7 @@ it('preserves generated originals in the shared local path while full without an
   expect(posts).toEqual([])
 })
 
-it('finishes URL generation before private original acquisition, and preserves generation success on storage failure', async () => {
+it('finishes URL generation before private original acquisition, and keeps saving the canvas while storage fails', async () => {
   await createCanvasProject(identity, 'drawing')
   await startCanvasEditor(identity, 'drawing')
   const post = vi.spyOn(api, 'post').mockResolvedValue({
@@ -161,8 +166,131 @@ it('finishes URL generation before private original acquisition, and preserves g
   )
   post.mockRestore()
   await flushLocalEditors(identity)
-  expect(getCanvasEditorState('drawing')?.localStatus).toBe('error')
+  expect(getCanvasEditorState('drawing')).toMatchObject({
+    localStatus: 'saved',
+    pendingOriginals: 1,
+  })
   expect(useDrawingStore.getState().nodes[0].data.status).toBe('complete')
+})
+
+describe('a returned link this browser cannot display', () => {
+  const link = 'https://chatgpt.com/backend-api/estuary/content?id=file_1'
+  let originals: string[]
+  beforeEach(async () => {
+    vi.stubGlobal(
+      'Image',
+      class extends EventTarget {
+        naturalWidth = 3
+        naturalHeight = 2
+        set src(value: string) {
+          const type = value.startsWith('data:') ? 'load' : 'error'
+          queueMicrotask(() => this.dispatchEvent(new Event(type)))
+        }
+      }
+    )
+    originals = []
+    vi.spyOn(api, 'post').mockResolvedValue({
+      headers: { 'content-type': 'application/json' },
+      data: new Response(JSON.stringify({ data: [{ url: link }] })).body,
+    })
+    await createCanvasProject(identity, 'drawing')
+    await startCanvasEditor(identity, 'drawing')
+  })
+  const answerOriginals = (
+    answer: (config: InternalAxiosRequestConfig) => AxiosResponse
+  ) => {
+    api.defaults.adapter = async (config) => {
+      if (config.url !== '/api/gallery/original') {
+        return response(config, usage)
+      }
+      originals.push(JSON.parse(config.data).url)
+      return answer(config)
+    }
+  }
+  const generate = () => {
+    const hook = renderHook(useImageGeneration)
+    act(() => {
+      hook.result.current.generate(
+        { ...DEFAULT_IMAGE_SETTINGS, model: 'gpt-image-1', prompt: 'A forest' },
+        { x: 0, y: 0 }
+      )
+    })
+  }
+  const settled = () =>
+    waitFor(() =>
+      expect(useDrawingStore.getState().nodes[0].data.status).not.toBe(
+        'pending'
+      )
+    )
+
+  it('fails the image when the server finds no picture behind it either, and the canvas keeps saving', async () => {
+    answerOriginals((config) => {
+      throw new AxiosError(
+        'invalid',
+        '',
+        config,
+        {},
+        { ...response(config, {}), status: 400 }
+      )
+    })
+
+    generate()
+    await settled()
+
+    expect(useDrawingStore.getState().nodes[0].data).toMatchObject({
+      status: 'error',
+      error: 'The returned image could not be downloaded.',
+    })
+    expect(useDrawingStore.getState().nodes[0].data.asset).toBeUndefined()
+    await flushLocalEditors(identity)
+    expect(getCanvasEditorState('drawing')?.localStatus).toBe('saved')
+  })
+
+  it('keeps the original the server downloads, in the type the server found', async () => {
+    answerOriginals((config) => ({
+      ...response(config, {}),
+      data: new Blob([new Uint8Array([0xff, 0xd8, 0xff, 0xd9])], {
+        type: 'image/jpeg',
+      }),
+    }))
+
+    generate()
+    await settled()
+
+    expect(useDrawingStore.getState().nodes[0].data).toMatchObject({
+      status: 'complete',
+      asset: {
+        src: 'data:image/jpeg;base64,/9j/2Q==',
+        mimeType: 'image/jpeg',
+        width: 3,
+        height: 2,
+      },
+    })
+    await flushLocalEditors(identity)
+    expect(getCanvasEditorState('drawing')?.localStatus).toBe('saved')
+    // Saving keeps the bytes already downloaded rather than asking again.
+    expect(originals).toEqual([link])
+  })
+
+  it('keeps the link while the server cannot be asked', async () => {
+    answerOriginals((config) => {
+      throw new AxiosError(
+        'unavailable',
+        '',
+        config,
+        {},
+        { ...response(config, {}), status: 503 }
+      )
+    })
+
+    generate()
+    await settled()
+
+    expect(useDrawingStore.getState().nodes[0].data).toMatchObject({
+      status: 'complete',
+      asset: { src: link },
+    })
+  })
 })
 
 it('keeps an in-flight generation alive when the current canvas is reopened', async () => {
@@ -407,10 +535,9 @@ it('acquires remote originals through the captured private transport, with no cl
     await preserveCanvasOriginalSource(
       identity,
       'https://images.example/final.png',
-      'image/png',
       new AbortController().signal
     )
-  ).toBe(`data:image/png;base64,${png}`)
+  ).toEqual({ src: `data:image/png;base64,${png}`, mimeType: 'image/png' })
   expect(urls).toEqual(['/api/gallery/original'])
 })
 

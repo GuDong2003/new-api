@@ -229,6 +229,7 @@ export function CanvasEditorHeader(props: {
               cloudStatus={canvas.cloudStatus}
               statusText={canvas.statusText}
               error={canvas.localError}
+              pendingOriginals={canvas.pendingOriginals}
               className='truncate'
             />
           </div>

@@ -203,22 +203,27 @@ describe('canvas originals and browser persistence', () => {
     await expect(encodeCanvas('drawing', drawing())).rejects.toThrow(/role/i)
   })
 
-  it('does not save a URL placeholder when the captured original reader fails', async () => {
+  it('keeps the link, never a stand-in original, when the captured original reader fails', async () => {
     const document = drawing()
     document.nodes[0].data.asset = {
       ...asset,
       src: 'https://example.test/original.png',
     }
     document.nodes[1].data.asset = document.nodes[0].data.asset
-    await expect(
-      encodeCanvas('drawing', document, {
-        roles: { [originalId]: { role: 'generated', nodeId: 'source' } },
-        readOriginal: async () => {
-          throw new Error('original unavailable')
-        },
-      })
-    ).rejects.toThrow('original unavailable')
-    expect(await listLocalCanvases(41)).toEqual([])
+
+    const encoded = await encodeCanvas('drawing', document, {
+      roles: { [originalId]: { role: 'generated', nodeId: 'source' } },
+      readOriginal: async () => {
+        throw new Error('original unavailable')
+      },
+    })
+
+    const original = encoded.assets.find((item) => item.id === originalId)
+    expect(original).toMatchObject({
+      sha256: '',
+      remoteSource: 'https://example.test/original.png',
+    })
+    expect(original?.blob.size).toBe(0)
   })
 
   it('rejects failed transactions and preserves the previous complete local revision', async () => {

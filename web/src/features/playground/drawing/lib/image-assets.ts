@@ -48,16 +48,25 @@ export function isReadableImageSource(source: string): boolean {
   return source.startsWith('blob:') || isSafeImageSource(source)
 }
 
+/**
+ * `readOriginal` is asked for a remote picture this browser cannot display. It
+ * answers the original as a portable source, nothing when that cannot be read
+ * right now, or rejects when the link holds no picture that can be kept.
+ */
 export async function imageSourceToAsset(
   source: string,
   name: string,
   mimeType: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  readOriginal?: (
+    source: string
+  ) => Promise<{ src: string; mimeType: string } | null>
 ): Promise<ImageAsset> {
   if (!isSafeImageSource(source)) {
     throw new Error('The image response is invalid.')
   }
   signal?.throwIfAborted()
+  let shown = true
   const dimensions = await new Promise<{ width: number; height: number }>(
     (resolve, reject) => {
       const image = new Image()
@@ -80,8 +89,10 @@ export async function imageSourceToAsset(
           signal?.removeEventListener('abort', cancel)
           if (/^https?:\/\//i.test(source)) {
             // A remote result may be valid while the browser cannot probe it
-            // because of CDN hotlink/CORS policy. Keep the result usable and
-            // let the image element or download path perform the real read.
+            // because of CDN hotlink/CORS policy. The original the server
+            // downloads stands in for it; while the server cannot be asked,
+            // keep the link and let a later read perform the real one.
+            shown = false
             resolve({ width: 1024, height: 1024 })
           } else {
             reject(new Error('The image could not be loaded.'))
@@ -92,6 +103,10 @@ export async function imageSourceToAsset(
       image.src = source
     }
   )
+  const original = shown ? null : await readOriginal?.(source)
+  if (original) {
+    return imageSourceToAsset(original.src, name, original.mimeType, signal)
+  }
   return {
     id: crypto.randomUUID(),
     name: name.slice(0, 512),

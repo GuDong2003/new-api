@@ -33,9 +33,23 @@ export async function persistCanvasGenerationResult(options: {
   revisedPrompts?: readonly (string | undefined)[]
   usage?: Record<string, unknown>
 }): Promise<boolean> {
-  return enqueueCanvasMutation(options.identity, options.canvasId, () =>
-    persistCanvasGenerationResultUnsafe(options)
-  )
+  return enqueueCanvasMutation(options.identity, options.canvasId, async () => {
+    // Another tab can save this canvas meanwhile; start again from what it
+    // stored rather than drop the result.
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await persistCanvasGenerationResultUnsafe(options)
+      } catch (error) {
+        if (
+          attempt === 2 ||
+          !(error instanceof Error) ||
+          error.message !== 'Stale canvas revision.'
+        ) {
+          throw error
+        }
+      }
+    }
+  })
 }
 
 async function persistCanvasGenerationResultUnsafe(options: {

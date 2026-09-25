@@ -30,6 +30,7 @@ import userEvent from '@testing-library/user-event'
 import { ReactFlowProvider } from '@xyflow/react'
 import {
   AxiosError,
+  type AxiosAdapter,
   type AxiosResponse,
   type InternalAxiosRequestConfig,
 } from 'axios'
@@ -50,7 +51,11 @@ import {
 import { CanvasSaveStatus } from '../components/canvas-save-status'
 import { Gallery } from '../index'
 import { deleteCanvasResource } from '../lib/canvas-deletion'
-import { flushLocalEditors, stopCanvasEditors } from '../lib/canvas-editor'
+import {
+  flushLocalEditors,
+  getCanvasEditorState,
+  stopCanvasEditors,
+} from '../lib/canvas-editor'
 import {
   createCanvasProject,
   exportCanvasProject,
@@ -373,6 +378,34 @@ it('opens a remote canvas from thumbnails and reads originals only when exportin
 
   await exportCanvasProject(identity, 'drawing')
   expect(fileParams).toEqual([{ thumbnail: true }, undefined])
+})
+
+it('keeps saving a canvas opened from thumbnails after the gallery lost an original', async () => {
+  await startCanvasEditor(identity, 'drawing')
+  serveRemoteDrawingCanvas(
+    remoteDrawingCanvas(useDrawingStore.getState().settings)
+  )
+  await openCanvasProject(identity, canvasId, undefined, 'drawing')
+  const served = api.defaults.adapter as AxiosAdapter
+  api.defaults.adapter = async (config) => {
+    if (!config.url?.endsWith('/file')) return served(config)
+    throw new AxiosError(
+      'gone',
+      '',
+      config,
+      {},
+      { ...response(config, {}), status: 404 }
+    )
+  }
+
+  useDrawingStore.getState().updateSettings({ prompt: '继续编辑' })
+  await flushLocalEditors(identity)
+
+  expect(getCanvasEditorState('drawing')?.localStatus).toBe('saved')
+  expect(
+    (await loadLocalCanvas(813, canvasId))?.document.settings
+  ).toMatchObject({ prompt: '继续编辑' })
+  expect((await readCanvasAssets(813, canvasId))[0]?.previewOnly).toBe(true)
 })
 
 // Base64 is only worth its cost when the document has to outlive the tab, as an
@@ -1241,6 +1274,19 @@ describe('canvas project save status', () => {
       screen.queryByText('已保存到本地，云端空间不足，暂未上传。')
     ).not.toBeInTheDocument()
     expect(screen.getByText('Canvas not saved')).toBeVisible()
+  })
+  it('says the cloud copy waits while images are kept only as links', () => {
+    render(
+      <CanvasSaveStatus
+        localStatus='saved'
+        cloudStatus='pending'
+        pendingOriginals={2}
+      />
+    )
+
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'Saved in this browser. The cloud copy waits for 2 image originals.'
+    )
   })
   // Nothing to say is not the same as an empty thing to look at: a canvas that
   // has not settled yet left a blank status element sitting in the toolbar.

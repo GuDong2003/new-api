@@ -131,6 +131,11 @@ export type CanvasBinary = {
   sha256: string
   /** The blob is a preview and must be replaced by the original before upload. */
   previewOnly?: boolean
+  /**
+   * The original could not be downloaded yet and is kept as this link, with an
+   * empty blob. A later save downloads it; nothing is uploaded before that.
+   */
+  remoteSource?: string
 }
 export type LocalCanvas = {
   id: string

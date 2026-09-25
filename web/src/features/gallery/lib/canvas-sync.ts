@@ -28,7 +28,7 @@ import type {
   LocalCanvas,
   GalleryUsage,
 } from '../types'
-import { canvasDocumentAssetIds } from './canvas-document'
+import { canvasDocumentAssetIds, documentKey } from './canvas-document'
 import {
   canvasEditors,
   emitCanvasEvent,
@@ -101,17 +101,6 @@ useAuthStore.subscribe((state, previous) => {
 })
 export function canvasResponseStatus(error: unknown) {
   return axios.isAxiosError(error) ? error.response?.status : undefined
-}
-function documentKey(document: unknown): string {
-  return JSON.stringify(document, (_key, value) =>
-    value && typeof value === 'object' && !Array.isArray(value)
-      ? Object.fromEntries(
-          Object.keys(value)
-            .sort()
-            .map((key) => [key, value[key]])
-        )
-      : value
-  )
 }
 async function cloudStatus(
   identity: GalleryIdentity,
@@ -301,6 +290,9 @@ async function upload(
     if (assets.length !== ids.size) {
       throw new Error('Canvas original is unavailable.')
     }
+    // The cloud needs the bytes; a canvas still holding an original only as a
+    // link uploads once a local save has downloaded it.
+    if (assets.some((asset) => asset.remoteSource)) return
     const newAssets = assets.filter(
       (asset) =>
         !remote?.assets.some(

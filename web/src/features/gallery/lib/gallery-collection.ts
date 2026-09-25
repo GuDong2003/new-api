@@ -44,6 +44,7 @@ export function localGalleryImages(
     if (
       !asset ||
       !binary ||
+      binary.remoteSource ||
       node.data.status !== 'complete' ||
       canvas.removedAssetIds.includes(asset.id)
     ) {

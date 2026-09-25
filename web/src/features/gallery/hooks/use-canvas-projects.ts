@@ -149,6 +149,7 @@ export function useCanvasProjects(kind: CanvasKind) {
     current,
     localStatus: state?.localStatus ?? 'loading',
     localError: state?.error,
+    pendingOriginals: state?.pendingOriginals ?? 0,
     cloudStatus: userState?.cloudPause ? 'full' : (current?.status ?? 'local'),
     statusText:
       userState?.cloudPause &&

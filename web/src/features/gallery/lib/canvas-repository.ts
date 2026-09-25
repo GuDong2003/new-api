@@ -142,6 +142,19 @@ async function persistCanvas(
   // Materialize all bytes before opening the transaction (never await I/O in it).
   const binaries = await Promise.all(
     assets.map(async (asset) => {
+      if (asset.remoteSource) {
+        if (!/^https?:\/\//i.test(asset.remoteSource)) {
+          throw new Error('Invalid canvas original link.')
+        }
+        return {
+          id: asset.id,
+          blob: new Blob([], { type: asset.blob.type }),
+          role: asset.role,
+          nodeId: asset.nodeId,
+          sha256: '',
+          remoteSource: asset.remoteSource,
+        } satisfies CanvasBinary
+      }
       const bytes = await asset.blob.arrayBuffer()
       if (asset.previewOnly) {
         if (!bytes.byteLength) {
@@ -229,11 +242,20 @@ async function persistCanvas(
     }
     for (const binary of binaries) {
       const previous = stored.find((asset) => asset.id === binary.id)
-      if (previous && previous.sha256 !== binary.sha256) {
+      if (
+        previous &&
+        !previous.remoteSource &&
+        !binary.remoteSource &&
+        previous.sha256 !== binary.sha256
+      ) {
         throw new Error('Canvas original is immutable.')
       }
+      // A kept original never gives way to its preview or to a bare link, and
+      // both give way to the original once it arrives.
       const nextBinary =
-        previous && !(previous.previewOnly && !binary.previewOnly)
+        previous &&
+        !previous.remoteSource &&
+        (!previous.previewOnly || binary.previewOnly || binary.remoteSource)
           ? previous
           : binary
       tx.objectStore('assets').put(nextBinary, [
@@ -389,6 +411,19 @@ export async function readCanvasAssets(
   return transact('readonly', async (tx) =>
     requestValue(tx.objectStore('assets').getAll(canvasAssetRange(userId, id)))
   )
+}
+
+/** Canonical IDs the cloud gave originals first saved under another ID. */
+export async function readCanvasAliases(
+  userId: number,
+  id: string
+): Promise<Record<string, string>> {
+  const aliases: Record<string, string> | undefined = await transact(
+    'readonly',
+    async (tx) =>
+      requestValue(tx.objectStore('canonicalAliases').get([userId, id]))
+  )
+  return aliases ?? {}
 }
 
 export async function removeLocalCanvasAsset(

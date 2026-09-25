@@ -23,6 +23,7 @@ import { toast } from 'sonner'
 import { getGalleryUsage } from '@/features/gallery/api'
 import { readCanvasNodeOriginal } from '@/features/gallery/hooks/use-canvas-node-image'
 import { persistCanvasGenerationResult } from '@/features/gallery/lib/canvas-generation'
+import { preserveCanvasOriginalSource } from '@/features/gallery/lib/canvas-original'
 import { useAuthStore } from '@/stores/auth-store'
 import { useDrawingStore } from '@/stores/drawing-store'
 
@@ -236,7 +237,13 @@ async function executeImageJob(
             image.src,
             `${input.settings.model}-${index + 1}`,
             image.mimeType,
-            decodeController.signal
+            decodeController.signal,
+            (source) =>
+              preserveCanvasOriginalSource(
+                { userId: input.userId, sessionId: input.sessionId },
+                source,
+                decodeController.signal
+              )
           )
           return asset
         })

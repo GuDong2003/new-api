@@ -30,6 +30,7 @@ export const STATIC_I18N_KEYS = [
   'Invalid canvas name.',
   'Canvas has been deleted.',
   'Canvas original is unavailable.',
+  'The returned image could not be downloaded.',
   'Canvas storage is unavailable.',
   'Infinite Canvas',
   'Gallery storage',

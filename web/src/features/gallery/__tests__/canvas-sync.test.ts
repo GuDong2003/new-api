@@ -17,9 +17,13 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 import { Blob as NodeBlob } from 'node:buffer'
 import { webcrypto } from 'node:crypto'
 
-import { AxiosError, type InternalAxiosRequestConfig } from 'axios'
+import {
+  AxiosError,
+  type AxiosAdapter,
+  type InternalAxiosRequestConfig,
+} from 'axios'
 import { IDBFactory, IDBObjectStore } from 'fake-indexeddb'
-import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { logout } from '@/features/auth/api'
 import * as legacyDrawing from '@/features/playground/drawing/lib/canvas-storage'
@@ -27,6 +31,7 @@ import { api } from '@/lib/api'
 import { useAuthStore } from '@/stores/auth-store'
 import { useDrawingStore } from '@/stores/drawing-store'
 
+import { deleteCanvasNodes } from '../components/canvas-node-deletion'
 import { deleteCanvasResource } from '../lib/canvas-deletion'
 import {
   flushLocalEditors,
@@ -46,6 +51,7 @@ import {
   saveLocalCanvas,
   readCanvasAssets,
   listLocalCanvases,
+  removeLocalCanvasAsset,
 } from '../lib/canvas-repository'
 import {
   syncCanvas,
@@ -401,6 +407,74 @@ it('replaces the cloud version with the local one as its successor', async () =>
   })
 })
 
+// The cloud lets an original go only through an explicit removal, so keeping the
+// local canvas has to remove the ones it no longer has; otherwise the server
+// refuses the replacement as one more conflict.
+it('replaces the cloud version even where the cloud holds an image this canvas no longer has', async () => {
+  const canvas = await createCanvasProject(identity, 'drawing')
+  await startCanvasEditor(identity, 'drawing')
+  addOriginal()
+  addOriginal(targetId)
+  await flushLocalEditors(identity)
+  await syncCanvas(identity, canvas.id, 'manual')
+  // Undo takes the second image off this canvas; the cloud still holds it.
+  useDrawingStore.getState().undo()
+  await flushLocalEditors(identity)
+  const cloud = api.defaults.adapter as AxiosAdapter
+  api.defaults.adapter = async (config) => {
+    const stored = required(remote)
+    if (config.method === 'delete') {
+      requests.push(config)
+      const assetId = decodeURIComponent(
+        required(required(config.url).split('/').at(-1))
+      )
+      remote = {
+        ...stored,
+        revision: stored.revision + 1,
+        assets: stored.assets.filter((asset) => asset.id !== assetId),
+        removed_asset_ids: [...stored.removed_asset_ids, assetId],
+      }
+      return response(config, remote)
+    }
+    if (config.method === 'post' && config.url === '/api/gallery/canvases') {
+      const sent = JSON.parse(
+        String((config.data as FormData).get('metadata'))
+      ) as CanvasSaveMetadata
+      const dropped = stored.assets.some(
+        (asset) =>
+          asset.role !== 'mask' &&
+          !sent.assets.some((item) => item.id === asset.id)
+      )
+      if (dropped) {
+        requests.push(config)
+        throw new AxiosError(
+          'conflict',
+          '',
+          config,
+          {},
+          {
+            ...response(config, {}),
+            status: 409,
+            data: {
+              success: false,
+              message: 'Canvas conflict.',
+              code: 'canvas_conflict',
+            },
+          }
+        )
+      }
+    }
+    return cloud(config)
+  }
+  await syncCanvas(identity, canvas.id, 'manual')
+  expect((await loadLocalCanvas(813, canvas.id))?.status).toBe('conflict')
+
+  await overwriteCanvasProject(identity, canvas.id)
+
+  expect((await loadLocalCanvas(813, canvas.id))?.status).toBe('synced')
+  expect(remote?.assets.map((asset) => asset.id)).toEqual([sourceId])
+})
+
 it('marks expiry without content revision changes or unchanged automatic reupload', async () => {
   const canvas = await createCanvasProject(identity, 'drawing')
   await syncCanvas(identity, canvas.id, 'manual')
@@ -522,6 +596,440 @@ it('deletes one shared original without discarding unrelated unsaved edits or al
   expect(
     (await loadLocalCanvas(813, canvas.id))?.document.settings
   ).toMatchObject({ prompt: '删除时仍在编辑' })
+})
+
+describe('an original this browser cannot download yet', () => {
+  const link = 'https://images.example/final.png'
+  // The type the server hands the original back in, or nothing while it cannot.
+  let original: string | null
+  beforeEach(() => {
+    vi.stubGlobal(
+      'URL',
+      class extends URL {
+        static createObjectURL = vi.fn(() => 'blob:stored-original')
+        static revokeObjectURL = vi.fn()
+      }
+    )
+    original = null
+    const cloud = api.defaults.adapter as AxiosAdapter
+    api.defaults.adapter = async (config) => {
+      if (config.url !== '/api/gallery/original') return cloud(config)
+      requests.push(config)
+      if (!original) {
+        throw new AxiosError(
+          'unavailable',
+          '',
+          config,
+          {},
+          { ...response(config, {}), status: 503 }
+        )
+      }
+      return {
+        ...response(config, {}),
+        data: new Blob([Uint8Array.from(atob(png), (c) => c.charCodeAt(0))], {
+          type: original,
+        }),
+      }
+    }
+  })
+  const addLinked = () => {
+    const state = useDrawingStore.getState()
+    state.addNodes([
+      {
+        id: 'linked',
+        type: 'image',
+        position: { x: 40, y: 12 },
+        data: {
+          asset: {
+            id: targetId,
+            name: 'final.png',
+            src: link,
+            width: 1,
+            height: 1,
+            mimeType: 'image/png',
+          },
+          settings: state.settings,
+          prompt: '',
+          status: 'complete',
+          createdAt: 2,
+        },
+      },
+    ])
+  }
+  const uploads = () =>
+    requests.filter(
+      (request) =>
+        request.method === 'post' && request.url === '/api/gallery/canvases'
+    )
+
+  it('saves everything else in this browser and keeps the image as its link', async () => {
+    await createCanvasProject(identity, 'drawing')
+    await startCanvasEditor(identity, 'drawing')
+    addOriginal()
+    addLinked()
+
+    await flushLocalEditors(identity)
+
+    expect(getCanvasEditorState('drawing')?.localStatus).toBe('saved')
+    stopCanvasEditors(identity)
+    await startCanvasEditor(identity, 'drawing')
+    expect(
+      useDrawingStore
+        .getState()
+        .nodes.map((node) => [node.id, node.data.asset?.src])
+    ).toEqual([
+      [`node-${sourceId}`, 'blob:stored-original'],
+      ['linked', link],
+    ])
+  })
+
+  it('keeps the cloud copy waiting for the original, and uploads once it arrives', async () => {
+    const canvas = await createCanvasProject(identity, 'drawing')
+    await startCanvasEditor(identity, 'drawing')
+    addOriginal()
+    addLinked()
+    await flushLocalEditors(identity)
+    await syncCanvas(identity, canvas.id, 'manual')
+    expect(uploads()).toEqual([])
+    expect(getCanvasEditorState('drawing')?.pendingOriginals).toBe(1)
+
+    original = 'image/png'
+    await flushLocalEditors(identity)
+    await syncCanvas(identity, canvas.id, 'manual')
+
+    expect(getCanvasEditorState('drawing')?.pendingOriginals).toBe(0)
+    expect(uploads()).toHaveLength(1)
+    expect(remote?.assets.map((asset) => asset.id).sort()).toEqual(
+      [sourceId, targetId].sort()
+    )
+  })
+
+  it('keeps saving an original that arrives in another type than its link said', async () => {
+    const canvas = await createCanvasProject(identity, 'drawing')
+    await startCanvasEditor(identity, 'drawing')
+    original = 'image/jpeg'
+    addLinked()
+    await flushLocalEditors(identity)
+    expect(getCanvasEditorState('drawing')?.localStatus).toBe('saved')
+
+    useDrawingStore.getState().updateSettings({ prompt: '再改一次' })
+    await flushLocalEditors(identity)
+
+    expect(getCanvasEditorState('drawing')?.localStatus).toBe('saved')
+    expect((await readCanvasAssets(813, canvas.id))[0].blob.type).toBe(
+      'image/jpeg'
+    )
+  })
+})
+
+describe('a canvas another tab saves too', () => {
+  type StoredNode = { id: string; data: Record<string, unknown> } & Record<
+    string,
+    unknown
+  >
+  beforeEach(() => {
+    vi.stubGlobal(
+      'URL',
+      class extends URL {
+        static createObjectURL = vi.fn(() => 'blob:stored-original')
+        static revokeObjectURL = vi.fn()
+      }
+    )
+  })
+  // Another tab's save reaches this browser's storage and nothing else here.
+  const saveElsewhere = async (
+    id: string,
+    change: (nodes: StoredNode[]) => StoredNode[],
+    binaries: Awaited<ReturnType<typeof readCanvasAssets>> = []
+  ) => {
+    const stored = required(await loadLocalCanvas(813, id))
+    await saveLocalCanvas(
+      {
+        ...stored,
+        document: {
+          ...stored.document,
+          nodes: change(stored.document.nodes as StoredNode[]),
+        },
+      },
+      binaries
+    )
+  }
+  const addElsewhere = async (id: string, nodeId: string, assetId: string) => {
+    const [binary] = await readCanvasAssets(813, id)
+    await saveElsewhere(
+      id,
+      (nodes) => [
+        ...nodes,
+        {
+          ...nodes[0],
+          id: nodeId,
+          position: { x: 90, y: 12 },
+          data: {
+            ...nodes[0].data,
+            asset: { ...(nodes[0].data.asset as object), id: assetId },
+          },
+        },
+      ],
+      [{ ...binary, id: assetId, role: 'reference', nodeId }]
+    )
+  }
+  const storedIds = async (id: string) =>
+    (
+      required(await loadLocalCanvas(813, id)).document.nodes as StoredNode[]
+    ).map((node) => node.id)
+  const shownIds = () => useDrawingStore.getState().nodes.map((node) => node.id)
+
+  it('keeps a reference another tab added when this tab saves its own edit', async () => {
+    const canvas = await createCanvasProject(identity, 'drawing')
+    await startCanvasEditor(identity, 'drawing')
+    addOriginal()
+    await flushLocalEditors(identity)
+    await addElsewhere(canvas.id, 'reference-there', targetId)
+
+    useDrawingStore.getState().updateSettings({ prompt: '这边的修改' })
+    await flushLocalEditors(identity)
+
+    expect(await storedIds(canvas.id)).toEqual([
+      `node-${sourceId}`,
+      'reference-there',
+    ])
+    expect(
+      required(await loadLocalCanvas(813, canvas.id)).document.settings
+    ).toMatchObject({ prompt: '这边的修改' })
+    expect(shownIds()).toEqual([`node-${sourceId}`, 'reference-there'])
+  })
+
+  it('lets an image another tab deleted stay deleted', async () => {
+    const canvas = await createCanvasProject(identity, 'drawing')
+    await startCanvasEditor(identity, 'drawing')
+    addOriginal()
+    addOriginal(targetId)
+    await flushLocalEditors(identity)
+    await removeLocalCanvasAsset(813, canvas.id, targetId)
+
+    useDrawingStore.getState().updateSettings({ prompt: '这边的修改' })
+    await flushLocalEditors(identity)
+
+    expect(getCanvasEditorState('drawing')?.localStatus).toBe('saved')
+    expect(await storedIds(canvas.id)).toEqual([`node-${sourceId}`])
+    expect(shownIds()).toEqual([`node-${sourceId}`])
+  })
+
+  it('shows what another tab saved when this tab is back in focus', async () => {
+    const canvas = await createCanvasProject(identity, 'drawing')
+    await startCanvasEditor(identity, 'drawing')
+    addOriginal()
+    await flushLocalEditors(identity)
+    await addElsewhere(canvas.id, 'reference-there', targetId)
+
+    window.dispatchEvent(new Event('focus'))
+    await flushLocalEditors(identity)
+
+    expect(shownIds()).toEqual([`node-${sourceId}`, 'reference-there'])
+  })
+
+  it('takes the result another tab stored for an image still generating here', async () => {
+    const canvas = await createCanvasProject(identity, 'drawing')
+    await startCanvasEditor(identity, 'drawing')
+    addOriginal()
+    const state = useDrawingStore.getState()
+    state.addNodes([
+      {
+        id: 'generating',
+        type: 'image',
+        position: { x: 0, y: 40 },
+        data: {
+          settings: state.settings,
+          prompt: '',
+          status: 'pending',
+          createdAt: 3,
+          jobId: 'job-there',
+        },
+      },
+    ])
+    await flushLocalEditors(identity)
+    const [binary] = await readCanvasAssets(813, canvas.id)
+    await saveElsewhere(
+      canvas.id,
+      (nodes) =>
+        nodes.map((node) =>
+          node.id === 'generating'
+            ? {
+                ...node,
+                data: {
+                  ...node.data,
+                  status: 'complete',
+                  asset: {
+                    id: targetId,
+                    name: 'result.png',
+                    width: 1,
+                    height: 1,
+                    mimeType: 'image/png',
+                  },
+                },
+              }
+            : node
+        ),
+      [{ ...binary, id: targetId, role: 'generated', nodeId: 'generating' }]
+    )
+
+    useDrawingStore.getState().updateSettings({ prompt: '这边的修改' })
+    await flushLocalEditors(identity)
+
+    const generated = useDrawingStore
+      .getState()
+      .nodes.find((node) => node.id === 'generating')
+    expect(generated?.data).toMatchObject({
+      status: 'complete',
+      asset: { id: targetId },
+    })
+  })
+})
+
+it('keeps an image another node on the canvas still shows', async () => {
+  const canvas = await createCanvasProject(identity, 'drawing')
+  await startCanvasEditor(identity, 'drawing')
+  addOriginal()
+  const state = useDrawingStore.getState()
+  state.addNodes([
+    { ...state.nodes[0], id: 'same-picture', position: { x: 60, y: 12 } },
+  ])
+  await flushLocalEditors(identity)
+
+  await deleteCanvasNodes('drawing', ['same-picture'])
+  await flushLocalEditors(identity)
+
+  expect(useDrawingStore.getState().nodes.map((node) => node.id)).toEqual([
+    `node-${sourceId}`,
+  ])
+  expect(
+    (await readCanvasAssets(813, canvas.id)).map((asset) => asset.id)
+  ).toEqual([sourceId])
+  expect((await readCanvasUserState(813)).pendingAssetRemovals).toEqual([])
+})
+
+it('keeps saving after deleting the reference a masked edit was made from', async () => {
+  await createCanvasProject(identity, 'drawing')
+  await startCanvasEditor(identity, 'drawing')
+  addOriginal()
+  const state = useDrawingStore.getState()
+  const image = (id: string, name: string) => ({
+    id,
+    name,
+    src: `data:image/png;base64,${png}`,
+    width: 1,
+    height: 1,
+    mimeType: 'image/png',
+  })
+  state.addNodes([
+    {
+      id: 'masked-edit',
+      type: 'image',
+      position: { x: 40, y: 12 },
+      data: {
+        asset: image(targetId, 'edit.png'),
+        mask: image('33333333-3333-4333-8333-333333333333', 'mask.png'),
+        referenceIds: [`node-${sourceId}`],
+        settings: state.settings,
+        prompt: 'edit',
+        status: 'complete',
+        createdAt: 2,
+      },
+    },
+  ])
+  await flushLocalEditors(identity)
+  expect(getCanvasEditorState('drawing')?.localStatus).toBe('saved')
+
+  await deleteCanvasNodes('drawing', [`node-${sourceId}`])
+  useDrawingStore.getState().updateSettings({ prompt: '删掉参考图之后' })
+  await flushLocalEditors(identity)
+
+  expect(getCanvasEditorState('drawing')?.localStatus).toBe('saved')
+})
+
+it('deletes an image whose original is gone, which keeps the canvas from saving', async () => {
+  await createCanvasProject(identity, 'drawing')
+  await startCanvasEditor(identity, 'drawing')
+  const cloud = api.defaults.adapter as AxiosAdapter
+  api.defaults.adapter = async (config) => {
+    if (config.url !== '/api/gallery/original') return cloud(config)
+    throw new AxiosError(
+      'invalid',
+      '',
+      config,
+      {},
+      { ...response(config, {}), status: 400 }
+    )
+  }
+  addOriginal()
+  const state = useDrawingStore.getState()
+  state.addNodes([
+    {
+      id: 'unreadable',
+      type: 'image',
+      position: { x: 40, y: 12 },
+      data: {
+        // Shown from this tab's copy of an original another tab has deleted.
+        asset: {
+          id: targetId,
+          name: 'unreadable.png',
+          src: 'blob:deleted-elsewhere',
+          width: 1024,
+          height: 1024,
+          mimeType: 'image/png',
+        },
+        settings: state.settings,
+        prompt: '',
+        status: 'complete',
+        createdAt: 2,
+      },
+    },
+  ])
+  await flushLocalEditors(identity)
+  expect(getCanvasEditorState('drawing')?.localStatus).toBe('error')
+
+  await deleteCanvasNodes('drawing', ['unreadable'])
+
+  expect(useDrawingStore.getState().nodes.map((node) => node.id)).toEqual([
+    `node-${sourceId}`,
+  ])
+  await flushLocalEditors(identity)
+  expect(getCanvasEditorState('drawing')?.localStatus).toBe('saved')
+})
+
+it('clears the removal of an original the cloud canvas never held, so the canvas uploads again', async () => {
+  const canvas = await createCanvasProject(identity, 'drawing')
+  await startCanvasEditor(identity, 'drawing')
+  addOriginal()
+  await flushLocalEditors(identity)
+  await syncCanvas(identity, canvas.id, 'manual')
+  // Added after that upload, this original exists only in this browser.
+  addOriginal(targetId)
+  await flushLocalEditors(identity)
+  const cloud = api.defaults.adapter as AxiosAdapter
+  api.defaults.adapter = async (config) => {
+    if (config.method !== 'delete') return cloud(config)
+    requests.push(config)
+    throw new AxiosError(
+      'not found',
+      '',
+      config,
+      {},
+      { ...response(config, {}), status: 404 }
+    )
+  }
+
+  await deleteCanvasResource(identity, canvas.id, targetId)
+
+  // Deleting replays the removal itself.
+  await vi.waitFor(async () =>
+    expect((await readCanvasUserState(813)).pendingAssetRemovals).toEqual([])
+  )
+  await flushLocalEditors(identity)
+  const uploads = posts().length
+  await syncCanvas(identity, canvas.id, 'manual')
+  expect(posts()).toHaveLength(uploads + 1)
+  expect(remote?.assets.map((asset) => asset.id)).toEqual([sourceId])
 })
 
 it('applies canonical IDs to latest editor and undo snapshots without overwriting edits made during upload', async () => {

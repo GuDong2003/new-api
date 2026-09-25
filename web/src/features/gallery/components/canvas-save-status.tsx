@@ -25,6 +25,8 @@ type CanvasSaveStatusProps = {
   cloudStatus: string
   statusText?: string | null
   error?: string
+  /** Originals the canvas keeps only as links, which the cloud copy waits for. */
+  pendingOriginals?: number
   className?: string
 }
 
@@ -42,6 +44,11 @@ export function CanvasSaveStatus(props: CanvasSaveStatusProps) {
     else if (props.cloudStatus === 'conflict') {
       text = t(
         'Cloud conflict. Export your local canvas, replace the cloud version with it, or reload the cloud version.'
+      )
+    } else if (props.pendingOriginals) {
+      text = t(
+        'Saved in this browser. The cloud copy waits for {{count}} image originals.',
+        { count: props.pendingOriginals }
       )
     } else if (props.cloudStatus === 'error') {
       text = t('Saved locally. Cloud save failed; try again later.')

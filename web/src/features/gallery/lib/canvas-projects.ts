@@ -18,7 +18,7 @@ import { DEFAULT_IMAGE_SETTINGS } from '@/features/playground/drawing/lib/image-
 import type { DrawingDocument } from '@/features/playground/drawing/types'
 import { useDrawingStore } from '@/stores/drawing-store'
 
-import { getCanvasRecord } from '../api'
+import { deleteCanvasRecord, getCanvasRecord } from '../api'
 import type {
   CanvasKind,
   CanvasRecord,
@@ -26,6 +26,7 @@ import type {
   LocalCanvas,
 } from '../types'
 import {
+  canvasDocumentAssetIds,
   decodeCanvas,
   encodeCanvas,
   upgradeLegacyNaiCanvasDocument,
@@ -323,6 +324,7 @@ async function openCanvasProjectInternal(
     updateState(canvas.kind, {
       canvas,
       localStatus: getCanvasEditorState(canvas.kind)?.localStatus ?? 'saved',
+      pendingOriginals: getCanvasEditorState(canvas.kind)?.pendingOriginals,
     })
   }
   if (focusAssetId) {
@@ -496,10 +498,20 @@ export async function overwriteCanvasProject(
   identity: GalleryIdentity,
   id: string
 ): Promise<void> {
+  await flushLocalEditors(identity)
   const current = await loadLocalCanvas(galleryOwner(identity), id)
   if (!current || current.deleted) throw new Error('Canvas has been deleted.')
   // Deliberate conflict action only; callers confirm discarding the cloud version.
-  const remote = await getCanvasRecord(identity, id)
+  let remote = await getCanvasRecord(identity, id)
+  // The cloud lets an original go only through an explicit removal: a save that
+  // just leaves one out is refused as one more conflict. Masks may go either way.
+  const shown = new Set(canvasDocumentAssetIds(current.document))
+  const dropped = remote.assets.filter(
+    (asset) => asset.role !== 'mask' && !shown.has(asset.id)
+  )
+  for (const asset of dropped) {
+    remote = await deleteCanvasRecord(identity, id, remote.revision, asset.id)
+  }
   const adopted = await updateCanvasCloudState(
     galleryOwner(identity),
     id,
@@ -547,7 +559,11 @@ export async function renameCanvasProject(
     []
   )
   if (canvasEditors.get(canvas.kind)?.canvasId === id) {
-    updateState(canvas.kind, { canvas, localStatus: 'saved' })
+    updateState(canvas.kind, {
+      canvas,
+      localStatus: 'saved',
+      pendingOriginals: getCanvasEditorState(canvas.kind)?.pendingOriginals,
+    })
   } else notifyCanvasProjects()
 }
 const startingEditors = new Map<string, Promise<void>>()
