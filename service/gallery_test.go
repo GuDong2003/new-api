@@ -447,6 +447,26 @@ func TestTaskGalleryImageIsReusedWhenCanvasIsSaved(t *testing.T) {
 	}
 }
 
+func TestCanvasReferenceStaysApartFromTaskGalleryImage(t *testing.T) {
+	galleryFixture(t, sqlite.Open(filepath.Join(t.TempDir(), "gallery.db")))
+	original := galleryPNG(t)
+	taskImage, err := service.SaveTaskGalleryImageWithSource(context.Background(), 41, "task_canvas", "image-0", "drawing", "gpt-image-1", "fox", "image/png", bytes.NewReader(original))
+	require.NoError(t, err)
+	// The same picture uploaded again, as a reference image.
+	metadata := canvasSaveMetadata(t)
+	metadata["assets"].([]any)[0].(map[string]any)["role"] = "reference"
+
+	saved, err := saveCanvasMetadata(t, 41, metadata, []string{"file:" + canvasFixtureAsset, string(original)})
+	require.NoError(t, err)
+	assert.Empty(t, saved.AssetIDMap)
+	require.Len(t, saved.Assets, 1)
+	assert.Equal(t, canvasFixtureAsset, saved.Assets[0].ID)
+
+	var standalone model.GalleryImage
+	require.NoError(t, model.DB.Where("id = ?", taskImage.ID).First(&standalone).Error)
+	assert.Empty(t, standalone.CanvasID)
+}
+
 func TestCanvasDoesNotReuseApiTaskGalleryImage(t *testing.T) {
 	galleryFixture(t, sqlite.Open(filepath.Join(t.TempDir(), "gallery.db")))
 	original := galleryPNG(t)

@@ -107,7 +107,10 @@ func resolveGalleryCanvasAssets(ctx context.Context, root string, user int, canv
 		if err == nil && (asset.UserID != user || asset.State != "ready" || asset.ExpiresAt <= time.Now().Unix() || (asset.CanvasID != "" && asset.CanvasID != canvasID)) {
 			return nil, nil, gorm.ErrRecordNotFound
 		}
-		if errors.Is(err, gorm.ErrRecordNotFound) && requested.Role != "mask" {
+		// Only a generated picture takes over a gallery copy of itself. A
+		// reference is the owner's own upload; sharing that copy would let
+		// deleting it from the gallery take the reference off the canvas.
+		if errors.Is(err, gorm.ErrRecordNotFound) && requested.Role == "generated" {
 			// Legacy reuse is byte identity only, never prompt/name/time similarity.
 			var candidates []model.GalleryImage
 			if err = model.DB.WithContext(ctx).Where("user_id = ? AND source IN ? AND (canvas_id = ? OR canvas_id IS NULL) AND state = ? AND expires_at > ? AND bytes = ?", user, sources, "", "ready", time.Now().Unix(), requested.Bytes).Order("id ASC").Find(&candidates).Error; err != nil {
