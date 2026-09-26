@@ -38,6 +38,8 @@ import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 
 import {
+  SettingsControlChildren,
+  SettingsControlGroup,
   SettingsForm,
   SettingsSwitchContent,
   SettingsSwitchItem,
@@ -72,6 +74,8 @@ const createRateLimitSchema = (t: (key: string) => string) =>
     ModelRequestRateLimitDurationMinutes: z.number().min(0),
     ModelRequestRateLimitCount: z.number().min(0).max(100000000),
     ModelRequestRateLimitSuccessCount: z.number().min(1).max(100000000),
+    ModelRequestRateLimitGlobalCount: z.number().min(0).max(100000000),
+    ModelRequestRateLimitGlobalSuccessCount: z.number().min(0).max(100000000),
     ModelRequestRateLimitGroup: z
       .string()
       .optional()
@@ -103,6 +107,8 @@ export function RateLimitSection({ defaultValues }: RateLimitSectionProps) {
     form.reset(defaultValues)
   }, [defaultValues, form])
 
+  const siteLimitEnabled = form.watch('ModelRequestRateLimitEnabled')
+
   const onSubmit = async (values: RateLimitFormValues) => {
     const updates = Object.entries(values).filter(
       ([key, value]) =>
@@ -125,64 +131,50 @@ export function RateLimitSection({ defaultValues }: RateLimitSectionProps) {
           />
           <FormField
             control={form.control}
-            name='ModelRequestRateLimitEnabled'
+            name='ModelRequestRateLimitDurationMinutes'
             render={({ field }) => (
-              <SettingsSwitchItem>
-                <SettingsSwitchContent>
-                  <FormLabel>{t('Enable rate limiting')}</FormLabel>
-                  <FormDescription>
-                    {t(
-                      'This controls model request rate limiting. Web/API route throttling is configured by environment variables and may still return 429.'
-                    )}
-                  </FormDescription>
-                </SettingsSwitchContent>
+              <FormItem>
+                <FormLabel>{t('Limit period')}</FormLabel>
                 <FormControl>
-                  <Switch
-                    checked={field.value}
-                    onCheckedChange={field.onChange}
-                  />
+                  <div className='flex items-center gap-2'>
+                    <Input
+                      type='number'
+                      min={0}
+                      step={1}
+                      {...field}
+                      onChange={(e) =>
+                        field.onChange(Number.parseInt(e.target.value) || 0)
+                      }
+                    />
+                    <span className='text-muted-foreground text-sm'>
+                      {t('minutes')}
+                    </span>
+                  </div>
                 </FormControl>
-              </SettingsSwitchItem>
+                <FormDescription>
+                  {t('Every limit below counts requests over this period')}
+                </FormDescription>
+                <FormMessage />
+              </FormItem>
             )}
           />
 
-          <div className='grid gap-4 md:grid-cols-3'>
-            <FormField
-              control={form.control}
-              name='ModelRequestRateLimitDurationMinutes'
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>{t('Limit period')}</FormLabel>
-                  <FormControl>
-                    <div className='flex items-center gap-2'>
-                      <Input
-                        type='number'
-                        min={0}
-                        step={1}
-                        {...field}
-                        onChange={(e) =>
-                          field.onChange(Number.parseInt(e.target.value) || 0)
-                        }
-                      />
-                      <span className='text-muted-foreground text-sm'>
-                        {t('minutes')}
-                      </span>
-                    </div>
-                  </FormControl>
-                  <FormDescription>
-                    {t('Time window for rate limiting')}
-                  </FormDescription>
-                  <FormMessage />
-                </FormItem>
+          <div data-settings-form-span='full' className='space-y-1'>
+            <h4 className='text-sm font-medium'>{t('Per-user limits')}</h4>
+            <p className='text-muted-foreground text-xs'>
+              {t(
+                "Each user's own limit always applies: the one set for them, else their group's, else the default below. Active subscriptions can raise it."
               )}
-            />
+            </p>
+          </div>
 
+          <div className='grid gap-4 md:grid-cols-2'>
             <FormField
               control={form.control}
               name='ModelRequestRateLimitCount'
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>{t('Max requests per period')}</FormLabel>
+                  <FormLabel>{t('Default max requests per period')}</FormLabel>
                   <FormControl>
                     <div className='flex items-center gap-2'>
                       <Input
@@ -213,7 +205,7 @@ export function RateLimitSection({ defaultValues }: RateLimitSectionProps) {
               name='ModelRequestRateLimitSuccessCount'
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>{t('Max successful requests')}</FormLabel>
+                  <FormLabel>{t('Default max successful requests')}</FormLabel>
                   <FormControl>
                     <div className='flex items-center gap-2'>
                       <Input
@@ -306,7 +298,7 @@ export function RateLimitSection({ defaultValues }: RateLimitSectionProps) {
                         </li>
                         <li>
                           {t(
-                            'Group config overrides global limits, shares the same period'
+                            'A group limit replaces the default for users in that group; a limit set for a user replaces both'
                           )}
                         </li>
                       </ul>
@@ -317,6 +309,111 @@ export function RateLimitSection({ defaultValues }: RateLimitSectionProps) {
               </FormItem>
             )}
           />
+
+          <SettingsControlGroup>
+            <FormField
+              control={form.control}
+              name='ModelRequestRateLimitEnabled'
+              render={({ field }) => (
+                <SettingsSwitchItem>
+                  <SettingsSwitchContent>
+                    <FormLabel>{t('Enable site-wide limit')}</FormLabel>
+                    <FormDescription>
+                      {t(
+                        "When on, all users' requests together must also stay within the caps below. Each user's own limit applies either way."
+                      )}
+                    </FormDescription>
+                  </SettingsSwitchContent>
+                  <FormControl>
+                    <Switch
+                      checked={field.value}
+                      onCheckedChange={field.onChange}
+                    />
+                  </FormControl>
+                </SettingsSwitchItem>
+              )}
+            />
+            {siteLimitEnabled && (
+              <SettingsControlChildren>
+                <div className='grid gap-4 md:grid-cols-2'>
+                  <FormField
+                    control={form.control}
+                    name='ModelRequestRateLimitGlobalCount'
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>
+                          {t('Site-wide max requests per period')}
+                        </FormLabel>
+                        <FormControl>
+                          <div className='flex items-center gap-2'>
+                            <Input
+                              type='number'
+                              min={0}
+                              max={100000000}
+                              step={1}
+                              {...field}
+                              onChange={(e) =>
+                                field.onChange(
+                                  Number.parseInt(e.target.value) || 0
+                                )
+                              }
+                            />
+                            <span className='text-muted-foreground text-sm'>
+                              {t('times')}
+                            </span>
+                          </div>
+                        </FormControl>
+                        <FormDescription>
+                          {t('Including failed requests, 0 = unlimited')}
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name='ModelRequestRateLimitGlobalSuccessCount'
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>
+                          {t('Site-wide max successful requests')}
+                        </FormLabel>
+                        <FormControl>
+                          <div className='flex items-center gap-2'>
+                            <Input
+                              type='number'
+                              min={0}
+                              max={100000000}
+                              step={1}
+                              {...field}
+                              onChange={(e) =>
+                                field.onChange(
+                                  Number.parseInt(e.target.value) || 0
+                                )
+                              }
+                            />
+                            <span className='text-muted-foreground text-sm'>
+                              {t('times')}
+                            </span>
+                          </div>
+                        </FormControl>
+                        <FormDescription>
+                          {t('Only successful requests, 0 = unlimited')}
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+              </SettingsControlChildren>
+            )}
+          </SettingsControlGroup>
+
+          <p className='text-muted-foreground text-xs'>
+            {t(
+              'This controls model request rate limiting. Web/API route throttling is configured by environment variables and may still return 429.'
+            )}
+          </p>
         </SettingsForm>
       </Form>
     </SettingsSection>

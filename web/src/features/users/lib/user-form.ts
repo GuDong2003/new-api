@@ -24,6 +24,12 @@ import {
   normalizeAdminPermissions,
 } from '@/lib/admin-permissions'
 import { quotaUnitsToDollars } from '@/lib/format'
+import {
+  type RequestRateLimitCaps,
+  requestRateLimitCaps,
+  requestRateLimitFields,
+  requestRateLimitFieldsSchema,
+} from '@/lib/request-rate-limit'
 import { ROLE } from '@/lib/roles'
 
 import { DEFAULT_GROUP } from '../constants'
@@ -41,6 +47,7 @@ export const userFormSchema = z.object({
   quota_dollars: z.number().min(0).optional(),
   group: z.string().optional(),
   remark: z.string().optional(),
+  rate_limit: requestRateLimitFieldsSchema,
   admin_permissions: z
     .record(z.string(), z.record(z.string(), z.boolean()))
     .optional(),
@@ -60,6 +67,7 @@ export const USER_FORM_DEFAULT_VALUES: UserFormValues = {
   quota_dollars: 0,
   group: DEFAULT_GROUP,
   remark: '',
+  rate_limit: requestRateLimitFields(null),
   // Filled against the backend catalog at render time; see UsersMutateDrawer.
   admin_permissions: {},
 }
@@ -101,6 +109,7 @@ export function transformFormDataToPayload(
     // For update: quota is adjusted atomically via /api/user/manage, not sent here
     payload.group = data.group
     payload.remark = data.remark
+    payload.rate_limit = requestRateLimitCaps(data.rate_limit)
     payload.id = userId
   }
 
@@ -108,11 +117,33 @@ export function transformFormDataToPayload(
 }
 
 /**
+ * Reads the request limit an administrator set for the user alone from their
+ * settings JSON, if any.
+ */
+export function personalRequestRateLimit(
+  user: Pick<User, 'setting'>
+): RequestRateLimitCaps | null {
+  if (!user.setting) return null
+  try {
+    const setting = JSON.parse(user.setting) as {
+      rate_limit?: RequestRateLimitCaps
+    }
+    return setting.rate_limit ?? null
+  } catch {
+    return null
+  }
+}
+
+/**
  * Transform user data to form defaults. The admin permission matrix is passed
  * through as-is (the backend already returns a full matrix); it is filled against
- * the catalog at render time in UsersMutateDrawer.
+ * the catalog at render time in UsersMutateDrawer. Without a personal request
+ * limit its caps start from `currentLimit`, the limit the user is held to now.
  */
-export function transformUserToFormDefaults(user: User): UserFormValues {
+export function transformUserToFormDefaults(
+  user: User,
+  currentLimit?: RequestRateLimitCaps
+): UserFormValues {
   return {
     username: user.username,
     display_name: user.display_name,
@@ -121,6 +152,10 @@ export function transformUserToFormDefaults(user: User): UserFormValues {
     quota_dollars: quotaUnitsToDollars(user.quota),
     group: user.group || DEFAULT_GROUP,
     remark: user.remark || '',
+    rate_limit: requestRateLimitFields(
+      personalRequestRateLimit(user),
+      currentLimit ?? user.request_rate_limit
+    ),
     admin_permissions: user.admin_permissions ?? {},
   }
 }

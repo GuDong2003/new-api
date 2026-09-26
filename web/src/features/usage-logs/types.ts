@@ -321,6 +321,8 @@ export interface TaskLog {
   task_id: string
   action: string // MUSIC, LYRICS, GENERATE, TEXT_GENERATE, etc.
   channel_id: number
+  /** The channel's name; only administrators' task lists carry it. */
+  channel_name?: string
   group: string
   quota: number
   submit_time: number // seconds

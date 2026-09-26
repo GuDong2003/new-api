@@ -374,6 +374,19 @@ func UpdateOption(c *gin.Context) {
 			})
 			return
 		}
+	case "ModelRequestRateLimitGlobalCount", "ModelRequestRateLimitGlobalSuccessCount":
+		var limit int
+		limit, err = strconv.Atoi(option.Value.(string))
+		if err == nil {
+			err = setting.CheckGlobalRequestRateLimitCap(limit)
+		}
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": err.Error(),
+			})
+			return
+		}
 	case "AutomaticDisableStatusCodes":
 		_, err = operation_setting.ParseHTTPStatusCodeRanges(option.Value.(string))
 		if err != nil {

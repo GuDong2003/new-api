@@ -27,9 +27,12 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Combobox } from '@/components/ui/combobox'
 import { Separator } from '@/components/ui/separator'
+import { useRequestRateLimitMinutes } from '@/hooks/use-status'
 import { useSystemConfig } from '@/hooks/use-system-config'
+import { toIntlLocale } from '@/i18n/languages'
 import { formatQuota } from '@/lib/format'
 import { handleServerError } from '@/lib/handle-server-error'
+import { formatRequestRateLimit } from '@/lib/request-rate-limit'
 import { DEFAULT_CURRENCY_CONFIG } from '@/stores/system-config-store'
 
 import {
@@ -63,7 +66,9 @@ interface Props {
 }
 
 export function SubscriptionPurchaseDialog(props: Props) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
+  const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
+  const rateLimitMinutes = useRequestRateLimitMinutes()
   const { currency } = useSystemConfig()
   const [paying, setPaying] = useState(false)
   const [selectedEpayMethod, setSelectedEpayMethod] = useState('')
@@ -281,6 +286,24 @@ export function SubscriptionPurchaseDialog(props: Props) {
                 {t('Upgrade Group')}
               </span>
               <GroupBadge group={plan.upgrade_group} />
+            </div>
+          )}
+          {plan.rate_limit_success_count > 0 && (
+            <div className='flex items-center justify-between gap-3'>
+              <span className='text-muted-foreground shrink-0 text-sm'>
+                {t('Request Limit')}
+              </span>
+              <span className='text-right text-sm'>
+                {formatRequestRateLimit(
+                  {
+                    count: plan.rate_limit_count,
+                    success_count: plan.rate_limit_success_count,
+                  },
+                  rateLimitMinutes,
+                  t,
+                  locale
+                )}
+              </span>
             </div>
           )}
           <Separator />

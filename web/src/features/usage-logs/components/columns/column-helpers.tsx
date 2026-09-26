@@ -33,7 +33,9 @@ import { formatTimestampToDate, formatTokens } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
 import { formatDuration } from '../../lib/format'
+import { ChannelDetailsPopover } from '../channel-details-popover'
 import { FailReasonDialog } from '../dialogs/fail-reason-dialog'
+import { useUsageLogsContext } from '../usage-logs-provider'
 
 /**
  * Cache tooltip component for token display
@@ -166,6 +168,8 @@ export function createDurationColumn<T>(config: {
 export function createChannelColumn<T>(config: {
   accessorKey?: string
   headerLabel: string
+  /** Reads the channel's name, for logs that carry one. */
+  channelName?: (row: T) => string | undefined
 }): ColumnDef<T> {
   const { accessorKey = 'channel_id', headerLabel } = config
 
@@ -174,20 +178,30 @@ export function createChannelColumn<T>(config: {
     header: ({ column }) => (
       <DataTableColumnHeader column={column} title={headerLabel} />
     ),
-    cell: ({ row }) => {
+    cell: function ChannelCell({ row }) {
+      const { sensitiveVisible } = useUsageLogsContext()
       const channelId = row.getValue(accessorKey) as number
       if (!channelId) {
         return <span className='text-muted-foreground/60 text-xs'>-</span>
       }
+      const name = config.channelName?.(row.original)
+      const shownName = name && !sensitiveVisible ? '••••' : name
       return (
-        <StatusBadge
-          label={`#${channelId}`}
-          autoColor={String(channelId)}
-          copyText={String(channelId)}
-          size='sm'
-          showDot={false}
-          className='font-mono'
-        />
+        <ChannelDetailsPopover channelId={channelId} channelName={shownName}>
+          <StatusBadge
+            label={`#${channelId}`}
+            autoColor={String(channelId)}
+            copyable={false}
+            size='sm'
+            showDot={false}
+            className='w-fit font-mono'
+          />
+          {shownName && (
+            <span className='text-muted-foreground/70 truncate text-xs'>
+              {shownName}
+            </span>
+          )}
+        </ChannelDetailsPopover>
       )
     },
     meta: { label: headerLabel },

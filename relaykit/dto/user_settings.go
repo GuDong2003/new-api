@@ -16,6 +16,17 @@ type UserSetting struct {
 	SidebarModules                   string  `json:"sidebar_modules,omitempty"`                      // SidebarModules 左侧边栏模块配置
 	BillingPreference                string  `json:"billing_preference,omitempty"`                   // BillingPreference 扣费策略（订阅/钱包）
 	Language                         string  `json:"language,omitempty"`                             // Language 用户语言偏好 (zh, en)
+	// RateLimit is the request limit an administrator set for this user alone.
+	// It takes the place of the group's; nil follows the group.
+	RateLimit *UserRateLimit `json:"rate_limit,omitempty"`
+}
+
+// UserRateLimit caps one user's requests in each rate limit period: Count
+// counts every request, failures included, with 0 for no cap, and SuccessCount
+// counts successful ones.
+type UserRateLimit struct {
+	Count        int `json:"count"`
+	SuccessCount int `json:"success_count"`
 }
 
 var (

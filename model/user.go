@@ -228,19 +228,47 @@ func (user *User) SetSetting(setting dto.UserSetting) {
 	user.Setting = string(settingBytes)
 }
 
+// UpdateUserSetting saves the settings a user edits themselves. The request
+// limit an administrator set for them is kept as stored, whatever setting holds.
 func UpdateUserSetting(userId int, setting dto.UserSetting) error {
 	if userId == 0 {
 		return errors.New("id 为空！")
 	}
+	var settingValue string
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		var stored User
+		if err := lockForUpdate(tx).Select("id", "setting").Where("id = ?", userId).First(&stored).Error; err != nil {
+			return err
+		}
+		setting.RateLimit = stored.GetSetting().RateLimit
+		settingBytes, err := common.Marshal(setting)
+		if err != nil {
+			return err
+		}
+		settingValue = string(settingBytes)
+		return tx.Model(&User{}).Where("id = ?", userId).Update("setting", settingValue).Error
+	})
+	if err != nil {
+		return err
+	}
+	return updateUserSettingCache(userId, settingValue)
+}
+
+// SetUserRateLimitTx sets the request limit an administrator holds one user
+// to, leaving the user's other settings as stored. A nil limit returns the user
+// to their group's. The caller refreshes the user cache after committing.
+func SetUserRateLimitTx(tx *gorm.DB, userId int, limit *dto.UserRateLimit) error {
+	var stored User
+	if err := lockForUpdate(tx).Select("id", "setting").Where("id = ?", userId).First(&stored).Error; err != nil {
+		return err
+	}
+	setting := stored.GetSetting()
+	setting.RateLimit = limit
 	settingBytes, err := common.Marshal(setting)
 	if err != nil {
 		return err
 	}
-	settingValue := string(settingBytes)
-	if err = DB.Model(&User{}).Where("id = ?", userId).Update("setting", settingValue).Error; err != nil {
-		return err
-	}
-	return updateUserSettingCache(userId, settingValue)
+	return tx.Model(&User{}).Where("id = ?", userId).Update("setting", string(settingBytes)).Error
 }
 
 // userBindColumns 允许通过 UpdateUserBindColumn 更新的第三方账号绑定列白名单。

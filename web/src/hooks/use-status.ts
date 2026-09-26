@@ -45,3 +45,10 @@ export function useStatus() {
     error,
   }
 }
+
+/** The minutes every request limit counts over, as `/api/status` reports. */
+export function useRequestRateLimitMinutes(): number | undefined {
+  const { status } = useStatus()
+  const minutes = status?.request_rate_limit_duration_minutes
+  return typeof minutes === 'number' && minutes > 0 ? minutes : undefined
+}

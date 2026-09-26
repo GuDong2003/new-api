@@ -127,6 +127,8 @@ func GetStatus(c *gin.Context) {
 		"user_agreement_enabled":      legalSetting.UserAgreement != "",
 		"privacy_policy_enabled":      legalSetting.PrivacyPolicy != "",
 		"checkin_enabled":             operation_setting.GetCheckinSetting().Enabled,
+		// The period every request limit counts over, for plans that raise one.
+		"request_rate_limit_duration_minutes": setting.ModelRequestRateLimitDurationMinutes,
 	}
 
 	// 根据启用状态注入可选内容

@@ -553,6 +553,20 @@ func tasksToDto(tasks []*model.Task, fillUser bool, viewerRole int) []*dto.TaskD
 			}
 		}
 	}
+	var channelNames map[int]string
+	if viewerRole >= common.RoleAdminUser {
+		channelIDs := types.NewSet[int]()
+		for _, task := range tasks {
+			if task.ChannelId != 0 {
+				channelIDs.Add(task.ChannelId)
+			}
+		}
+		names, err := model.ChannelNamesByIds(channelIDs.Items())
+		if err != nil {
+			common.SysError("failed to read the channel names of listed tasks: " + err.Error())
+		}
+		channelNames = names
+	}
 	result := make([]*dto.TaskDto, len(tasks))
 	for i, task := range tasks {
 		if fillUser {
@@ -576,6 +590,7 @@ func tasksToDto(tasks []*model.Task, fillUser bool, viewerRole int) []*dto.TaskD
 			}
 		}
 		if viewerRole >= common.RoleAdminUser {
+			item.ChannelName = channelNames[task.ChannelId]
 			adminInfo := &dto.TaskAdminInfo{}
 			if execution := task.PrivateData.Execution; execution != nil {
 				adminInfo.RequestID = execution.RequestID

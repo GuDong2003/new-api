@@ -146,24 +146,9 @@ func fillFlowChannelNames(rows []*FlowQuotaData) error {
 		return nil
 	}
 
-	channelNameByID := make(map[int]string, len(channelIDs))
-	if common.MemoryCacheEnabled {
-		for _, channelID := range channelIDs {
-			if channel, err := CacheGetChannel(channelID); err == nil {
-				channelNameByID[channelID] = channel.Name
-			}
-		}
-	} else {
-		var channels []struct {
-			Id   int    `gorm:"column:id"`
-			Name string `gorm:"column:name"`
-		}
-		if err := DB.Table("channels").Select("id, name").Where("id IN ?", channelIDs).Find(&channels).Error; err != nil {
-			return err
-		}
-		for _, channel := range channels {
-			channelNameByID[channel.Id] = channel.Name
-		}
+	channelNameByID, err := ChannelNamesByIds(channelIDs)
+	if err != nil {
+		return err
 	}
 	for _, row := range rows {
 		if name := channelNameByID[row.ChannelID]; name != "" {

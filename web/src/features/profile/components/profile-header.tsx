@@ -16,9 +16,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Activity, BarChart3, WalletCards } from 'lucide-react'
+import { Activity, BarChart3, Gauge, WalletCards } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
+import { RequestRateLimitSummary } from '@/components/request-rate-limit-summary'
 import { StatusBadge } from '@/components/status-badge'
 import { Card, CardContent } from '@/components/ui/card'
 import { IconBadge, type IconBadgeTone } from '@/components/ui/icon-badge'
@@ -182,6 +183,17 @@ export function ProfileHeader(props: ProfileHeaderProps) {
           ))}
         </div>
       </div>
+      {profile.request_rate_limit && (
+        <div className='flex items-center gap-3 border-t px-3 py-3 sm:px-5'>
+          <IconBadge tone='warning' size='stat'>
+            <Gauge />
+          </IconBadge>
+          <div className='text-muted-foreground shrink-0 text-xs font-medium tracking-wider uppercase'>
+            {t('Request Limit')}
+          </div>
+          <RequestRateLimitSummary limit={profile.request_rate_limit} />
+        </div>
+      )}
     </Card>
   )
 }

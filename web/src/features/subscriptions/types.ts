@@ -41,6 +41,9 @@ export const subscriptionPlanSchema = z.object({
   total_amount: z.number(),
   upgrade_group: z.string().optional(),
   downgrade_group: z.string().optional(),
+  /** The request limit subscribers are raised to; a success cap of 0 raises nothing. */
+  rate_limit_count: z.number().optional().default(0),
+  rate_limit_success_count: z.number().optional().default(0),
   stripe_price_id: z.string().optional(),
   creem_product_id: z.string().optional(),
   waffo_pancake_product_id: z.string().optional(),

@@ -16,6 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import type { UserRequestRateLimit } from '@/lib/request-rate-limit'
 import type { UserPermissions } from '@/stores/auth-store'
 
 // ============================================================================
@@ -57,6 +58,8 @@ export interface UserProfile {
   used_quota: number
   /** Total request count */
   request_count: number
+  /** The request limit the user is held to in each rate limit period */
+  request_rate_limit?: UserRequestRateLimit
   /** Account status (1=启用, 2=禁用, 3=待审核, 4=已删除) */
   status: number
   /** Access token (system token) */

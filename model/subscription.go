@@ -10,6 +10,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/pkg/cachex"
+	"github.com/QuantumNous/new-api/setting"
 	"github.com/samber/hot"
 	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
@@ -39,9 +40,15 @@ var (
 )
 
 const (
-	subscriptionPlanCacheNamespace     = "new-api:subscription_plan:v1"
-	subscriptionPlanInfoCacheNamespace = "new-api:subscription_plan_info:v1"
+	subscriptionPlanCacheNamespace      = "new-api:subscription_plan:v1"
+	subscriptionPlanInfoCacheNamespace  = "new-api:subscription_plan_info:v1"
+	subscriptionRateLimitCacheNamespace = "new-api:subscription_rate_limit:v1"
 )
+
+// subscriptionRateLimitCacheTTL bounds how long the request limiter goes on
+// using what a user's subscriptions raise them to after one of them ends on its
+// own. Purchases and administrator changes clear the cached answer at once.
+const subscriptionRateLimitCacheTTL = time.Minute
 
 var (
 	subscriptionPlanCacheOnce     sync.Once
@@ -49,7 +56,17 @@ var (
 
 	subscriptionPlanCache     *cachex.HybridCache[SubscriptionPlan]
 	subscriptionPlanInfoCache *cachex.HybridCache[SubscriptionPlanInfo]
+
+	subscriptionRateLimitCacheOnce sync.Once
+	subscriptionRateLimitCache     *cachex.HybridCache[subscriptionRateLimitRaise]
 )
+
+// subscriptionRateLimitRaise is a cached answer to what a user's active
+// subscriptions raise their request limit to.
+type subscriptionRateLimitRaise struct {
+	Limit  setting.RequestRateLimit `json:"limit"`
+	Raised bool                     `json:"raised"`
+}
 
 func subscriptionPlanCacheTTL() time.Duration {
 	ttlSeconds := common.GetEnvOrDefault("SUBSCRIPTION_PLAN_CACHE_TTL", 300)
@@ -125,6 +142,37 @@ func getSubscriptionPlanInfoCache() *cachex.HybridCache[SubscriptionPlanInfo] {
 	return subscriptionPlanInfoCache
 }
 
+func getSubscriptionRateLimitCache() *cachex.HybridCache[subscriptionRateLimitRaise] {
+	subscriptionRateLimitCacheOnce.Do(func() {
+		subscriptionRateLimitCache = cachex.NewHybridCache[subscriptionRateLimitRaise](cachex.HybridCacheConfig[subscriptionRateLimitRaise]{
+			Namespace: cachex.Namespace(subscriptionRateLimitCacheNamespace),
+			Redis:     common.RDB,
+			RedisEnabled: func() bool {
+				return common.RedisEnabled && common.RDB != nil
+			},
+			RedisCodec: cachex.JSONCodec[subscriptionRateLimitRaise]{},
+			Memory: func() *hot.HotCache[string, subscriptionRateLimitRaise] {
+				return hot.NewHotCache[string, subscriptionRateLimitRaise](hot.LRU, subscriptionPlanInfoCacheCapacity()).
+					WithTTL(subscriptionRateLimitCacheTTL).
+					WithJanitor().
+					Build()
+			},
+		})
+	})
+	return subscriptionRateLimitCache
+}
+
+// forgetSubscriptionRateLimit drops the cached answer to what a user's
+// subscriptions raise their request limit to, after one starts or ends.
+func forgetSubscriptionRateLimit(userId int) {
+	if userId <= 0 {
+		return
+	}
+	if _, err := getSubscriptionRateLimitCache().DeleteMany([]string{strconv.Itoa(userId)}); err != nil {
+		common.SysError(fmt.Sprintf("failed to clear subscription rate limit cache for user %d: %v", userId, err))
+	}
+}
+
 func subscriptionPlanCacheKey(id int) string {
 	if id <= 0 {
 		return ""
@@ -177,6 +225,12 @@ type SubscriptionPlan struct {
 
 	// Downgrade user group on expiry (empty = revert to the group held before purchase)
 	DowngradeGroup string `json:"downgrade_group" gorm:"type:varchar(64);default:''"`
+
+	// Request limit a subscriber's own limit rises to while the subscription is
+	// active: RateLimitCount counts every request (0 = no cap) and
+	// RateLimitSuccessCount successful ones. A success cap of 0 raises nothing.
+	RateLimitCount        int `json:"rate_limit_count" gorm:"type:int;not null;default:0"`
+	RateLimitSuccessCount int `json:"rate_limit_success_count" gorm:"type:int;not null;default:0"`
 
 	// Total quota (amount in quota units, 0 = unlimited)
 	TotalAmount int64 `json:"total_amount" gorm:"type:bigint;not null;default:0"`
@@ -272,6 +326,11 @@ type UserSubscription struct {
 
 	// Downgrade target group on expiry (snapshot from plan; empty = revert to PrevUserGroup)
 	DowngradeGroup string `json:"downgrade_group" gorm:"type:varchar(64);default:''"`
+
+	// Request limit the subscriber's own limit rises to while this subscription is
+	// active (snapshot from plan; a success cap of 0 raises nothing)
+	RateLimitCount        int `json:"rate_limit_count" gorm:"type:int;not null;default:0"`
+	RateLimitSuccessCount int `json:"rate_limit_success_count" gorm:"type:int;not null;default:0"`
 
 	// Whether wallet fallback is allowed after this subscription's quota is exhausted (snapshot from plan)
 	AllowWalletOverflow bool `json:"allow_wallet_overflow"`
@@ -551,6 +610,10 @@ func CreateUserSubscriptionFromPlanTx(tx *gorm.DB, userId int, plan *Subscriptio
 		CreatedAt:           common.GetTimestamp(),
 		UpdatedAt:           common.GetTimestamp(),
 	}
+	if plan.RateLimitSuccessCount > 0 {
+		sub.RateLimitCount = plan.RateLimitCount
+		sub.RateLimitSuccessCount = plan.RateLimitSuccessCount
+	}
 	if err := tx.Create(sub).Error; err != nil {
 		return nil, err
 	}
@@ -636,6 +699,7 @@ func CompleteSubscriptionOrder(tradeNo string, providerPayload string, expectedP
 	if err != nil {
 		return err
 	}
+	forgetSubscriptionRateLimit(logUserId)
 	if upgradeGroup != "" && logUserId > 0 {
 		refreshSubscriptionUserGroupCache(logUserId, "subscription payment completion")
 	}
@@ -732,6 +796,7 @@ func AdminBindSubscription(userId int, planId int, sourceNote string) (string, e
 	if err != nil {
 		return "", err
 	}
+	forgetSubscriptionRateLimit(userId)
 	if groupChanged {
 		refreshSubscriptionUserGroupCache(userId, "admin subscription creation")
 		return fmt.Sprintf("用户分组将升级到 %s", plan.UpgradeGroup), nil
@@ -836,6 +901,7 @@ func PurchaseSubscriptionWithBalance(userId int, planId int) error {
 			common.SysLog("failed to decrease user quota cache after subscription balance purchase: " + err.Error())
 		}
 	}
+	forgetSubscriptionRateLimit(userId)
 	if upgradeGroup != "" {
 		refreshSubscriptionUserGroupCache(userId, "subscription balance purchase")
 	}
@@ -874,6 +940,55 @@ func HasActiveUserSubscription(userId int) (bool, error) {
 		return false, err
 	}
 	return count > 0, nil
+}
+
+// SubscriptionRequestRateLimits returns, for each given user, the most permissive
+// request limit their active subscriptions raise them to. A user without such a
+// subscription is absent.
+func SubscriptionRequestRateLimits(userIds []int) (map[int]setting.RequestRateLimit, error) {
+	limits := make(map[int]setting.RequestRateLimit)
+	if len(userIds) == 0 {
+		return limits, nil
+	}
+	var rows []struct {
+		UserId                int
+		RateLimitCount        int
+		RateLimitSuccessCount int
+	}
+	if err := DB.Model(&UserSubscription{}).
+		Select("user_id, rate_limit_count, rate_limit_success_count").
+		Where("user_id IN ? AND status = ? AND end_time > ? AND rate_limit_success_count > ?", userIds, "active", common.GetTimestamp(), 0).
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		limit := setting.RequestRateLimit{Count: row.RateLimitCount, SuccessCount: row.RateLimitSuccessCount}
+		if held, ok := limits[row.UserId]; ok {
+			limit = held.Raise(limit)
+		}
+		limits[row.UserId] = limit
+	}
+	return limits, nil
+}
+
+// UserSubscriptionRequestRateLimit returns the most permissive request limit the
+// user's active subscriptions raise them to, and whether any does. The answer is
+// cached for up to subscriptionRateLimitCacheTTL.
+func UserSubscriptionRequestRateLimit(userId int) (setting.RequestRateLimit, bool, error) {
+	cache := getSubscriptionRateLimitCache()
+	key := strconv.Itoa(userId)
+	if cached, found, err := cache.Get(key); err == nil && found {
+		return cached.Limit, cached.Raised, nil
+	}
+	limits, err := SubscriptionRequestRateLimits([]int{userId})
+	if err != nil {
+		return setting.RequestRateLimit{}, false, err
+	}
+	limit, raised := limits[userId]
+	if err := cache.SetWithTTL(key, subscriptionRateLimitRaise{Limit: limit, Raised: raised}, subscriptionRateLimitCacheTTL); err != nil {
+		common.SysError(fmt.Sprintf("failed to cache subscription rate limit for user %d: %v", userId, err))
+	}
+	return limit, raised, nil
 }
 
 // UserActiveSubscriptionsAllowWalletOverflow returns whether wallet balance may be used
@@ -959,6 +1074,7 @@ func AdminInvalidateUserSubscription(userSubscriptionId int) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	forgetSubscriptionRateLimit(userId)
 	if cacheGroup != "" && userId > 0 {
 		refreshSubscriptionUserGroupCache(userId, "admin subscription update")
 	}
@@ -1000,6 +1116,7 @@ func AdminDeleteUserSubscription(userSubscriptionId int) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	forgetSubscriptionRateLimit(userId)
 	if cacheGroup != "" && userId > 0 {
 		refreshSubscriptionUserGroupCache(userId, "admin subscription deletion")
 	}
@@ -1227,6 +1344,7 @@ func ExpireDueSubscriptions(limit int) (int, error) {
 		if err != nil {
 			return expiredCount, err
 		}
+		forgetSubscriptionRateLimit(userId)
 		if cacheGroup != "" {
 			refreshSubscriptionUserGroupCache(userId, "subscription expiration")
 		}

@@ -24,6 +24,7 @@ import { ActivityTimeCell } from '@/components/activity-time-cell'
 import { BadgeCell } from '@/components/data-table'
 import { GroupBadge } from '@/components/group-badge'
 import { LongText } from '@/components/long-text'
+import { RequestRateLimitSummary } from '@/components/request-rate-limit-summary'
 import { StatusBadge } from '@/components/status-badge'
 import { TableId } from '@/components/table-id'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
@@ -229,6 +230,17 @@ export function useUsersColumns(): ColumnDef<User>[] {
         },
         size: 140,
         meta: { mobileOrder: 30 },
+      },
+      {
+        id: 'request_rate_limit',
+        header: t('Request Limit'),
+        cell: ({ row }) => {
+          const limit = row.original.request_rate_limit
+          return limit ? <RequestRateLimitSummary limit={limit} /> : null
+        },
+        enableSorting: false,
+        size: 220,
+        meta: { mobileHidden: true },
       },
       {
         accessorKey: 'role',

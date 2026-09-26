@@ -31,6 +31,8 @@ import {
   sideDrawerFormClassName,
   sideDrawerHeaderClassName,
 } from '@/components/drawer-layout'
+import { RequestRateLimitFields } from '@/components/request-rate-limit-fields'
+import { RequestRateLimitSummary } from '@/components/request-rate-limit-summary'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Combobox } from '@/components/ui/combobox'
@@ -157,7 +159,12 @@ export function UsersMutateDrawer({
         .then((result) => {
           if (cancelled) return
           if (result.success && result.data) {
-            form.reset(transformUserToFormDefaults(result.data))
+            form.reset(
+              transformUserToFormDefaults(
+                result.data,
+                currentRow.request_rate_limit
+              )
+            )
           } else {
             handleServerError(result, t('Failed to load'))
           }
@@ -245,6 +252,7 @@ export function UsersMutateDrawer({
         delete (payload as Partial<typeof payload>).display_name
         delete (payload as Partial<typeof payload>).group
         delete (payload as Partial<typeof payload>).remark
+        delete payload.rate_limit
       }
       if (!canEditSecurity) {
         delete payload.password
@@ -287,7 +295,12 @@ export function UsersMutateDrawer({
     try {
       const result = requireServerSuccess(await getUser(currentRow.id))
       if (result.success && result.data) {
-        form.reset(transformUserToFormDefaults(result.data))
+        form.reset(
+          transformUserToFormDefaults(
+            result.data,
+            currentRow.request_rate_limit
+          )
+        )
         setAvatarUrl(result.data.avatar_url || '')
       }
       triggerRefresh()
@@ -548,6 +561,29 @@ export function UsersMutateDrawer({
                         <FormMessage />
                       </FormItem>
                     )}
+                  />
+                </SideDrawerSection>
+              )}
+
+              {isUpdate && (
+                <SideDrawerSection>
+                  <h3 className='text-sm font-medium'>{t('Request Limit')}</h3>
+                  {currentRow?.request_rate_limit && (
+                    <div className='flex items-start gap-2'>
+                      <span className='text-muted-foreground shrink-0 pt-0.5 text-xs'>
+                        {t('In effect now')}
+                      </span>
+                      <RequestRateLimitSummary
+                        limit={currentRow.request_rate_limit}
+                      />
+                    </div>
+                  )}
+                  <RequestRateLimitFields
+                    label={t('Set a limit for this user')}
+                    description={t(
+                      'When off, the user follows their group limit, or the default when the group has none. Active subscriptions can raise either.'
+                    )}
+                    disabled={!canEditProfile}
                   />
                 </SideDrawerSection>
               )}

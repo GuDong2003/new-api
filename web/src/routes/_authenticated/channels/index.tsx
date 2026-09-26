@@ -31,6 +31,8 @@ const channelsSearchSchema = z.object({
   type: z.array(z.string()).optional().catch([]),
   group: z.array(z.string()).optional().catch([]),
   model: z.string().optional().catch(''),
+  // Opens this channel's edit drawer, as links from the logs do.
+  channel: z.number().int().positive().optional().catch(undefined),
 })
 
 export const Route = createFileRoute('/_authenticated/channels/')({

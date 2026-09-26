@@ -365,6 +365,23 @@ func Register(c *gin.Context) {
 	return
 }
 
+// userListItem is a user as administrators' user lists show it.
+type userListItem struct {
+	*model.User
+	RequestRateLimit service.UserRequestRateLimit `json:"request_rate_limit"`
+}
+
+// withRequestRateLimits pairs each listed user with the request limit they are
+// held to on their own group.
+func withRequestRateLimits(users []*model.User) []userListItem {
+	limits := service.DescribeRequestRateLimits(users)
+	items := make([]userListItem, 0, len(users))
+	for _, user := range users {
+		items = append(items, userListItem{User: user, RequestRateLimit: limits[user.Id]})
+	}
+	return items
+}
+
 func GetAllUsers(c *gin.Context) {
 	pageInfo := common.GetPageQuery(c)
 	sortOptions := model.NewUserSortOptions(c.Query("sort_by"), c.Query("sort_order"))
@@ -373,9 +390,8 @@ func GetAllUsers(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-
 	pageInfo.SetTotal(int(total))
-	pageInfo.SetItems(users)
+	pageInfo.SetItems(withRequestRateLimits(users))
 
 	common.ApiSuccess(c, pageInfo)
 	return
@@ -403,9 +419,8 @@ func SearchUsers(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-
 	pageInfo.SetTotal(int(total))
-	pageInfo.SetItems(users)
+	pageInfo.SetItems(withRequestRateLimits(users))
 	common.ApiSuccess(c, pageInfo)
 	return
 }
@@ -519,6 +534,7 @@ func GetSelf(c *gin.Context) {
 		return
 	}
 	responseData := buildSelfUserData(user)
+	responseData["request_rate_limit"] = service.DescribeRequestRateLimits([]*model.User{user})[user.Id]
 	// The authenticated role is loaded from GetUserCache. It should equal the
 	// row role, but use it for capabilities so GetSelf and login/refresh remain
 	// consistent with the authorization decision made for this request.
@@ -704,6 +720,9 @@ type updateUserRequest struct {
 	Group            *string                    `json:"group"`
 	Remark           *string                    `json:"remark"`
 	AdminPermissions map[string]map[string]bool `json:"admin_permissions"`
+	// RateLimit sets the request limit the user alone is held to. Both caps at
+	// 0 return the user to their group's.
+	RateLimit *dto.UserRateLimit `json:"rate_limit"`
 }
 
 func UpdateUser(c *gin.Context) {
@@ -723,19 +742,28 @@ func UpdateUser(c *gin.Context) {
 	}
 
 	profileTouched := request.Username != nil || request.DisplayName != nil || request.Group != nil || request.Remark != nil
+	rateLimitTouched := request.RateLimit != nil
 	password := ""
 	if request.Password != nil {
 		password = *request.Password
 	}
-	if profileTouched && !requireUserPermission(c, authz.UserProfileWrite) {
+	if (profileTouched || rateLimitTouched) && !requireUserPermission(c, authz.UserProfileWrite) {
 		return
 	}
 	if password != "" && !requireUserPermission(c, authz.UserSecurityWrite) {
 		return
 	}
-	if !profileTouched && password == "" && request.AdminPermissions == nil {
+	if !profileTouched && !rateLimitTouched && password == "" && request.AdminPermissions == nil {
 		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
 		return
+	}
+	var rateLimit *dto.UserRateLimit
+	if rateLimitTouched && (request.RateLimit.Count != 0 || request.RateLimit.SuccessCount != 0) {
+		if err := setting.CheckRequestRateLimit(request.RateLimit.Count, request.RateLimit.SuccessCount); err != nil {
+			common.ApiErrorI18n(c, i18n.MsgUserInputInvalid, map[string]any{"Error": err.Error()})
+			return
+		}
+		rateLimit = request.RateLimit
 	}
 
 	updatedUser := model.User{
@@ -781,6 +809,11 @@ func UpdateUser(c *gin.Context) {
 				return err
 			}
 		}
+		if rateLimitTouched {
+			if err := model.SetUserRateLimitTx(tx, updatedUser.Id, rateLimit); err != nil {
+				return err
+			}
+		}
 		if request.AdminPermissions != nil {
 			touched, err := updateAdminPermissionsForUserInTx(c, tx, updatedUser.Id, originUser.Role, updatedUser.AdminPermissions)
 			authzTouched = touched
@@ -807,10 +840,14 @@ func UpdateUser(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	recordManageAuditFor(c, updatedUser.Id, "user.update", map[string]any{
+	auditDetails := map[string]any{
 		"username": originUser.Username,
 		"id":       updatedUser.Id,
-	})
+	}
+	if rateLimitTouched {
+		auditDetails["rate_limit"] = rateLimit
+	}
+	recordManageAuditFor(c, updatedUser.Id, "user.update", auditDetails)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
@@ -1522,13 +1559,16 @@ func UpdateUserSetting(c *gin.Context) {
 		upstreamModelUpdateNotifyEnabled = *req.UpstreamModelUpdateNotifyEnabled
 	}
 
-	// 构建设置
+	// 构建设置。侧边栏、扣费偏好和语言不在这里修改，原样保留。
 	settings := dto.UserSetting{
 		NotifyType:                       req.QuotaWarningType,
 		QuotaWarningThreshold:            req.QuotaWarningThreshold,
 		UpstreamModelUpdateNotifyEnabled: upstreamModelUpdateNotifyEnabled,
 		AcceptUnsetRatioModel:            req.AcceptUnsetModelRatioModel,
 		RecordIpLog:                      req.RecordIpLog,
+		SidebarModules:                   existingSettings.SidebarModules,
+		BillingPreference:                existingSettings.BillingPreference,
+		Language:                         existingSettings.Language,
 	}
 
 	// 如果是webhook类型,添加webhook相关设置

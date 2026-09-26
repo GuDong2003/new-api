@@ -24,14 +24,19 @@ import { BadgeCell } from '@/components/data-table'
 import { GroupBadge } from '@/components/group-badge'
 import { StatusBadge } from '@/components/status-badge'
 import { TableId } from '@/components/table-id'
+import { useRequestRateLimitMinutes } from '@/hooks/use-status'
+import { toIntlLocale } from '@/i18n/languages'
 import { formatQuota } from '@/lib/format'
+import { formatRequestRateLimit } from '@/lib/request-rate-limit'
 
 import { formatDuration, formatResetPeriod } from '../lib'
 import type { PlanRecord } from '../types'
 import { DataTableRowActions } from './data-table-row-actions'
 
 export function useSubscriptionsColumns(): ColumnDef<PlanRecord>[] {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
+  const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
+  const rateLimitMinutes = useRequestRateLimitMinutes()
 
   return useMemo(
     (): ColumnDef<PlanRecord>[] => [
@@ -194,12 +199,39 @@ export function useSubscriptionsColumns(): ColumnDef<PlanRecord>[] {
         size: 120,
       },
       {
+        id: 'rate_limit',
+        header: t('Request Limit'),
+        meta: { mobileHidden: true },
+        cell: ({ row }) => {
+          const plan = row.original.plan
+          if (!plan.rate_limit_success_count) {
+            return (
+              <span className='text-muted-foreground'>{t('No Raise')}</span>
+            )
+          }
+          return (
+            <span className='text-sm'>
+              {formatRequestRateLimit(
+                {
+                  count: plan.rate_limit_count ?? 0,
+                  success_count: plan.rate_limit_success_count,
+                },
+                rateLimitMinutes,
+                t,
+                locale
+              )}
+            </span>
+          )
+        },
+        size: 200,
+      },
+      {
         id: 'actions',
         header: () => t('Actions'),
         cell: ({ row }) => <DataTableRowActions row={row} />,
         meta: { pinned: 'right' as const },
       },
     ],
-    [t]
+    [t, locale, rateLimitMinutes]
   )
 }

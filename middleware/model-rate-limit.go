@@ -11,7 +11,10 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/common/limiter"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/i18n"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/relaykit/dto"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
 
 	"github.com/gin-gonic/gin"
@@ -77,92 +80,146 @@ func recordRedisRequest(ctx context.Context, rdb *redis.Client, key string, maxC
 	rdb.Expire(ctx, key, time.Duration(setting.ModelRequestRateLimitDurationMinutes)*time.Minute)
 }
 
-// Redis限流处理器
-func redisRateLimitHandler(duration int64, totalMaxCount, successMaxCount int) gin.HandlerFunc {
+// requestRateLimitScope is one set of counters a request has to fit in: a
+// user's own, or the one all users' requests share.
+type requestRateLimitScope struct {
+	// key tells the scope's counters apart from other scopes'.
+	key   string
+	limit setting.RequestRateLimit
+	// reachedMessage and totalReachedMessage are the i18n keys a request is
+	// refused with once the scope's success cap or its request cap is reached.
+	reachedMessage      string
+	totalReachedMessage string
+}
+
+// globalRequestRateLimitKey names the counters all users' requests share. User
+// scopes are keyed by user id, so it cannot collide with one.
+const globalRequestRateLimitKey = "global"
+
+func userRequestRateLimitScope(userId int, limit setting.RequestRateLimit) requestRateLimitScope {
+	return requestRateLimitScope{
+		key:                 strconv.Itoa(userId),
+		limit:               limit,
+		reachedMessage:      i18n.MsgRateLimitReached,
+		totalReachedMessage: i18n.MsgRateLimitTotalReached,
+	}
+}
+
+func globalRequestRateLimitScope() requestRateLimitScope {
+	return requestRateLimitScope{
+		key: globalRequestRateLimitKey,
+		limit: setting.RequestRateLimit{
+			Count:        setting.ModelRequestRateLimitGlobalCount,
+			SuccessCount: setting.ModelRequestRateLimitGlobalSuccessCount,
+		},
+		reachedMessage:      i18n.MsgRateLimitSiteReached,
+		totalReachedMessage: i18n.MsgRateLimitSiteTotalReached,
+	}
+}
+
+func abortRateLimited(c *gin.Context, message string, max int) {
+	abortWithOpenAiMessage(c, http.StatusTooManyRequests, i18n.T(c, message, map[string]any{
+		"Minutes": setting.ModelRequestRateLimitDurationMinutes,
+		"Max":     max,
+	}))
+}
+
+// Redis限流处理器。按顺序检查每个范围，前面的范围拒绝时不再占用后面范围的名额。
+func redisRateLimitHandler(duration int64, scopes ...requestRateLimitScope) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		userId := strconv.Itoa(c.GetInt("id"))
 		ctx := context.Background()
 		rdb := common.RDB
 
-		// 1. 检查成功请求数限制
-		successKey := fmt.Sprintf("rateLimit:%s:%s", ModelRequestRateLimitSuccessCountMark, userId)
-		allowed, err := checkRedisRateLimit(ctx, rdb, successKey, successMaxCount, duration)
-		if err != nil {
-			fmt.Println("检查成功请求数限制失败:", err.Error())
-			abortWithOpenAiMessage(c, http.StatusInternalServerError, "rate_limit_check_failed")
-			return
-		}
-		if !allowed {
-			abortWithOpenAiMessage(c, http.StatusTooManyRequests, fmt.Sprintf("您已达到请求数限制：%d分钟内最多请求%d次", setting.ModelRequestRateLimitDurationMinutes, successMaxCount))
-			return
-		}
-
-		//2.检查总请求数限制并记录总请求（当totalMaxCount为0时会自动跳过，使用令牌桶限流器
-		if totalMaxCount > 0 {
-			totalKey := fmt.Sprintf("rateLimit:%s", userId)
-			// 初始化
-			tb := limiter.New(ctx, rdb)
-			allowed, err = tb.Allow(
-				ctx,
-				totalKey,
-				limiter.WithCapacity(rateLimitCapacity(totalMaxCount, duration)),
-				limiter.WithRate(int64(totalMaxCount)),
-				limiter.WithRequested(duration),
-			)
-
+		for _, scope := range scopes {
+			// 1. 检查成功请求数限制
+			successKey := fmt.Sprintf("rateLimit:%s:%s", ModelRequestRateLimitSuccessCountMark, scope.key)
+			allowed, err := checkRedisRateLimit(ctx, rdb, successKey, scope.limit.SuccessCount, duration)
 			if err != nil {
-				fmt.Println("检查总请求数限制失败:", err.Error())
+				fmt.Println("检查成功请求数限制失败:", err.Error())
 				abortWithOpenAiMessage(c, http.StatusInternalServerError, "rate_limit_check_failed")
 				return
 			}
-
 			if !allowed {
-				abortWithOpenAiMessage(c, http.StatusTooManyRequests, fmt.Sprintf("您已达到总请求数限制：%d分钟内最多请求%d次，包括失败次数，请检查您的请求是否正确", setting.ModelRequestRateLimitDurationMinutes, totalMaxCount))
+				abortRateLimited(c, scope.reachedMessage, scope.limit.SuccessCount)
 				return
+			}
+
+			// 2. 检查总请求数限制并记录总请求（为0时跳过），使用令牌桶限流器
+			if scope.limit.Count > 0 {
+				totalKey := fmt.Sprintf("rateLimit:%s", scope.key)
+				tb := limiter.New(rdb)
+				allowed, err = tb.Allow(
+					ctx,
+					totalKey,
+					limiter.WithCapacity(rateLimitCapacity(scope.limit.Count, duration)),
+					limiter.WithRate(int64(scope.limit.Count)),
+					limiter.WithRequested(duration),
+				)
+				if err != nil {
+					fmt.Println("检查总请求数限制失败:", err.Error())
+					abortWithOpenAiMessage(c, http.StatusInternalServerError, "rate_limit_check_failed")
+					return
+				}
+				if !allowed {
+					abortRateLimited(c, scope.totalReachedMessage, scope.limit.Count)
+					return
+				}
 			}
 		}
 
-		// 4. 处理请求
+		// 3. 处理请求
 		c.Next()
 
-		// 5. 如果请求成功，记录成功请求
+		// 4. 如果请求成功，在每个范围记录成功请求
 		if modelRequestSucceeded(c) {
-			recordRedisRequest(ctx, rdb, successKey, successMaxCount)
+			for _, scope := range scopes {
+				successKey := fmt.Sprintf("rateLimit:%s:%s", ModelRequestRateLimitSuccessCountMark, scope.key)
+				recordRedisRequest(ctx, rdb, successKey, scope.limit.SuccessCount)
+			}
 		}
 	}
 }
 
-// 内存限流处理器
-func memoryRateLimitHandler(duration int64, totalMaxCount, successMaxCount int) gin.HandlerFunc {
+// 内存限流处理器。按顺序检查每个范围，前面的范围拒绝时不再占用后面范围的名额。
+func memoryRateLimitHandler(duration int64, scopes ...requestRateLimitScope) gin.HandlerFunc {
 	inMemoryRateLimiter.Init(time.Duration(setting.ModelRequestRateLimitDurationMinutes) * time.Minute)
 
 	return func(c *gin.Context) {
-		userId := strconv.Itoa(c.GetInt("id"))
-		totalKey := ModelRequestRateLimitCountMark + userId
-		successKey := ModelRequestRateLimitSuccessCountMark + userId
+		reservations := make([]*common.RateLimitReservation, 0, len(scopes))
+		defer func() {
+			for _, reservation := range reservations {
+				reservation.Complete(false)
+			}
+		}()
 
-		// 1. 检查总请求数限制（当totalMaxCount为0时跳过）
-		if totalMaxCount > 0 && !inMemoryRateLimiter.Request(totalKey, totalMaxCount, duration) {
-			c.Status(http.StatusTooManyRequests)
-			c.Abort()
-			return
-		}
-
-		var reservation *common.RateLimitReservation
-		if successMaxCount > 0 {
-			reservation = inMemoryRateLimiter.Reserve(successKey, successMaxCount, duration)
-			if reservation == nil {
-				c.AbortWithStatus(http.StatusTooManyRequests)
+		for _, scope := range scopes {
+			// 1. 检查总请求数限制（为0时跳过）
+			totalKey := ModelRequestRateLimitCountMark + scope.key
+			if scope.limit.Count > 0 && !inMemoryRateLimiter.Request(totalKey, scope.limit.Count, duration) {
+				abortRateLimited(c, scope.totalReachedMessage, scope.limit.Count)
 				return
 			}
-			defer reservation.Complete(false)
+
+			// 2. 预占成功请求名额，请求结束时按结果记入或释放
+			if scope.limit.SuccessCount > 0 {
+				successKey := ModelRequestRateLimitSuccessCountMark + scope.key
+				reservation := inMemoryRateLimiter.Reserve(successKey, scope.limit.SuccessCount, duration)
+				if reservation == nil {
+					abortRateLimited(c, scope.reachedMessage, scope.limit.SuccessCount)
+					return
+				}
+				reservations = append(reservations, reservation)
+			}
 		}
 
 		// 3. 处理请求
 		c.Next()
 
 		// 4. 如果请求成功，记录到实际的成功请求计数中
-		reservation.Complete(modelRequestSucceeded(c))
+		succeeded := modelRequestSucceeded(c)
+		for _, reservation := range reservations {
+			reservation.Complete(succeeded)
+		}
 	}
 }
 
@@ -171,38 +228,34 @@ func modelRequestSucceeded(c *gin.Context) bool {
 	return c.Writer.Status() < 400 && !status.ResponseFailed()
 }
 
-// ModelRequestRateLimit 模型请求限流中间件
+// ModelRequestRateLimit 模型请求限流中间件。
+// 每个用户始终受自己的限制：管理员单独设置的，否则是分组的，否则是默认值，再由有效订阅提升。
+// 开关打开时，所有用户的请求还要共同遵守全站总量限制。
 func ModelRequestRateLimit() func(c *gin.Context) {
 	return func(c *gin.Context) {
-		// 在每个请求时检查是否启用限流
-		if !setting.ModelRequestRateLimitEnabled {
-			c.Next()
-			return
-		}
-
-		// 计算限流参数
 		duration := rateLimitDurationSeconds(setting.ModelRequestRateLimitDurationMinutes)
-		totalMaxCount := setting.ModelRequestRateLimitCount
-		successMaxCount := setting.ModelRequestRateLimitSuccessCount
 
-		// 获取分组
-		group := common.GetContextKeyString(c, constant.ContextKeyTokenGroup)
-		if group == "" {
-			group = common.GetContextKeyString(c, constant.ContextKeyUserGroup)
+		// 令牌指定的分组没有限制时（如 auto），按用户自己的分组
+		tokenGroup := common.GetContextKeyString(c, constant.ContextKeyTokenGroup)
+		userGroup := common.GetContextKeyString(c, constant.ContextKeyUserGroup)
+		userId := c.GetInt("id")
+		userSetting, _ := common.GetContextKeyType[dto.UserSetting](c, constant.ContextKeyUserSetting)
+		limit, err := service.RequestRateLimitFor(userId, userSetting, tokenGroup, userGroup)
+		if err != nil {
+			// 订阅只会放宽限制，读不到订阅时按用户自己的基础限制处理，不拒绝请求。
+			common.SysError(fmt.Sprintf("failed to read the subscriptions raising the request limit of user %d: %v", userId, err))
 		}
 
-		//获取分组的限流配置
-		groupTotalCount, groupSuccessCount, found := setting.GetGroupRateLimit(group)
-		if found {
-			totalMaxCount = groupTotalCount
-			successMaxCount = groupSuccessCount
+		scopes := []requestRateLimitScope{userRequestRateLimitScope(userId, limit)}
+		if setting.ModelRequestRateLimitEnabled {
+			scopes = append(scopes, globalRequestRateLimitScope())
 		}
 
 		// 根据存储类型选择并执行限流处理器
-		if common.RedisEnabled {
-			redisRateLimitHandler(duration, totalMaxCount, successMaxCount)(c)
+		if common.RedisEnabled && common.RDB != nil {
+			redisRateLimitHandler(duration, scopes...)(c)
 		} else {
-			memoryRateLimitHandler(duration, totalMaxCount, successMaxCount)(c)
+			memoryRateLimitHandler(duration, scopes...)(c)
 		}
 	}
 }

@@ -17,7 +17,10 @@ import (
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/relaykit/dto"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/service/authz"
+	"github.com/QuantumNous/new-api/setting"
 	"github.com/alicebob/miniredis/v2"
 	"github.com/go-redis/redis/v8"
 
@@ -752,4 +755,152 @@ func TestManageUserQuotaCacheUsesCommittedIntegerDifference(t *testing.T) {
 			}
 		})
 	}
+}
+
+// performUserEndpoint calls one user endpoint the way the dashboard does, as
+// the given signed-in user.
+func performUserEndpoint(t *testing.T, handler gin.HandlerFunc, method, target string, actorID, actorRole int, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(method, target, strings.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set("id", actorID)
+	c.Set("role", actorRole)
+	c.Set("username", "rate-limit-operator")
+	handler(c)
+	return recorder
+}
+
+func useRequestRateLimitSettings(t *testing.T, groups string) {
+	t.Helper()
+	previousCount, previousSuccessCount := setting.ModelRequestRateLimitCount, setting.ModelRequestRateLimitSuccessCount
+	previousDuration := setting.ModelRequestRateLimitDurationMinutes
+	previousGroups := setting.ModelRequestRateLimitGroup2JSONString()
+	setting.ModelRequestRateLimitCount, setting.ModelRequestRateLimitSuccessCount = 0, 7
+	setting.ModelRequestRateLimitDurationMinutes = 1
+	require.NoError(t, setting.UpdateModelRequestRateLimitGroupByJSONString(groups))
+	t.Cleanup(func() {
+		setting.ModelRequestRateLimitCount, setting.ModelRequestRateLimitSuccessCount = previousCount, previousSuccessCount
+		setting.ModelRequestRateLimitDurationMinutes = previousDuration
+		_ = setting.UpdateModelRequestRateLimitGroupByJSONString(previousGroups)
+	})
+}
+
+func storedUserSetting(t *testing.T, db *gorm.DB, userID int) dto.UserSetting {
+	t.Helper()
+	var user model.User
+	require.NoError(t, db.Select("id", "setting").First(&user, userID).Error)
+	return user.GetSetting()
+}
+
+func TestUpdateUserSetsAndClearsAPersonalRequestLimit(t *testing.T) {
+	db := setupManageUserTestDB(t)
+	initManageUserAuthz(t, db)
+	user := model.User{
+		Username: "limited-user", Password: "unused-password-hash", Role: common.RoleCommonUser,
+		Status: common.UserStatusEnabled, Group: "default", AffCode: "limited-user",
+		Setting: `{"language":"en","sidebar_modules":"{\"chat\":true}"}`,
+	}
+	require.NoError(t, db.Create(&user).Error)
+	update := func(rateLimit string) *httptest.ResponseRecorder {
+		return performUpdateManagedUserRequest(t, 9999, common.RoleRootUser, fmt.Sprintf(`{"id":%d,"rate_limit":%s}`, user.Id, rateLimit))
+	}
+
+	recorder := update(`{"count":30,"success_count":20}`)
+	require.Contains(t, recorder.Body.String(), `"success":true`)
+	stored := storedUserSetting(t, db, user.Id)
+	assert.Equal(t, &dto.UserRateLimit{Count: 30, SuccessCount: 20}, stored.RateLimit)
+	assert.Equal(t, "en", stored.Language)
+	assert.Equal(t, `{"chat":true}`, stored.SidebarModules)
+
+	recorder = update(`{"count":30,"success_count":0}`)
+	assert.Contains(t, recorder.Body.String(), `"success":false`)
+	assert.Equal(t, &dto.UserRateLimit{Count: 30, SuccessCount: 20}, storedUserSetting(t, db, user.Id).RateLimit)
+
+	recorder = update(`{"count":0,"success_count":0}`)
+	require.Contains(t, recorder.Body.String(), `"success":true`)
+	stored = storedUserSetting(t, db, user.Id)
+	assert.Nil(t, stored.RateLimit)
+	assert.Equal(t, "en", stored.Language)
+}
+
+func TestUserSettingSavesKeepWhatTheyDoNotEdit(t *testing.T) {
+	db := setupManageUserTestDB(t)
+	user := model.User{
+		Username: "settings-user", Password: "unused-password-hash", Role: common.RoleCommonUser,
+		Status: common.UserStatusEnabled, Group: "default", AffCode: "settings-user",
+		Setting: `{"language":"en","sidebar_modules":"{\"chat\":true}","billing_preference":"wallet_first","rate_limit":{"count":3,"success_count":2}}`,
+	}
+	require.NoError(t, db.Create(&user).Error)
+
+	recorder := performUserEndpoint(t, UpdateUserSetting, http.MethodPut, "/api/user/setting", user.Id, user.Role,
+		`{"notify_type":"email","quota_warning_threshold":5,"rate_limit":{"count":0,"success_count":9999}}`)
+	require.Contains(t, recorder.Body.String(), `"success":true`)
+
+	stored := storedUserSetting(t, db, user.Id)
+	assert.Equal(t, dto.NotifyTypeEmail, stored.NotifyType)
+	assert.Equal(t, 5.0, stored.QuotaWarningThreshold)
+	assert.Equal(t, "en", stored.Language)
+	assert.Equal(t, `{"chat":true}`, stored.SidebarModules)
+	assert.Equal(t, "wallet_first", stored.BillingPreference)
+	assert.Equal(t, &dto.UserRateLimit{Count: 3, SuccessCount: 2}, stored.RateLimit, "users cannot change the limit an administrator set")
+}
+
+func TestUserListsAndProfileShowTheRequestLimitEachUserIsHeldTo(t *testing.T) {
+	db := setupManageUserTestDB(t)
+	initManageUserAuthz(t, db)
+	require.NoError(t, db.AutoMigrate(&model.UserSubscription{}))
+	useRequestRateLimitSettings(t, `{"vip":[0,20]}`)
+	users := []model.User{
+		{Username: "personal-limit", Setting: `{"rate_limit":{"count":9,"success_count":4}}`, Group: "vip"},
+		{Username: "group-limit", Group: "vip"},
+		{Username: "default-limit", Group: "default"},
+		{Username: "raised-limit", Group: "default"},
+	}
+	for i := range users {
+		users[i].Password, users[i].AffCode = "unused-password-hash", users[i].Username
+		users[i].Role, users[i].Status = common.RoleCommonUser, common.UserStatusEnabled
+		require.NoError(t, db.Create(&users[i]).Error)
+	}
+	now := common.GetTimestamp()
+	require.NoError(t, db.Create(&model.UserSubscription{
+		UserId: users[3].Id, PlanId: 1, StartTime: now - 60, EndTime: now + 3600, Status: "active",
+		RateLimitCount: 50, RateLimitSuccessCount: 30,
+	}).Error)
+	require.NoError(t, db.Create(&model.UserSubscription{
+		UserId: users[2].Id, PlanId: 1, StartTime: now - 7200, EndTime: now - 3600, Status: "active",
+		RateLimitSuccessCount: 99,
+	}).Error)
+	want := map[string]service.UserRequestRateLimit{
+		"personal-limit": {Count: 9, SuccessCount: 4, DurationMinutes: 1, Source: service.RequestRateLimitSourceUser},
+		"group-limit":    {Count: 0, SuccessCount: 20, DurationMinutes: 1, Source: service.RequestRateLimitSourceGroup},
+		"default-limit":  {Count: 0, SuccessCount: 7, DurationMinutes: 1, Source: service.RequestRateLimitSourceDefault},
+		"raised-limit":   {Count: 0, SuccessCount: 30, DurationMinutes: 1, Source: service.RequestRateLimitSourceDefault, Raised: true},
+	}
+
+	recorder := performUserEndpoint(t, GetAllUsers, http.MethodGet, "/api/user/?p=1&page_size=10", 9999, common.RoleRootUser, "")
+	var listed struct {
+		Data struct {
+			Items []struct {
+				Username         string                       `json:"username"`
+				RequestRateLimit service.UserRequestRateLimit `json:"request_rate_limit"`
+			} `json:"items"`
+		} `json:"data"`
+	}
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &listed))
+	require.Len(t, listed.Data.Items, len(users))
+	for _, item := range listed.Data.Items {
+		assert.Equal(t, want[item.Username], item.RequestRateLimit, item.Username)
+	}
+
+	recorder = performUserEndpoint(t, GetSelf, http.MethodGet, "/api/user/self", users[3].Id, common.RoleCommonUser, "")
+	var self struct {
+		Data struct {
+			RequestRateLimit service.UserRequestRateLimit `json:"request_rate_limit"`
+		} `json:"data"`
+	}
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &self))
+	assert.Equal(t, want["raised-limit"], self.Data.RequestRateLimit)
 }

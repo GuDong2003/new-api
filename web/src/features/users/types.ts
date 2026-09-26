@@ -19,6 +19,10 @@ For commercial licensing, please contact support@quantumnous.com
 import { z } from 'zod'
 
 import type { AdminPermissionMatrix } from '@/lib/admin-permissions'
+import {
+  type RequestRateLimitCaps,
+  userRequestRateLimitSchema,
+} from '@/lib/request-rate-limit'
 
 // ============================================================================
 // User Schema & Types
@@ -60,6 +64,10 @@ export const userSchema = z.object({
   last_login_at: z.number().optional(),
   DeletedAt: z.any().nullable().optional(),
   remark: z.string().optional(),
+  /** The user's settings as a JSON string. */
+  setting: z.string().optional(),
+  /** The request limit the user is held to; only user lists carry it. */
+  request_rate_limit: userRequestRateLimitSchema.optional(),
   admin_permissions: z
     .record(z.string(), z.record(z.string(), z.boolean()))
     .optional(),
@@ -126,6 +134,7 @@ export interface UserFormData {
   quota?: number // Only used when updating user
   group?: string // Only used when updating user
   remark?: string // Only used when updating user
+  rate_limit?: RequestRateLimitCaps // Only used when updating user
   admin_permissions?: AdminPermissionMatrix
 }
 

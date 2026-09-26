@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useQuery } from '@tanstack/react-query'
-import { Link } from '@tanstack/react-router'
+import { getRouteApi, Link } from '@tanstack/react-router'
 import { Settings2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
@@ -33,13 +33,20 @@ import { requireServerSuccess } from '@/lib/server-error-message'
 import { useAuthStore } from '@/stores/auth-store'
 
 import { getChannelOps } from './api'
+import { ChannelLinkOpener } from './components/channel-link-opener'
 import { ChannelsDialogs } from './components/channels-dialogs'
 import { ChannelsPrimaryButtons } from './components/channels-primary-buttons'
 import { ChannelsProvider } from './components/channels-provider'
 import { ChannelsTable } from './components/channels-table'
 
+const route = getRouteApi('/_authenticated/channels/')
+
 export function Channels() {
   const { t } = useTranslation()
+  const linkedChannelId = route.useSearch({
+    select: (search) => search.channel,
+  })
+  const navigate = route.useNavigate()
   const isRoot = useAuthStore(
     (state) => state.auth.user?.role === ROLE.SUPER_ADMIN
   )
@@ -103,6 +110,15 @@ export function Channels() {
       </SectionPageLayout>
 
       <ChannelsDialogs />
+      <ChannelLinkOpener
+        channelId={linkedChannelId}
+        onHandled={() =>
+          void navigate({
+            search: (prev) => ({ ...prev, channel: undefined }),
+            replace: true,
+          })
+        }
+      />
     </ChannelsProvider>
   )
 }

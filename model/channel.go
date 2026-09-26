@@ -1189,6 +1189,34 @@ func (channel *Channel) GetHeaderOverride() map[string]any {
 	return headerOverride
 }
 
+// ChannelNamesByIds returns the names of the given channels, read from the
+// channel cache when it is on. A channel that no longer exists is absent.
+func ChannelNamesByIds(ids []int) (map[int]string, error) {
+	names := make(map[int]string, len(ids))
+	if len(ids) == 0 {
+		return names, nil
+	}
+	if common.MemoryCacheEnabled {
+		for _, id := range ids {
+			if channel, err := CacheGetChannel(id); err == nil {
+				names[id] = channel.Name
+			}
+		}
+		return names, nil
+	}
+	var channels []struct {
+		Id   int    `gorm:"column:id"`
+		Name string `gorm:"column:name"`
+	}
+	if err := DB.Table("channels").Select("id, name").Where("id IN ?", ids).Find(&channels).Error; err != nil {
+		return nil, err
+	}
+	for _, channel := range channels {
+		names[channel.Id] = channel.Name
+	}
+	return names, nil
+}
+
 func GetChannelsByIds(ids []int) ([]*Channel, error) {
 	var channels []*Channel
 	err := DB.Where("id in (?)", ids).Find(&channels).Error
