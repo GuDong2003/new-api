@@ -149,9 +149,10 @@ it('opens long channel text on tap and copies the complete value', async () => {
   expect(within(dialog).getByText(`${longName} #372`)).toHaveClass(
     '[overflow-wrap:anywhere]'
   )
-  expect(
-    within(dialog).getByRole('link', { name: 'Open channel' })
-  ).toHaveAttribute('href', '/channels?channel=372')
+  expect(within(dialog).getByRole('link', { name: /#372/ })).toHaveAttribute(
+    'href',
+    '/channels?channel=372'
+  )
   await user.click(
     within(dialog).getByRole('button', { name: 'Copy to clipboard' })
   )

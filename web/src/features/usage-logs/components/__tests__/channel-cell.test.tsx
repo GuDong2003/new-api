@@ -29,9 +29,9 @@ import {
   getCoreRowModel,
   useReactTable,
 } from '@tanstack/react-table'
-import { render, screen, within } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { useEffect } from 'react'
+import { type ReactNode, useEffect } from 'react'
 import { describe, expect, it } from 'vitest'
 
 import { usageLogSchema } from '../../data/schema'
@@ -100,7 +100,7 @@ function HideSensitive() {
 }
 
 function renderWithLogs(
-  cell: React.ReactNode,
+  cell: ReactNode,
   options: { hideSensitive?: boolean } = {}
 ) {
   const router = createRouter({
@@ -124,49 +124,40 @@ function renderWithLogs(
 }
 
 describe('task log channel', () => {
-  it('shows the channel name with its ID', () => {
+  it('links its name and ID to the channel on the channels page', () => {
     renderWithLogs(<FirstCell columns={taskChannelColumns} row={task} />)
-    expect(screen.getByText('#12')).toBeInTheDocument()
-    expect(screen.getByText('alpha-image')).toBeInTheDocument()
+    const link = screen.getByRole('link', { name: /#12/ })
+    expect(link).toHaveAttribute('href', '/channels?channel=12')
+    expect(link).toHaveTextContent('alpha-image')
   })
 
-  it('opens a dialog that links to the channel on the channels page', async () => {
-    const user = userEvent.setup()
-    renderWithLogs(<FirstCell columns={taskChannelColumns} row={task} />)
-    await user.click(screen.getByRole('button', { name: /#12/ }))
-
-    const dialog = await screen.findByRole('dialog', { name: 'Channel' })
-    expect(within(dialog).getByText('alpha-image #12')).toBeInTheDocument()
-    expect(
-      within(dialog).getByRole('link', { name: 'Open channel' })
-    ).toHaveAttribute('href', '/channels?channel=12')
-  })
-
-  it('hides the channel name while sensitive values are hidden', async () => {
-    const user = userEvent.setup()
+  it('hides the channel name while sensitive values are hidden', () => {
     renderWithLogs(<FirstCell columns={taskChannelColumns} row={task} />, {
       hideSensitive: true,
     })
-    expect(screen.queryByText('alpha-image')).not.toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: /#12/ }))
-
-    const dialog = await screen.findByRole('dialog', { name: 'Channel' })
-    expect(within(dialog).getByText('#12')).toBeInTheDocument()
-    expect(within(dialog).queryByText(/alpha-image/)).not.toBeInTheDocument()
+    const link = screen.getByRole('link', { name: /#12/ })
+    expect(link).toHaveTextContent('••••')
+    expect(link).not.toHaveTextContent('alpha-image')
   })
 })
 
 describe('usage log channel', () => {
-  it('opens a dialog with the retry chain and a link to the channel', async () => {
+  it('links to the channel on the channels page', () => {
+    renderWithLogs(<UsageLogChannelCell />)
+    expect(screen.getByRole('link', { name: /#30/ })).toHaveAttribute(
+      'href',
+      '/channels?channel=30'
+    )
+  })
+
+  it('shows the retry chain on hover and says a click opens the channel', async () => {
     const user = userEvent.setup()
     renderWithLogs(<UsageLogChannelCell />)
-    await user.click(screen.getByRole('button', { name: /#30/ }))
+    await user.hover(screen.getByRole('link', { name: /#30/ }))
 
-    const dialog = await screen.findByRole('dialog', { name: 'Channel' })
-    expect(within(dialog).getByText('beta-image #30')).toBeInTheDocument()
-    expect(within(dialog).getByText('12 → 30')).toBeInTheDocument()
     expect(
-      within(dialog).getByRole('link', { name: 'Open channel' })
-    ).toHaveAttribute('href', '/channels?channel=30')
+      await screen.findByText('Click to open the channel')
+    ).toBeInTheDocument()
+    expect(screen.getByText('Chain: 12 → 30')).toBeInTheDocument()
   })
 })

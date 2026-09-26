@@ -38,11 +38,6 @@ import {
   isDisplayableLogType,
   isTimingLogType,
 } from '../lib/utils'
-import {
-  ChannelDetailsDialog,
-  logFieldDialogClassName,
-  UsageLogChannelDetails,
-} from './channel-details-dialog'
 import { ModelBadge, ResponseModelDetails } from './model-badge'
 import { StreamTpsCell, TimingMetricsCell } from './timing-metrics-cell'
 import { useUsageLogsContext } from './usage-logs-provider'
@@ -131,6 +126,7 @@ export function CommonLogMobileCard<TData>(props: {
   const visibleMetadata = metadata.filter((id) => fields[id].visible)
   const costCell = props.cells.get('quota')
   const contentCell = props.cells.get('content')
+  const channelCell = props.cells.get('channel')
   const cacheRead = other?.cache_tokens || 0
   const cacheWrite =
     (other?.cache_creation_tokens_5m || 0) +
@@ -330,23 +326,13 @@ export function CommonLogMobileCard<TData>(props: {
           />
         </div>
       )}
-      <ChannelDetailsDialog
-        open={selectedField === 'channel' && !!activeField}
-        onOpenChange={(open) => {
-          if (!open) setSelectedField(null)
-        }}
-        channelId={log.channel}
-        value={fields.channel.value}
-      >
-        <UsageLogChannelDetails log={log} />
-      </ChannelDetailsDialog>
       <Dialog
-        open={selectedField !== 'channel' && !!activeField}
+        open={!!activeField}
         onOpenChange={(open) => {
           if (!open) setSelectedField(null)
         }}
         title={activeField?.label ?? t('Details')}
-        contentClassName={logFieldDialogClassName}
+        contentClassName='max-sm:top-auto max-sm:bottom-0 max-sm:max-h-[85dvh] max-sm:max-w-full max-sm:translate-y-0 max-sm:rounded-b-none max-sm:rounded-t-2xl max-sm:pb-[max(1rem,env(safe-area-inset-bottom))] [&_[data-slot=dialog-close]]:size-11'
         footer={
           activeField && (
             <CopyButton
@@ -379,6 +365,14 @@ export function CommonLogMobileCard<TData>(props: {
                   <CopyButton value={model.actualModel} />
                 </div>
               )}
+            {selectedField === 'channel' && channelCell && (
+              <div>
+                {flexRender(
+                  channelCell.column.columnDef.cell,
+                  channelCell.getContext()
+                )}
+              </div>
+            )}
             {selectedField === 'user' && (
               <Button
                 variant='outline'

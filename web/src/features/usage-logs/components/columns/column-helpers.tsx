@@ -16,6 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { Link } from '@tanstack/react-router'
 import type { ColumnDef } from '@tanstack/react-table'
 import { Zap } from 'lucide-react'
 /* eslint-disable react-refresh/only-export-components */
@@ -33,7 +34,6 @@ import { formatTimestampToDate, formatTokens } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
 import { formatDuration } from '../../lib/format'
-import { ChannelDetailsDialog } from '../channel-details-dialog'
 import { FailReasonDialog } from '../dialogs/fail-reason-dialog'
 import { useUsageLogsContext } from '../usage-logs-provider'
 
@@ -180,44 +180,32 @@ export function createChannelColumn<T>(config: {
     ),
     cell: function ChannelCell({ row }) {
       const { sensitiveVisible } = useUsageLogsContext()
-      const [detailsOpen, setDetailsOpen] = useState(false)
       const channelId = row.getValue(accessorKey) as number
       if (!channelId) {
         return <span className='text-muted-foreground/60 text-xs'>-</span>
       }
       const name = config.channelName?.(row.original)
       const shownName = name && !sensitiveVisible ? '••••' : name
-      const value =
-        name && sensitiveVisible ? `${name} #${channelId}` : `#${channelId}`
       return (
-        <>
-          <button
-            type='button'
-            aria-haspopup='dialog'
-            className='focus-visible:ring-ring flex max-w-[180px] min-w-0 cursor-pointer flex-col items-start gap-0.5 rounded-md text-left outline-none focus-visible:ring-2'
-            onClick={() => setDetailsOpen(true)}
-          >
-            <StatusBadge
-              label={`#${channelId}`}
-              autoColor={String(channelId)}
-              copyable={false}
-              size='sm'
-              showDot={false}
-              className='font-mono'
-            />
-            {shownName && (
-              <span className='text-muted-foreground/70 max-w-full truncate text-xs'>
-                {shownName}
-              </span>
-            )}
-          </button>
-          <ChannelDetailsDialog
-            open={detailsOpen}
-            onOpenChange={setDetailsOpen}
-            channelId={channelId}
-            value={value}
+        <Link
+          to='/channels'
+          search={{ channel: channelId }}
+          className='focus-visible:ring-ring flex max-w-[180px] min-w-0 flex-col items-start gap-0.5 rounded-md text-left outline-none focus-visible:ring-2'
+        >
+          <StatusBadge
+            label={`#${channelId}`}
+            autoColor={String(channelId)}
+            copyable={false}
+            size='sm'
+            showDot={false}
+            className='font-mono'
           />
-        </>
+          {shownName && (
+            <span className='text-muted-foreground/70 max-w-full truncate text-xs'>
+              {shownName}
+            </span>
+          )}
+        </Link>
       )
     },
     meta: { label: headerLabel },
