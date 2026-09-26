@@ -7,7 +7,6 @@
     "After a retry: {{reason}}": "重试后：{{reason}}",
     "Allow NSFW content": "允许 NSFW 内容",
     "Channel queue warm-up": "渠道排队保活",
-    "Click to open the channel": "点击打开渠道",
     "Client version refresh": "客户端版本刷新",
     "Database backup": "数据库备份",
     "Database restore": "数据库恢复",

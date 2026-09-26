@@ -150,14 +150,11 @@ describe('usage log channel', () => {
     )
   })
 
-  it('shows the retry chain on hover and says a click opens the channel', async () => {
+  it('shows the retry chain on hover', async () => {
     const user = userEvent.setup()
     renderWithLogs(<UsageLogChannelCell />)
     await user.hover(screen.getByRole('link', { name: /#30/ }))
 
-    expect(
-      await screen.findByText('Click to open the channel')
-    ).toBeInTheDocument()
-    expect(screen.getByText('Chain: 12 → 30')).toBeInTheDocument()
+    expect(await screen.findByText('Chain: 12 → 30')).toBeInTheDocument()
   })
 })

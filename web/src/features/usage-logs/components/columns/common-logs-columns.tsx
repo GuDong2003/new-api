@@ -491,9 +491,6 @@ export function useCommonLogsColumns(
                             </p>
                           </div>
                         )}
-                        <p className='text-muted-foreground border-t pt-1 text-xs'>
-                          {t('Click to open the channel')}
-                        </p>
                       </div>
                     </TooltipContent>
                   </Tooltip>
