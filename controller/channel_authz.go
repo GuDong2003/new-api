@@ -111,6 +111,7 @@ var channelReadOnlyFields = map[string]struct{}{
 	"upstream_balance_updated_time": {},
 	"upstream_balance_status":       {},
 	"upstream_balance_details":      {},
+	"key_balance_details":           {},
 	"used_quota":                    {},
 }
 
@@ -143,6 +144,7 @@ func clearChannelReadOnlyFields(channel *PatchChannel, requestData map[string]an
 	channel.UpstreamBalanceUpdatedTime = 0
 	channel.UpstreamBalanceStatus = ""
 	channel.UpstreamBalanceDetails = nil
+	channel.KeyBalanceDetails = nil
 	if _, ok := requestData["used_quota"]; ok {
 		channel.UsedQuota = 0
 	}

@@ -21,14 +21,15 @@ import { createInstance } from 'i18next'
 import { I18nextProvider } from 'react-i18next'
 import { expect, test } from 'vitest'
 
-import { UpstreamAccountBalances } from '../upstream-account-balances'
+import type { BalanceBreakdownRow } from '../../lib/balance-breakdown'
+import { BalanceBreakdown } from '../balance-breakdown'
 
-const QUOTA_ACCOUNT = {
-  account_id: 1,
-  account_name: '主号',
+const QUOTA_ACCOUNT: BalanceBreakdownRow = {
+  kind: 'account',
+  id: 1,
+  name: '主号',
   balance: 1234567.891,
   unit: 'QUOTA',
-  updated_time: 100,
   status: 'healthy',
 }
 
@@ -57,7 +58,7 @@ test.each([
     })
     render(
       <I18nextProvider i18n={translations}>
-        <UpstreamAccountBalances accounts={[QUOTA_ACCOUNT]} />
+        <BalanceBreakdown rows={[QUOTA_ACCOUNT]} />
       </I18nextProvider>
     )
 

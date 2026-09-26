@@ -379,6 +379,7 @@ func migrateDB() error {
 		&UpstreamAccount{},
 		&UpstreamAccountChannel{},
 		&UpstreamAccountLog{},
+		&ChannelKeyBalance{},
 		&NamedLease{},
 		&CasbinRule{},
 		&AuthzRole{},
@@ -457,6 +458,7 @@ func migrateDBFast() error {
 		{&UpstreamAccount{}, "UpstreamAccount"},
 		{&UpstreamAccountChannel{}, "UpstreamAccountChannel"},
 		{&UpstreamAccountLog{}, "UpstreamAccountLog"},
+		{&ChannelKeyBalance{}, "ChannelKeyBalance"},
 		{&NamedLease{}, "NamedLease"},
 	}
 	// 动态计算migration数量，确保errChan缓冲区足够大

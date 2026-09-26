@@ -114,6 +114,17 @@ export const channelSchema = z.object({
       })
     )
     .optional(),
+  key_balance_details: z
+    .array(
+      z.object({
+        index: z.number(),
+        balance: z.number(),
+        updated_time: z.number(),
+        status: z.string(),
+        key_status: z.number(),
+      })
+    )
+    .optional(),
   upstream_account_config: channelUpstreamAccountConfigSchema.optional(),
   upstream_account_configs: z
     .array(channelUpstreamAccountConfigSchema)
@@ -369,6 +380,8 @@ export interface ChannelBalanceResponse {
     updated_time: number
     status: string
   }>
+  key_count?: number
+  key_balances?: NonNullable<Channel['key_balance_details']>
   refresh_failed?: number
   refresh_errors?: string[]
   raw_response?: string

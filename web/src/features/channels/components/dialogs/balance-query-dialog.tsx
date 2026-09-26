@@ -36,9 +36,10 @@ import { createServerError } from '@/lib/server-error-message'
 
 import { getCodexUsage, updateChannelBalance } from '../../api'
 import { channelsQueryKeys, reportChannelBalanceRefresh } from '../../lib'
+import { getBalanceBreakdown } from '../../lib/balance-breakdown'
 import { formatUpstreamBalance } from '../../lib/upstream-account-display'
+import { BalanceBreakdown } from '../balance-breakdown'
 import { useChannels } from '../channels-provider'
-import { UpstreamAccountBalances } from '../upstream-account-balances'
 import {
   CodexUsageDialog,
   type CodexUsageDialogData,
@@ -140,6 +141,8 @@ export function BalanceQueryDialog(props: BalanceQueryDialogProps) {
                 ...currentRow,
                 balance: newBalance,
                 balance_updated_time: now,
+                key_balance_details:
+                  response.key_balances ?? currentRow.key_balance_details,
               }
         )
 
@@ -200,10 +203,7 @@ export function BalanceQueryDialog(props: BalanceQueryDialogProps) {
       ? currentRow.upstream_balance_updated_time
       : currentRow.balance_updated_time) ??
     0
-  const upstreamDetails =
-    currentRow.balance_source === 'upstream'
-      ? (currentRow.upstream_balance_details ?? [])
-      : []
+  const breakdown = getBalanceBreakdown(currentRow)
   let queryButtonLabel = t('Update Balance')
   if (currentRow.balance_source === 'none') {
     queryButtonLabel = '余额查询已关闭'
@@ -281,12 +281,14 @@ export function BalanceQueryDialog(props: BalanceQueryDialogProps) {
               <div className='text-muted-foreground mt-2 text-xs'>
                 {t('Last updated:')} {formatDate(displayedUpdatedTime)}
               </div>
-              {upstreamDetails.length > 1 && (
+              {breakdown.length > 1 && (
                 <div className='mt-3 flex flex-col gap-1 border-t pt-3 text-xs'>
                   <div className='text-muted-foreground'>
-                    {t('Balance of each account')}
+                    {breakdown[0].kind === 'key'
+                      ? t('Balance of each key')
+                      : t('Balance of each account')}
                   </div>
-                  <UpstreamAccountBalances accounts={upstreamDetails} />
+                  <BalanceBreakdown rows={breakdown} />
                 </div>
               )}
             </div>

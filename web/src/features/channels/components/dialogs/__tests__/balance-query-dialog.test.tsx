@@ -30,7 +30,7 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 
 import { api } from '@/lib/api'
 
-import { channelSchema } from '../../../types'
+import { channelSchema, type Channel } from '../../../types'
 import { ChannelsProvider, useChannels } from '../../channels-provider'
 import { BalanceQueryDialog } from '../balance-query-dialog'
 
@@ -70,21 +70,21 @@ const channel = channelSchema.parse({
   ],
 })
 
-function ChooseChannel() {
+function ChooseChannel(props: { channel: Channel }) {
   const channels = useChannels()
   return (
-    <button type='button' onClick={() => channels.setCurrentRow(channel)}>
+    <button type='button' onClick={() => channels.setCurrentRow(props.channel)}>
       Query the balance
     </button>
   )
 }
 
-async function openBalanceDialog() {
+async function openBalanceDialog(chosen: Channel = channel) {
   const user = userEvent.setup()
   render(
     <QueryClientProvider client={client}>
       <ChannelsProvider>
-        <ChooseChannel />
+        <ChooseChannel channel={chosen} />
         <BalanceQueryDialog open onOpenChange={vi.fn()} />
       </ChannelsProvider>
     </QueryClientProvider>
@@ -113,6 +113,53 @@ test('the balance dialog of a channel with several accounts lists how each accou
   expect(accounts).toHaveLength(2)
   expect(accounts[0]).toHaveTextContent(/^主号\$10$/)
   expect(accounts[1]).toHaveTextContent(/^副号\$5Refresh failed$/)
+})
+
+test('the balance dialog of a multi-key channel lists how each key stands', async () => {
+  const { dialog } = await openBalanceDialog(
+    channelSchema.parse({
+      id: 43,
+      type: 1,
+      key: '',
+      name: 'Several keys',
+      status: 1,
+      created_time: 1,
+      test_time: 0,
+      response_time: 0,
+      balance: 15,
+      balance_updated_time: 100,
+      balance_source: 'channel',
+      channel_info: {
+        is_multi_key: true,
+        multi_key_size: 2,
+        multi_key_polling_index: 0,
+        multi_key_mode: 'polling',
+        multi_key_status_list: { '1': 3 },
+      },
+      key_balance_details: [
+        {
+          index: 0,
+          balance: 10,
+          updated_time: 100,
+          status: 'healthy',
+          key_status: 1,
+        },
+        {
+          index: 1,
+          balance: 5,
+          updated_time: 100,
+          status: 'failed',
+          key_status: 3,
+        },
+      ],
+    })
+  )
+
+  expect(within(dialog).getByText('Balance of each key')).toBeVisible()
+  const keys = within(within(dialog).getByRole('list')).getAllByRole('listitem')
+  expect(keys).toHaveLength(2)
+  expect(keys[0]).toHaveTextContent(/^Key #1\$10$/)
+  expect(keys[1]).toHaveTextContent(/^Key #2\$5Refresh failed · Auto Disabled$/)
 })
 
 test('refreshing the balance in the dialog warns which accounts failed', async () => {

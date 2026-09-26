@@ -47,6 +47,7 @@ type Channel struct {
 	UpstreamBalanceUpdatedTime int64                         `json:"upstream_balance_updated_time,omitempty" gorm:"-:all"`
 	UpstreamBalanceStatus      string                        `json:"upstream_balance_status,omitempty" gorm:"-:all"`
 	UpstreamBalanceDetails     []UpstreamAccountBalance      `json:"upstream_balance_details,omitempty" gorm:"-:all"`
+	KeyBalanceDetails          []ChannelKeyBalanceDetail     `json:"key_balance_details,omitempty" gorm:"-:all"`
 	UpstreamAccountConfig      *ChannelUpstreamAccountConfig `json:"upstream_account_config,omitempty" gorm:"-:all"`
 	Models                     string                        `json:"models"`
 	Group                      string                        `json:"group" gorm:"type:varchar(64);default:'default'"`

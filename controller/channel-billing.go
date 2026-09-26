@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -150,15 +151,15 @@ func GetClaudeAuthHeader(token string) http.Header {
 	return h
 }
 
-func GetResponseBody(method, url string, channel *model.Channel, headers http.Header) ([]byte, error) {
-	req, err := http.NewRequest(method, url, nil)
+func GetResponseBody(ctx context.Context, method, url, proxy string, headers http.Header) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, method, url, nil)
 	if err != nil {
 		return nil, err
 	}
 	for k := range headers {
 		req.Header.Add(k, headers.Get(k))
 	}
-	client, err := service.GetHttpClientWithProxy(channel.GetSetting().Proxy)
+	client, err := service.GetHttpClientWithProxy(proxy)
 	if err != nil {
 		return nil, err
 	}
@@ -166,23 +167,16 @@ func GetResponseBody(method, url string, channel *model.Channel, headers http.He
 	if err != nil {
 		return nil, err
 	}
+	defer res.Body.Close()
 	if res.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("status code: %d", res.StatusCode)
 	}
-	body, err := io.ReadAll(res.Body)
-	if err != nil {
-		return nil, err
-	}
-	err = res.Body.Close()
-	if err != nil {
-		return nil, err
-	}
-	return body, nil
+	return io.ReadAll(res.Body)
 }
 
-func updateChannelCloseAIBalance(channel *model.Channel) (float64, error) {
-	url := fmt.Sprintf("%s/dashboard/billing/credit_grants", channel.GetBaseURL())
-	body, err := GetResponseBody("GET", url, channel, GetAuthHeader(channel.Key))
+func fetchChannelCloseAIBalance(ctx context.Context, baseURL, key, proxy string) (float64, error) {
+	url := fmt.Sprintf("%s/dashboard/billing/credit_grants", baseURL)
+	body, err := GetResponseBody(ctx, "GET", url, proxy, GetAuthHeader(key))
 
 	if err != nil {
 		return 0, err
@@ -192,13 +186,12 @@ func updateChannelCloseAIBalance(channel *model.Channel) (float64, error) {
 	if err != nil {
 		return 0, err
 	}
-	channel.UpdateBalance(response.TotalAvailable)
 	return response.TotalAvailable, nil
 }
 
-func updateChannelOpenAISBBalance(channel *model.Channel) (float64, error) {
-	url := fmt.Sprintf("https://api.openai-sb.com/sb-api/user/status?api_key=%s", channel.Key)
-	body, err := GetResponseBody("GET", url, channel, GetAuthHeader(channel.Key))
+func fetchChannelOpenAISBBalance(ctx context.Context, key, proxy string) (float64, error) {
+	url := fmt.Sprintf("https://api.openai-sb.com/sb-api/user/status?api_key=%s", key)
+	body, err := GetResponseBody(ctx, "GET", url, proxy, GetAuthHeader(key))
 	if err != nil {
 		return 0, err
 	}
@@ -214,15 +207,14 @@ func updateChannelOpenAISBBalance(channel *model.Channel) (float64, error) {
 	if err != nil {
 		return 0, err
 	}
-	channel.UpdateBalance(balance)
 	return balance, nil
 }
 
-func updateChannelAIProxyBalance(channel *model.Channel) (float64, error) {
+func fetchChannelAIProxyBalance(ctx context.Context, key, proxy string) (float64, error) {
 	url := "https://aiproxy.io/api/report/getUserOverview"
 	headers := http.Header{}
-	headers.Add("Api-Key", channel.Key)
-	body, err := GetResponseBody("GET", url, channel, headers)
+	headers.Add("Api-Key", key)
+	body, err := GetResponseBody(ctx, "GET", url, proxy, headers)
 	if err != nil {
 		return 0, err
 	}
@@ -234,13 +226,12 @@ func updateChannelAIProxyBalance(channel *model.Channel) (float64, error) {
 	if !response.Success {
 		return 0, fmt.Errorf("code: %d, message: %s", response.ErrorCode, response.Message)
 	}
-	channel.UpdateBalance(response.Data.TotalPoints)
 	return response.Data.TotalPoints, nil
 }
 
-func updateChannelAPI2GPTBalance(channel *model.Channel) (float64, error) {
+func fetchChannelAPI2GPTBalance(ctx context.Context, key, proxy string) (float64, error) {
 	url := "https://api.api2gpt.com/dashboard/billing/credit_grants"
-	body, err := GetResponseBody("GET", url, channel, GetAuthHeader(channel.Key))
+	body, err := GetResponseBody(ctx, "GET", url, proxy, GetAuthHeader(key))
 
 	if err != nil {
 		return 0, err
@@ -250,13 +241,12 @@ func updateChannelAPI2GPTBalance(channel *model.Channel) (float64, error) {
 	if err != nil {
 		return 0, err
 	}
-	channel.UpdateBalance(response.TotalRemaining)
 	return response.TotalRemaining, nil
 }
 
-func updateChannelSiliconFlowBalance(channel *model.Channel) (float64, error) {
+func fetchChannelSiliconFlowBalance(ctx context.Context, key, proxy string) (float64, error) {
 	url := "https://api.siliconflow.cn/v1/user/info"
-	body, err := GetResponseBody("GET", url, channel, GetAuthHeader(channel.Key))
+	body, err := GetResponseBody(ctx, "GET", url, proxy, GetAuthHeader(key))
 	if err != nil {
 		return 0, err
 	}
@@ -272,7 +262,6 @@ func updateChannelSiliconFlowBalance(channel *model.Channel) (float64, error) {
 	if err != nil {
 		return 0, err
 	}
-	channel.UpdateBalance(balance)
 	return balance, nil
 }
 
@@ -337,9 +326,9 @@ func getDeepSeekBalanceUSD(response DeepSeekUsageResponse, usdExchangeRate float
 	return balanceUSD, nil
 }
 
-func updateChannelDeepSeekBalance(channel *model.Channel) (float64, error) {
+func fetchChannelDeepSeekBalance(ctx context.Context, key, proxy string) (float64, error) {
 	url := "https://api.deepseek.com/user/balance"
-	body, err := GetResponseBody("GET", url, channel, GetAuthHeader(channel.Key))
+	body, err := GetResponseBody(ctx, "GET", url, proxy, GetAuthHeader(key))
 	if err != nil {
 		return 0, err
 	}
@@ -352,13 +341,12 @@ func updateChannelDeepSeekBalance(channel *model.Channel) (float64, error) {
 	if err != nil {
 		return 0, err
 	}
-	channel.UpdateBalance(balance)
 	return balance, nil
 }
 
-func updateChannelAIGC2DBalance(channel *model.Channel) (float64, error) {
+func fetchChannelAIGC2DBalance(ctx context.Context, key, proxy string) (float64, error) {
 	url := "https://api.aigc2d.com/dashboard/billing/credit_grants"
-	body, err := GetResponseBody("GET", url, channel, GetAuthHeader(channel.Key))
+	body, err := GetResponseBody(ctx, "GET", url, proxy, GetAuthHeader(key))
 	if err != nil {
 		return 0, err
 	}
@@ -367,13 +355,12 @@ func updateChannelAIGC2DBalance(channel *model.Channel) (float64, error) {
 	if err != nil {
 		return 0, err
 	}
-	channel.UpdateBalance(response.TotalAvailable)
 	return response.TotalAvailable, nil
 }
 
-func updateChannelOpenRouterBalance(channel *model.Channel) (float64, error) {
+func fetchChannelOpenRouterBalance(ctx context.Context, key, proxy string) (float64, error) {
 	url := "https://openrouter.ai/api/v1/credits"
-	body, err := GetResponseBody("GET", url, channel, GetAuthHeader(channel.Key))
+	body, err := GetResponseBody(ctx, "GET", url, proxy, GetAuthHeader(key))
 	if err != nil {
 		return 0, err
 	}
@@ -383,13 +370,12 @@ func updateChannelOpenRouterBalance(channel *model.Channel) (float64, error) {
 		return 0, err
 	}
 	balance := response.Data.TotalCredits - response.Data.TotalUsage
-	channel.UpdateBalance(balance)
 	return balance, nil
 }
 
-func updateChannelMoonshotBalance(channel *model.Channel) (float64, error) {
+func fetchChannelMoonshotBalance(ctx context.Context, key, proxy string) (float64, error) {
 	url := "https://api.moonshot.cn/v1/users/me/balance"
-	body, err := GetResponseBody("GET", url, channel, GetAuthHeader(channel.Key))
+	body, err := GetResponseBody(ctx, "GET", url, proxy, GetAuthHeader(key))
 	if err != nil {
 		return 0, err
 	}
@@ -417,12 +403,11 @@ func updateChannelMoonshotBalance(channel *model.Channel) (float64, error) {
 	}
 	availableBalanceCny := response.Data.AvailableBalance
 	availableBalanceUsd := decimal.NewFromFloat(availableBalanceCny).Div(decimal.NewFromFloat(operation_setting.Price)).InexactFloat64()
-	channel.UpdateBalance(availableBalanceUsd)
 	return availableBalanceUsd, nil
 }
 
-func fetchAdvancedCustomBalance(channel *model.Channel) (channelBalanceResult, error) {
-	key := strings.TrimSpace(channel.Key)
+func fetchAdvancedCustomBalance(ctx context.Context, channel *model.Channel, key string, settings channelBalanceSettings) (channelBalanceResult, error) {
+	key = strings.TrimSpace(key)
 	info := &relaycommon.RelayInfo{
 		RelayFormat:    types.RelayFormatOpenAI,
 		RelayMode:      relayconstant.RelayModeUnknown,
@@ -431,7 +416,7 @@ func fetchAdvancedCustomBalance(channel *model.Channel) (channelBalanceResult, e
 			ChannelType:          constant.ChannelTypeAdvancedCustom,
 			ChannelBaseUrl:       channel.GetBaseURL(),
 			ApiKey:               key,
-			ChannelOtherSettings: channel.GetOtherSettings(),
+			ChannelOtherSettings: settings.otherSettings,
 		},
 	}
 	requestURL, headers, err := (&advancedcustom.Adaptor{}).BuildBalanceRequest(info)
@@ -442,7 +427,7 @@ func fetchAdvancedCustomBalance(channel *model.Channel) (channelBalanceResult, e
 		return channelBalanceResult{}, sanitizeFetchModelsError(err, key)
 	}
 
-	request, err := http.NewRequest(http.MethodGet, requestURL, nil)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, requestURL, nil)
 	if err != nil {
 		return channelBalanceResult{}, sanitizeFetchModelsError(err, key)
 	}
@@ -454,7 +439,7 @@ func fetchAdvancedCustomBalance(channel *model.Channel) (channelBalanceResult, e
 			request.Host = headers.Get(name)
 		}
 	}
-	client, err := service.GetHttpClientWithProxy(channel.GetSetting().Proxy)
+	client, err := service.GetHttpClientWithProxy(settings.proxy)
 	if err != nil {
 		return channelBalanceResult{}, sanitizeFetchModelsError(err, key)
 	}
@@ -493,7 +478,6 @@ func fetchAdvancedCustomBalance(channel *model.Channel) (channelBalanceResult, e
 				balance >= 0 &&
 				!math.IsNaN(balance) &&
 				!math.IsInf(balance, 0) {
-				channel.UpdateBalance(balance)
 				return channelBalanceResult{Balance: balance}, nil
 			}
 		}
@@ -526,49 +510,185 @@ func updateChannelBalance(channel *model.Channel) (channelBalanceResult, error) 
 		}
 		return channelBalanceResult{Balance: result.Summary.Balance}, nil
 	}
-	if channel.Type == constant.ChannelTypeAdvancedCustom {
-		return fetchAdvancedCustomBalance(channel)
+	result, err := fetchChannelBalance(context.Background(), channel, channel.Key, readChannelBalanceSettings(channel))
+	if err == nil && result.RawResponse == "" {
+		channel.UpdateBalance(result.Balance)
 	}
-	balance, err := updateStandardChannelBalance(channel)
+	return result, err
+}
+
+// errChannelBalanceUnsupported answers a balance query for a channel type
+// whose upstream has no balance API this gateway knows.
+var errChannelBalanceUnsupported = errors.New("尚未实现")
+
+// channelBalanceSettings are the channel settings a balance query uses. The
+// channel's setting getters save the whole channel when a setting does not
+// parse, so they are read once, before any key is asked, and never on a
+// channel holding only the key being asked.
+type channelBalanceSettings struct {
+	proxy         string
+	otherSettings dto.ChannelOtherSettings
+}
+
+func readChannelBalanceSettings(channel *model.Channel) channelBalanceSettings {
+	return channelBalanceSettings{
+		proxy:         channel.GetSetting().Proxy,
+		otherSettings: channel.GetOtherSettings(),
+	}
+}
+
+// fetchChannelBalance asks the upstream for the balance of one key of the
+// channel, without saving it. The channel is only read.
+func fetchChannelBalance(ctx context.Context, channel *model.Channel, key string, settings channelBalanceSettings) (channelBalanceResult, error) {
+	if channel.Type == constant.ChannelTypeAdvancedCustom {
+		return fetchAdvancedCustomBalance(ctx, channel, key, settings)
+	}
+	balance, err := fetchStandardChannelBalance(ctx, channel, key, settings.proxy)
 	return channelBalanceResult{Balance: balance}, err
 }
 
-func updateStandardChannelBalance(channel *model.Channel) (float64, error) {
-	baseURL := constant.GetChannelBaseURL(channel.Type)
-	if channel.GetBaseURL() == "" {
-		channel.BaseURL = &baseURL
+// channelKeyBalanceRefresh is how reading the balance of every key of a
+// multi-key channel went. Failed counts the keys not refreshed, whether
+// their upstream refused them or the deadline came first.
+type channelKeyBalanceRefresh struct {
+	Summary *model.ChannelKeyBalanceSummary
+	Failed  int
+	Errors  []string
+}
+
+const (
+	// channelKeyBalanceConcurrency bounds how many keys of one channel are
+	// read at once, so their upstream is not flooded.
+	channelKeyBalanceConcurrency = 4
+	// channelKeyBalanceTimeout bounds a whole refresh, so a channel with many
+	// keys answers before a proxy in front gives up on the request. A key
+	// not read by then is left as it was.
+	channelKeyBalanceTimeout = 40 * time.Second
+	// channelKeyBalanceErrorLines bounds the failures a refresh spells out;
+	// the rest are only counted.
+	channelKeyBalanceErrorLines = 20
+)
+
+// refreshChannelKeyBalances reads the balance of every key of a multi-key
+// channel and saves them with their total. The channel must be loaded with
+// its keys.
+func refreshChannelKeyBalances(channel *model.Channel) (*channelKeyBalanceRefresh, error) {
+	keys := channel.GetKeys()
+	if len(keys) == 0 {
+		return nil, errors.New("渠道没有可查询余额的密钥")
+	}
+	settings := readChannelBalanceSettings(channel)
+	ctx, cancel := context.WithTimeout(context.Background(), channelKeyBalanceTimeout)
+	defer cancel()
+	balances := make([]float64, len(keys))
+	failures := make([]error, len(keys))
+	reached := make([]bool, len(keys))
+	readKey := func(index int) {
+		// Unlike the request goroutine, nothing recovers a panic here for the
+		// server, so one key must not take it down.
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				reached[index] = true
+				failures[index] = fmt.Errorf("查询余额出错: %v", recovered)
+			}
+		}()
+		if ctx.Err() != nil {
+			return
+		}
+		result, err := fetchChannelBalance(ctx, channel, keys[index], settings)
+		if errors.Is(err, context.DeadlineExceeded) {
+			return
+		}
+		reached[index] = true
+		if err == nil && result.RawResponse != "" {
+			err = errors.New("余额响应格式无法识别")
+		}
+		balances[index] = result.Balance
+		failures[index] = err
+	}
+	// The keys wait in line stalest first, so a refresh the deadline cuts
+	// short reaches the keys it left out first next time.
+	queue := make(chan int)
+	var wg sync.WaitGroup
+	for range channelKeyBalanceConcurrency {
+		wg.Go(func() {
+			for index := range queue {
+				readKey(index)
+			}
+		})
+	}
+	for _, index := range model.ChannelKeyReadOrder(channel.Id, keys) {
+		queue <- index
+	}
+	close(queue)
+	wg.Wait()
+
+	refresh := &channelKeyBalanceRefresh{Errors: []string{}}
+	reads := make([]model.ChannelKeyBalanceRead, 0, len(keys))
+	skipped := 0
+	for index, key := range keys {
+		err := failures[index]
+		switch {
+		case errors.Is(err, errChannelBalanceUnsupported):
+			return nil, err
+		case !reached[index]:
+			skipped++
+		case err != nil:
+			refresh.Failed++
+			if len(refresh.Errors) < channelKeyBalanceErrorLines {
+				refresh.Errors = append(refresh.Errors, fmt.Sprintf("#%d: %s", index+1, err.Error()))
+			}
+			reads = append(reads, model.ChannelKeyBalanceRead{Key: key, Failed: true})
+		default:
+			reads = append(reads, model.ChannelKeyBalanceRead{Key: key, Balance: balances[index]})
+		}
+	}
+	if unlisted := refresh.Failed - len(refresh.Errors); unlisted > 0 {
+		refresh.Errors = append(refresh.Errors, fmt.Sprintf("另有 %d 个密钥刷新失败", unlisted))
+	}
+	if skipped > 0 {
+		refresh.Failed += skipped
+		refresh.Errors = append(refresh.Errors, fmt.Sprintf("%d 个密钥未在时限内查询，下次刷新时优先查询", skipped))
+	}
+	summary, err := model.SaveChannelKeyBalances(channel.Id, reads)
+	if err != nil {
+		return nil, err
+	}
+	refresh.Summary = summary
+	return refresh, nil
+}
+
+func fetchStandardChannelBalance(ctx context.Context, channel *model.Channel, key, proxy string) (float64, error) {
+	baseURL := channel.GetBaseURL()
+	if baseURL == "" {
+		baseURL = constant.GetChannelBaseURL(channel.Type)
 	}
 	switch channel.Type {
-	case constant.ChannelTypeOpenAI:
-		if channel.GetBaseURL() != "" {
-			baseURL = channel.GetBaseURL()
-		}
+	case constant.ChannelTypeOpenAI, constant.ChannelTypeCustom:
 	case constant.ChannelTypeAzure:
-		return 0, errors.New("尚未实现")
-	case constant.ChannelTypeCustom:
-		baseURL = channel.GetBaseURL()
+		return 0, errChannelBalanceUnsupported
 	//case common.ChannelTypeOpenAISB:
-	//	return updateChannelOpenAISBBalance(channel)
+	//	return fetchChannelOpenAISBBalance(ctx, key, proxy)
 	case constant.ChannelTypeAIProxy:
-		return updateChannelAIProxyBalance(channel)
+		return fetchChannelAIProxyBalance(ctx, key, proxy)
 	case constant.ChannelTypeAPI2GPT:
-		return updateChannelAPI2GPTBalance(channel)
+		return fetchChannelAPI2GPTBalance(ctx, key, proxy)
 	case constant.ChannelTypeAIGC2D:
-		return updateChannelAIGC2DBalance(channel)
+		return fetchChannelAIGC2DBalance(ctx, key, proxy)
 	case constant.ChannelTypeSiliconFlow:
-		return updateChannelSiliconFlowBalance(channel)
+		return fetchChannelSiliconFlowBalance(ctx, key, proxy)
 	case constant.ChannelTypeDeepSeek:
-		return updateChannelDeepSeekBalance(channel)
+		return fetchChannelDeepSeekBalance(ctx, key, proxy)
 	case constant.ChannelTypeOpenRouter:
-		return updateChannelOpenRouterBalance(channel)
+		return fetchChannelOpenRouterBalance(ctx, key, proxy)
 	case constant.ChannelTypeMoonshot:
-		return updateChannelMoonshotBalance(channel)
+		return fetchChannelMoonshotBalance(ctx, key, proxy)
 	default:
-		return 0, errors.New("尚未实现")
+		return 0, errChannelBalanceUnsupported
 	}
 	url := fmt.Sprintf("%s/v1/dashboard/billing/subscription", baseURL)
 
-	body, err := GetResponseBody("GET", url, channel, GetAuthHeader(channel.Key))
+	body, err := GetResponseBody(ctx, "GET", url, proxy, GetAuthHeader(key))
 	if err != nil {
 		return 0, err
 	}
@@ -584,7 +704,7 @@ func updateStandardChannelBalance(channel *model.Channel) (float64, error) {
 		startDate = now.AddDate(0, 0, -100).Format("2006-01-02")
 	}
 	url = fmt.Sprintf("%s/v1/dashboard/billing/usage?start_date=%s&end_date=%s", baseURL, startDate, endDate)
-	body, err = GetResponseBody("GET", url, channel, GetAuthHeader(channel.Key))
+	body, err = GetResponseBody(ctx, "GET", url, proxy, GetAuthHeader(key))
 	if err != nil {
 		return 0, err
 	}
@@ -594,7 +714,6 @@ func updateStandardChannelBalance(channel *model.Channel) (float64, error) {
 		return 0, err
 	}
 	balance := subscription.HardLimitUSD - usage.TotalUsage/100
-	channel.UpdateBalance(balance)
 	return balance, nil
 }
 
@@ -604,7 +723,7 @@ func UpdateChannelBalance(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	channel, err := model.CacheGetChannel(id)
+	channel, err := model.GetChannelById(id, true)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -654,9 +773,26 @@ func UpdateChannelBalance(c *gin.Context) {
 		return
 	}
 	if channel.ChannelInfo.IsMultiKey {
+		if channel.BalanceSource == model.ChannelBalanceSourceNone {
+			common.ApiError(c, errors.New("该渠道已设置为不查询余额"))
+			return
+		}
+		refresh, err := refreshChannelKeyBalances(channel)
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
 		c.JSON(http.StatusOK, gin.H{
-			"success": false,
-			"message": "多密钥渠道不支持余额查询",
+			"success":              true,
+			"message":              "",
+			"balance":              refresh.Summary.Balance,
+			"currency":             "USD",
+			"balance_source":       channel.BalanceSource,
+			"balance_updated_time": refresh.Summary.UpdatedTime,
+			"key_count":            len(refresh.Summary.Keys),
+			"key_balances":         refresh.Summary.Keys,
+			"refresh_failed":       refresh.Failed,
+			"refresh_errors":       refresh.Errors,
 		})
 		return
 	}
@@ -690,9 +826,6 @@ func updateAllChannelsBalance() error {
 		if channel.Status != common.ChannelStatusEnabled {
 			continue
 		}
-		if channel.ChannelInfo.IsMultiKey && channel.BalanceSource != model.ChannelBalanceSourceUpstream {
-			continue // skip multi-key channels
-		}
 		if channel.BalanceSource == model.ChannelBalanceSourceNone {
 			continue
 		}
@@ -709,6 +842,17 @@ func updateAllChannelsBalance() error {
 				_, _ = service.RefreshUpstreamAccountBalance(context.Background(), account, model.UpstreamTriggerScheduled)
 				time.Sleep(common.RequestInterval)
 			}
+			continue
+		}
+		if channel.ChannelInfo.IsMultiKey {
+			// A key that runs out is disabled by the request that fails on it,
+			// so reading its balance disables nothing. The list is as old as
+			// this run, and reading a setting that does not parse saves the
+			// channel, so the refresh works on the channel as it is now.
+			if current, err := model.GetChannelById(channel.Id, true); err == nil {
+				_, _ = refreshChannelKeyBalances(current)
+			}
+			time.Sleep(common.RequestInterval)
 			continue
 		}
 		// TODO: support Azure

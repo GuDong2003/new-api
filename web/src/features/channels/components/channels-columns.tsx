@@ -84,9 +84,11 @@ import {
   reportChannelBalanceRefresh,
   type TagRow,
 } from '../lib'
+import { getBalanceBreakdown } from '../lib/balance-breakdown'
 import { formatUpstreamBalance } from '../lib/upstream-account-display'
 import { parseUpstreamUpdateMeta } from '../lib/upstream-update-utils'
 import type { Channel } from '../types'
+import { BalanceBreakdown } from './balance-breakdown'
 import { ChannelRowActionsLayoutContext } from './channel-row-actions-context'
 import { TaskPluginChannelBadge } from './channel-type-badge'
 import { useChannels } from './channels-provider'
@@ -98,7 +100,6 @@ import {
   type CodexUsageDialogData,
 } from './dialogs/codex-usage-dialog'
 import { NumericSpinnerInput } from './numeric-spinner-input'
-import { UpstreamAccountBalances } from './upstream-account-balances'
 
 function parseIonetMeta(otherInfo: string | null | undefined): null | {
   source?: string
@@ -351,14 +352,12 @@ export function BalanceCell({ channel }: { channel: Channel }) {
   const balanceUnit = usesUpstream
     ? channel.upstream_balance_unit || 'QUOTA'
     : 'USD'
-  // Several accounts are listed one by one under the total instead of being
-  // named after it.
-  const accountBalances =
-    usesUpstream && (channel.upstream_balance_details?.length ?? 0) > 1
-      ? channel.upstream_balance_details
-      : undefined
+  // Several accounts or keys are listed one by one under the total instead of
+  // being named after it.
+  const breakdown = getBalanceBreakdown(channel)
+  const hasBreakdown = breakdown.length > 1
   let upstreamAccountLabel: string | undefined
-  if (usesUpstream && !accountBalances) {
+  if (usesUpstream && !hasBreakdown) {
     upstreamAccountLabel = channel.upstream_account_names?.length
       ? channel.upstream_account_names.join('、')
       : channel.upstream_account_name
@@ -541,13 +540,12 @@ export function BalanceCell({ channel }: { channel: Channel }) {
     remainingTooltipLabel = inferenceStatusLabel
   }
   // Codex usage and inference status take the place of a balance, so they
-  // have no account balances to list.
-  const listedAccountBalances =
+  // have no balances to list.
+  const listsBreakdown =
+    hasBreakdown &&
     sensitiveVisible &&
     channel.type !== CHANNEL_TYPE_CODEX_LEGACY &&
     !isInferenceChannel
-      ? accountBalances
-      : undefined
   let remainingBadgeVariant: StatusBadgeProps['variant'] = variant
   if (channel.balance_source === 'none') {
     remainingBadgeVariant = 'neutral'
@@ -607,10 +605,10 @@ export function BalanceCell({ channel }: { channel: Channel }) {
             }
           />
           <TooltipContent>
-            {listedAccountBalances ? (
+            {listsBreakdown ? (
               <div className='flex min-w-0 flex-col gap-1.5'>
                 <p>{remainingTooltipLabel}</p>
-                <UpstreamAccountBalances accounts={listedAccountBalances} />
+                <BalanceBreakdown rows={breakdown} limit={10} />
                 <p className='opacity-70'>{t('Click to update balance')}</p>
               </div>
             ) : (

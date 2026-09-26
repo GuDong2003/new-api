@@ -547,14 +547,14 @@ export async function handleUpdateChannelBalance(
 }
 
 /**
- * Tells how refreshing the balance of a channel went. An account that could
- * not be read keeps the balance it last read, if any, in the total, so a
- * refresh that read some of the accounts warns which ones failed, and one
- * that read none of them fails.
+ * Tells how refreshing the balance of a channel went. An account or key that
+ * could not be read keeps the balance it last read, if any, in the total, so
+ * a refresh that read only some of them warns which ones failed, and one that
+ * read none of them fails.
  *
  * `display.balance` is the refreshed total as it may be shown, and
- * `display.errors` whether the reasons, which name each account and its
- * site, may be shown.
+ * `display.errors` whether the reasons, which name each account and its site
+ * or number each key, may be shown.
  */
 export function reportChannelBalanceRefresh(
   response: ChannelBalanceResponse,
@@ -564,16 +564,23 @@ export function reportChannelBalanceRefresh(
   const description = display.errors
     ? response.refresh_errors?.join('; ')
     : undefined
-  if (failed > 0 && failed >= (response.account_count ?? 0)) {
+  const attempted = response.account_count ?? response.key_count ?? 0
+  if (failed > 0 && failed >= attempted) {
     toast.error(i18next.t('Failed to update balance'), { description })
     return
   }
   if (failed > 0) {
+    const counts = { balance: display.balance, count: failed }
     toast.warning(
-      i18next.t(
-        'Balance updated: {{balance}}, but {{count}} account(s) could not be refreshed',
-        { balance: display.balance, count: failed }
-      ),
+      response.key_count === undefined
+        ? i18next.t(
+            'Balance updated: {{balance}}, but {{count}} account(s) could not be refreshed',
+            counts
+          )
+        : i18next.t(
+            'Balance updated: {{balance}}, but {{count}} key(s) could not be refreshed',
+            counts
+          ),
       { description }
     )
     return
