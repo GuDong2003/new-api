@@ -25,6 +25,11 @@ import { GroupBadge } from '@/components/group-badge'
 import { StatusBadge, type StatusBadgeProps } from '@/components/status-badge'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover'
+import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
@@ -66,7 +71,10 @@ import {
   isPerCallBilling,
 } from '../../lib/utils'
 import type { LogOtherData } from '../../types'
-import { ChannelDetailsPopover } from '../channel-details-popover'
+import {
+  ChannelDetailsDialog,
+  UsageLogChannelDetails,
+} from '../channel-details-dialog'
 import { DetailsDialog } from '../dialogs/details-dialog'
 import { LogCostDisplay } from '../log-cost-display'
 import { ModelBadge } from '../model-badge'
@@ -388,6 +396,7 @@ export function useCommonLogsColumns(
               setAffinityTarget,
               setAffinityDialogOpen,
             } = useUsageLogsContext()
+            const [detailsOpen, setDetailsOpen] = useState(false)
             const log = row.original
 
             if (!isDisplayableLogType(log.type)) return null
@@ -402,6 +411,9 @@ export function useCommonLogsColumns(
             const channelChain = hasRetryChain
               ? useChannel.join(' → ')
               : undefined
+            const channelDisplay = log.channel_name
+              ? `${log.channel_name} #${log.channel}`
+              : `#${log.channel}`
             const channelIdDisplay = `#${log.channel}`
             const channelName = sensitiveVisible ? log.channel_name : '••••'
             const multiKeyIndex = other?.admin_info?.multi_key_index
@@ -411,80 +423,122 @@ export function useCommonLogsColumns(
               Number.isFinite(multiKeyIndex)
 
             return (
-              <ChannelDetailsPopover
-                channelId={log.channel}
-                channelName={
-                  sensitiveVisible ? log.channel_name || undefined : '••••'
-                }
-                details={
-                  (channelChain || showMultiKeyIndex || affinity) && (
-                    <div className='space-y-1 border-t pt-2'>
-                      {channelChain && (
-                        <div>
+              <>
+                <div className='flex max-w-[180px] items-start gap-1'>
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          <button
+                            type='button'
+                            aria-haspopup='dialog'
+                            className='focus-visible:ring-ring flex min-w-0 cursor-pointer flex-col items-start gap-0.5 rounded-md text-left outline-none focus-visible:ring-2'
+                            onClick={() => setDetailsOpen(true)}
+                          />
+                        }
+                      >
+                        <span className='inline-flex w-fit items-center gap-1'>
+                          <StatusBadge
+                            label={channelIdDisplay}
+                            autoColor={String(log.channel)}
+                            copyable={false}
+                            size='sm'
+                            showDot={false}
+                            className='font-mono'
+                          />
+                          {showMultiKeyIndex && (
+                            <StatusBadge
+                              label={String(multiKeyIndex)}
+                              size='sm'
+                              showDot={false}
+                              copyable={false}
+                              variant='neutral'
+                              className='h-5 min-w-5 justify-center rounded-full px-1 font-mono text-xs'
+                              aria-label={`${t('Key')} ${multiKeyIndex}`}
+                            />
+                          )}
+                        </span>
+                        {log.channel_name && (
+                          <span className='text-muted-foreground/70 max-w-full truncate [font-family:var(--font-body)] !text-xs'>
+                            {channelName}
+                          </span>
+                        )}
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        <div className='space-y-1'>
+                          <p>
+                            {sensitiveVisible
+                              ? channelDisplay
+                              : channelIdDisplay}
+                          </p>
+                          {channelChain && (
+                            <p className='text-muted-foreground text-xs'>
+                              {t('Chain')}: {channelChain}
+                            </p>
+                          )}
+                          {showMultiKeyIndex && (
+                            <p className='text-muted-foreground text-xs'>
+                              {t('Key')}: {multiKeyIndex}
+                            </p>
+                          )}
+                          {affinity && (
+                            <div className='border-t pt-1 text-xs'>
+                              <p className='font-medium'>
+                                {t('Channel Affinity')}
+                              </p>
+                              <p>
+                                {t('Rule')}: {affinity.rule_name || '-'}
+                              </p>
+                              <p>
+                                {t('Group')}:{' '}
+                                {sensitiveVisible
+                                  ? affinity.using_group ||
+                                    affinity.selected_group ||
+                                    '-'
+                                  : '••••'}
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                  {hasRetryChain && (
+                    <Popover>
+                      <PopoverTrigger
+                        render={
+                          <button
+                            type='button'
+                            className='text-muted-foreground hover:text-foreground focus-visible:ring-ring inline-flex size-5 shrink-0 items-center justify-center rounded-full transition-colors focus-visible:ring-2 focus-visible:outline-none'
+                            aria-label={t('Retry Chain')}
+                          />
+                        }
+                      >
+                        <GitBranch
+                          className='size-3.5 text-amber-500'
+                          aria-hidden='true'
+                        />
+                      </PopoverTrigger>
+                      <PopoverContent
+                        side='top'
+                        align='start'
+                        className='w-64 text-xs'
+                      >
+                        <div className='flex flex-col gap-1'>
                           <p className='font-medium'>{t('Retry Chain')}</p>
                           <p className='text-muted-foreground font-mono break-all'>
                             {channelChain}
                           </p>
                         </div>
-                      )}
-                      {showMultiKeyIndex && (
-                        <p className='text-muted-foreground'>
-                          {t('Key')}: {multiKeyIndex}
-                        </p>
-                      )}
-                      {affinity && (
-                        <div>
-                          <p className='font-medium'>{t('Channel Affinity')}</p>
-                          <p>
-                            {t('Rule')}: {affinity.rule_name || '-'}
-                          </p>
-                          <p>
-                            {t('Group')}:{' '}
-                            {sensitiveVisible
-                              ? affinity.using_group ||
-                                affinity.selected_group ||
-                                '-'
-                              : '••••'}
-                          </p>
-                        </div>
-                      )}
-                    </div>
-                  )
-                }
-              >
-                <div className='relative inline-flex w-fit items-center gap-1'>
-                  <StatusBadge
-                    label={channelIdDisplay}
-                    autoColor={String(log.channel)}
-                    copyable={false}
-                    size='sm'
-                    showDot={false}
-                    className='font-mono'
-                  />
-                  {showMultiKeyIndex && (
-                    <StatusBadge
-                      label={String(multiKeyIndex)}
-                      size='sm'
-                      showDot={false}
-                      copyable={false}
-                      variant='neutral'
-                      className='h-5 min-w-5 justify-center rounded-full px-1 font-mono text-xs'
-                      aria-label={`${t('Key')} ${multiKeyIndex}`}
-                    />
-                  )}
-                  {hasRetryChain && (
-                    <GitBranch
-                      className='size-3.5 shrink-0 text-amber-500'
-                      aria-label={t('Retry Chain')}
-                    />
+                      </PopoverContent>
+                    </Popover>
                   )}
                   {affinity && (
                     <button
                       type='button'
-                      className='absolute -top-1 -right-1 leading-none text-amber-500'
+                      className='inline-flex size-5 shrink-0 items-center justify-center leading-none text-amber-500'
                       aria-label={t('Channel Affinity')}
-                      onClick={(e) => {
-                        e.stopPropagation()
+                      onClick={() => {
                         setAffinityTarget({
                           rule_name: affinity.rule_name || '',
                           using_group:
@@ -501,12 +555,15 @@ export function useCommonLogsColumns(
                     </button>
                   )}
                 </div>
-                {log.channel_name && (
-                  <span className='text-muted-foreground/70 truncate [font-family:var(--font-body)] !text-xs'>
-                    {channelName}
-                  </span>
-                )}
-              </ChannelDetailsPopover>
+                <ChannelDetailsDialog
+                  open={detailsOpen}
+                  onOpenChange={setDetailsOpen}
+                  channelId={log.channel}
+                  value={sensitiveVisible ? channelDisplay : channelIdDisplay}
+                >
+                  <UsageLogChannelDetails log={log} />
+                </ChannelDetailsDialog>
+              </>
             )
           },
         },

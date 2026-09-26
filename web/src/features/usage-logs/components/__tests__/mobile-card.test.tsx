@@ -18,6 +18,12 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import {
+  createMemoryHistory,
+  createRootRoute,
+  createRouter,
+  RouterContextProvider,
+} from '@tanstack/react-router'
+import {
   getCoreRowModel,
   useReactTable,
   type VisibilityState,
@@ -84,15 +90,21 @@ function Fixture(props: {
 }
 
 function renderLogs(props: Parameters<typeof Fixture>[0] = {}) {
+  const router = createRouter({
+    routeTree: createRootRoute(),
+    history: createMemoryHistory({ initialEntries: ['/'] }),
+  })
   return render(
     <QueryClientProvider
       client={
         new QueryClient({ defaultOptions: { queries: { retry: false } } })
       }
     >
-      <UsageLogsProvider>
-        <Fixture {...props} />
-      </UsageLogsProvider>
+      <RouterContextProvider router={router}>
+        <UsageLogsProvider>
+          <Fixture {...props} />
+        </UsageLogsProvider>
+      </RouterContextProvider>
     </QueryClientProvider>
   )
 }
@@ -137,6 +149,9 @@ it('opens long channel text on tap and copies the complete value', async () => {
   expect(within(dialog).getByText(`${longName} #372`)).toHaveClass(
     '[overflow-wrap:anywhere]'
   )
+  expect(
+    within(dialog).getByRole('link', { name: 'Open channel' })
+  ).toHaveAttribute('href', '/channels?channel=372')
   await user.click(
     within(dialog).getByRole('button', { name: 'Copy to clipboard' })
   )

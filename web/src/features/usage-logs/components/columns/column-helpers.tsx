@@ -33,7 +33,7 @@ import { formatTimestampToDate, formatTokens } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
 import { formatDuration } from '../../lib/format'
-import { ChannelDetailsPopover } from '../channel-details-popover'
+import { ChannelDetailsDialog } from '../channel-details-dialog'
 import { FailReasonDialog } from '../dialogs/fail-reason-dialog'
 import { useUsageLogsContext } from '../usage-logs-provider'
 
@@ -180,28 +180,44 @@ export function createChannelColumn<T>(config: {
     ),
     cell: function ChannelCell({ row }) {
       const { sensitiveVisible } = useUsageLogsContext()
+      const [detailsOpen, setDetailsOpen] = useState(false)
       const channelId = row.getValue(accessorKey) as number
       if (!channelId) {
         return <span className='text-muted-foreground/60 text-xs'>-</span>
       }
       const name = config.channelName?.(row.original)
       const shownName = name && !sensitiveVisible ? '••••' : name
+      const value =
+        name && sensitiveVisible ? `${name} #${channelId}` : `#${channelId}`
       return (
-        <ChannelDetailsPopover channelId={channelId} channelName={shownName}>
-          <StatusBadge
-            label={`#${channelId}`}
-            autoColor={String(channelId)}
-            copyable={false}
-            size='sm'
-            showDot={false}
-            className='w-fit font-mono'
+        <>
+          <button
+            type='button'
+            aria-haspopup='dialog'
+            className='focus-visible:ring-ring flex max-w-[180px] min-w-0 cursor-pointer flex-col items-start gap-0.5 rounded-md text-left outline-none focus-visible:ring-2'
+            onClick={() => setDetailsOpen(true)}
+          >
+            <StatusBadge
+              label={`#${channelId}`}
+              autoColor={String(channelId)}
+              copyable={false}
+              size='sm'
+              showDot={false}
+              className='font-mono'
+            />
+            {shownName && (
+              <span className='text-muted-foreground/70 max-w-full truncate text-xs'>
+                {shownName}
+              </span>
+            )}
+          </button>
+          <ChannelDetailsDialog
+            open={detailsOpen}
+            onOpenChange={setDetailsOpen}
+            channelId={channelId}
+            value={value}
           />
-          {shownName && (
-            <span className='text-muted-foreground/70 truncate text-xs'>
-              {shownName}
-            </span>
-          )}
-        </ChannelDetailsPopover>
+        </>
       )
     },
     meta: { label: headerLabel },

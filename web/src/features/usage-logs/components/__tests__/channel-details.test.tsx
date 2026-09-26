@@ -16,6 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import {
   createMemoryHistory,
   createRootRoute,
@@ -23,20 +24,23 @@ import {
   RouterContextProvider,
 } from '@tanstack/react-router'
 import {
+  type ColumnDef,
   flexRender,
   getCoreRowModel,
   useReactTable,
 } from '@tanstack/react-table'
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { useEffect, useState } from 'react'
+import { useEffect } from 'react'
 import { describe, expect, it } from 'vitest'
 
+import { usageLogSchema } from '../../data/schema'
 import type { TaskLog } from '../../types'
 import { createChannelColumn } from '../columns/column-helpers'
+import { useCommonLogsColumns } from '../columns/common-logs-columns'
 import { UsageLogsProvider, useUsageLogsContext } from '../usage-logs-provider'
 
-const task: TaskLog = {
+const task = {
   id: 1,
   user_id: 2,
   platform: 'image',
@@ -50,20 +54,43 @@ const task: TaskLog = {
   status: 'SUCCESS',
 } as TaskLog
 
-function ChannelCell() {
-  const [columns] = useState(() => [
-    createChannelColumn<TaskLog>({
-      headerLabel: 'Channel',
-      channelName: (log) => log.channel_name,
-    }),
-  ])
+const log = usageLogSchema.parse({
+  id: 1,
+  user_id: 2,
+  created_at: 1788840000,
+  type: 2,
+  content: '',
+  model_name: 'gpt-image-2',
+  username: 'alice',
+  channel: 30,
+  channel_name: 'beta-image',
+  token_name: 'default',
+  quota: 100,
+  other: JSON.stringify({ admin_info: { use_channel: [12, 30] } }),
+})
+
+function FirstCell<T>(props: { columns: ColumnDef<T>[]; row: T }) {
   const table = useReactTable({
-    data: [task],
-    columns,
+    data: [props.row],
+    columns: props.columns,
     getCoreRowModel: getCoreRowModel(),
   })
   const cell = table.getRowModel().rows[0].getVisibleCells()[0]
   return <>{flexRender(cell.column.columnDef.cell, cell.getContext())}</>
+}
+
+const taskChannelColumns = [
+  createChannelColumn<TaskLog>({
+    headerLabel: 'Channel',
+    channelName: (row) => row.channel_name,
+  }),
+]
+
+function UsageLogChannelCell() {
+  const columns = useCommonLogsColumns(true, false).filter(
+    (column) => column.id === 'channel'
+  )
+  return <FirstCell columns={columns} row={log} />
 }
 
 function HideSensitive() {
@@ -72,40 +99,74 @@ function HideSensitive() {
   return null
 }
 
-function renderChannelCell(options: { hideSensitive?: boolean } = {}) {
+function renderWithLogs(
+  cell: React.ReactNode,
+  options: { hideSensitive?: boolean } = {}
+) {
   const router = createRouter({
     routeTree: createRootRoute(),
     history: createMemoryHistory({ initialEntries: ['/'] }),
   })
   render(
-    <RouterContextProvider router={router}>
-      <UsageLogsProvider>
-        {options.hideSensitive && <HideSensitive />}
-        <ChannelCell />
-      </UsageLogsProvider>
-    </RouterContextProvider>
+    <QueryClientProvider
+      client={
+        new QueryClient({ defaultOptions: { queries: { retry: false } } })
+      }
+    >
+      <RouterContextProvider router={router}>
+        <UsageLogsProvider>
+          {options.hideSensitive && <HideSensitive />}
+          {cell}
+        </UsageLogsProvider>
+      </RouterContextProvider>
+    </QueryClientProvider>
   )
 }
 
-describe('task log channel cell', () => {
+describe('task log channel', () => {
   it('shows the channel name with its ID', () => {
-    renderChannelCell()
+    renderWithLogs(<FirstCell columns={taskChannelColumns} row={task} />)
     expect(screen.getByText('#12')).toBeInTheDocument()
     expect(screen.getByText('alpha-image')).toBeInTheDocument()
   })
 
-  it('opens the channel on the channels page from its details', async () => {
+  it('opens a dialog that links to the channel on the channels page', async () => {
     const user = userEvent.setup()
-    renderChannelCell()
-    await user.click(screen.getByRole('button', { name: 'Channel details' }))
+    renderWithLogs(<FirstCell columns={taskChannelColumns} row={task} />)
+    await user.click(screen.getByRole('button', { name: /#12/ }))
+
+    const dialog = await screen.findByRole('dialog', { name: 'Channel' })
+    expect(within(dialog).getByText('alpha-image #12')).toBeInTheDocument()
     expect(
-      await screen.findByRole('link', { name: 'Open channel' })
+      within(dialog).getByRole('link', { name: 'Open channel' })
     ).toHaveAttribute('href', '/channels?channel=12')
   })
 
-  it('masks the channel name while sensitive values are hidden', () => {
-    renderChannelCell({ hideSensitive: true })
+  it('hides the channel name while sensitive values are hidden', async () => {
+    const user = userEvent.setup()
+    renderWithLogs(<FirstCell columns={taskChannelColumns} row={task} />, {
+      hideSensitive: true,
+    })
     expect(screen.queryByText('alpha-image')).not.toBeInTheDocument()
-    expect(screen.getByText('••••')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /#12/ }))
+
+    const dialog = await screen.findByRole('dialog', { name: 'Channel' })
+    expect(within(dialog).getByText('#12')).toBeInTheDocument()
+    expect(within(dialog).queryByText(/alpha-image/)).not.toBeInTheDocument()
+  })
+})
+
+describe('usage log channel', () => {
+  it('opens a dialog with the retry chain and a link to the channel', async () => {
+    const user = userEvent.setup()
+    renderWithLogs(<UsageLogChannelCell />)
+    await user.click(screen.getByRole('button', { name: /#30/ }))
+
+    const dialog = await screen.findByRole('dialog', { name: 'Channel' })
+    expect(within(dialog).getByText('beta-image #30')).toBeInTheDocument()
+    expect(within(dialog).getByText('12 → 30')).toBeInTheDocument()
+    expect(
+      within(dialog).getByRole('link', { name: 'Open channel' })
+    ).toHaveAttribute('href', '/channels?channel=30')
   })
 })
