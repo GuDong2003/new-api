@@ -20,11 +20,6 @@ import type { TFunction } from 'i18next'
 import { z } from 'zod'
 
 import { parseQuotaFromDollars, quotaUnitsToDollars } from '@/lib/format'
-import {
-  requestRateLimitCaps,
-  requestRateLimitFields,
-  requestRateLimitFieldsSchema,
-} from '@/lib/request-rate-limit'
 
 import type { SubscriptionPlan, PlanPayload } from '../types'
 
@@ -52,7 +47,6 @@ export function getPlanFormSchema(t: TFunction) {
     total_amount: z.coerce.number().min(0),
     upgrade_group: z.string().optional(),
     downgrade_group: z.string().optional(),
-    rate_limit: requestRateLimitFieldsSchema,
     stripe_price_id: z.string().optional(),
     creem_product_id: z.string().optional(),
     waffo_pancake_product_id: z.string().optional(),
@@ -78,7 +72,6 @@ export const PLAN_FORM_DEFAULTS: PlanFormValues = {
   total_amount: 0,
   upgrade_group: '',
   downgrade_group: '',
-  rate_limit: requestRateLimitFields(null),
   stripe_price_id: '',
   creem_product_id: '',
   waffo_pancake_product_id: '',
@@ -102,10 +95,6 @@ export function planToFormValues(plan: SubscriptionPlan): PlanFormValues {
     total_amount: quotaUnitsToDollars(Number(plan.total_amount || 0)),
     upgrade_group: plan.upgrade_group || '',
     downgrade_group: plan.downgrade_group || '',
-    rate_limit: requestRateLimitFields({
-      count: plan.rate_limit_count ?? 0,
-      success_count: plan.rate_limit_success_count ?? 0,
-    }),
     stripe_price_id: plan.stripe_price_id || '',
     creem_product_id: plan.creem_product_id || '',
     waffo_pancake_product_id: plan.waffo_pancake_product_id || '',
@@ -113,11 +102,9 @@ export function planToFormValues(plan: SubscriptionPlan): PlanFormValues {
 }
 
 export function formValuesToPlanPayload(values: PlanFormValues): PlanPayload {
-  const { rate_limit: rateLimit, ...planValues } = values
-  const rateLimitCaps = requestRateLimitCaps(rateLimit)
   return {
     plan: {
-      ...planValues,
+      ...values,
       price_amount: Number(values.price_amount || 0),
       currency: 'USD',
       duration_value: Number(values.duration_value || 0),
@@ -132,8 +119,6 @@ export function formValuesToPlanPayload(values: PlanFormValues): PlanPayload {
       total_amount: parseQuotaFromDollars(Number(values.total_amount || 0)),
       upgrade_group: values.upgrade_group || '',
       downgrade_group: values.downgrade_group || '',
-      rate_limit_count: rateLimitCaps.count,
-      rate_limit_success_count: rateLimitCaps.success_count,
     },
   }
 }

@@ -19,10 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { z } from 'zod'
 
 import type { AdminPermissionMatrix } from '@/lib/admin-permissions'
-import {
-  type RequestRateLimitCaps,
-  userRequestRateLimitSchema,
-} from '@/lib/request-rate-limit'
+import type { RequestRateLimitCaps } from '@/lib/request-rate-limit'
 
 // ============================================================================
 // User Schema & Types
@@ -66,8 +63,8 @@ export const userSchema = z.object({
   remark: z.string().optional(),
   /** The user's settings as a JSON string. */
   setting: z.string().optional(),
-  /** The request limit the user is held to; only user lists carry it. */
-  request_rate_limit: userRequestRateLimitSchema.optional(),
+  /** Requests a minute the user may make; 0 is no limit. Only user lists carry it. */
+  request_rpm: z.number().optional(),
   admin_permissions: z
     .record(z.string(), z.record(z.string(), z.boolean()))
     .optional(),

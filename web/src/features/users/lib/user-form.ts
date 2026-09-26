@@ -25,10 +25,10 @@ import {
 } from '@/lib/admin-permissions'
 import { quotaUnitsToDollars } from '@/lib/format'
 import {
+  capsOfRpm,
+  RPM_MAX,
+  rpmOfCaps,
   type RequestRateLimitCaps,
-  requestRateLimitCaps,
-  requestRateLimitFields,
-  requestRateLimitFieldsSchema,
 } from '@/lib/request-rate-limit'
 import { ROLE } from '@/lib/roles'
 
@@ -47,7 +47,11 @@ export const userFormSchema = z.object({
   quota_dollars: z.number().min(0).optional(),
   group: z.string().optional(),
   remark: z.string().optional(),
-  rate_limit: requestRateLimitFieldsSchema,
+  // The RPM an administrator sets for the user alone; off follows the group.
+  rpm_limit: z.object({
+    enabled: z.boolean(),
+    rpm: z.number().int().min(1, 'Must be ≥ 1').max(RPM_MAX),
+  }),
   admin_permissions: z
     .record(z.string(), z.record(z.string(), z.boolean()))
     .optional(),
@@ -67,7 +71,7 @@ export const USER_FORM_DEFAULT_VALUES: UserFormValues = {
   quota_dollars: 0,
   group: DEFAULT_GROUP,
   remark: '',
-  rate_limit: requestRateLimitFields(null),
+  rpm_limit: { enabled: false, rpm: 1 },
   // Filled against the backend catalog at render time; see UsersMutateDrawer.
   admin_permissions: {},
 }
@@ -109,7 +113,10 @@ export function transformFormDataToPayload(
     // For update: quota is adjusted atomically via /api/user/manage, not sent here
     payload.group = data.group
     payload.remark = data.remark
-    payload.rate_limit = requestRateLimitCaps(data.rate_limit)
+    // Both caps at 0 return the user to their group's RPM.
+    payload.rate_limit = data.rpm_limit.enabled
+      ? capsOfRpm(data.rpm_limit.rpm)
+      : { count: 0, success_count: 0 }
     payload.id = userId
   }
 
@@ -137,13 +144,17 @@ export function personalRequestRateLimit(
 /**
  * Transform user data to form defaults. The admin permission matrix is passed
  * through as-is (the backend already returns a full matrix); it is filled against
- * the catalog at render time in UsersMutateDrawer. Without a personal request
- * limit its caps start from `currentLimit`, the limit the user is held to now.
+ * the catalog at render time in UsersMutateDrawer. Without a personal RPM the
+ * input starts from `currentRpm`, the RPM the user is held to now.
  */
 export function transformUserToFormDefaults(
   user: User,
-  currentLimit?: RequestRateLimitCaps
+  currentRpm?: number
 ): UserFormValues {
+  const personal = personalRequestRateLimit(user)
+  const shownRpm = personal
+    ? rpmOfCaps(personal)
+    : (currentRpm ?? user.request_rpm ?? 0)
   return {
     username: user.username,
     display_name: user.display_name,
@@ -152,10 +163,7 @@ export function transformUserToFormDefaults(
     quota_dollars: quotaUnitsToDollars(user.quota),
     group: user.group || DEFAULT_GROUP,
     remark: user.remark || '',
-    rate_limit: requestRateLimitFields(
-      personalRequestRateLimit(user),
-      currentLimit ?? user.request_rate_limit
-    ),
+    rpm_limit: { enabled: personal !== null, rpm: Math.max(shownRpm, 1) },
     admin_permissions: user.admin_permissions ?? {},
   }
 }

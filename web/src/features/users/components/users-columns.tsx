@@ -24,7 +24,6 @@ import { ActivityTimeCell } from '@/components/activity-time-cell'
 import { BadgeCell } from '@/components/data-table'
 import { GroupBadge } from '@/components/group-badge'
 import { LongText } from '@/components/long-text'
-import { RequestRateLimitSummary } from '@/components/request-rate-limit-summary'
 import { StatusBadge } from '@/components/status-badge'
 import { TableId } from '@/components/table-id'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
@@ -34,9 +33,11 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+import { toIntlLocale } from '@/i18n/languages'
 import { getUserAvatarFallback, getUserAvatarStyle } from '@/lib/avatar'
 import { getCurrencyDisplay } from '@/lib/currency'
 import { formatQuota } from '@/lib/format'
+import { formatRpm } from '@/lib/request-rate-limit'
 import { useSystemConfigStore } from '@/stores/system-config-store'
 
 import {
@@ -50,7 +51,8 @@ import { DataTableRowActions } from './data-table-row-actions'
 import { UserQuotaCell } from './user-quota-cell'
 
 export function useUsersColumns(): ColumnDef<User>[] {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
+  const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
   const currencyConfig = useSystemConfigStore((state) => state.config.currency)
   const { meta: currency } = getCurrencyDisplay()
   const quotaUnit = currency.kind === 'tokens' ? t('Tokens') : currency.symbol
@@ -232,14 +234,19 @@ export function useUsersColumns(): ColumnDef<User>[] {
         meta: { mobileOrder: 30 },
       },
       {
-        id: 'request_rate_limit',
-        header: t('Request Limit'),
+        id: 'request_rpm',
+        header: 'RPM',
         cell: ({ row }) => {
-          const limit = row.original.request_rate_limit
-          return limit ? <RequestRateLimitSummary limit={limit} /> : null
+          const rpm = row.original.request_rpm
+          if (rpm === undefined) return null
+          return (
+            <span className='text-sm tabular-nums'>
+              {formatRpm(rpm, t, locale)}
+            </span>
+          )
         },
         enableSorting: false,
-        size: 220,
+        size: 100,
         meta: { mobileHidden: true },
       },
       {
@@ -325,6 +332,6 @@ export function useUsersColumns(): ColumnDef<User>[] {
     ],
     // formatQuota reads the currency configuration from the store.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [t, quotaUnit, currencyConfig]
+    [t, locale, quotaUnit, currencyConfig]
   )
 }

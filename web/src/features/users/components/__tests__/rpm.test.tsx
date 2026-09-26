@@ -22,9 +22,15 @@ import {
   useReactTable,
 } from '@tanstack/react-table'
 import { render, screen } from '@testing-library/react'
-import { expect, it } from 'vitest'
+import userEvent from '@testing-library/user-event'
+import { useForm } from 'react-hook-form'
+import { describe, expect, it } from 'vitest'
 
+import { Form } from '@/components/ui/form'
+
+import type { UserFormValues } from '../../lib'
 import type { User } from '../../types'
+import { UserRpmFields } from '../user-rpm-fields'
 import { useUsersColumns } from '../users-columns'
 
 const user: User = {
@@ -37,22 +43,16 @@ const user: User = {
   used_quota: 0,
   request_count: 0,
   group: 'default',
-  request_rate_limit: {
-    count: 0,
-    success_count: 30,
-    duration_minutes: 1,
-    source: 'default',
-    raised: true,
-  },
+  request_rpm: 9999,
 }
 
-function RequestLimitTable() {
+function RpmColumn(props: { user: User }) {
   const columns = useUsersColumns().filter(
-    (column) => column.id === 'request_rate_limit'
+    (column) => column.id === 'request_rpm'
   )
   const table = useReactTable({
     columns,
-    data: [user],
+    data: [props.user],
     getCoreRowModel: getCoreRowModel(),
   })
   return (
@@ -86,15 +86,53 @@ function RequestLimitTable() {
   )
 }
 
-it('lists the request limit each user is held to', () => {
-  render(<RequestLimitTable />)
-  expect(
-    screen.getByRole('columnheader', { name: 'Request Limit' })
-  ).toBeInTheDocument()
-  expect(
-    screen.getByText('Unlimited requests · 30 successful')
-  ).toBeInTheDocument()
-  expect(
-    screen.getByText('Raised by subscription').parentElement
-  ).toHaveTextContent('Every 1 min · Default · Raised by subscription')
+function RpmFields(props: {
+  rpmLimit: UserFormValues['rpm_limit']
+  disabled?: boolean
+}) {
+  const form = useForm<UserFormValues>({
+    defaultValues: { username: 'alice', rpm_limit: props.rpmLimit },
+  })
+  return (
+    <Form {...form}>
+      <UserRpmFields disabled={props.disabled} />
+    </Form>
+  )
+}
+
+describe('users RPM column', () => {
+  it('shows the RPM each user is held to', () => {
+    render(<RpmColumn user={user} />)
+    expect(
+      screen.getByRole('columnheader', { name: 'RPM' })
+    ).toBeInTheDocument()
+    expect(screen.getByText('9,999')).toBeInTheDocument()
+  })
+
+  it('shows a user without a limit as unlimited', () => {
+    render(<RpmColumn user={{ ...user, request_rpm: 0 }} />)
+    expect(screen.getByText('Unlimited')).toBeInTheDocument()
+  })
+})
+
+describe('user drawer RPM', () => {
+  it('shows the RPM input only once the personal RPM is switched on', async () => {
+    const actor = userEvent.setup()
+    render(<RpmFields rpmLimit={{ enabled: false, rpm: 10 }} />)
+    expect(screen.queryByRole('spinbutton')).not.toBeInTheDocument()
+
+    await actor.click(
+      screen.getByRole('switch', { name: 'Set an RPM for this user' })
+    )
+
+    expect(screen.getByRole('spinbutton')).toHaveValue(10)
+  })
+
+  it('locks the switch and RPM for someone who cannot edit them', () => {
+    render(<RpmFields rpmLimit={{ enabled: true, rpm: 10 }} disabled />)
+    expect(
+      screen.getByRole('switch', { name: 'Set an RPM for this user' })
+    ).toHaveAttribute('aria-disabled', 'true')
+    expect(screen.getByRole('spinbutton')).toBeDisabled()
+  })
 })

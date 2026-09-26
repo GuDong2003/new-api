@@ -24,6 +24,8 @@ import { StaticDataTable } from '@/components/data-table/static/static-data-tabl
 import { StaticRowActions } from '@/components/data-table/static/static-row-actions'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { toIntlLocale } from '@/i18n/languages'
+import { capsOfRpm, formatRpm, rpmOfCaps } from '@/lib/request-rate-limit'
 
 import { safeJsonParseWithValidation } from '../utils/json-parser'
 import { isObjectRecord } from '../utils/json-validators'
@@ -40,7 +42,8 @@ export function RateLimitVisualEditor({
   value,
   onChange,
 }: RateLimitVisualEditorProps) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
+  const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
   const [searchText, setSearchText] = useState('')
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editData, setEditData] = useState<RateLimitEntry | null>(null)
@@ -65,8 +68,7 @@ export function RateLimitVisualEditor({
         ) {
           return {
             groupName,
-            maxRequests: limits[0],
-            maxSuccess: limits[1],
+            rpm: rpmOfCaps({ count: limits[0], success_count: limits[1] }),
           }
         }
         return null
@@ -93,7 +95,8 @@ export function RateLimitVisualEditor({
       delete parsed[editData.groupName]
     }
 
-    parsed[data.groupName] = [data.maxRequests, data.maxSuccess]
+    const caps = capsOfRpm(data.rpm)
+    parsed[data.groupName] = [caps.count, caps.success_count]
 
     onChange(JSON.stringify(parsed, null, 2))
   }
@@ -156,26 +159,13 @@ export function RateLimitVisualEditor({
             cell: (limit) => limit.groupName,
           },
           {
-            id: 'max-requests',
-            header: t('Max Requests (incl. failures)'),
+            id: 'rpm',
+            header: 'RPM',
             className: 'text-right',
             cellClassName: 'text-right',
             cell: (limit) => (
               <span className='font-mono'>
-                {limit.maxRequests === 0
-                  ? t('Unlimited')
-                  : limit.maxRequests.toLocaleString()}
-              </span>
-            ),
-          },
-          {
-            id: 'max-success',
-            header: t('Max Success'),
-            className: 'text-right',
-            cellClassName: 'text-right',
-            cell: (limit) => (
-              <span className='font-mono'>
-                {limit.maxSuccess.toLocaleString()}
+                {formatRpm(limit.rpm, t, locale)}
               </span>
             ),
           },

@@ -43,21 +43,22 @@ type RequestRateLimit struct {
 	SuccessCount int
 }
 
-// Raise returns the more permissive of two limits, cap by cap. A cap that is
-// off admits the most.
-func (l RequestRateLimit) Raise(other RequestRateLimit) RequestRateLimit {
-	looser := func(a, b int) int {
-		if a == 0 || b == 0 {
-			return 0
-		}
-		return max(a, b)
+// PerPeriod returns how many requests the limit admits in each period: the
+// stricter of its caps, or 0 when it caps neither.
+func (l RequestRateLimit) PerPeriod() int {
+	switch {
+	case l.Count == 0:
+		return l.SuccessCount
+	case l.SuccessCount == 0:
+		return l.Count
+	default:
+		return min(l.Count, l.SuccessCount)
 	}
-	return RequestRateLimit{Count: looser(l.Count, other.Count), SuccessCount: looser(l.SuccessCount, other.SuccessCount)}
 }
 
-// CheckRequestRateLimit reports whether a limit a group, a user or a
-// subscription plan sets is in range: a request cap of 0 or more, where 0 is
-// off, and a success cap of at least 1.
+// CheckRequestRateLimit reports whether a limit a group or a user sets is in
+// range: a request cap of 0 or more, where 0 is off, and a success cap of at
+// least 1.
 func CheckRequestRateLimit(count, successCount int) error {
 	if count < 0 || successCount < 1 {
 		return fmt.Errorf("rate limit [%d, %d] needs a request cap of at least 0 and a success cap of at least 1", count, successCount)

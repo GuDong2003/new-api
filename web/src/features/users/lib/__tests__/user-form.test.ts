@@ -34,61 +34,44 @@ const user: User = {
   group: 'vip',
   status: 1,
   role: 1,
-  request_rate_limit: {
-    count: 10,
-    success_count: 10,
-    duration_minutes: 1,
-    source: 'group',
-    raised: false,
-  },
+  request_rpm: 10,
 }
 
-describe('user form request limit', () => {
-  it('turns on with the limit an administrator set for the user', () => {
+describe('user form RPM', () => {
+  it('turns on with the RPM an administrator set for the user', () => {
     const values = transformUserToFormDefaults({
       ...user,
       setting: JSON.stringify({
         language: 'en',
-        rate_limit: { count: 30, success_count: 20 },
+        rate_limit: { count: 30, success_count: 30 },
       }),
     })
-    expect(values.rate_limit).toEqual({
-      enabled: true,
-      count: 30,
-      success_count: 20,
-    })
+    expect(values.rpm_limit).toEqual({ enabled: true, rpm: 30 })
   })
 
-  it('starts off from the limit in effect when none is set for the user', () => {
+  it('starts off from the RPM in effect when none is set for the user', () => {
     const values = transformUserToFormDefaults({
       ...user,
       setting: '{"language":"en"}',
     })
-    expect(values.rate_limit).toEqual({
-      enabled: false,
-      count: 10,
-      success_count: 10,
-    })
+    expect(values.rpm_limit).toEqual({ enabled: false, rpm: 10 })
   })
 
-  it('sends the caps on update and none once switched off', () => {
+  it('sends the RPM as both caps on update and clears it once switched off', () => {
     const values = transformUserToFormDefaults(user)
     expect(
       transformFormDataToPayload(
-        {
-          ...values,
-          rate_limit: { enabled: true, count: 0, success_count: 50 },
-        },
+        { ...values, rpm_limit: { enabled: true, rpm: 50 } },
         user.id
       ).rate_limit
-    ).toEqual({ count: 0, success_count: 50 })
+    ).toEqual({ count: 50, success_count: 50 })
     expect(transformFormDataToPayload(values, user.id).rate_limit).toEqual({
       count: 0,
       success_count: 0,
     })
   })
 
-  it('leaves the request limit out when creating a user', () => {
+  it('leaves the RPM out when creating a user', () => {
     const values = transformUserToFormDefaults(user)
     expect(transformFormDataToPayload(values).rate_limit).toBeUndefined()
   })

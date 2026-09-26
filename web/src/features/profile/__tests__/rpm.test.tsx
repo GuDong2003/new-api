@@ -23,11 +23,11 @@ import { ProfileHeader } from '../components/profile-header'
 import type { UserProfile } from '../types'
 
 const profile: UserProfile = {
-  id: 7,
-  username: 'alice',
-  display_name: 'Alice',
-  role: 1,
-  group: 'vip',
+  id: 1,
+  username: 'GuDong226',
+  display_name: 'Root User',
+  role: 100,
+  group: 'svip',
   quota: 0,
   used_quota: 0,
   request_count: 0,
@@ -38,30 +38,31 @@ const profile: UserProfile = {
   created_time: 0,
 }
 
-describe('profile request limit', () => {
-  it('shows the request limit the user is held to', () => {
+describe('profile RPM', () => {
+  it('shows the RPM next to the group under the name', () => {
     render(
       <ProfileHeader
-        profile={{
-          ...profile,
-          request_rate_limit: {
-            count: 5,
-            success_count: 5,
-            duration_minutes: 1,
-            source: 'group',
-            raised: false,
-          },
-        }}
+        profile={{ ...profile, request_rpm: 9999 }}
         loading={false}
         onAvatarChanged={vi.fn()}
       />
     )
-    expect(screen.getByText('Request Limit')).toBeInTheDocument()
-    expect(screen.getByText('5 requests · 5 successful')).toBeInTheDocument()
-    expect(screen.getByText('Every 1 min · Group')).toBeInTheDocument()
+    const rpm = screen.getByText('RPM 9,999')
+    expect(rpm.parentElement).toHaveTextContent('@GuDong226•svip•RPM 9,999')
   })
 
-  it('shows no request limit row when the server sends none', () => {
+  it('says the RPM is unlimited when there is no limit', () => {
+    render(
+      <ProfileHeader
+        profile={{ ...profile, request_rpm: 0 }}
+        loading={false}
+        onAvatarChanged={vi.fn()}
+      />
+    )
+    expect(screen.getByText('RPM Unlimited')).toBeInTheDocument()
+  })
+
+  it('shows no RPM when the server sends none', () => {
     render(
       <ProfileHeader
         profile={profile}
@@ -69,6 +70,6 @@ describe('profile request limit', () => {
         onAvatarChanged={vi.fn()}
       />
     )
-    expect(screen.queryByText('Request Limit')).not.toBeInTheDocument()
+    expect(screen.queryByText(/^RPM/)).not.toBeInTheDocument()
   })
 })

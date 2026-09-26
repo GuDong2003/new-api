@@ -34,17 +34,11 @@ import {
   FormMessage,
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
+import { RPM_MAX } from '@/lib/request-rate-limit'
 
 const rateLimitDialogSchema = z.object({
   groupName: z.string().min(1, 'Group name is required'),
-  maxRequests: z
-    .number()
-    .min(0, 'Must be ≥ 0')
-    .max(2147483647, 'Must be ≤ 2,147,483,647'),
-  maxSuccess: z
-    .number()
-    .min(1, 'Must be ≥ 1')
-    .max(2147483647, 'Must be ≤ 2,147,483,647'),
+  rpm: z.number().int().min(1, 'Must be ≥ 1').max(RPM_MAX),
 })
 
 type RateLimitDialogFormValues = z.infer<typeof rateLimitDialogSchema>
@@ -53,8 +47,7 @@ const RATE_LIMIT_FORM_ID = 'rate-limit-form'
 
 export type RateLimitEntryData = {
   groupName: string
-  maxRequests: number
-  maxSuccess: number
+  rpm: number
 }
 
 type RateLimitDialogProps = {
@@ -77,8 +70,7 @@ export function RateLimitDialog({
     resolver: zodResolver(rateLimitDialogSchema),
     defaultValues: {
       groupName: '',
-      maxRequests: 0,
-      maxSuccess: 1,
+      rpm: 60,
     },
   })
 
@@ -88,8 +80,7 @@ export function RateLimitDialog({
     } else {
       form.reset({
         groupName: '',
-        maxRequests: 0,
-        maxSuccess: 1,
+        rpm: 60,
       })
     }
   }, [editData, form, open])
@@ -159,60 +150,24 @@ export function RateLimitDialog({
 
           <FormField
             control={form.control}
-            name='maxRequests'
+            name='rpm'
             render={({ field }) => (
               <FormItem>
-                <FormLabel>{t('Max Requests (including failures)')}</FormLabel>
+                <FormLabel>RPM</FormLabel>
                 <FormControl>
-                  <div className='flex items-center gap-2'>
-                    <Input
-                      type='number'
-                      min={0}
-                      max={2147483647}
-                      step={1}
-                      {...field}
-                      onChange={(e) =>
-                        field.onChange(Number.parseInt(e.target.value) || 0)
-                      }
-                    />
-                    <span className='text-muted-foreground text-sm'>
-                      {t('times')}
-                    </span>
-                  </div>
+                  <Input
+                    type='number'
+                    min={1}
+                    max={RPM_MAX}
+                    step={1}
+                    {...field}
+                    onChange={(e) =>
+                      field.onChange(Number.parseInt(e.target.value) || 0)
+                    }
+                  />
                 </FormControl>
                 <FormDescription>
-                  {t('Total requests allowed per period. 0 = unlimited.')}
-                </FormDescription>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-
-          <FormField
-            control={form.control}
-            name='maxSuccess'
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>{t('Max Successful Requests')}</FormLabel>
-                <FormControl>
-                  <div className='flex items-center gap-2'>
-                    <Input
-                      type='number'
-                      min={1}
-                      max={2147483647}
-                      step={1}
-                      {...field}
-                      onChange={(e) =>
-                        field.onChange(Number.parseInt(e.target.value) || 1)
-                      }
-                    />
-                    <span className='text-muted-foreground text-sm'>
-                      {t('times')}
-                    </span>
-                  </div>
-                </FormControl>
-                <FormDescription>
-                  {t('Only successful requests count toward this limit.')}
+                  {t('Requests per minute, failed ones included')}
                 </FormDescription>
                 <FormMessage />
               </FormItem>

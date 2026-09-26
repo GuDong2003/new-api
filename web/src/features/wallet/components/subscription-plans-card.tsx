@@ -56,11 +56,8 @@ import type {
   PlanRecord,
   UserSubscriptionRecord,
 } from '@/features/subscriptions/types'
-import { useRequestRateLimitMinutes } from '@/hooks/use-status'
-import { toIntlLocale } from '@/i18n/languages'
 import { formatQuota } from '@/lib/format'
 import { handleServerError } from '@/lib/handle-server-error'
-import { formatRequestRateLimit } from '@/lib/request-rate-limit'
 import { requireServerSuccess } from '@/lib/server-error-message'
 import { cn } from '@/lib/utils'
 
@@ -103,9 +100,7 @@ export function SubscriptionPlansCard({
   userQuota,
   onPurchaseSuccess,
 }: SubscriptionPlansCardProps) {
-  const { t, i18n } = useTranslation()
-  const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
-  const rateLimitMinutes = useRequestRateLimitMinutes()
+  const { t } = useTranslation()
 
   const [plans, setPlans] = useState<PlanRecord[]>([])
   const [activeSubscriptions, setActiveSubscriptions] = useState<
@@ -551,17 +546,6 @@ export function SubscriptionPlansCard({
                 limit > 0 ? `${t('Purchase Limit')}: ${limit}` : null,
                 plan.upgrade_group
                   ? `${t('Upgrade Group')}: ${plan.upgrade_group}`
-                  : null,
-                plan.rate_limit_success_count > 0
-                  ? `${t('Request Limit')}: ${formatRequestRateLimit(
-                      {
-                        count: plan.rate_limit_count,
-                        success_count: plan.rate_limit_success_count,
-                      },
-                      rateLimitMinutes,
-                      t,
-                      locale
-                    )}`
                   : null,
               ].filter(Boolean) as string[]
 

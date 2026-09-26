@@ -7,7 +7,6 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
-	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/gin-gonic/gin"
@@ -139,15 +138,6 @@ type AdminUpsertSubscriptionPlanRequest struct {
 	Plan model.SubscriptionPlan `json:"plan"`
 }
 
-// checkPlanRateLimit checks the request limit a plan raises its subscribers
-// to. A plan with both caps at 0 raises nothing.
-func checkPlanRateLimit(plan *model.SubscriptionPlan) error {
-	if plan.RateLimitCount == 0 && plan.RateLimitSuccessCount == 0 {
-		return nil
-	}
-	return setting.CheckRequestRateLimit(plan.RateLimitCount, plan.RateLimitSuccessCount)
-}
-
 func AdminCreateSubscriptionPlan(c *gin.Context) {
 	if !requirePaymentCompliance(c) {
 		return
@@ -201,10 +191,6 @@ func AdminCreateSubscriptionPlan(c *gin.Context) {
 			common.ApiErrorMsg(c, "升级分组不存在")
 			return
 		}
-	}
-	if err := checkPlanRateLimit(&req.Plan); err != nil {
-		common.ApiErrorMsg(c, "请求限制提升无效: "+err.Error())
-		return
 	}
 	req.Plan.DowngradeGroup = strings.TrimSpace(req.Plan.DowngradeGroup)
 	if req.Plan.DowngradeGroup != "" {
@@ -280,10 +266,6 @@ func AdminUpdateSubscriptionPlan(c *gin.Context) {
 			return
 		}
 	}
-	if err := checkPlanRateLimit(&req.Plan); err != nil {
-		common.ApiErrorMsg(c, "请求限制提升无效: "+err.Error())
-		return
-	}
 	req.Plan.DowngradeGroup = strings.TrimSpace(req.Plan.DowngradeGroup)
 	if req.Plan.DowngradeGroup != "" {
 		if _, ok := ratio_setting.GetGroupRatioCopy()[req.Plan.DowngradeGroup]; !ok {
@@ -316,8 +298,6 @@ func AdminUpdateSubscriptionPlan(c *gin.Context) {
 			"total_amount":               req.Plan.TotalAmount,
 			"upgrade_group":              req.Plan.UpgradeGroup,
 			"downgrade_group":            req.Plan.DowngradeGroup,
-			"rate_limit_count":           req.Plan.RateLimitCount,
-			"rate_limit_success_count":   req.Plan.RateLimitSuccessCount,
 			"quota_reset_period":         req.Plan.QuotaResetPeriod,
 			"quota_reset_custom_seconds": req.Plan.QuotaResetCustomSeconds,
 			"updated_at":                 common.GetTimestamp(),

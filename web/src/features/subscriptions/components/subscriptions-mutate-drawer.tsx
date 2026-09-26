@@ -31,7 +31,6 @@ import {
   sideDrawerHeaderClassName,
   sideDrawerSwitchItemClassName,
 } from '@/components/drawer-layout'
-import { RequestRateLimitFields } from '@/components/request-rate-limit-fields'
 import { Button } from '@/components/ui/button'
 import { Combobox } from '@/components/ui/combobox'
 import {
@@ -489,13 +488,6 @@ export function SubscriptionsMutateDrawer({
                   )}
                 />
               </div>
-
-              <RequestRateLimitFields
-                label={t('Raise the request limit')}
-                description={t(
-                  "While the subscription is active, the subscriber's request limit is raised to at least these caps. A looser limit of their own stays."
-                )}
-              />
 
               <FormField
                 control={form.control}

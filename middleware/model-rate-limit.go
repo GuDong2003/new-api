@@ -229,7 +229,7 @@ func modelRequestSucceeded(c *gin.Context) bool {
 }
 
 // ModelRequestRateLimit 模型请求限流中间件。
-// 每个用户始终受自己的限制：管理员单独设置的，否则是分组的，否则是默认值，再由有效订阅提升。
+// 每个用户始终受自己的限制：管理员单独设置的，否则是分组的，否则是默认值。
 // 开关打开时，所有用户的请求还要共同遵守全站总量限制。
 func ModelRequestRateLimit() func(c *gin.Context) {
 	return func(c *gin.Context) {
@@ -240,11 +240,7 @@ func ModelRequestRateLimit() func(c *gin.Context) {
 		userGroup := common.GetContextKeyString(c, constant.ContextKeyUserGroup)
 		userId := c.GetInt("id")
 		userSetting, _ := common.GetContextKeyType[dto.UserSetting](c, constant.ContextKeyUserSetting)
-		limit, err := service.RequestRateLimitFor(userId, userSetting, tokenGroup, userGroup)
-		if err != nil {
-			// 订阅只会放宽限制，读不到订阅时按用户自己的基础限制处理，不拒绝请求。
-			common.SysError(fmt.Sprintf("failed to read the subscriptions raising the request limit of user %d: %v", userId, err))
-		}
+		limit := service.RequestRateLimitFor(userSetting, tokenGroup, userGroup)
 
 		scopes := []requestRateLimitScope{userRequestRateLimitScope(userId, limit)}
 		if setting.ModelRequestRateLimitEnabled {

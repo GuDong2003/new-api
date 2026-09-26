@@ -33,8 +33,6 @@ const SECURITY_SECTIONS = [
           ModelRequestRateLimitCount: settings.ModelRequestRateLimitCount,
           ModelRequestRateLimitSuccessCount:
             settings.ModelRequestRateLimitSuccessCount,
-          ModelRequestRateLimitDurationMinutes:
-            settings.ModelRequestRateLimitDurationMinutes,
           ModelRequestRateLimitGroup: settings.ModelRequestRateLimitGroup,
           ModelRequestRateLimitGlobalCount:
             settings.ModelRequestRateLimitGlobalCount,

@@ -23,7 +23,7 @@ import {
   createRouter,
   RouterProvider,
 } from '@tanstack/react-router'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -33,23 +33,22 @@ import { api } from '@/lib/api'
 import { SettingsPageProvider } from '../../components/settings-page-context'
 import { RateLimitSection } from '../rate-limit-section'
 
+const settings = {
+  ModelRequestRateLimitEnabled: false,
+  ModelRequestRateLimitCount: 0,
+  ModelRequestRateLimitSuccessCount: 1000,
+  ModelRequestRateLimitGroup: '{"vip":[10,10]}',
+  ModelRequestRateLimitGlobalCount: 0,
+  ModelRequestRateLimitGlobalSuccessCount: 200,
+}
+
 function Fixture() {
   const [container, setContainer] = useState<HTMLDivElement | null>(null)
   return (
     <>
       <div ref={setContainer} />
       <SettingsPageProvider actionsContainer={container}>
-        <RateLimitSection
-          defaultValues={{
-            ModelRequestRateLimitEnabled: false,
-            ModelRequestRateLimitDurationMinutes: 1,
-            ModelRequestRateLimitCount: 0,
-            ModelRequestRateLimitSuccessCount: 1000,
-            ModelRequestRateLimitGroup: '',
-            ModelRequestRateLimitGlobalCount: 0,
-            ModelRequestRateLimitGlobalSuccessCount: 0,
-          }}
-        />
+        <RateLimitSection defaultValues={settings} />
       </SettingsPageProvider>
     </>
   )
@@ -68,7 +67,13 @@ async function renderSection() {
       <RouterProvider router={router} />
     </QueryClientProvider>
   )
-  return screen.findByRole('switch', { name: 'Enable site-wide limit' })
+  return screen.findByRole('spinbutton', { name: 'Default RPM' })
+}
+
+function savedOptions() {
+  return vi
+    .mocked(api.put)
+    .mock.calls.map(([, body]) => body as { key: string; value: unknown })
 }
 
 beforeEach(() => {
@@ -80,41 +85,71 @@ afterEach(() => {
 })
 
 describe('rate limit settings', () => {
-  it('shows the site-wide caps only while the site-wide limit is on', async () => {
-    const user = userEvent.setup()
-    const siteSwitch = await renderSection()
-    expect(
-      screen.getByText('Default max requests per period')
-    ).toBeInTheDocument()
-    expect(
-      screen.queryByText('Site-wide max successful requests')
-    ).not.toBeInTheDocument()
-
-    await user.click(siteSwitch)
-
-    expect(
-      screen.getByText('Site-wide max successful requests')
-    ).toBeInTheDocument()
+  it('reads a limit stored as two caps as one RPM', async () => {
+    expect(await renderSection()).toHaveValue(1000)
+    expect(screen.getByText('10')).toBeInTheDocument()
   })
 
-  it('saves the switch together with a site-wide cap', async () => {
+  it('saves a changed RPM as both of its caps', async () => {
     const user = userEvent.setup()
-    await user.click(await renderSection())
-    const successCap = screen.getAllByRole('spinbutton').at(-1)
-    if (!successCap) throw new Error('missing site-wide success cap')
-    await user.clear(successCap)
-    await user.type(successCap, '500')
+    const defaultRpm = await renderSection()
+    await user.clear(defaultRpm)
+    await user.type(defaultRpm, '30')
     await user.click(screen.getByRole('button', { name: /save/i }))
 
     await waitFor(() =>
-      expect(api.put).toHaveBeenCalledWith('/api/option/', {
-        key: 'ModelRequestRateLimitGlobalSuccessCount',
-        value: 500,
-      })
+      expect(savedOptions()).toEqual([
+        { key: 'ModelRequestRateLimitCount', value: 30 },
+        { key: 'ModelRequestRateLimitSuccessCount', value: 30 },
+      ])
     )
-    expect(api.put).toHaveBeenCalledWith('/api/option/', {
-      key: 'ModelRequestRateLimitEnabled',
-      value: true,
+  })
+
+  it('shows the site-wide RPM only while the site-wide limit is on and leaves untouched caps as they are', async () => {
+    const user = userEvent.setup()
+    await renderSection()
+    expect(
+      screen.queryByRole('spinbutton', { name: 'Site-wide RPM' })
+    ).not.toBeInTheDocument()
+
+    await user.click(
+      screen.getByRole('switch', { name: 'Enable site-wide limit' })
+    )
+    expect(
+      screen.getByRole('spinbutton', { name: 'Site-wide RPM' })
+    ).toHaveValue(200)
+    await user.click(screen.getByRole('button', { name: /save/i }))
+
+    await waitFor(() =>
+      expect(savedOptions()).toEqual([
+        { key: 'ModelRequestRateLimitEnabled', value: true },
+      ])
+    )
+  })
+
+  it('adds a group with one RPM', async () => {
+    const user = userEvent.setup()
+    await renderSection()
+    await user.click(screen.getByRole('button', { name: 'Add group' }))
+    const dialog = await screen.findByRole('dialog', {
+      name: 'Add group rate limit',
+    })
+    await user.type(
+      within(dialog).getByRole('textbox', { name: 'Group Name' }),
+      'image'
+    )
+    const rpm = within(dialog).getByRole('spinbutton', { name: 'RPM' })
+    await user.clear(rpm)
+    await user.type(rpm, '15')
+    await user.click(within(dialog).getByRole('button', { name: 'Add' }))
+    await user.click(screen.getByRole('button', { name: /save/i }))
+
+    await waitFor(() => expect(savedOptions()).toHaveLength(1))
+    const saved = savedOptions()[0]
+    expect(saved.key).toBe('ModelRequestRateLimitGroup')
+    expect(JSON.parse(String(saved.value))).toEqual({
+      vip: [10, 10],
+      image: [15, 15],
     })
   })
 })

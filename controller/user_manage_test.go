@@ -18,7 +18,6 @@ import (
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relaykit/dto"
-	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/service/authz"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/alicebob/miniredis/v2"
@@ -848,59 +847,44 @@ func TestUserSettingSavesKeepWhatTheyDoNotEdit(t *testing.T) {
 	assert.Equal(t, &dto.UserRateLimit{Count: 3, SuccessCount: 2}, stored.RateLimit, "users cannot change the limit an administrator set")
 }
 
-func TestUserListsAndProfileShowTheRequestLimitEachUserIsHeldTo(t *testing.T) {
+func TestUserListsAndProfileShowTheRPMEachUserIsHeldTo(t *testing.T) {
 	db := setupManageUserTestDB(t)
 	initManageUserAuthz(t, db)
-	require.NoError(t, db.AutoMigrate(&model.UserSubscription{}))
-	useRequestRateLimitSettings(t, `{"vip":[0,20]}`)
+	useRequestRateLimitSettings(t, `{"vip":[20,20],"svip":[0,9999]}`)
 	users := []model.User{
-		{Username: "personal-limit", Setting: `{"rate_limit":{"count":9,"success_count":4}}`, Group: "vip"},
+		{Username: "personal-limit", Setting: `{"rate_limit":{"count":9,"success_count":9}}`, Group: "vip"},
 		{Username: "group-limit", Group: "vip"},
+		{Username: "success-cap-only", Group: "svip"},
 		{Username: "default-limit", Group: "default"},
-		{Username: "raised-limit", Group: "default"},
 	}
 	for i := range users {
 		users[i].Password, users[i].AffCode = "unused-password-hash", users[i].Username
 		users[i].Role, users[i].Status = common.RoleCommonUser, common.UserStatusEnabled
 		require.NoError(t, db.Create(&users[i]).Error)
 	}
-	now := common.GetTimestamp()
-	require.NoError(t, db.Create(&model.UserSubscription{
-		UserId: users[3].Id, PlanId: 1, StartTime: now - 60, EndTime: now + 3600, Status: "active",
-		RateLimitCount: 50, RateLimitSuccessCount: 30,
-	}).Error)
-	require.NoError(t, db.Create(&model.UserSubscription{
-		UserId: users[2].Id, PlanId: 1, StartTime: now - 7200, EndTime: now - 3600, Status: "active",
-		RateLimitSuccessCount: 99,
-	}).Error)
-	want := map[string]service.UserRequestRateLimit{
-		"personal-limit": {Count: 9, SuccessCount: 4, DurationMinutes: 1, Source: service.RequestRateLimitSourceUser},
-		"group-limit":    {Count: 0, SuccessCount: 20, DurationMinutes: 1, Source: service.RequestRateLimitSourceGroup},
-		"default-limit":  {Count: 0, SuccessCount: 7, DurationMinutes: 1, Source: service.RequestRateLimitSourceDefault},
-		"raised-limit":   {Count: 0, SuccessCount: 30, DurationMinutes: 1, Source: service.RequestRateLimitSourceDefault, Raised: true},
-	}
+	want := map[string]int{"personal-limit": 9, "group-limit": 20, "success-cap-only": 9999, "default-limit": 7}
 
 	recorder := performUserEndpoint(t, GetAllUsers, http.MethodGet, "/api/user/?p=1&page_size=10", 9999, common.RoleRootUser, "")
 	var listed struct {
 		Data struct {
 			Items []struct {
-				Username         string                       `json:"username"`
-				RequestRateLimit service.UserRequestRateLimit `json:"request_rate_limit"`
+				Username   string `json:"username"`
+				RequestRPM int    `json:"request_rpm"`
 			} `json:"items"`
 		} `json:"data"`
 	}
 	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &listed))
 	require.Len(t, listed.Data.Items, len(users))
 	for _, item := range listed.Data.Items {
-		assert.Equal(t, want[item.Username], item.RequestRateLimit, item.Username)
+		assert.Equal(t, want[item.Username], item.RequestRPM, item.Username)
 	}
 
-	recorder = performUserEndpoint(t, GetSelf, http.MethodGet, "/api/user/self", users[3].Id, common.RoleCommonUser, "")
+	recorder = performUserEndpoint(t, GetSelf, http.MethodGet, "/api/user/self", users[2].Id, common.RoleCommonUser, "")
 	var self struct {
 		Data struct {
-			RequestRateLimit service.UserRequestRateLimit `json:"request_rate_limit"`
+			RequestRPM int `json:"request_rpm"`
 		} `json:"data"`
 	}
 	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &self))
-	assert.Equal(t, want["raised-limit"], self.Data.RequestRateLimit)
+	assert.Equal(t, 9999, self.Data.RequestRPM)
 }

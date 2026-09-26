@@ -368,16 +368,16 @@ func Register(c *gin.Context) {
 // userListItem is a user as administrators' user lists show it.
 type userListItem struct {
 	*model.User
-	RequestRateLimit service.UserRequestRateLimit `json:"request_rate_limit"`
+	// RequestRPM is how many requests the user may make each minute on their
+	// own group; 0 is no limit.
+	RequestRPM int `json:"request_rpm"`
 }
 
-// withRequestRateLimits pairs each listed user with the request limit they are
-// held to on their own group.
-func withRequestRateLimits(users []*model.User) []userListItem {
-	limits := service.DescribeRequestRateLimits(users)
+// withRequestRPM pairs each listed user with the RPM they are held to.
+func withRequestRPM(users []*model.User) []userListItem {
 	items := make([]userListItem, 0, len(users))
 	for _, user := range users {
-		items = append(items, userListItem{User: user, RequestRateLimit: limits[user.Id]})
+		items = append(items, userListItem{User: user, RequestRPM: service.UserRPM(user)})
 	}
 	return items
 }
@@ -391,7 +391,7 @@ func GetAllUsers(c *gin.Context) {
 		return
 	}
 	pageInfo.SetTotal(int(total))
-	pageInfo.SetItems(withRequestRateLimits(users))
+	pageInfo.SetItems(withRequestRPM(users))
 
 	common.ApiSuccess(c, pageInfo)
 	return
@@ -420,7 +420,7 @@ func SearchUsers(c *gin.Context) {
 		return
 	}
 	pageInfo.SetTotal(int(total))
-	pageInfo.SetItems(withRequestRateLimits(users))
+	pageInfo.SetItems(withRequestRPM(users))
 	common.ApiSuccess(c, pageInfo)
 	return
 }
@@ -534,7 +534,7 @@ func GetSelf(c *gin.Context) {
 		return
 	}
 	responseData := buildSelfUserData(user)
-	responseData["request_rate_limit"] = service.DescribeRequestRateLimits([]*model.User{user})[user.Id]
+	responseData["request_rpm"] = service.UserRPM(user)
 	// The authenticated role is loaded from GetUserCache. It should equal the
 	// row role, but use it for capabilities so GetSelf and login/refresh remain
 	// consistent with the authorization decision made for this request.
