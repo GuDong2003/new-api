@@ -1233,20 +1233,21 @@ func aggregateUpstreamAccountBalances(items []UpstreamAccountBalance) UpstreamCh
 	summary.AccountCount = len(items)
 	summary.AccountIds = make([]int, 0, len(items))
 	summary.AccountNames = make([]string, 0, len(items))
-	unit := strings.TrimSpace(items[0].Unit)
-	if unit == "" {
-		unit = "QUOTA"
-	}
+	// A refreshed balance always has a unit, so an account without one has
+	// never been read: it adds nothing to the total and does not decide its
+	// unit, or one account not read yet would blank the total of the others.
+	unit := ""
 	unitMismatch := false
 	oldestUpdate := int64(0)
 	for _, item := range items {
 		summary.AccountIds = append(summary.AccountIds, item.AccountId)
 		summary.AccountNames = append(summary.AccountNames, item.AccountName)
 		itemUnit := strings.TrimSpace(item.Unit)
-		if itemUnit == "" {
-			itemUnit = "QUOTA"
-		}
-		if itemUnit != unit {
+		switch {
+		case itemUnit == "":
+		case unit == "":
+			unit = itemUnit
+		case itemUnit != unit:
 			unitMismatch = true
 		}
 		if item.UpdatedTime > 0 && (oldestUpdate == 0 || item.UpdatedTime < oldestUpdate) {
@@ -1263,9 +1264,14 @@ func aggregateUpstreamAccountBalances(items []UpstreamAccountBalance) UpstreamCh
 		summary.Status = UpstreamStatusFailed
 		return summary
 	}
+	if unit == "" {
+		unit = "QUOTA"
+	}
 	summary.Unit = unit
 	for _, item := range items {
-		summary.Balance += item.Balance
+		if strings.TrimSpace(item.Unit) != "" {
+			summary.Balance += item.Balance
+		}
 	}
 	return summary
 }

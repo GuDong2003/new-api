@@ -29,7 +29,6 @@ import {
 } from 'lucide-react'
 import { useState, useMemo, useContext, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
-import { toast } from 'sonner'
 
 import { ConfirmDialog } from '@/components/confirm-dialog'
 import { BadgeListCell } from '@/components/data-table'
@@ -60,6 +59,7 @@ import { truncateText } from '@/lib/utils'
 import { getCodexUsage, updateChannelBalance } from '../api'
 import {
   CHANNEL_STATUS_CONFIG,
+  CHANNEL_TYPE_CODEX_LEGACY,
   CHANNEL_TYPE_TASK_PLUGIN,
   CHANNEL_TYPE_VLLM,
   CHANNEL_TYPE_SGLANG,
@@ -81,8 +81,10 @@ import {
   handleUpdateTagField,
   createChannelFieldUpdateScheduler,
   isTagAggregateRow,
+  reportChannelBalanceRefresh,
   type TagRow,
 } from '../lib'
+import { formatUpstreamBalance } from '../lib/upstream-account-display'
 import { parseUpstreamUpdateMeta } from '../lib/upstream-update-utils'
 import type { Channel } from '../types'
 import { ChannelRowActionsLayoutContext } from './channel-row-actions-context'
@@ -96,6 +98,7 @@ import {
   type CodexUsageDialogData,
 } from './dialogs/codex-usage-dialog'
 import { NumericSpinnerInput } from './numeric-spinner-input'
+import { UpstreamAccountBalances } from './upstream-account-balances'
 
 function parseIonetMeta(otherInfo: string | null | undefined): null | {
   source?: string
@@ -348,8 +351,14 @@ export function BalanceCell({ channel }: { channel: Channel }) {
   const balanceUnit = usesUpstream
     ? channel.upstream_balance_unit || 'QUOTA'
     : 'USD'
+  // Several accounts are listed one by one under the total instead of being
+  // named after it.
+  const accountBalances =
+    usesUpstream && (channel.upstream_balance_details?.length ?? 0) > 1
+      ? channel.upstream_balance_details
+      : undefined
   let upstreamAccountLabel: string | undefined
-  if (usesUpstream) {
+  if (usesUpstream && !accountBalances) {
     upstreamAccountLabel = channel.upstream_account_names?.length
       ? channel.upstream_account_names.join('、')
       : channel.upstream_account_name
@@ -386,7 +395,7 @@ export function BalanceCell({ channel }: { channel: Channel }) {
   const remainingFull =
     balanceUnit === 'USD'
       ? withSuffix(formatCurrencyFromUSD(balance, balanceFormatOptions))
-      : `${balance.toLocaleString(locale)} ${balanceUnit}`
+      : formatUpstreamBalance(balance, balanceUnit, locale)
   const usedDisplay =
     usedFull.length > MAX_INLINE_BALANCE_CHARS
       ? withSuffix(
@@ -486,15 +495,16 @@ export function BalanceCell({ channel }: { channel: Channel }) {
     try {
       const response = await updateChannelBalance(channel.id)
       if (response.success && response.balance !== undefined) {
-        toast.success(
-          t('Balance updated: {{balance}}', {
-            balance: formatCurrencyFromUSD(response.balance, {
-              digitsLarge: 2,
-              digitsSmall: 4,
-              abbreviate: false,
-            }),
-          })
-        )
+        reportChannelBalanceRefresh(response, {
+          balance: sensitiveVisible
+            ? formatUpstreamBalance(
+                response.balance,
+                response.currency || 'USD',
+                locale
+              )
+            : SENSITIVE_MASK,
+          errors: sensitiveVisible,
+        })
         void queryClient.invalidateQueries({
           queryKey: channelsQueryKeys.lists(),
         })
@@ -530,6 +540,14 @@ export function BalanceCell({ channel }: { channel: Channel }) {
   } else if (isInferenceChannel) {
     remainingTooltipLabel = inferenceStatusLabel
   }
+  // Codex usage and inference status take the place of a balance, so they
+  // have no account balances to list.
+  const listedAccountBalances =
+    sensitiveVisible &&
+    channel.type !== CHANNEL_TYPE_CODEX_LEGACY &&
+    !isInferenceChannel
+      ? accountBalances
+      : undefined
   let remainingBadgeVariant: StatusBadgeProps['variant'] = variant
   if (channel.balance_source === 'none') {
     remainingBadgeVariant = 'neutral'
@@ -589,9 +607,19 @@ export function BalanceCell({ channel }: { channel: Channel }) {
             }
           />
           <TooltipContent>
-            <p>{remainingTooltipLabel}</p>
-            {channel.type !== 57 && !isInferenceChannel && (
-              <p>{t('Click to update balance')}</p>
+            {listedAccountBalances ? (
+              <div className='flex min-w-0 flex-col gap-1.5'>
+                <p>{remainingTooltipLabel}</p>
+                <UpstreamAccountBalances accounts={listedAccountBalances} />
+                <p className='opacity-70'>{t('Click to update balance')}</p>
+              </div>
+            ) : (
+              <>
+                <p>{remainingTooltipLabel}</p>
+                {channel.type !== 57 && !isInferenceChannel && (
+                  <p>{t('Click to update balance')}</p>
+                )}
+              </>
             )}
           </TooltipContent>
         </Tooltip>

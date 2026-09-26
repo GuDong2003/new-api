@@ -44,6 +44,7 @@ import {
 } from '../api'
 import { CHANNEL_STATUS, ERROR_MESSAGES, SUCCESS_MESSAGES } from '../constants'
 import type {
+  ChannelBalanceResponse,
   ChannelTestResponse,
   ChannelTestType,
   CopyChannelParams,
@@ -543,6 +544,43 @@ export async function handleUpdateChannelBalance(
         : i18next.t('Failed to update balance')
     )
   }
+}
+
+/**
+ * Tells how refreshing the balance of a channel went. An account that could
+ * not be read keeps the balance it last read, if any, in the total, so a
+ * refresh that read some of the accounts warns which ones failed, and one
+ * that read none of them fails.
+ *
+ * `display.balance` is the refreshed total as it may be shown, and
+ * `display.errors` whether the reasons, which name each account and its
+ * site, may be shown.
+ */
+export function reportChannelBalanceRefresh(
+  response: ChannelBalanceResponse,
+  display: { balance: string; errors: boolean }
+): void {
+  const failed = response.refresh_failed ?? 0
+  const description = display.errors
+    ? response.refresh_errors?.join('; ')
+    : undefined
+  if (failed > 0 && failed >= (response.account_count ?? 0)) {
+    toast.error(i18next.t('Failed to update balance'), { description })
+    return
+  }
+  if (failed > 0) {
+    toast.warning(
+      i18next.t(
+        'Balance updated: {{balance}}, but {{count}} account(s) could not be refreshed',
+        { balance: display.balance, count: failed }
+      ),
+      { description }
+    )
+    return
+  }
+  toast.success(
+    i18next.t('Balance updated: {{balance}}', { balance: display.balance })
+  )
 }
 
 // ============================================================================

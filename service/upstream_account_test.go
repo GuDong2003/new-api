@@ -334,6 +334,37 @@ func TestUpstreamAccountMetadataIsNormalizedAndPersisted(t *testing.T) {
 	assert.True(t, stored.OpenRedeemWithCheckin)
 }
 
+// An account whose balance was never read has no unit yet. It is left out of
+// the channel total instead of making the units look mixed, so an account
+// just added, or one no refresh has read yet, does not blank the others.
+func TestChannelBalanceLeavesOutAccountsWithoutABalanceYet(t *testing.T) {
+	truncate(t)
+	seedChannel(t, 201)
+	bind := func(name string, balance map[string]any) {
+		account := &model.UpstreamAccount{Name: name, BaseURL: "https://" + name + ".example.com", Credential: name + "-token", BalanceInterval: 60}
+		require.NoError(t, model.CreateUpstreamAccount(account))
+		require.NoError(t, model.BindUpstreamAccountChannel(account.Id, 201))
+		require.NoError(t, model.DB.Model(&model.UpstreamAccount{}).Where("id = ?", account.Id).Updates(balance).Error)
+	}
+	bind("fetched", map[string]any{"balance": 10, "balance_unit": "USD", "balance_updated_time": 100, "balance_status": model.UpstreamStatusHealthy})
+	bind("unfetched", map[string]any{"balance_status": model.UpstreamStatusFailed})
+
+	summary, err := model.GetUpstreamChannelBalanceSummary(201)
+	require.NoError(t, err)
+	assert.Equal(t, "USD", summary.Unit)
+	assert.InDelta(t, 10, summary.Balance, 0.000001)
+	assert.Equal(t, model.UpstreamStatusFailed, summary.Status, "the channel still shows that an account failed")
+	assert.Equal(t, int64(100), summary.UpdatedTime)
+	assert.Len(t, summary.Accounts, 2)
+
+	// Balances read in different units still cannot be added up.
+	bind("quota", map[string]any{"balance": 500, "balance_unit": "QUOTA", "balance_updated_time": 200, "balance_status": model.UpstreamStatusHealthy})
+	summary, err = model.GetUpstreamChannelBalanceSummary(201)
+	require.NoError(t, err)
+	assert.Equal(t, "MIXED", summary.Unit)
+	assert.Zero(t, summary.Balance)
+}
+
 func TestManyToManyUpstreamAccountChannelBalanceAggregation(t *testing.T) {
 	truncate(t)
 	seedChannel(t, 101)

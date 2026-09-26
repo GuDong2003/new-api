@@ -20,7 +20,6 @@ import { useQueryClient } from '@tanstack/react-query'
 import { Loader2, RefreshCw, DollarSign } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { toast } from 'sonner'
 
 import {
   CodeBlock,
@@ -30,14 +29,16 @@ import { Dialog } from '@/components/dialog'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { IconBadge } from '@/components/ui/icon-badge'
-import { formatCurrencyFromUSD } from '@/lib/currency'
+import { toIntlLocale } from '@/i18n/languages'
 import { formatTimestampToDate } from '@/lib/format'
 import { handleServerError } from '@/lib/handle-server-error'
 import { createServerError } from '@/lib/server-error-message'
 
 import { getCodexUsage, updateChannelBalance } from '../../api'
-import { channelsQueryKeys } from '../../lib'
+import { channelsQueryKeys, reportChannelBalanceRefresh } from '../../lib'
+import { formatUpstreamBalance } from '../../lib/upstream-account-display'
 import { useChannels } from '../channels-provider'
+import { UpstreamAccountBalances } from '../upstream-account-balances'
 import {
   CodexUsageDialog,
   type CodexUsageDialogData,
@@ -50,7 +51,8 @@ type BalanceQueryDialogProps = {
 }
 
 export function BalanceQueryDialog(props: BalanceQueryDialogProps) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
+  const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
   const { currentRow, setCurrentRow } = useChannels()
   const queryClient = useQueryClient()
   const [isQuerying, setIsQuerying] = useState(false)
@@ -105,7 +107,14 @@ export function BalanceQueryDialog(props: BalanceQueryDialogProps) {
         setBalance(newBalance)
         setBalanceCurrency(response.currency || 'USD')
         setBalanceUpdatedTime(now)
-        toast.success(t('Balance updated successfully'))
+        reportChannelBalanceRefresh(response, {
+          balance: formatUpstreamBalance(
+            newBalance,
+            response.currency || 'USD',
+            locale
+          ),
+          errors: true,
+        })
 
         // Update currentRow immediately with new balance and timestamp
         setCurrentRow(
@@ -160,27 +169,27 @@ export function BalanceQueryDialog(props: BalanceQueryDialogProps) {
     props.onOpenChange(false)
   }
 
-  const formatBalance = (bal: number, currency = 'USD') =>
-    currency === 'USD'
-      ? formatCurrencyFromUSD(bal, {
-          digitsLarge: 2,
-          digitsSmall: 4,
-          abbreviate: false,
-        })
-      : `${bal.toLocaleString()} ${currency}`
-
   const formatDate = (timestamp: number) => {
     if (!timestamp) return 'Never'
     return formatTimestampToDate(timestamp)
   }
 
-  let displayedBalance = formatBalance(currentRow.balance)
+  let displayedBalance = formatUpstreamBalance(
+    currentRow.balance,
+    'USD',
+    locale
+  )
   if (balance !== null) {
-    displayedBalance = formatBalance(balance, balanceCurrency || 'USD')
+    displayedBalance = formatUpstreamBalance(
+      balance,
+      balanceCurrency || 'USD',
+      locale
+    )
   } else if (currentRow.balance_source === 'upstream') {
-    displayedBalance = formatBalance(
+    displayedBalance = formatUpstreamBalance(
       currentRow.upstream_balance ?? 0,
-      currentRow.upstream_balance_unit || 'QUOTA'
+      currentRow.upstream_balance_unit || 'QUOTA',
+      locale
     )
   } else if (currentRow.balance_source === 'none') {
     displayedBalance = '不查询'
@@ -273,21 +282,11 @@ export function BalanceQueryDialog(props: BalanceQueryDialogProps) {
                 {t('Last updated:')} {formatDate(displayedUpdatedTime)}
               </div>
               {upstreamDetails.length > 1 && (
-                <div className='mt-3 space-y-1 border-t pt-3 text-xs'>
-                  <div className='text-muted-foreground'>各账号余额</div>
-                  {upstreamDetails.map((item) => (
-                    <div
-                      key={item.account_id}
-                      className='flex items-center justify-between gap-3'
-                    >
-                      <span className='min-w-0 truncate'>
-                        {item.account_name}
-                      </span>
-                      <span className='shrink-0 font-medium'>
-                        {formatBalance(item.balance, item.unit || 'QUOTA')}
-                      </span>
-                    </div>
-                  ))}
+                <div className='mt-3 flex flex-col gap-1 border-t pt-3 text-xs'>
+                  <div className='text-muted-foreground'>
+                    {t('Balance of each account')}
+                  </div>
+                  <UpstreamAccountBalances accounts={upstreamDetails} />
                 </div>
               )}
             </div>

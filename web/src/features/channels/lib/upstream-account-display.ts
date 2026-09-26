@@ -15,6 +15,8 @@ You should have received a copy of the GNU Affero General Public License
 along with this program. If not, see <https://www.gnu.org/licenses/>.
 */
 
+import { formatCurrencyFromUSD, getCurrencyLabel } from '@/lib/currency'
+
 import type {
   Channel,
   ChannelOtherSettings,
@@ -88,6 +90,28 @@ export function summarizeChannelCheckins(
     ).length,
     total: accounts.length,
   }
+}
+
+/**
+ * A balance as an upstream site reports it: dollars are shown the way this
+ * site shows amounts, in its currency or as tokens, and anything else in the
+ * upstream site's own quota units.
+ */
+export function formatUpstreamBalance(
+  balance: number,
+  unit: string,
+  locale?: Intl.LocalesArgument
+): string {
+  if (unit === 'USD') {
+    const amount = formatCurrencyFromUSD(balance, {
+      digitsLarge: 2,
+      digitsSmall: 4,
+      abbreviate: false,
+    })
+    return getCurrencyLabel() === 'Tokens' ? `${amount} Tokens` : amount
+  }
+  // Three decimals, as balances have always shown; formatNumber keeps two.
+  return `${balance.toLocaleString(locale)} ${unit || 'QUOTA'}`
 }
 
 export function formatLastCheckinTime(timestamp: unknown): string | null {
