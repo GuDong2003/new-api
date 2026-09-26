@@ -28,7 +28,9 @@ export function ChannelUpstreamAccountSection(
     <SideDrawerSection className='min-w-0'>
       <SideDrawerSectionHeader
         title={t('Automatic Check-in')}
-        description={t('Use a pass token for balance and optional check-in.')}
+        description={t(
+          'Link the upstream site’s check-in pages, and add the accounts that check in on this channel.'
+        )}
         icon={<CalendarCheck2 className='h-4 w-4' aria-hidden='true' />}
         iconTone='warning'
       />

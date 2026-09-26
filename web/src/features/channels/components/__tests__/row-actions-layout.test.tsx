@@ -18,8 +18,11 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { Row } from '@tanstack/react-table'
-import { render, screen } from '@testing-library/react'
-import { afterEach, describe, expect, test } from 'vitest'
+import { render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { afterEach, describe, expect, test, vi } from 'vitest'
+
+import { api } from '@/lib/api'
 
 import type { Channel, ChannelUpstreamAccountConfig } from '../../types'
 import {
@@ -43,7 +46,10 @@ const boundUpstreamAccount: ChannelUpstreamAccountConfig = {
   redeem_url: 'https://upstream.example.com/redeem',
 }
 
-function makeChannel(upstream?: ChannelUpstreamAccountConfig): Channel {
+function makeChannel(
+  accounts: ChannelUpstreamAccountConfig[] = [],
+  settings = '{}'
+): Channel {
   return {
     id: 1,
     type: 1,
@@ -58,7 +64,8 @@ function makeChannel(upstream?: ChannelUpstreamAccountConfig): Channel {
     balance: 0,
     balance_updated_time: 0,
     balance_source: 'upstream',
-    upstream_account_config: upstream,
+    upstream_account_config: accounts[0],
+    upstream_account_configs: accounts.length ? accounts : undefined,
     models: '',
     group: 'default',
     used_quota: 0,
@@ -71,7 +78,7 @@ function makeChannel(upstream?: ChannelUpstreamAccountConfig): Channel {
       multi_key_polling_index: 0,
       multi_key_mode: 'random',
     },
-    settings: '{}',
+    settings,
   }
 }
 
@@ -132,6 +139,7 @@ afterEach(() => {
     queryClient.clear()
   }
   queryClients.length = 0
+  vi.restoreAllMocks()
 })
 
 describe('channel row actions alignment', () => {
@@ -146,7 +154,7 @@ describe('channel row actions alignment', () => {
   })
 
   test('applies the table alignment to a channel row', () => {
-    renderRowActions(makeChannel(boundUpstreamAccount))
+    renderRowActions(makeChannel([boundUpstreamAccount]))
 
     expect(actionsContainer('Open menu')).toHaveClass('justify-end')
   })
@@ -158,7 +166,7 @@ describe('channel row actions alignment', () => {
   })
 
   test('does not right-align a channel row in card layout', () => {
-    renderRowActions(makeChannel(boundUpstreamAccount), 'card')
+    renderRowActions(makeChannel([boundUpstreamAccount]), 'card')
 
     expect(actionsContainer('Open menu')).not.toHaveClass('justify-end')
   })
@@ -172,7 +180,7 @@ describe('channel row actions alignment', () => {
 
 describe('channel row actions in table layout', () => {
   test('offers the upstream account actions when the channel is bound to an upstream account', () => {
-    renderRowActions(makeChannel(boundUpstreamAccount))
+    renderRowActions(makeChannel([boundUpstreamAccount]))
 
     expect(screen.getByRole('button', { name: 'Check in' })).toBeInTheDocument()
     expect(
@@ -196,5 +204,47 @@ describe('channel row actions in table layout', () => {
     expect(
       screen.queryByRole('button', { name: 'Recharge / redeem' })
     ).toBeNull()
+  })
+
+  test('offers the check-in pages of a channel without an account', () => {
+    renderRowActions(
+      makeChannel(
+        [],
+        JSON.stringify({
+          external_checkin_url: 'https://upstream.example.com/checkin',
+          redeem_url: 'https://upstream.example.com/redeem',
+        })
+      )
+    )
+
+    expect(screen.queryByRole('button', { name: 'Check in' })).toBeNull()
+    expect(
+      screen.getByRole('button', { name: 'External check-in' })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: 'Recharge / redeem' })
+    ).toBeInTheDocument()
+  })
+
+  test('checks in every account of the channel one after another', async () => {
+    const user = userEvent.setup()
+    const post = vi.spyOn(api, 'post').mockResolvedValue({
+      data: { success: true, data: { status: 'healthy', message: '' } },
+    })
+    renderRowActions(
+      makeChannel([
+        boundUpstreamAccount,
+        { ...boundUpstreamAccount, id: 8, name: 'second account' },
+        { ...boundUpstreamAccount, id: 9, auto_checkin: false },
+      ])
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Check in' }))
+
+    await waitFor(() => expect(post).toHaveBeenCalledTimes(2))
+    expect(post.mock.calls.map((call) => call[0])).toEqual([
+      '/api/upstream-account/7/checkin',
+      '/api/upstream-account/8/checkin',
+    ])
   })
 })

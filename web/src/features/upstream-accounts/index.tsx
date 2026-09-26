@@ -194,9 +194,13 @@ function AccountDialog(props: AccountDialogProps) {
     else next.delete(channel.id)
 
     const nextForm = { ...form, channel_ids: [...next] }
+    // Ticking a channel fills in its name and address, but not over what was
+    // entered, so a second account on the channel keeps a name of its own.
     if (checked) {
-      nextForm.name = channel.name
-      nextForm.base_url = channel.base_url ?? ''
+      nextForm.name = form.name.trim() ? form.name : channel.name
+      nextForm.base_url = form.base_url.trim()
+        ? form.base_url
+        : (channel.base_url ?? '')
     }
     setForm(nextForm)
   }

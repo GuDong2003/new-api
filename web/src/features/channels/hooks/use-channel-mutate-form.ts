@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useMutation } from '@tanstack/react-query'
+import type { DeepPartial } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
@@ -42,6 +43,8 @@ type UseChannelMutateFormParams = {
   currentRow?: Channel | null
   isEditing: boolean
   isMultiKeyChannel: boolean
+  /** The values the form was loaded with, to tell what a save changes. */
+  loadedValues?: DeepPartial<ChannelFormValues>
   onSuccess: () => void
 }
 
@@ -55,7 +58,8 @@ const SENSITIVE_UPDATE_FIELDS = [
   'setting',
   'settings',
   'other',
-  'upstream_account_config',
+  'upstream_account_configs',
+  'upstream_account_loaded_ids',
 ] satisfies (keyof Channel)[]
 
 export function useChannelMutateForm(props: UseChannelMutateFormParams) {
@@ -72,7 +76,8 @@ export function useChannelMutateForm(props: UseChannelMutateFormParams) {
       if (props.isEditing && props.currentRow) {
         const payload = transformFormDataToUpdatePayload(
           data,
-          props.currentRow.id
+          props.currentRow.id,
+          props.loadedValues
         )
         if (!data.key?.trim()) {
           delete payload.key

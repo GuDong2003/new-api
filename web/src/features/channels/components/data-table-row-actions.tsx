@@ -75,7 +75,10 @@ import {
   isChannelEnabled,
   isMultiKeyChannel,
 } from '../lib'
-import { shouldShowChannelCheckinAction } from '../lib/upstream-account-display'
+import {
+  getChannelCheckinAccounts,
+  getChannelCheckinLinks,
+} from '../lib/upstream-account-display'
 import type { Channel } from '../types'
 import {
   channelRowActionsClassName,
@@ -137,14 +140,49 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
   }
 
   const upstreamConfig = channel.upstream_account_config
-  const upstreamAccountId = upstreamConfig?.id
+  const checkinAccounts = getChannelCheckinAccounts(channel)
+  const checkinLinks = getChannelCheckinLinks(channel)
 
+  // Accounts check in one after another so the upstream site does not see a
+  // burst of sign-ins from one address.
   const handleUpstreamOperation = async () => {
-    if (!upstreamAccountId || upstreamOperation) return
+    if (!checkinAccounts.length || upstreamOperation) return
     setUpstreamOperation('checkin')
+    const failures: { name: string; message: string }[] = []
+    let lastMessage = ''
+    for (const account of checkinAccounts) {
+      try {
+        const result = await checkinUpstreamAccount(account.id as number)
+        lastMessage = result?.message || ''
+      } catch (error) {
+        failures.push({
+          name: account.name || `#${account.id}`,
+          message:
+            error instanceof Error
+              ? error.message
+              : t('Upstream operation failed'),
+        })
+      }
+    }
+    const total = checkinAccounts.length
+    const summary = t('Checked in {{succeeded}} of {{total}} accounts', {
+      succeeded: total - failures.length,
+      total,
+    })
+    if (total === 1 && failures.length === 0) {
+      toast.success(lastMessage || t('Check-in successful'))
+    } else if (total === 1) {
+      toast.error(failures[0].message)
+    } else if (failures.length === 0) {
+      toast.success(summary)
+    } else {
+      toast.error(summary, {
+        description: failures
+          .map((failure) => `${failure.name}: ${failure.message}`)
+          .join('\n'),
+      })
+    }
     try {
-      const result = await checkinUpstreamAccount(upstreamAccountId)
-      toast.success(result?.message || t('Check-in successful'))
       await queryClient.invalidateQueries({
         queryKey: channelsQueryKeys.lists(),
       })
@@ -152,10 +190,6 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
         queryKey: channelsQueryKeys.detail(channel.id),
       })
       await queryClient.invalidateQueries({ queryKey: ['upstream-accounts'] })
-    } catch (error) {
-      toast.error(
-        error instanceof Error ? error.message : t('Upstream operation failed')
-      )
     } finally {
       setUpstreamOperation(null)
     }
@@ -175,9 +209,9 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
   }
 
   const handleExternalCheckin = () => {
-    openExternal(upstreamConfig?.external_checkin_url)
-    if (upstreamConfig?.open_redeem_with_checkin && upstreamConfig.redeem_url) {
-      openExternal(upstreamConfig.redeem_url)
+    openExternal(checkinLinks.externalCheckinUrl)
+    if (checkinLinks.openRedeemWithCheckin && checkinLinks.redeemUrl) {
+      openExternal(checkinLinks.redeemUrl)
     }
   }
 
@@ -224,7 +258,7 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
     <div className={channelRowActionsClassName(layout)}>
       {/* Upstream-account actions depend on the bound account, not on the
           layout, so table and card view expose the same set. */}
-      {shouldShowChannelCheckinAction(upstreamConfig) && (
+      {checkinAccounts.length > 0 && (
         <Tooltip>
           <TooltipTrigger
             render={
@@ -249,7 +283,7 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
           <TooltipContent>{t('Check in')}</TooltipContent>
         </Tooltip>
       )}
-      {upstreamConfig?.external_checkin_url && (
+      {checkinLinks.externalCheckinUrl && (
         <Tooltip>
           <TooltipTrigger
             render={
@@ -269,7 +303,7 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
           <TooltipContent>{t('External check-in')}</TooltipContent>
         </Tooltip>
       )}
-      {upstreamConfig?.redeem_url && (
+      {checkinLinks.redeemUrl && (
         <Tooltip>
           <TooltipTrigger
             render={
@@ -278,7 +312,7 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
                 size='icon-sm'
                 onClick={(event) => {
                   event.stopPropagation()
-                  openExternal(upstreamConfig.redeem_url)
+                  openExternal(checkinLinks.redeemUrl)
                 }}
                 aria-label={t('Recharge / redeem')}
               />

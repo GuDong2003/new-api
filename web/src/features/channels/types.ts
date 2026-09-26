@@ -115,6 +115,10 @@ export const channelSchema = z.object({
     )
     .optional(),
   upstream_account_config: channelUpstreamAccountConfigSchema.optional(),
+  upstream_account_configs: z
+    .array(channelUpstreamAccountConfigSchema)
+    .optional(),
+  upstream_account_loaded_ids: z.array(z.number()).optional(),
   models: z.string().default(''),
   group: z.string().default('default'),
   used_quota: z.number().default(0),
@@ -179,6 +183,9 @@ export interface ChannelOtherSettings {
   upstream_model_update_last_check_time?: number
   upstream_model_update_last_detected_models?: string[]
   advanced_custom?: AdvancedCustomConfig
+  external_checkin_url?: string
+  redeem_url?: string
+  open_redeem_with_checkin?: boolean
 }
 
 export type ClientIdentityProfile =

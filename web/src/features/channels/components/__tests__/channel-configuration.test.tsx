@@ -235,7 +235,7 @@ test('keeps channel editing in a centered dialog with a dedicated check-in tab',
   await user.click(checkinTab)
 
   expect(
-    await screen.findByRole('switch', { name: 'Enable upstream account' })
+    await screen.findByRole('button', { name: 'Add account' })
   ).toBeInTheDocument()
 })
 
@@ -249,9 +249,7 @@ test('keeps the check-in panel within the dialog width and translates the upstre
 
   const panel = screen.getByRole('tabpanel', { name: 'Automatic Check-in' })
   expect(panel).toHaveClass('min-w-0', 'overflow-x-hidden')
-  await user.click(
-    await screen.findByRole('switch', { name: 'Enable upstream account' })
-  )
+  await user.click(await screen.findByRole('button', { name: 'Add account' }))
   expect(
     screen.getByRole('spinbutton', { name: 'Upstream user ID' })
   ).toHaveAttribute('placeholder', 'Upstream user ID (optional)')

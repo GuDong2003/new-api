@@ -25,7 +25,10 @@ import { StatusBadgeTypeContext } from '@/components/status-badge'
 
 import { CHANNEL_STATUS } from '../constants'
 import { isTagAggregateRow, parseGroupsList } from '../lib'
-import { formatLastCheckinTime } from '../lib/upstream-account-display'
+import {
+  formatLastCheckinTime,
+  summarizeChannelCheckins,
+} from '../lib/upstream-account-display'
 import type { Channel } from '../types'
 import { ChannelRowActionsLayoutContext } from './channel-row-actions-context'
 import { useChannels } from './channels-provider'
@@ -61,9 +64,8 @@ function ChannelCardComponent({
   }
 
   const groups = parseGroupsList(row.original.group ?? '')
-  const lastCheckinTime = formatLastCheckinTime(
-    row.original.upstream_account_config?.last_checkin_time
-  )
+  const checkins = summarizeChannelCheckins(row.original)
+  const lastCheckinTime = formatLastCheckinTime(checkins.lastCheckinTime)
 
   const selectCell = renderCell('select')
   const typeCell = renderCell('type')
@@ -175,6 +177,11 @@ function ChannelCardComponent({
           {lastCheckinTime ? (
             <div className='text-muted-foreground ml-auto shrink-0 text-xs whitespace-nowrap'>
               {t('Last check-in time')}: {lastCheckinTime}
+              {checkins.total > 1 &&
+                ` · ${t('{{succeeded}}/{{total}} succeeded', {
+                  succeeded: checkins.succeeded,
+                  total: checkins.total,
+                })}`}
             </div>
           ) : null}
         </div>

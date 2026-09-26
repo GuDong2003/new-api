@@ -511,7 +511,12 @@ func GetChannel(c *gin.Context) {
 	}
 	if channel != nil {
 		clearChannelInfo(channel)
-		_ = model.HydrateChannelUpstreamBalances([]*model.Channel{channel})
+		// The editor saves back the accounts it loads, so a channel shown
+		// without them would lose them on its next save.
+		if err := model.HydrateChannelUpstreamBalances([]*model.Channel{channel}); err != nil {
+			common.ApiError(c, err)
+			return
+		}
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
@@ -874,12 +879,20 @@ func AddChannel(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	if config := addChannelRequest.Channel.UpstreamAccountConfig; config != nil && config.Enabled {
+	configs := addChannelRequest.Channel.UpstreamAccountConfigs
+	legacyConfig := addChannelRequest.Channel.UpstreamAccountConfig
+	if (configs != nil && len(*configs) > 0) || (configs == nil && legacyConfig != nil && legacyConfig.Enabled) {
 		if len(channels) == 0 {
 			common.ApiError(c, fmt.Errorf("channel cannot be empty"))
 			return
 		}
-		if err := model.SyncChannelUpstreamAccountConfig(channels[0].Id, config); err != nil {
+		var syncErr error
+		if configs != nil {
+			syncErr = model.SyncChannelUpstreamAccounts(channels[0].Id, *configs, nil)
+		} else {
+			syncErr = model.SyncChannelUpstreamAccountConfig(channels[0].Id, legacyConfig)
+		}
+		if syncErr != nil {
 			ids := make([]int, 0, len(channels))
 			for _, created := range channels {
 				if created.Id > 0 {
@@ -887,7 +900,7 @@ func AddChannel(c *gin.Context) {
 				}
 			}
 			_, _ = model.BatchDeleteChannels(ids)
-			common.ApiError(c, err)
+			common.ApiError(c, syncErr)
 			return
 		}
 		accounts, accountErr := model.GetUpstreamAccountsForChannel(channels[0].Id)
@@ -898,10 +911,13 @@ func AddChannel(c *gin.Context) {
 			common.ApiError(c, accountErr)
 			return
 		}
+		// Channels created together from a batch of keys share the accounts.
 		for _, created := range channels[1:] {
-			if err := model.BindUpstreamAccountChannel(accounts[0].Id, created.Id); err != nil {
-				common.ApiError(c, err)
-				return
+			for _, account := range accounts {
+				if err := model.BindUpstreamAccountChannel(account.Id, created.Id); err != nil {
+					common.ApiError(c, err)
+					return
+				}
 			}
 		}
 	}
@@ -1332,19 +1348,42 @@ func UpdateChannel(c *gin.Context) {
 			// 覆盖模式：直接使用新密钥（默认行为，不需要特殊处理）
 		}
 	}
+	// The accounts are saved after the channel, so a list they would refuse
+	// must refuse the whole save before the channel is written.
+	var loadedAccountIds []int
+	if channel.UpstreamAccountLoadedIds != nil {
+		loadedAccountIds = append([]int{}, *channel.UpstreamAccountLoadedIds...)
+	}
+	if channel.UpstreamAccountConfigs != nil {
+		if err := model.ValidateChannelUpstreamAccounts(channel.Id, *channel.UpstreamAccountConfigs, loadedAccountIds); err != nil {
+			common.ApiError(c, err)
+			return
+		}
+	}
 	err = channel.Update()
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
-	if config := channel.UpstreamAccountConfig; config != nil {
-		if err := model.SyncChannelUpstreamAccountConfig(channel.Id, config); err != nil {
-			common.ApiError(c, err)
-			return
+	// The channel is saved from here on, so the cache and the audit record
+	// follow it even when its accounts then fail to save.
+	var syncErr error
+	if channel.UpstreamAccountConfigs != nil || channel.UpstreamAccountConfig != nil {
+		if channel.UpstreamAccountConfigs != nil {
+			syncErr = model.SyncChannelUpstreamAccounts(channel.Id, *channel.UpstreamAccountConfigs, loadedAccountIds)
+		} else {
+			syncErr = model.SyncChannelUpstreamAccountConfig(channel.Id, channel.UpstreamAccountConfig)
 		}
-		if saved, reloadErr := model.GetChannelById(channel.Id, true); reloadErr == nil {
-			channel.Channel = *saved
-			_ = model.HydrateChannelUpstreamBalances([]*model.Channel{&channel.Channel})
+		// The request carries credentials in plain text; the response shows the
+		// saved accounts instead, or none when they cannot be read back.
+		channel.UpstreamAccountConfigs = nil
+		channel.UpstreamAccountConfig = nil
+		channel.UpstreamAccountLoadedIds = nil
+		if syncErr == nil {
+			if saved, reloadErr := model.GetChannelById(channel.Id, true); reloadErr == nil {
+				channel.Channel = *saved
+				_ = model.HydrateChannelUpstreamBalances([]*model.Channel{&channel.Channel})
+			}
 		}
 	}
 	model.InitChannelCache()
@@ -1377,6 +1416,10 @@ func UpdateChannel(c *gin.Context) {
 		updateAudit["base_url_source"] = "plugin_default"
 	}
 	recordManageAudit(c, "channel.update", updateAudit)
+	if syncErr != nil {
+		common.ApiError(c, syncErr)
+		return
+	}
 	channel.Key = ""
 	clearChannelInfo(&channel.Channel)
 	c.JSON(http.StatusOK, gin.H{

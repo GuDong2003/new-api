@@ -67,6 +67,14 @@ type Channel struct {
 
 	OtherSettings string `json:"settings" gorm:"column:settings"` // 其他设置，存储azure版本等不需要检索的信息，详见dto.ChannelOtherSettings
 
+	// UpstreamAccountConfigs holds every account that checks in on the channel.
+	// A save that sends it replaces the channel's accounts with the list; a
+	// save that leaves it out keeps them. UpstreamAccountLoadedIds are the
+	// accounts the editor showed, so a save from an editor opened before the
+	// accounts changed is refused rather than deleting one it never saw.
+	UpstreamAccountConfigs   *[]ChannelUpstreamAccountConfig `json:"upstream_account_configs,omitempty" gorm:"-:all"`
+	UpstreamAccountLoadedIds *[]int                          `json:"upstream_account_loaded_ids,omitempty" gorm:"-:all"`
+
 	// cache info
 	Keys []string `json:"-" gorm:"-"`
 }
@@ -1025,6 +1033,12 @@ func (channel *Channel) ValidateSettings() error {
 		}
 	}
 	if err := channelOtherSettings.ValidateToolLossPolicy(); err != nil {
+		return err
+	}
+	if _, err := normalizeOptionalHTTPURL(channelOtherSettings.ExternalCheckinURL, "external check-in URL"); err != nil {
+		return err
+	}
+	if _, err := normalizeOptionalHTTPURL(channelOtherSettings.RedeemURL, "redeem URL"); err != nil {
 		return err
 	}
 	if preset := common.GetAdvancedCustomPreset(channel.Type); preset != nil {

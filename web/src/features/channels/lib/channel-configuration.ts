@@ -25,7 +25,11 @@ import {
   OPENAI_FIELD_PASSTHROUGH_TYPES,
 } from '../constants'
 import { CHANNEL_TYPE_ADVANCED_CUSTOM } from './advanced-custom'
-import { channelFormSchema, type ChannelFormValues } from './channel-form'
+import {
+  CHECKIN_FORM_FIELDS,
+  channelFormSchema,
+  type ChannelFormValues,
+} from './channel-form'
 import { supportsResponsesWebSocket } from './responses-websocket'
 
 export type ChannelProviderTarget =
@@ -110,6 +114,10 @@ export type ChannelConfigurationBlock = keyof typeof CONFIGURATION_BLOCKS
 export function getChannelConfigurationSection(
   field: string
 ): ChannelConfigurationSection {
+  // The check-in section has no configuration blocks of its own.
+  if ((CHECKIN_FORM_FIELDS as readonly string[]).includes(field)) {
+    return 'checkin'
+  }
   for (const block of Object.values(CONFIGURATION_BLOCKS)) {
     if ((block.fields as readonly string[]).includes(field)) {
       return block.section
@@ -202,22 +210,16 @@ export function getChannelConfigurationState(
     other: 'idle',
   }
 
-  const checkinFields = [
-    'upstream_account_enabled',
-    'upstream_account_site_type',
-    'upstream_account_auth_type',
-    'upstream_account_credential',
-    'upstream_account_auto_checkin',
-    'upstream_account_auto_balance',
-    'upstream_account_balance_interval',
-    'upstream_account_external_checkin_url',
-    'upstream_account_redeem_url',
-    'upstream_account_open_redeem_with_checkin',
-  ] as const
-  const checkinHasError = checkinFields.some((field) => Boolean(errors[field]))
+  const checkinHasError = CHECKIN_FORM_FIELDS.some((field) =>
+    Boolean(errors[field])
+  )
   if (checkinHasError) {
     sections.checkin = 'error'
-  } else if (values.upstream_account_enabled) {
+  } else if (
+    (values.upstream_accounts?.length ?? 0) > 0 ||
+    values.external_checkin_url?.trim() ||
+    values.redeem_url?.trim()
+  ) {
     sections.checkin = 'configured'
   }
   for (const id of Object.keys(

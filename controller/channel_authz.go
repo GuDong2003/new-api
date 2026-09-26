@@ -33,6 +33,12 @@ func channelHasSensitiveChanges(channel *PatchChannel, origin *model.Channel, re
 	if _, ok := requestData["upstream_account_config"]; ok {
 		return true
 	}
+	if _, ok := requestData["upstream_account_configs"]; ok {
+		return true
+	}
+	if _, ok := requestData["upstream_account_loaded_ids"]; ok {
+		return true
+	}
 	if _, ok := requestData["key_mode"]; ok && channel.KeyMode != nil {
 		return true
 	}
@@ -64,17 +70,20 @@ func channelHasSensitiveChanges(channel *PatchChannel, origin *model.Channel, re
 // channelHasSensitiveChanges with a precise old-vs-new comparison; this set is
 // used to exclude them from the fail-closed scan for unknown fields.
 var channelSensitiveFields = map[string]struct{}{
-	"type":                    {},
-	"key":                     {},
-	"base_url":                {},
-	"openai_organization":     {},
-	"header_override":         {},
-	"param_override":          {},
-	"setting":                 {},
-	"other":                   {},
-	"settings":                {},
-	"key_mode":                {},
-	"upstream_account_config": {},
+	"type":                     {},
+	"key":                      {},
+	"base_url":                 {},
+	"openai_organization":      {},
+	"header_override":          {},
+	"param_override":           {},
+	"setting":                  {},
+	"other":                    {},
+	"settings":                 {},
+	"key_mode":                 {},
+	"upstream_account_config":  {},
+	"upstream_account_configs": {},
+	// Sent only with upstream_account_configs, which it guards.
+	"upstream_account_loaded_ids": {},
 }
 
 // channelOperationalFields lists fields managed by operation endpoints instead

@@ -16,7 +16,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import type { DeepPartial } from 'react-hook-form'
 import { z } from 'zod'
+
+import { isHttpUrl } from '@/lib/content-format'
 
 import {
   CLAUDE_FIELD_PASSTHROUGH_TYPES,
@@ -38,7 +41,7 @@ import {
   MODEL_FETCHABLE_TYPES,
   OPENAI_FIELD_PASSTHROUGH_TYPES,
 } from '../constants'
-import type { Channel } from '../types'
+import type { Channel, ChannelUpstreamAccountConfig } from '../types'
 import {
   CHANNEL_TYPE_ADVANCED_CUSTOM,
   advancedCustomConfigUsesRelativeUpstreamPath,
@@ -50,6 +53,7 @@ import {
 import { readTaskExtendPluginKeys } from './channel-plugin-extensions'
 import { getDefaultBaseUrl } from './channel-type-config'
 import { supportsResponsesWebSocket } from './responses-websocket'
+import { getChannelCheckinLinks } from './upstream-account-display'
 
 export function supportsChannelKeyAppend(
   type: number,
@@ -321,6 +325,41 @@ function addRequiredIssue(
   })
 }
 
+// One account that checks in on the channel. An account without an id is new
+// and needs a credential; a saved one keeps its credential when left empty.
+const upstreamAccountFormSchema = z.object({
+  id: z.number().optional(),
+  name: z.string(),
+  auth_type: z.enum(['token', 'cookie']),
+  user_id: z.number().int().nonnegative().optional(),
+  credential: z.string(),
+  auto_checkin: z.boolean(),
+})
+
+export type UpstreamAccountFormValues = z.infer<
+  typeof upstreamAccountFormSchema
+>
+
+// The fields the check-in accounts are built from, besides the channel's own
+// address. A save that changes none of them leaves the saved accounts alone.
+export const CHECKIN_FORM_FIELDS = [
+  'upstream_accounts',
+  'upstream_account_site_type',
+  'upstream_account_auto_balance',
+  'upstream_account_balance_interval',
+  'external_checkin_url',
+  'redeem_url',
+  'open_redeem_with_checkin',
+] as const
+
+export const EMPTY_UPSTREAM_ACCOUNT: UpstreamAccountFormValues = {
+  name: '',
+  auth_type: 'token',
+  user_id: undefined,
+  credential: '',
+  auto_checkin: true,
+}
+
 export const channelFormSchema = z
   .object({
     name: z.string().min(1, ERROR_MESSAGES.REQUIRED_NAME),
@@ -448,17 +487,13 @@ export const channelFormSchema = z
     client_identity_source: z
       .enum(['manual', 'official', 'community', 'npm', 'workbuddy'])
       .optional(),
-    upstream_account_enabled: z.boolean().optional(),
+    upstream_accounts: z.array(upstreamAccountFormSchema).optional(),
     upstream_account_site_type: z.string().optional(),
-    upstream_account_auth_type: z.enum(['token', 'cookie']).optional(),
-    upstream_account_user_id: z.number().int().nonnegative().optional(),
-    upstream_account_credential: z.string().optional(),
-    upstream_account_auto_checkin: z.boolean().optional(),
     upstream_account_auto_balance: z.boolean().optional(),
     upstream_account_balance_interval: z.number().int().optional(),
-    upstream_account_external_checkin_url: z.string().optional(),
-    upstream_account_redeem_url: z.string().optional(),
-    upstream_account_open_redeem_with_checkin: z.boolean().optional(),
+    external_checkin_url: z.string().optional(),
+    redeem_url: z.string().optional(),
+    open_redeem_with_checkin: z.boolean().optional(),
   })
   .superRefine((data, ctx) => {
     if (
@@ -573,8 +608,9 @@ export const channelFormSchema = z
       )
     }
 
+    const upstreamAccounts = data.upstream_accounts ?? []
     if (
-      data.upstream_account_enabled === true &&
+      upstreamAccounts.length > 0 &&
       !getEffectiveChannelBaseUrl(data.type, data.base_url)
     ) {
       addRequiredIssue(
@@ -584,7 +620,7 @@ export const channelFormSchema = z
       )
     }
     if (
-      data.upstream_account_enabled === true &&
+      upstreamAccounts.length > 0 &&
       (data.upstream_account_balance_interval ?? 60) < 5
     ) {
       ctx.addIssue({
@@ -592,6 +628,25 @@ export const channelFormSchema = z
         path: ['upstream_account_balance_interval'],
         message: 'Balance refresh interval cannot be less than 5 minutes',
       })
+    }
+    for (const [index, account] of upstreamAccounts.entries()) {
+      if (!account.id && !account.credential.trim()) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['upstream_accounts', index, 'credential'],
+          message: 'Enter a credential for the new account',
+        })
+      }
+    }
+    for (const field of ['external_checkin_url', 'redeem_url'] as const) {
+      const url = data[field]?.trim()
+      if (url && !isHttpUrl(url)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [field],
+          message: 'Enter an address starting with http:// or https://',
+        })
+      }
     }
 
     const protocol = normalizeHttpProtocol(data.http_protocol)
@@ -681,17 +736,13 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   client_identity_context_1m_enabled: false,
   client_identity_source: 'manual',
   advanced_custom: '',
-  upstream_account_enabled: false,
+  upstream_accounts: [],
   upstream_account_site_type: 'new_api',
-  upstream_account_auth_type: 'token',
-  upstream_account_user_id: undefined,
-  upstream_account_credential: '',
-  upstream_account_auto_checkin: false,
   upstream_account_auto_balance: true,
   upstream_account_balance_interval: 60,
-  upstream_account_external_checkin_url: '',
-  upstream_account_redeem_url: '',
-  upstream_account_open_redeem_with_checkin: false,
+  external_checkin_url: '',
+  redeem_url: '',
+  open_redeem_with_checkin: false,
 }
 
 // ============================================================================
@@ -859,6 +910,8 @@ export function transformChannelToFormDefaults(
       console.error('Failed to parse channel settings:', error)
     }
   }
+  const upstreamAccounts = channel.upstream_account_configs ?? []
+  const checkinLinks = getChannelCheckinLinks(channel)
 
   return {
     name: channel.name || '',
@@ -912,26 +965,22 @@ export function transformChannelToFormDefaults(
     client_identity_context_1m_enabled: clientIdentityContext1MEnabled,
     client_identity_source: clientIdentitySource || 'manual',
     advanced_custom: advancedCustom,
-    upstream_account_enabled: Boolean(channel.upstream_account_config?.enabled),
-    upstream_account_site_type:
-      channel.upstream_account_config?.site_type || 'new_api',
-    upstream_account_auth_type:
-      channel.upstream_account_config?.auth_type || 'token',
-    upstream_account_user_id:
-      channel.upstream_account_config?.user_id || undefined,
-    upstream_account_credential: '',
-    upstream_account_auto_checkin:
-      channel.upstream_account_config?.auto_checkin || false,
-    upstream_account_auto_balance:
-      channel.upstream_account_config?.auto_balance ?? true,
+    upstream_accounts: upstreamAccounts.map((account) => ({
+      id: account.id,
+      name: account.name ?? '',
+      auth_type: account.auth_type ?? 'token',
+      user_id: account.user_id || undefined,
+      credential: '',
+      auto_checkin: account.auto_checkin === true,
+    })),
+    // The site settings are one per channel; every account carries a copy.
+    upstream_account_site_type: upstreamAccounts[0]?.site_type || 'new_api',
+    upstream_account_auto_balance: upstreamAccounts[0]?.auto_balance ?? true,
     upstream_account_balance_interval:
-      channel.upstream_account_config?.balance_interval || 60,
-    upstream_account_external_checkin_url:
-      channel.upstream_account_config?.external_checkin_url || '',
-    upstream_account_redeem_url:
-      channel.upstream_account_config?.redeem_url || '',
-    upstream_account_open_redeem_with_checkin:
-      channel.upstream_account_config?.open_redeem_with_checkin || false,
+      upstreamAccounts[0]?.balance_interval || 60,
+    external_checkin_url: checkinLinks.externalCheckinUrl,
+    redeem_url: checkinLinks.redeemUrl,
+    open_redeem_with_checkin: checkinLinks.openRedeemWithCheckin,
   }
 }
 
@@ -1170,6 +1219,20 @@ export function buildSettingsJSON(formData: ChannelFormValues): string {
     delete settingsObj.advanced_custom
   }
 
+  // The upstream site's check-in and recharge pages belong to the channel, so
+  // they are kept whether or not an account checks in on it.
+  const externalCheckinUrl = formData.external_checkin_url?.trim()
+  const redeemUrl = formData.redeem_url?.trim()
+  if (externalCheckinUrl) settingsObj.external_checkin_url = externalCheckinUrl
+  else delete settingsObj.external_checkin_url
+  if (redeemUrl) settingsObj.redeem_url = redeemUrl
+  else delete settingsObj.redeem_url
+  if (formData.open_redeem_with_checkin === true) {
+    settingsObj.open_redeem_with_checkin = true
+  } else {
+    delete settingsObj.open_redeem_with_checkin
+  }
+
   return JSON.stringify(settingsObj)
 }
 
@@ -1186,32 +1249,35 @@ function getEffectiveChannelBaseUrl(
   return normalizeBaseUrl(baseUrl) || getDefaultBaseUrl(type)
 }
 
-function buildUpstreamAccountConfigPayload(
+// The accounts that check in on the channel, replacing the saved ones. Each
+// carries the channel's site settings; an empty name lets the server name it
+// after the channel.
+function buildUpstreamAccountConfigsPayload(
   formData: ChannelFormValues
-): NonNullable<Partial<Channel>['upstream_account_config']> {
-  const config: NonNullable<Partial<Channel>['upstream_account_config']> = {
-    enabled: formData.upstream_account_enabled === true,
-    name: formData.name.trim(),
-    base_url: getEffectiveChannelBaseUrl(formData.type, formData.base_url),
-    site_type: formData.upstream_account_site_type || 'new_api',
-    auth_type: formData.upstream_account_auth_type || 'token',
-    user_id: formData.upstream_account_user_id ?? 0,
-    auto_checkin: formData.upstream_account_auto_checkin === true,
-    auto_balance: formData.upstream_account_auto_balance !== false,
-    balance_interval: formData.upstream_account_balance_interval || 60,
-    external_checkin_url:
-      formData.upstream_account_external_checkin_url?.trim() || '',
-    redeem_url: formData.upstream_account_redeem_url?.trim() || '',
-    open_redeem_with_checkin:
-      formData.upstream_account_open_redeem_with_checkin === true,
-    notes: '',
-    tags: [],
-  }
-  const credential = formData.upstream_account_credential?.trim()
-  if (credential) {
-    config.credential = credential
-  }
-  return config
+): ChannelUpstreamAccountConfig[] {
+  const baseUrl = getEffectiveChannelBaseUrl(formData.type, formData.base_url)
+  return (formData.upstream_accounts ?? []).map((account) => {
+    const config: ChannelUpstreamAccountConfig = {
+      enabled: true,
+      id: account.id,
+      name: account.name.trim(),
+      base_url: baseUrl,
+      site_type: formData.upstream_account_site_type || 'new_api',
+      auth_type: account.auth_type,
+      user_id: account.user_id ?? 0,
+      auto_checkin: account.auto_checkin,
+      auto_balance: formData.upstream_account_auto_balance !== false,
+      balance_interval: formData.upstream_account_balance_interval || 60,
+      external_checkin_url: formData.external_checkin_url?.trim() || '',
+      redeem_url: formData.redeem_url?.trim() || '',
+      open_redeem_with_checkin: formData.open_redeem_with_checkin === true,
+    }
+    const credential = account.credential.trim()
+    if (credential) {
+      config.credential = credential
+    }
+    return config
+  })
 }
 
 /**
@@ -1247,7 +1313,7 @@ export function transformFormDataToCreatePayload(formData: ChannelFormValues): {
     header_override: formData.header_override || null,
     settings: buildSettingsJSON(formData),
     other: formData.other || '',
-    upstream_account_config: buildUpstreamAccountConfigPayload(formData),
+    upstream_account_configs: buildUpstreamAccountConfigsPayload(formData),
   }
 
   // Clean up empty strings to null for optional fields
@@ -1268,12 +1334,28 @@ export function transformFormDataToCreatePayload(formData: ChannelFormValues): {
 }
 
 /**
- * Transform form data to API payload for updating channel
+ * Transform form data to API payload for updating channel. Given the values
+ * the form was loaded with, it leaves the check-in accounts out unless the
+ * save changes what they are built from, so a save that only touches routing
+ * cannot overwrite accounts added elsewhere since.
  */
 export function transformFormDataToUpdatePayload(
   formData: ChannelFormValues,
-  channelId: number
+  channelId: number,
+  loaded?: DeepPartial<ChannelFormValues>
 ): Partial<Channel> {
+  const checkinChanged =
+    !loaded ||
+    getEffectiveChannelBaseUrl(formData.type, formData.base_url) !==
+      getEffectiveChannelBaseUrl(
+        loaded.type ?? formData.type,
+        loaded.base_url
+      ) ||
+    CHECKIN_FORM_FIELDS.some(
+      (field) =>
+        JSON.stringify(formData[field] ?? null) !==
+        JSON.stringify(loaded[field] ?? null)
+    )
   const payload: Partial<Channel> = {
     id: channelId,
     name: formData.name,
@@ -1295,7 +1377,17 @@ export function transformFormDataToUpdatePayload(
     header_override: formData.header_override || null,
     settings: buildSettingsJSON(formData),
     other: formData.other || '',
-    upstream_account_config: buildUpstreamAccountConfigPayload(formData),
+    upstream_account_configs: checkinChanged
+      ? buildUpstreamAccountConfigsPayload(formData)
+      : undefined,
+    // The accounts the form showed, so the server refuses the list if the
+    // channel's accounts changed after the form was opened.
+    upstream_account_loaded_ids:
+      checkinChanged && loaded
+        ? (loaded.upstream_accounts ?? []).flatMap((account) =>
+            account?.id ? [account.id] : []
+          )
+        : undefined,
   }
 
   // Only include key if it was changed (not empty)

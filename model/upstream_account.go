@@ -9,7 +9,9 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/QuantumNous/new-api/common"
 	"gorm.io/gorm"
@@ -342,6 +344,14 @@ func NormalizeUpstreamAccount(account *UpstreamAccount) error {
 	if account.Name == "" || account.BaseURL == "" {
 		return errors.New("name and base URL are required")
 	}
+	// The columns cap these lengths, and a save must refuse them before it
+	// writes anything rather than fail halfway.
+	if utf8.RuneCountInString(account.Name) > upstreamAccountNameMaxLength {
+		return fmt.Errorf("name cannot exceed %d characters", upstreamAccountNameMaxLength)
+	}
+	if utf8.RuneCountInString(account.BaseURL) > 512 {
+		return errors.New("base URL cannot exceed 512 characters")
+	}
 	parsedBaseURL, err := url.Parse(account.BaseURL)
 	if err != nil || parsedBaseURL.Host == "" || (parsedBaseURL.Scheme != "http" && parsedBaseURL.Scheme != "https") {
 		return errors.New("base URL must use http or https")
@@ -408,6 +418,9 @@ func normalizeOptionalHTTPURL(value, label string) (string, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {
 		return "", nil
+	}
+	if utf8.RuneCountInString(value) > 1024 {
+		return "", fmt.Errorf("%s cannot exceed 1024 characters", label)
 	}
 	parsed, err := url.Parse(value)
 	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
@@ -510,6 +523,10 @@ func GetUpstreamAccountForChannel(channelId int) (*UpstreamAccount, error) {
 }
 
 func CreateUpstreamAccount(account *UpstreamAccount) error {
+	return createUpstreamAccount(DB, account)
+}
+
+func createUpstreamAccount(tx *gorm.DB, account *UpstreamAccount) error {
 	if err := NormalizeUpstreamAccount(account); err != nil {
 		return err
 	}
@@ -528,15 +545,30 @@ func CreateUpstreamAccount(account *UpstreamAccount) error {
 	if account.AutoBalance {
 		account.NextBalanceTime = now
 	}
-	return DB.Create(account).Error
+	// GORM replaces a false value with the column default of true on insert,
+	// on the struct too, so an account created with automatic balance refresh
+	// off would be stored with it on.
+	autoBalance := account.AutoBalance
+	if err := tx.Create(account).Error; err != nil {
+		return err
+	}
+	if !autoBalance {
+		account.AutoBalance = false
+		return tx.Model(account).Update("auto_balance", false).Error
+	}
+	return nil
 }
 
 func UpdateUpstreamAccount(account *UpstreamAccount) error {
+	return updateUpstreamAccount(DB, account)
+}
+
+func updateUpstreamAccount(tx *gorm.DB, account *UpstreamAccount) error {
 	if err := NormalizeUpstreamAccount(account); err != nil {
 		return err
 	}
-	existing, err := GetUpstreamAccountById(account.Id)
-	if err != nil {
+	var existing UpstreamAccount
+	if err := tx.First(&existing, account.Id).Error; err != nil {
 		return err
 	}
 	credentialCiphertext := existing.CredentialCiphertext
@@ -580,45 +612,49 @@ func UpdateUpstreamAccount(account *UpstreamAccount) error {
 	if !account.AutoBalance {
 		updates["next_balance_time"] = int64(0)
 	}
-	return DB.Model(&UpstreamAccount{}).Where("id = ?", account.Id).Updates(updates).Error
+	return tx.Model(&UpstreamAccount{}).Where("id = ?", account.Id).Updates(updates).Error
 }
 
 func DeleteUpstreamAccount(id int) error {
 	return DB.Transaction(func(tx *gorm.DB) error {
-		var links []UpstreamAccountChannel
-		if err := tx.Where("account_id = ?", id).Find(&links).Error; err != nil {
+		return deleteUpstreamAccount(tx, id)
+	})
+}
+
+func deleteUpstreamAccount(tx *gorm.DB, id int) error {
+	var links []UpstreamAccountChannel
+	if err := tx.Where("account_id = ?", id).Find(&links).Error; err != nil {
+		return err
+	}
+	if err := tx.Where("account_id = ?", id).Delete(&UpstreamAccountChannel{}).Error; err != nil {
+		return err
+	}
+	for _, link := range links {
+		var remaining int64
+		if err := tx.Model(&UpstreamAccountChannel{}).
+			Where("channel_id = ?", link.ChannelId).
+			Count(&remaining).Error; err != nil {
 			return err
 		}
-		if err := tx.Where("account_id = ?", id).Delete(&UpstreamAccountChannel{}).Error; err != nil {
-			return err
-		}
-		for _, link := range links {
-			var remaining int64
-			if err := tx.Model(&UpstreamAccountChannel{}).
-				Where("channel_id = ?", link.ChannelId).
-				Count(&remaining).Error; err != nil {
+		if remaining == 0 {
+			if err := tx.Model(&Channel{}).
+				Where("id = ? AND balance_source = ?", link.ChannelId, ChannelBalanceSourceUpstream).
+				Update("balance_source", ChannelBalanceSourceChannel).Error; err != nil {
 				return err
 			}
-			if remaining == 0 {
-				if err := tx.Model(&Channel{}).
-					Where("id = ? AND balance_source = ?", link.ChannelId, ChannelBalanceSourceUpstream).
-					Update("balance_source", ChannelBalanceSourceChannel).Error; err != nil {
-					return err
-				}
-			}
 		}
-		if err := tx.Where("account_id = ?", id).Delete(&UpstreamAccountLog{}).Error; err != nil {
-			return err
-		}
-		result := tx.Delete(&UpstreamAccount{}, id)
-		if result.Error != nil {
-			return result.Error
-		}
-		if result.RowsAffected == 0 {
-			return gorm.ErrRecordNotFound
-		}
-		return nil
-	})
+	}
+	if err := tx.Where("account_id = ?", id).Delete(&UpstreamAccountLog{}).Error; err != nil {
+		return err
+	}
+	result := tx.Delete(&UpstreamAccount{}, id)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
 }
 
 func ReplaceUpstreamAccountChannels(accountId int, channelIds []int) error {
@@ -810,6 +846,193 @@ func SyncChannelUpstreamAccountConfig(channelId int, config *ChannelUpstreamAcco
 	return nil
 }
 
+// upstreamAccountNameMaxLength is the length of the name column.
+const upstreamAccountNameMaxLength = 191
+
+// ErrChannelUpstreamAccountsChanged refuses a save from an editor that
+// showed a channel's accounts before they last changed.
+var ErrChannelUpstreamAccountsChanged = errors.New("the channel's check-in accounts changed after it was opened; reopen the channel and save again")
+
+// channelUpstreamAccountPlan is what saving an account list does to a
+// channel: the accounts to create (no id) or update, and the bound accounts
+// the list leaves out.
+type channelUpstreamAccountPlan struct {
+	accounts    []*UpstreamAccount
+	removed     []int
+	hadAccounts bool
+}
+
+// planChannelUpstreamAccounts checks an account list against the accounts a
+// channel has and builds each account from its entry. An entry with an id
+// must name an account bound to the channel; an entry without one is new and
+// needs a credential. Only the fields an editor sets are taken from the
+// request, so balances, statuses and schedules stay the server's. The channel
+// editor does not show notes or tags, so a saved account keeps its own unless
+// the entry sets them, and an empty name takes one from the channel.
+func planChannelUpstreamAccounts(tx *gorm.DB, channelId int, configs []ChannelUpstreamAccountConfig, loadedIds []int) (*channelUpstreamAccountPlan, error) {
+	var channel Channel
+	if err := tx.Select("id", "name").First(&channel, channelId).Error; err != nil {
+		return nil, err
+	}
+	var boundIds []int
+	if err := tx.Model(&UpstreamAccountChannel{}).Where("channel_id = ?", channelId).
+		Order("account_id asc").Pluck("account_id", &boundIds).Error; err != nil {
+		return nil, err
+	}
+	if loadedIds != nil {
+		loaded := slices.Clone(loadedIds)
+		slices.Sort(loaded)
+		if !slices.Equal(slices.Compact(loaded), boundIds) {
+			return nil, ErrChannelUpstreamAccountsChanged
+		}
+	}
+	bound := make(map[int]bool, len(boundIds))
+	for _, id := range boundIds {
+		bound[id] = true
+	}
+	plan := &channelUpstreamAccountPlan{hadAccounts: len(boundIds) > 0}
+	kept := make(map[int]bool, len(configs))
+	for index, config := range configs {
+		account := &UpstreamAccount{
+			Id:                    config.Id,
+			Name:                  strings.TrimSpace(config.Name),
+			BaseURL:               config.BaseURL,
+			SiteType:              config.SiteType,
+			Notes:                 config.Notes,
+			Tags:                  config.Tags,
+			ExternalCheckinURL:    config.ExternalCheckinURL,
+			RedeemURL:             config.RedeemURL,
+			OpenRedeemWithCheckin: config.OpenRedeemWithCheckin,
+			AuthType:              config.AuthType,
+			UserId:                config.UserId,
+			Credential:            strings.TrimSpace(config.Credential),
+			AutoCheckin:           config.AutoCheckin,
+			AutoBalance:           config.AutoBalance,
+			BalanceInterval:       config.BalanceInterval,
+		}
+		if account.Name == "" {
+			// A long channel name is cut, not the part telling accounts apart.
+			suffix := ""
+			switch {
+			case account.UserId > 0:
+				suffix = fmt.Sprintf(" · %d", account.UserId)
+			case index > 0:
+				suffix = fmt.Sprintf(" %d", index+1)
+			}
+			base := []rune(channel.Name)
+			if limit := upstreamAccountNameMaxLength - utf8.RuneCountInString(suffix); len(base) > limit {
+				base = base[:limit]
+			}
+			account.Name = string(base) + suffix
+		}
+		if account.Id == 0 {
+			if account.Credential == "" {
+				return nil, errors.New("upstream account credential is required")
+			}
+		} else {
+			if !bound[account.Id] {
+				return nil, fmt.Errorf("upstream account %d is not bound to this channel", account.Id)
+			}
+			if kept[account.Id] {
+				return nil, fmt.Errorf("upstream account %d is listed more than once", account.Id)
+			}
+			kept[account.Id] = true
+			var stored UpstreamAccount
+			if err := tx.First(&stored, account.Id).Error; err != nil {
+				return nil, err
+			}
+			hydrateUpstreamAccount(&stored)
+			if strings.TrimSpace(account.Notes) == "" {
+				account.Notes = stored.Notes
+			}
+			if len(account.Tags) == 0 {
+				account.Tags = stored.Tags
+			}
+		}
+		if err := NormalizeUpstreamAccount(account); err != nil {
+			return nil, err
+		}
+		plan.accounts = append(plan.accounts, account)
+	}
+	for _, id := range boundIds {
+		if !kept[id] {
+			plan.removed = append(plan.removed, id)
+		}
+	}
+	return plan, nil
+}
+
+// ValidateChannelUpstreamAccounts reports whether SyncChannelUpstreamAccounts
+// would accept configs for a channel, without saving anything, so a save can
+// be refused before the channel itself is written.
+func ValidateChannelUpstreamAccounts(channelId int, configs []ChannelUpstreamAccountConfig, loadedIds []int) error {
+	_, err := planChannelUpstreamAccounts(DB, channelId, configs, loadedIds)
+	return err
+}
+
+// SyncChannelUpstreamAccounts makes configs the accounts that check in on a
+// channel, in one transaction: an entry with an id updates that account, an
+// entry without one creates and binds a new account, and a bound account left
+// out is unbound, and deleted with its logs once no existing channel uses it,
+// so it stops checking in. An empty credential keeps the one an account has.
+//
+// loadedIds are the accounts the editor showed. When given, the save is
+// refused if the channel's accounts have changed since, so an account bound
+// meanwhile is not deleted as one the editor left out. Nil skips the check.
+func SyncChannelUpstreamAccounts(channelId int, configs []ChannelUpstreamAccountConfig, loadedIds []int) error {
+	return DB.Transaction(func(tx *gorm.DB) error {
+		plan, err := planChannelUpstreamAccounts(tx, channelId, configs, loadedIds)
+		if err != nil {
+			return err
+		}
+		now := common.GetTimestamp()
+		for _, account := range plan.accounts {
+			if account.Id > 0 {
+				if err := updateUpstreamAccount(tx, account); err != nil {
+					return err
+				}
+				continue
+			}
+			if err := createUpstreamAccount(tx, account); err != nil {
+				return err
+			}
+			if err := tx.Create(&UpstreamAccountChannel{AccountId: account.Id, ChannelId: channelId, CreatedAt: now}).Error; err != nil {
+				return err
+			}
+		}
+		for _, id := range plan.removed {
+			if err := tx.Where("account_id = ? AND channel_id = ?", id, channelId).
+				Delete(&UpstreamAccountChannel{}).Error; err != nil {
+				return err
+			}
+			// Deleting a channel leaves its bindings behind, so only channels
+			// that still exist keep an account alive.
+			var others int64
+			if err := tx.Model(&UpstreamAccountChannel{}).
+				Joins("JOIN channels ON channels.id = upstream_account_channels.channel_id").
+				Where("upstream_account_channels.account_id = ?", id).
+				Count(&others).Error; err != nil {
+				return err
+			}
+			if others == 0 {
+				if err := deleteUpstreamAccount(tx, id); err != nil {
+					return err
+				}
+			}
+		}
+		switch {
+		case len(plan.accounts) > 0 && !plan.hadAccounts:
+			return tx.Model(&Channel{}).Where("id = ?", channelId).
+				Update("balance_source", ChannelBalanceSourceUpstream).Error
+		case len(plan.accounts) == 0 && plan.hadAccounts:
+			return tx.Model(&Channel{}).
+				Where("id = ? AND balance_source = ?", channelId, ChannelBalanceSourceUpstream).
+				Update("balance_source", ChannelBalanceSourceChannel).Error
+		}
+		return nil
+	})
+}
+
 func UpdateChannelBalanceSource(channelId int, source string) error {
 	source = strings.ToLower(strings.TrimSpace(source))
 	if source != ChannelBalanceSourceChannel && source != ChannelBalanceSourceUpstream && source != ChannelBalanceSourceNone {
@@ -872,44 +1095,40 @@ func HydrateChannelUpstreamBalances(channels []*Channel) error {
 		return nil
 	}
 	ids := make([]int, 0, len(channels))
-	byId := make(map[int]*Channel, len(channels))
+	for _, channel := range channels {
+		if channel != nil {
+			ids = append(ids, channel.Id)
+		}
+	}
+	var links []UpstreamAccountChannel
+	if err := DB.Where("channel_id IN ?", ids).Order("account_id asc").Find(&links).Error; err != nil {
+		return err
+	}
+	accountIds := make([]int, 0, len(links))
+	for _, link := range links {
+		accountIds = append(accountIds, link.AccountId)
+	}
+	accounts := make(map[int]*UpstreamAccount, len(accountIds))
+	if len(accountIds) > 0 {
+		var found []*UpstreamAccount
+		if err := DB.Where("id IN ?", accountIds).Find(&found).Error; err != nil {
+			return err
+		}
+		for _, account := range found {
+			hydrateUpstreamAccount(account)
+			accounts[account.Id] = account
+		}
+	}
+	byChannel := make(map[int][]*UpstreamAccount, len(ids))
+	for _, link := range links {
+		if account, ok := accounts[link.AccountId]; ok {
+			byChannel[link.ChannelId] = append(byChannel[link.ChannelId], account)
+		}
+	}
 	for _, channel := range channels {
 		if channel == nil {
 			continue
 		}
-		ids = append(ids, channel.Id)
-		byId[channel.Id] = channel
-	}
-	type row struct {
-		ChannelId          int
-		AccountId          int
-		AccountName        string
-		Balance            float64
-		BalanceUnit        string
-		BalanceUpdatedTime int64
-		BalanceStatus      string
-	}
-	var rows []row
-	err := DB.Table("upstream_account_channels").
-		Select("upstream_account_channels.channel_id, upstream_accounts.id AS account_id, upstream_accounts.name AS account_name, upstream_accounts.balance, upstream_accounts.balance_unit, upstream_accounts.balance_updated_time, upstream_accounts.balance_status").
-		Joins("JOIN upstream_accounts ON upstream_accounts.id = upstream_account_channels.account_id").
-		Where("upstream_account_channels.channel_id IN ?", ids).
-		Scan(&rows).Error
-	if err != nil {
-		return err
-	}
-	byChannel := make(map[int][]UpstreamAccountBalance)
-	for _, item := range rows {
-		byChannel[item.ChannelId] = append(byChannel[item.ChannelId], UpstreamAccountBalance{
-			AccountId:   item.AccountId,
-			AccountName: item.AccountName,
-			Balance:     item.Balance,
-			Unit:        item.BalanceUnit,
-			UpdatedTime: item.BalanceUpdatedTime,
-			Status:      item.BalanceStatus,
-		})
-	}
-	for channelId, channel := range byId {
 		channel.UpstreamAccountId = 0
 		channel.UpstreamAccountName = ""
 		channel.UpstreamAccountIds = nil
@@ -921,9 +1140,30 @@ func HydrateChannelUpstreamBalances(channels []*Channel) error {
 		channel.UpstreamBalanceStatus = ""
 		channel.UpstreamBalanceDetails = nil
 		channel.UpstreamAccountConfig = nil
-		items := byChannel[channelId]
-		if len(items) == 0 {
+		channel.UpstreamAccountConfigs = nil
+		bound := byChannel[channel.Id]
+		if len(bound) == 0 {
 			continue
+		}
+		items := make([]UpstreamAccountBalance, 0, len(bound))
+		configs := make([]ChannelUpstreamAccountConfig, 0, len(bound))
+		for _, account := range bound {
+			items = append(items, UpstreamAccountBalance{
+				AccountId:   account.Id,
+				AccountName: account.Name,
+				Balance:     account.Balance,
+				Unit:        account.BalanceUnit,
+				UpdatedTime: account.BalanceUpdatedTime,
+				Status:      account.BalanceStatus,
+			})
+			option, _ := upstreamSiteTypeOption(account.SiteType)
+			configs = append(configs, ChannelUpstreamAccountConfig{
+				Enabled:         true,
+				SupportsCheckin: option.SupportsCheckin,
+				SupportsBalance: option.SupportsBalance,
+				ExternalOnly:    option.ExternalOnly,
+				UpstreamAccount: *account,
+			})
 		}
 		summary := aggregateUpstreamAccountBalances(items)
 		channel.UpstreamAccountIds = summary.AccountIds
@@ -939,21 +1179,8 @@ func HydrateChannelUpstreamBalances(channels []*Channel) error {
 		channel.UpstreamBalanceUnit = summary.Unit
 		channel.UpstreamBalanceUpdatedTime = summary.UpdatedTime
 		channel.UpstreamBalanceStatus = summary.Status
-		// The first bound account is the account edited from the channel drawer.
-		// Additional accounts manually bound on the dedicated page remain part of
-		// the aggregate and are not overwritten by this view.
-		var account UpstreamAccount
-		if err := DB.First(&account, summary.AccountIds[0]).Error; err == nil {
-			hydrateUpstreamAccount(&account)
-			option, _ := upstreamSiteTypeOption(account.SiteType)
-			channel.UpstreamAccountConfig = &ChannelUpstreamAccountConfig{
-				Enabled:         true,
-				SupportsCheckin: option.SupportsCheckin,
-				SupportsBalance: option.SupportsBalance,
-				ExternalOnly:    option.ExternalOnly,
-				UpstreamAccount: account,
-			}
-		}
+		channel.UpstreamAccountConfig = &configs[0]
+		channel.UpstreamAccountConfigs = &configs
 	}
 	return nil
 }

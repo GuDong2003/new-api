@@ -69,6 +69,13 @@ func TestChannelHasSensitiveChanges(t *testing.T) {
 		assert.False(t, channelHasSensitiveChanges(&updated, origin, map[string]any{"priority": 10}))
 	})
 
+	t.Run("check-in account list", func(t *testing.T) {
+		updated := PatchChannel{Channel: *origin}
+
+		assert.True(t, channelHasSensitiveChanges(&updated, origin, map[string]any{"upstream_account_configs": []any{}}))
+		assert.True(t, channelHasSensitiveChanges(&updated, origin, map[string]any{"upstream_account_loaded_ids": []any{}}))
+	})
+
 	t.Run("unknown field fails closed", func(t *testing.T) {
 		updated := PatchChannel{Channel: *origin}
 

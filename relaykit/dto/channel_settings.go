@@ -712,6 +712,13 @@ type ChannelOtherSettings struct {
 	// rejection. Empty follows the default allow policy. Accepted values:
 	// "", "allow", "safe", "strict".
 	ToolLossPolicy string `json:"tool_loss_policy,omitempty"`
+	// ExternalCheckinURL and RedeemURL link the channel to the upstream site's
+	// own check-in and recharge pages, whether or not an account checks in on
+	// the channel. OpenRedeemWithCheckin opens the recharge page along with the
+	// check-in page.
+	ExternalCheckinURL    string `json:"external_checkin_url,omitempty"`
+	RedeemURL             string `json:"redeem_url,omitempty"`
+	OpenRedeemWithCheckin bool   `json:"open_redeem_with_checkin,omitempty"`
 }
 
 func (s *ChannelOtherSettings) IsOpenRouterEnterprise() bool {
