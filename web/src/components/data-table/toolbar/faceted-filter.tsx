@@ -52,6 +52,11 @@ type DataTableFacetedFilterProps<TData, TValue> = {
   }[]
   /** Enable single select mode (only one option can be selected at a time) */
   singleSelect?: boolean
+  /**
+   * Whether option labels are i18n keys. Turn it off for labels that are
+   * data, such as group names, which must show as they are.
+   */
+  translateLabels?: boolean
 }
 
 function DataTableFacetedFilterInner<TData, TValue>({
@@ -59,8 +64,10 @@ function DataTableFacetedFilterInner<TData, TValue>({
   title,
   options,
   singleSelect = false,
+  translateLabels = true,
 }: DataTableFacetedFilterProps<TData, TValue>) {
   const { t } = useTranslation()
+  const labelOf = (label: string) => (translateLabels ? t(label) : label)
   const facets = column?.getFacetedUniqueValues()
   const filterValue = column?.getFilterValue() as string[] | undefined
   const selectedValues = new Set(filterValue)
@@ -112,7 +119,7 @@ function DataTableFacetedFilterInner<TData, TValue>({
                       key={option.value}
                       className='rounded-sm px-1 font-normal'
                     >
-                      {t(option.label)}
+                      {labelOf(option.label)}
                     </Badge>
                   ))
               )}
@@ -158,9 +165,9 @@ function DataTableFacetedFilterInner<TData, TValue>({
                     {optionIcon}
                     <span
                       className='min-w-0 flex-1 truncate'
-                      title={t(option.label)}
+                      title={labelOf(option.label)}
                     >
-                      {t(option.label)}
+                      {labelOf(option.label)}
                     </span>
                     {typeof option.count === 'number' && (
                       <span className='text-muted-foreground ms-auto flex h-4 min-w-4 items-center justify-center font-mono text-xs'>

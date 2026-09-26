@@ -463,6 +463,9 @@ export function ChannelsTable() {
             title: t('Group'),
             options: groupFilterOptions,
             singleSelect: true,
+            // Group names are data: a group called "image" is not the unit
+            // "张" that key translates to.
+            translateLabels: false,
           },
         ],
         preActions: (

@@ -42,6 +42,8 @@ type FilterDef = {
     count?: number
   }[]
   singleSelect?: boolean
+  /** Whether option labels are i18n keys; off for labels that are data. */
+  translateLabels?: boolean
 }
 
 type SearchDraft = {
@@ -272,6 +274,7 @@ export function DataTableToolbar<TData>(props: DataTableToolbarProps<TData>) {
             title={filter.title}
             options={filter.options}
             singleSelect={filter.singleSelect}
+            translateLabels={filter.translateLabels}
           />
         )
       }),
