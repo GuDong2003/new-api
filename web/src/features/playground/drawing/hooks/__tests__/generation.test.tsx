@@ -33,6 +33,10 @@ import { api } from '@/lib/api'
 import { useAuthStore } from '@/stores/auth-store'
 import { useDrawingStore } from '@/stores/drawing-store'
 
+import {
+  CANVAS_NODE_HEIGHT,
+  CANVAS_NODE_WIDTH,
+} from '../../lib/canvas-geometry'
 import { DEFAULT_IMAGE_SETTINGS } from '../../lib/image-settings'
 import type { DrawingNode } from '../../types'
 import {
@@ -214,6 +218,46 @@ describe('Image generation jobs', () => {
     expect(useDrawingStore.getState().nodes.at(-1)?.position).toEqual({
       x: 700,
       y: 30,
+    })
+    await waitFor(() => expect(decoders.length).toBeGreaterThan(decoderStart))
+    await act(async () => {
+      for (const decoder of decoders.slice(decoderStart)) {
+        decoder.dispatchEvent(new Event('error'))
+      }
+    })
+    await waitFor(() => expect(hook.result.current.pendingCount).toBe(0))
+    hook.unmount()
+    client.clear()
+  })
+
+  // An uploaded image is dropped at the canvas default size, so a generated
+  // one has to take the same size for the two to line up.
+  it('gives a generated image the default node size an uploaded image gets', async () => {
+    const client = new QueryClient()
+    const hook = renderHook(useImageGeneration, {
+      wrapper: (props: { children: ReactNode }) => (
+        <QueryClientProvider client={client}>
+          {props.children}
+        </QueryClientProvider>
+      ),
+    })
+
+    const decoderStart = decoders.length
+    act(() =>
+      hook.result.current.generate(
+        {
+          ...DEFAULT_IMAGE_SETTINGS,
+          model: 'gpt-image-1',
+          prompt: 'A standalone image',
+          mode: 'generate',
+        },
+        { x: 0, y: 0 }
+      )
+    )
+
+    expect(useDrawingStore.getState().nodes.at(-1)).toMatchObject({
+      width: CANVAS_NODE_WIDTH,
+      height: CANVAS_NODE_HEIGHT,
     })
     await waitFor(() => expect(decoders.length).toBeGreaterThan(decoderStart))
     await act(async () => {

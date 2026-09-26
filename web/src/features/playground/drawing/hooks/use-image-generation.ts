@@ -29,6 +29,7 @@ import { useDrawingStore } from '@/stores/drawing-store'
 
 import { generateImages } from '../api'
 import { positionGeneratedImageNodes } from '../lib/canvas-document'
+import { CANVAS_NODE_HEIGHT, CANVAS_NODE_WIDTH } from '../lib/canvas-geometry'
 import { imageSourceToAsset } from '../lib/image-assets'
 import {
   getMaxImageGalleryBytes,
@@ -472,8 +473,8 @@ export function useImageGeneration() {
       type: 'image',
       dragHandle: '.drawing-node-handle',
       position,
-      width: 280,
-      height: 330,
+      width: CANVAS_NODE_WIDTH,
+      height: CANVAS_NODE_HEIGHT,
       data: {
         prompt: settings.prompt,
         settings: { ...settings },

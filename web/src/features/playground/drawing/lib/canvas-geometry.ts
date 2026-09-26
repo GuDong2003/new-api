@@ -17,12 +17,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-// Drawing and NAI drop nodes onto the same grid and lay them out with the same
-// gap. Both used to carry their own copy of these numbers, which had already
-// drifted: one placed uploads 32px apart horizontally while everything else
-// assumed 40.
-export const CANVAS_NODE_WIDTH = 260
-export const CANVAS_NODE_HEIGHT = 290
+// Uploaded and generated images land on the canvas at this size and are laid
+// out with the same gap. Each used to carry its own copy of these numbers,
+// which drifted: generated images kept 280x330 after uploads shrank to
+// 260x290, so the two sat side by side at different sizes.
+export const CANVAS_NODE_WIDTH = 280
+export const CANVAS_NODE_HEIGHT = 330
 export const CANVAS_NODE_GAP = 40
 
 // Layers sit further apart than siblings do. A connection leaves one image and
