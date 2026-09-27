@@ -2,20 +2,24 @@ package channel
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/gin-gonic/gin"
+	"golang.org/x/net/publicsuffix"
 )
 
 const (
@@ -244,11 +248,64 @@ func resolveUpstreamImageTaskURL(baseURL, rawURL, taskID string) (*url.URL, erro
 		}
 		resolved = base.ResolveReference(candidate)
 	}
-	if !strings.EqualFold(resolved.Scheme, base.Scheme) || !strings.EqualFold(resolved.Host, base.Host) {
-		return nil, fmt.Errorf("upstream image task URL must stay on the selected channel origin")
+	if !sameUpstreamProvider(base, resolved) {
+		return nil, fmt.Errorf("upstream image task URL must stay with the selected channel's provider")
 	}
 	resolved.Fragment = ""
 	return resolved, nil
+}
+
+// sameUpstreamProvider reports whether a task URL a provider handed back stays
+// with that provider, since polling it carries the channel's key. Beyond the
+// channel's own host it allows a parent or child host inside the provider's
+// registered domain, such as qkmss.com for api.qkmss.com, on the channel's
+// port or with both on their scheme's default port. The scheme stays the same
+// or is upgraded to https.
+func sameUpstreamProvider(channel, task *url.URL) bool {
+	channelScheme, taskScheme := strings.ToLower(channel.Scheme), strings.ToLower(task.Scheme)
+	if taskScheme != channelScheme && (channelScheme != "http" || taskScheme != "https") {
+		return false
+	}
+	if strings.EqualFold(task.Host, channel.Host) {
+		return true
+	}
+
+	defaultPorts := map[string]string{"http": "80", "https": "443"}
+	channelPort := cmp.Or(channel.Port(), defaultPorts[channelScheme])
+	taskPort := cmp.Or(task.Port(), defaultPorts[taskScheme])
+	if taskPort != channelPort && (channelPort != defaultPorts[channelScheme] || taskPort != defaultPorts[taskScheme]) {
+		return false
+	}
+
+	channelHost, taskHost := channel.Hostname(), task.Hostname()
+	for _, host := range []string{channelHost, taskHost} {
+		// Only a plain domain name can share a provider's domain: an IP or a
+		// bare name has none, and a name outside ASCII connects to the host
+		// its IDNA form spells, which lowercasing does not predict (İ
+		// lowercases to i). So this looks at the name before lowercasing.
+		if net.ParseIP(host) != nil || !strings.Contains(host, ".") || strings.HasSuffix(host, ".") ||
+			strings.ContainsFunc(host, func(r rune) bool { return r > unicode.MaxASCII }) {
+			return false
+		}
+	}
+	channelHost, taskHost = strings.ToLower(channelHost), strings.ToLower(taskHost)
+	if taskHost == channelHost {
+		return true
+	}
+
+	// Only a parent or child host counts: siblings such as two resources on
+	// openai.azure.com may belong to different tenants.
+	parent, child := channelHost, taskHost
+	if len(parent) > len(child) {
+		parent, child = child, parent
+	}
+	if !strings.HasSuffix(child, "."+parent) {
+		return false
+	}
+	// The parent must be a registered domain under a suffix the public suffix
+	// list knows: github.io is nobody's own domain, and .local names none.
+	suffix, icann := publicsuffix.PublicSuffix(parent)
+	return suffix != parent && (icann || strings.Contains(suffix, "."))
 }
 
 func pollUpstreamImageTask(c *gin.Context, source *http.Request, info *relaycommon.RelayInfo, taskURL *url.URL) (*http.Response, error) {
@@ -312,7 +369,11 @@ func newUpstreamImagePollRequest(source *http.Request, target *url.URL) (*http.R
 		request.Header.Del(header)
 	}
 	request.Header.Set("Accept", "application/json")
-	request.Host = source.Host
+	// A Host override names the channel's own host; a task on another host of
+	// the provider is asked for by that host's name.
+	if strings.EqualFold(target.Hostname(), source.URL.Hostname()) {
+		request.Host = source.Host
+	}
 	return request, nil
 }
 

@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 
 	"github.com/QuantumNous/new-api/constant"
@@ -32,19 +33,61 @@ func TestUpstreamImageTaskResponseRecognizesErrorPayload(t *testing.T) {
 	assert.True(t, envelope.Failed())
 }
 
-func TestUpstreamImageTaskURLStaysOnTheSelectedChannelOrigin(t *testing.T) {
-	base, err := http.NewRequest(http.MethodPost, "https://qkmss.example/v1/images/generations?async=1", nil)
-	require.NoError(t, err)
+func TestUpstreamImageTaskURLStaysWithTheChannelProvider(t *testing.T) {
+	const channel = "https://api.qkmss.com/v1/images/generations?async=1"
+	tests := []struct {
+		name    string
+		base    string
+		taskURL string
+		want    string // empty when the task URL is refused
+	}{
+		{name: "a path resolves on the channel host", base: channel, taskURL: "/v1/images/generations/upstream-task", want: "https://api.qkmss.com/v1/images/generations/upstream-task"},
+		{name: "a relative path resolves on the channel host", base: channel, taskURL: "v1/images/generations/upstream-task", want: "https://api.qkmss.com/v1/images/generations/upstream-task"},
+		{name: "the provider's parent domain is followed", base: channel, taskURL: "https://qkmss.com/v1/images/generations/upstream-task", want: "https://qkmss.com/v1/images/generations/upstream-task"},
+		{name: "a subdomain of the channel host is followed", base: "https://qkmss.com/v1/images/generations?async=1", taskURL: "https://tasks.qkmss.com/v1/images/generations/upstream-task", want: "https://tasks.qkmss.com/v1/images/generations/upstream-task"},
+		{name: "a channel on http may be sent on to https", base: "http://api.qkmss.com/v1/images/generations?async=1", taskURL: "https://qkmss.com/v1/images/generations/upstream-task", want: "https://qkmss.com/v1/images/generations/upstream-task"},
+		{name: "a channel on https is never sent back to http", base: channel, taskURL: "http://api.qkmss.com/v1/images/generations/upstream-task"},
+		{name: "another provider is refused", base: channel, taskURL: "https://other.example/task/upstream-task"},
+		{name: "a sibling host may belong to another tenant", base: "https://myres.openai.azure.com/openai/images/generations?async=1", taskURL: "https://attacker.openai.azure.com/task/upstream-task"},
+		{name: "a public suffix is nobody's own domain", base: "https://alice.github.io/v1/images/generations?async=1", taskURL: "https://github.io/v1/images/generations/upstream-task"},
+		{name: "another port on the provider's domain is refused", base: channel, taskURL: "https://qkmss.com:6379/v1/images/generations/upstream-task"},
+		{name: "a host spelled outside ASCII matches only itself", base: "https://api.siliconflow.cn/v1/images/generations?async=1", taskURL: "https://sİlİconflow.cn/v1/images/generations/upstream-task"},
+		{name: "a host on an unlisted top-level domain matches only itself", base: "http://image-svc.ai.svc.cluster.local:8080/v1/images/generations?async=1", taskURL: "http://ai.svc.cluster.local:8080/v1/images/generations/upstream-task"},
+		{name: "a channel addressed by IP matches only itself", base: "http://10.0.0.1:3000/v1/images/generations?async=1", taskURL: "http://192.168.0.1:3000/v1/images/generations/upstream-task"},
+		{name: "a channel on a bare host name matches only itself", base: "http://image-worker:8080/v1/images/generations?async=1", taskURL: "http://other-worker:8080/v1/images/generations/upstream-task"},
+		{name: "only web addresses are followed", base: channel, taskURL: "ftp://api.qkmss.com/upstream-task"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resolved, err := resolveUpstreamImageTaskURL(tt.base, tt.taskURL, "upstream-task")
+			if tt.want == "" {
+				assert.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, resolved.String())
+		})
+	}
+}
 
-	resolved, err := resolveUpstreamImageTaskURL(base.URL.String(), "/v1/images/generations/upstream-task", "upstream-task")
+func TestUpstreamImagePollAsksEachHostByItsOwnName(t *testing.T) {
+	source, err := http.NewRequest(http.MethodPost, "http://api.qkmss.com/v1/images/generations?async=1", nil)
 	require.NoError(t, err)
-	assert.Equal(t, "https://qkmss.example/v1/images/generations/upstream-task", resolved.String())
-	resolved, err = resolveUpstreamImageTaskURL(base.URL.String(), "v1/images/generations/upstream-task", "upstream-task")
-	require.NoError(t, err)
-	assert.Equal(t, "https://qkmss.example/v1/images/generations/upstream-task", resolved.String())
+	source.Header.Set("Authorization", "Bearer upstream-key")
+	source.Host = "alias.qkmss.com" // a Host header override the channel sets for its own host
 
-	_, err = resolveUpstreamImageTaskURL(base.URL.String(), "https://other.example/task/upstream-task", "upstream-task")
-	assert.Error(t, err)
+	for target, wantHost := range map[string]string{
+		"http://api.qkmss.com/v1/images/generations/upstream-task":      "alias.qkmss.com",
+		"https://api.qkmss.com:443/v1/images/generations/upstream-task": "alias.qkmss.com",
+		"https://qkmss.com/v1/images/generations/upstream-task":         "qkmss.com",
+	} {
+		targetURL, err := url.Parse(target)
+		require.NoError(t, err)
+		poll, err := newUpstreamImagePollRequest(source, targetURL)
+		require.NoError(t, err)
+		assert.Equal(t, wantHost, poll.Host, target)
+		assert.Equal(t, "Bearer upstream-key", poll.Header.Get("Authorization"), target)
+	}
 }
 
 func TestDoUpstreamImageRequestPollsAndPreservesFinalResponse(t *testing.T) {
