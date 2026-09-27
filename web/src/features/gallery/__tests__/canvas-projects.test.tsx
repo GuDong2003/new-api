@@ -35,10 +35,12 @@ import {
   type InternalAxiosRequestConfig,
 } from 'axios'
 import { IDBFactory } from 'fake-indexeddb'
+import i18next from 'i18next'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { useCanvasFiles } from '@/features/playground/drawing/hooks/use-canvas-files'
 import { DEFAULT_IMAGE_SETTINGS } from '@/features/playground/drawing/lib/image-settings'
+import zh from '@/i18n/locales/zh.json'
 import { api } from '@/lib/api'
 import { useAuthStore } from '@/stores/auth-store'
 import { useDrawingStore } from '@/stores/drawing-store'
@@ -979,6 +981,30 @@ it('requires an explicit conflict reload and offers local export without a nativ
   )
   await userEvent.click(screen.getByRole('button', { name: 'Cancel' }))
   expect(useDrawingStore.getState().nodes).toHaveLength(1)
+})
+
+it('asks in Chinese before reloading the cloud version over a conflicting canvas', async () => {
+  const canvas = await localImage()
+  await updateCanvasCloudState(813, canvas.id, (current) => ({
+    ...current,
+    status: 'conflict',
+  }))
+  await openCanvasProject(identity, canvas.id)
+  i18next.addResourceBundle('zh', 'translation', zh.translation, true, true)
+  await i18next.changeLanguage('zh')
+  try {
+    render(<CanvasEditorHeader kind='drawing' />)
+    await userEvent.click(
+      await screen.findByRole('button', { name: '重新加载云端版本' })
+    )
+
+    const dialog = screen.getByRole('alertdialog')
+    expect(
+      within(dialog).getByRole('button', { name: '重新加载' })
+    ).toBeVisible()
+  } finally {
+    await i18next.changeLanguage('en')
+  }
 })
 
 // A conflict previously offered only export and reload, so keeping the local
