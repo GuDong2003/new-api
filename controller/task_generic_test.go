@@ -6,6 +6,7 @@ import (
 	"image"
 	"image/png"
 	"io"
+	"mime"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -438,11 +439,18 @@ func TestImageTaskArtifactsUseGalleryPreviewAndOriginal(t *testing.T) {
 		system_setting.ServerAddress = previousAddress
 	})
 
+	previousLocal := time.Local
+	time.Local = time.FixedZone("UTC+8", 8*60*60)
+	t.Cleanup(func() { time.Local = previousLocal })
+
 	var original bytes.Buffer
 	require.NoError(t, png.Encode(&original, image.NewRGBA(image.Rect(0, 0, 16, 8))))
 	saved, err := service.SaveTaskGalleryImage(context.Background(), task.UserId, task.TaskID, "image-0", "gpt-image-1", "a fox", "image/png", bytes.NewReader(original.Bytes()))
 	require.NoError(t, err)
 	task.PrivateData.GalleryImageIDs = map[string]string{"image-0": saved.ID}
+	task.PrivateData.GallerySource = "drawing"
+	task.Properties.Input = "a fox"
+	task.SubmitTime = time.Date(2026, 9, 27, 21, 30, 5, 0, time.Local).Unix()
 	require.NoError(t, model.DB.Save(task).Error)
 
 	recorder := httptest.NewRecorder()
@@ -480,7 +488,7 @@ func TestImageTaskArtifactsUseGalleryPreviewAndOriginal(t *testing.T) {
 	assert.Equal(t, "image/png", previewRecorder.Header().Get("Content-Type"))
 	// A browser saves an image under the name the response gives it, and one
 	// without an extension is saved as a file nothing opens.
-	assert.Equal(t, `inline; filename="image-0.png"`, previewRecorder.Header().Get("Content-Disposition"))
+	assert.Equal(t, `inline; filename="a fox-20260927-213005.png"`, previewRecorder.Header().Get("Content-Disposition"))
 
 	originalRecorder := httptest.NewRecorder()
 	originalContext, _ := gin.CreateTestContext(originalRecorder)
@@ -490,7 +498,7 @@ func TestImageTaskArtifactsUseGalleryPreviewAndOriginal(t *testing.T) {
 	TaskArtifactContent(originalContext)
 	assert.Equal(t, http.StatusOK, originalRecorder.Code)
 	assert.Equal(t, "image/png", originalRecorder.Header().Get("Content-Type"))
-	assert.Equal(t, `inline; filename="image-0.png"`, originalRecorder.Header().Get("Content-Disposition"))
+	assert.Equal(t, `inline; filename="a fox-20260927-213005.png"`, originalRecorder.Header().Get("Content-Disposition"))
 	assert.Equal(t, original.Bytes(), originalRecorder.Body.Bytes())
 
 	galleryRecorder := httptest.NewRecorder()
@@ -503,21 +511,61 @@ func TestImageTaskArtifactsUseGalleryPreviewAndOriginal(t *testing.T) {
 	assert.Equal(t, `inline; filename="gallery-image.png"`, galleryRecorder.Header().Get("Content-Disposition"))
 }
 
-// An opaque picture's thumbnail is a JPEG, and a saved image keeps the
-// extension of what was served; a type with no known extension gets none
-// rather than a wrong one.
-func TestImageFilenameFollowsTheServedType(t *testing.T) {
+// "Save image as" names an image the drawing page asked for the way the canvas
+// names a download: what the prompt asked for, then when it was asked, and
+// after the first of a batch its place in it. A type with no known extension
+// gets none rather than a wrong one.
+func TestTaskImageDispositionNamesWhatThePromptAskedFor(t *testing.T) {
+	previousLocal := time.Local
+	time.Local = time.FixedZone("UTC+8", 8*60*60)
+	t.Cleanup(func() { time.Local = previousLocal })
+	submitted := time.Date(2026, 9, 27, 21, 30, 5, 0, time.Local).Unix()
 	for _, tc := range []struct {
+		name     string
+		prompt   string
+		key      string
 		mimeType string
 		want     string
 	}{
-		{mimeType: "image/png", want: "image-0.png"},
-		{mimeType: "image/jpeg", want: "image-0.jpg"},
-		{mimeType: "image/webp", want: "image-0.webp"},
-		{mimeType: "image/gif", want: "image-0.gif"},
-		{mimeType: "application/octet-stream", want: "image-0"},
+		{name: "one image", prompt: "a fox on a hill", key: "image-0", mimeType: "image/png", want: "a fox on a hill-20260927-213005.png"},
+		{name: "the second of a batch", prompt: "a fox", key: "image-1", mimeType: "image/jpeg", want: "a fox-20260927-213005-2.jpg"},
+		{name: "characters a desktop refuses", prompt: "a/b:c*d?e\"f<g>h|i\\j\nk", key: "image-0", mimeType: "image/webp", want: "a b c d e f g h i j k-20260927-213005.webp"},
+		// Chrome decodes a plain filename, and drops one that decodes to no UTF-8.
+		{name: "a percent sign", prompt: "100%Beef burger", key: "image-0", mimeType: "image/png", want: "100 Beef burger-20260927-213005.png"},
+		// A desktop hides a file whose name starts with a dot.
+		{name: "leading dots", prompt: "..a fox", key: "image-0", mimeType: "image/png", want: "a fox-20260927-213005.png"},
+		{name: "a long prompt", prompt: "one two three four five six seven eight nine ten", key: "image-0", mimeType: "image/png", want: "one two three four five six se-20260927-213005.png"},
+		// Cut through a character, the name would no longer decode as UTF-8.
+		{name: "a long Chinese prompt", prompt: "一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十多余的字", key: "image-0", mimeType: "image/png", want: "一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十-20260927-213005.png"},
+		{name: "no prompt", prompt: "  ", key: "image-0", mimeType: "image/png", want: "image-20260927-213005.png"},
+		{name: "a type with no known extension", prompt: "a fox", key: "image-0", mimeType: "application/octet-stream", want: "a fox-20260927-213005"},
 	} {
-		assert.Equal(t, tc.want, imageFilename("image-0", tc.mimeType), tc.mimeType)
+		t.Run(tc.name, func(t *testing.T) {
+			task := &model.Task{SubmitTime: submitted, Properties: model.Properties{Input: tc.prompt}, PrivateData: model.TaskPrivateData{GallerySource: "drawing"}}
+			disposition, params, err := mime.ParseMediaType(taskImageDisposition(task, tc.key, tc.mimeType))
+			require.NoError(t, err)
+			assert.Equal(t, "inline", disposition)
+			assert.Equal(t, tc.want, params["filename"])
+		})
+	}
+}
+
+// A client that cannot read a UTF-8 filename finds the artifact key first.
+func TestTaskImageDispositionLeadsWithAPlainName(t *testing.T) {
+	previousLocal := time.Local
+	time.Local = time.FixedZone("UTC+8", 8*60*60)
+	t.Cleanup(func() { time.Local = previousLocal })
+	task := &model.Task{SubmitTime: time.Date(2026, 9, 27, 21, 30, 5, 0, time.Local).Unix(), Properties: model.Properties{Input: "一只橘猫在窗台上"}, PrivateData: model.TaskPrivateData{GallerySource: "drawing"}}
+
+	assert.Equal(t, `inline; filename="image-0.png"; filename*=utf-8''%E4%B8%80%E5%8F%AA%E6%A9%98%E7%8C%AB%E5%9C%A8%E7%AA%97%E5%8F%B0%E4%B8%8A-20260927-213005.png`, taskImageDisposition(task, "image-0", "image/png"))
+}
+
+// An API caller hands its image links to the people it serves, and a name read
+// from its prompt would show them the prompt.
+func TestTaskImageDispositionKeepsAnAPICallersPromptPrivate(t *testing.T) {
+	for _, source := range []string{"api", ""} {
+		task := &model.Task{SubmitTime: 1790000000, Properties: model.Properties{Input: "a private style template"}, PrivateData: model.TaskPrivateData{GallerySource: source}}
+		assert.Equal(t, `inline; filename="image-1.png"`, taskImageDisposition(task, "image-1", "image/png"), source)
 	}
 }
 

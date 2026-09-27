@@ -18,7 +18,11 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { imageAssetToFile, imageSourceToAsset } from '../image-assets'
+import {
+  imageAssetToFile,
+  imageDownloadName,
+  imageSourceToAsset,
+} from '../image-assets'
 
 class TestImage extends EventTarget {
   naturalWidth = 512
@@ -119,5 +123,77 @@ describe('reference images held by the canvas', () => {
         mimeType: 'image/png',
       })
     ).rejects.toThrow('The image response is invalid.')
+  })
+})
+
+// A folder of downloads that all read "new-api-" and a random id could not be
+// told apart. Each picture is named for what it shows, then when it was made,
+// so the folder reads and sorts on its own.
+describe('image download names', () => {
+  const madeAt = new Date(2026, 8, 27, 21, 30, 5).getTime()
+
+  it.each([
+    {
+      prompt: '一只橘猫在窗台上',
+      mimeType: 'image/png',
+      name: '一只橘猫在窗台上-20260927-213005.png',
+    },
+    {
+      prompt: 'A fox\nin the snow',
+      mimeType: 'image/jpeg',
+      name: 'A fox in the snow-20260927-213005.jpg',
+    },
+    {
+      prompt: 'a/b:c*d?e"f<g>h|i\\j',
+      mimeType: 'image/webp',
+      name: 'a b c d e f g h i j-20260927-213005.webp',
+    },
+    // A desktop hides a file whose name starts with a dot.
+    {
+      prompt: '..a fox',
+      mimeType: 'image/png',
+      name: 'a fox-20260927-213005.png',
+    },
+    // The gateway sends the same name, and a browser would decode the %.
+    {
+      prompt: '100%Beef burger',
+      mimeType: 'image/png',
+      name: '100 Beef burger-20260927-213005.png',
+    },
+    { prompt: '  ', mimeType: 'image/png', name: 'image-20260927-213005.png' },
+  ])('names a $mimeType picture made from "$prompt"', (test) => {
+    expect(imageDownloadName(test.prompt, madeAt, test.mimeType)).toBe(
+      test.name
+    )
+  })
+
+  it('numbers the pictures of a batch after its first', () => {
+    expect(
+      [0, 1, 2].map((index) =>
+        imageDownloadName('A fox', madeAt, 'image/png', index)
+      )
+    ).toEqual([
+      'A fox-20260927-213005.png',
+      'A fox-20260927-213005-2.png',
+      'A fox-20260927-213005-3.png',
+    ])
+  })
+
+  it('cuts a long prompt between characters, never inside one', () => {
+    expect(imageDownloadName('🦊'.repeat(31), madeAt, 'image/png')).toBe(
+      `${'🦊'.repeat(30)}-20260927-213005.png`
+    )
+  })
+
+  it('keeps only the start of a long prompt', () => {
+    expect(
+      imageDownloadName(
+        '一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十多余的字',
+        madeAt,
+        'image/png'
+      )
+    ).toBe(
+      '一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十-20260927-213005.png'
+    )
   })
 })

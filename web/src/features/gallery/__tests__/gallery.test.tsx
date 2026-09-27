@@ -259,6 +259,53 @@ it('asks for a preview even without one, and reads the original for details', as
   ).toHaveAttribute('download')
 })
 
+// An original is saved under what it shows and when it was made, like a canvas
+// download. After the first of a task's batch it adds its place in it, or the
+// pictures of one batch would all share a name.
+it.each([
+  { source: 'task_1:image-1', name: 'A quiet forest-20260927-213005-2.png' },
+  { source: 'canvas:asset-1', name: 'A quiet forest-20260927-213005.png' },
+])(
+  'names the original stored as $source for its prompt, time and place in its batch',
+  async (test) => {
+    api.defaults.adapter = async (config) => {
+      if (config.url?.endsWith('/usage')) return response(config, usage)
+      if (config.url?.endsWith('/file')) {
+        return {
+          ...response(config, {}),
+          data: new Blob(['original'], { type: 'image/png' }),
+        }
+      }
+      return response(config, {
+        items: [
+          {
+            ...galleryImage,
+            source_id: test.source,
+            created_at: new Date(2026, 8, 27, 21, 30, 5).getTime() / 1000,
+          },
+        ],
+        total: 1,
+        page: 1,
+        page_size: 24,
+      })
+    }
+    render(
+      <QueryClientProvider client={client}>
+        <Gallery />
+      </QueryClientProvider>
+    )
+
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'Preview original' })
+    )
+
+    const dialog = await screen.findByRole('dialog')
+    expect(
+      await within(dialog).findByRole('link', { name: 'Download original' })
+    ).toHaveAttribute('download', test.name)
+  }
+)
+
 it('requires confirmation before deletion and refreshes list and usage after deletion', async () => {
   let deleted = false
   api.defaults.adapter = async (config) => {

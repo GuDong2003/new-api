@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"mime"
 	"net/http"
 	"regexp"
 	"sort"
@@ -43,7 +44,43 @@ var (
 	taskArtifactKeyPattern           = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._~-]{0,127}$`)
 	errTaskArtifactPluginUnavailable = errors.New("task artifact plugin unavailable")
 	errTaskArtifactPlugin            = errors.New("task artifact plugin error")
+	// unsafeFilenameCharacters are what a desktop refuses in a filename, and
+	// the % a browser decodes in one it is sent.
+	unsafeFilenameCharacters = regexp.MustCompile(`[\\/:*?"<>|%\p{Cc}]`)
 )
+
+// taskImageDisposition names a task's image for "Save image as". One the
+// drawing page asked for is named the way the canvas names a download: what
+// the prompt asked for, then when it was asked, so a folder of saved images
+// reads and sorts on its own, and after the first of a batch its place in it.
+// The artifact key stands in for a client that cannot read a UTF-8 filename.
+// An API caller's image keeps only its artifact key, because the caller hands
+// its links to people who should not read its prompts.
+func taskImageDisposition(task *model.Task, artifactKey, mimeType string) string {
+	plain := `inline; filename="` + imageFilename(artifactKey, mimeType) + `"`
+	if source := task.PrivateData.GallerySource; source != "drawing" && source != "nai" {
+		return plain
+	}
+	words := strings.Fields(unsafeFilenameCharacters.ReplaceAllString(task.Properties.Input, " "))
+	subject := strings.TrimLeft(strings.Join(words, " "), ". ")
+	if runes := []rune(subject); len(runes) > 30 {
+		subject = strings.TrimSpace(string(runes[:30]))
+	}
+	if subject == "" {
+		subject = "image"
+	}
+	name := subject + "-" + time.Unix(task.SubmitTime, 0).Format("20060102-150405")
+	if position, ok := strings.CutPrefix(artifactKey, "image-"); ok {
+		if index, err := strconv.Atoi(position); err == nil && index > 0 {
+			name += "-" + strconv.Itoa(index+1)
+		}
+	}
+	disposition := mime.FormatMediaType("inline", map[string]string{"filename": imageFilename(name, mimeType)})
+	if strings.Contains(disposition, "filename*=") {
+		return plain + strings.TrimPrefix(disposition, "inline")
+	}
+	return disposition
+}
 
 func GetTask(c *gin.Context) {
 	task, exists, err := model.GetByTaskId(c.GetInt("id"), c.Param("key"))
@@ -432,7 +469,7 @@ func TaskArtifactContent(c *gin.Context) {
 		}
 		c.Header("Cache-Control", "private, no-store")
 		c.Header("X-Content-Type-Options", "nosniff")
-		c.Header("Content-Disposition", `inline; filename="`+imageFilename(artifactKey, mimeType)+`"`)
+		c.Header("Content-Disposition", taskImageDisposition(task, artifactKey, mimeType))
 		c.DataFromReader(http.StatusOK, info.Size(), mimeType, file, nil)
 		return
 	}

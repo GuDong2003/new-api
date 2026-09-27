@@ -165,6 +165,46 @@ export async function imageAssetToFile(
   })
 }
 
+const IMAGE_EXTENSIONS: Record<string, string> = {
+  'image/png': 'png',
+  'image/jpeg': 'jpg',
+  'image/webp': 'webp',
+  'image/gif': 'gif',
+}
+
+/**
+ * The name a picture is saved under: what it shows, then when it was made, so
+ * a folder of downloads reads and sorts on its own. After the first of a
+ * batch, a picture adds its place in it. The characters a desktop will not
+ * take in a filename become spaces, as does the % a browser decodes in a name
+ * the gateway sends, and a long prompt keeps its start. The gateway names a
+ * task's images for "Save image as" the same way.
+ */
+export function imageDownloadName(
+  prompt: string,
+  createdAt: number,
+  mimeType: string,
+  batchIndex = 0
+): string {
+  const words = prompt
+    .replaceAll(/[\\/:*?"<>|%\p{Cc}]/gu, ' ')
+    .replaceAll(/\s+/g, ' ')
+    .replace(/^[\s.]+/, '')
+  const subject = [...words].slice(0, 30).join('').trim() || 'image'
+  const made = new Date(createdAt)
+  const [month, day, hours, minutes, seconds] = [
+    made.getMonth() + 1,
+    made.getDate(),
+    made.getHours(),
+    made.getMinutes(),
+    made.getSeconds(),
+  ].map((part) => String(part).padStart(2, '0'))
+  const extension =
+    IMAGE_EXTENSIONS[mimeType] ?? (mimeType.split('/')[1] || 'png')
+  const place = batchIndex > 0 ? `-${batchIndex + 1}` : ''
+  return `${subject}-${made.getFullYear()}${month}${day}-${hours}${minutes}${seconds}${place}.${extension}`
+}
+
 export function downloadBlob(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob)
   const anchor = document.createElement('a')

@@ -20,8 +20,10 @@ import { Dialog } from '@/components/dialog'
 import { ErrorState } from '@/components/error-state'
 import { LoadingState } from '@/components/loading-state'
 import { Button } from '@/components/ui/button'
+import { imageDownloadName } from '@/features/playground/drawing/lib/image-assets'
 
 import { useGalleryFile } from '../hooks/use-gallery-file'
+import { galleryBatchIndex } from '../lib/gallery-collection'
 import type { GalleryIdentity, GalleryImage } from '../types'
 
 export function GalleryPreview(props: {
@@ -36,7 +38,6 @@ export function GalleryPreview(props: {
     blob: props.image.localBlob,
     only: props.image.localOnly,
   })
-  const extension = props.image.mime_type.split('/')[1] || 'image'
   return (
     <Dialog
       open
@@ -51,7 +52,15 @@ export function GalleryPreview(props: {
           <Button
             role='link'
             render={
-              <a href={file.url} download={`${props.image.id}.${extension}`} />
+              <a
+                href={file.url}
+                download={imageDownloadName(
+                  props.image.prompt,
+                  props.image.created_at * 1000,
+                  props.image.mime_type,
+                  galleryBatchIndex(props.image)
+                )}
+              />
             }
           >
             {t('Download original')}

@@ -47,7 +47,7 @@ import {
   CANVAS_NODE_MIN_HEIGHT,
   CANVAS_NODE_MIN_WIDTH,
 } from '../lib/canvas-geometry'
-import { downloadBlob } from '../lib/image-assets'
+import { downloadBlob, imageDownloadName } from '../lib/image-assets'
 import { getMaxReferenceImages } from '../lib/image-settings'
 import type { DrawingNode } from '../types'
 import {
@@ -337,9 +337,26 @@ export const ImageCanvasNode = memo(function ImageCanvasNode(
                 setDownloading(true)
                 try {
                   const file = await readCanvasNodeOriginal(identity, asset)
+                  // Pictures generated together share their prompt and
+                  // second, and each is numbered by its place among all of
+                  // them, finished or not, as the gateway numbers a batch. A
+                  // retry keeps both, so it renumbers none of the others.
+                  const batch = useDrawingStore
+                    .getState()
+                    .nodes.filter(
+                      (node) =>
+                        node.data.prompt === props.data.prompt &&
+                        Math.floor(node.data.createdAt / 1000) ===
+                          Math.floor(props.data.createdAt / 1000)
+                    )
                   downloadBlob(
                     file,
-                    `new-api-${props.id}.${file.type.split('/')[1]}`
+                    imageDownloadName(
+                      props.data.prompt,
+                      props.data.createdAt,
+                      file.type,
+                      batch.findIndex((node) => node.id === props.id)
+                    )
                   )
                 } catch {
                   toast.error(

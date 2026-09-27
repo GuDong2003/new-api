@@ -65,6 +65,112 @@ function RetryImageCard() {
 }
 
 describe('Canvas image result', () => {
+  const madeAt = new Date(2026, 8, 27, 21, 30, 5).getTime()
+
+  function imageNode(
+    id: string,
+    data: Partial<DrawingNode['data']> = {}
+  ): DrawingNode {
+    return {
+      id,
+      type: 'image',
+      position: { x: 0, y: 0 },
+      data: {
+        prompt: '一只橘猫在窗台上',
+        settings: DEFAULT_IMAGE_SETTINGS,
+        createdAt: madeAt,
+        status: 'complete',
+        asset: {
+          id: `${id}-asset`,
+          name: 'gpt-image-2-1',
+          src: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aKn0AAAAASUVORK5CYII=',
+          mimeType: 'image/png',
+          width: 1,
+          height: 1,
+        },
+        ...data,
+      },
+    }
+  }
+
+  // Renders the node, downloads its original and returns the name it was
+  // saved under.
+  async function downloadedName(node: DrawingNode) {
+    const saved: string[] = []
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(
+      function (this: HTMLAnchorElement) {
+        saved.push(this.download)
+      }
+    )
+    vi.stubGlobal(
+      'URL',
+      class extends URL {
+        static createObjectURL = vi.fn(() => 'blob:download')
+        static revokeObjectURL = vi.fn()
+      }
+    )
+    try {
+      render(
+        <QueryClientProvider client={client}>
+          <ReactFlowProvider>
+            <ImageCanvasNode
+              id={node.id}
+              type='image'
+              data={node.data}
+              draggable
+              dragging={false}
+              selectable
+              selected={false}
+              deletable
+              isConnectable={false}
+              zIndex={0}
+              positionAbsoluteX={0}
+              positionAbsoluteY={0}
+            />
+          </ReactFlowProvider>
+        </QueryClientProvider>
+      )
+      await userEvent.click(screen.getByRole('button', { name: 'Download' }))
+      await waitFor(() => expect(saved).toHaveLength(1))
+      return saved[0]
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  }
+
+  // Every download used to read "new-api-" and the node's id, so a folder of
+  // them could not be told apart. A picture is saved under what it shows and
+  // when it was made.
+  it('downloads the original under its prompt and the time it was made', async () => {
+    useDrawingStore.getState().initialize(820)
+    const node = imageNode('only')
+    useDrawingStore.getState().addNodes([node])
+
+    expect(await downloadedName(node)).toBe(
+      '一只橘猫在窗台上-20260927-213005.png'
+    )
+  })
+
+  // A batch shares its prompt and second, so without its place each picture of
+  // it would be saved under the same name. A picture of another prompt or
+  // second is not of the batch, while one that failed keeps its place, so a
+  // retry renumbers none of the others.
+  it('numbers the pictures generated together by their place in the batch', async () => {
+    useDrawingStore.getState().initialize(820)
+    const nodes = [
+      imageNode('earlier', { createdAt: madeAt - 1000 }),
+      imageNode('first'),
+      imageNode('another prompt', { prompt: '一只黑猫' }),
+      imageNode('failed', { status: 'error', asset: undefined }),
+      imageNode('third', { createdAt: madeAt + 400 }),
+    ]
+    useDrawingStore.getState().addNodes(nodes)
+
+    expect(await downloadedName(nodes[4])).toBe(
+      '一只橘猫在窗台上-20260927-213005-3.png'
+    )
+  })
+
   it('keeps selected nodes to one outline while retaining resize controls', () => {
     useDrawingStore.getState().initialize(820)
     const props: NodeProps<DrawingNode> = {

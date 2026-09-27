@@ -16,6 +16,14 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 */
 import type { CanvasBinary, GalleryImage, LocalCanvas } from '../types'
 
+/**
+ * The gateway stores a task's images as "<task>:image-<index>", and the index
+ * tells the pictures of one batch apart. Any other image stands alone.
+ */
+export function galleryBatchIndex(image: Pick<GalleryImage, 'source_id'>) {
+  return Number(/:image-(\d+)$/.exec(image.source_id)?.[1] ?? 0)
+}
+
 export function localGalleryImages(
   canvas: LocalCanvas,
   assets: readonly CanvasBinary[]
