@@ -275,6 +275,10 @@ describe('Image parameter fields', () => {
       ['drawing-models', 914, 'default'],
       [{ value: 'gpt-image-2.5', label: 'gpt-image-2.5' }]
     )
+    client.setQueryData(['canvas-setting', 914], {
+      default_model: '',
+      disabled_resolutions: [],
+    })
     const panel = (
       <QueryClientProvider client={client}>
         <DrawingSettings
@@ -543,6 +547,10 @@ describe('the model selector groups by vendor', () => {
         { value: 'grok-imagine-image-2.0', label: 'grok-imagine-image-2.0' },
       ]
     )
+    client.setQueryData(['canvas-setting', 915], {
+      default_model: '',
+      disabled_resolutions: [],
+    })
     const view = render(
       <QueryClientProvider client={client}>
         <DrawingSettings

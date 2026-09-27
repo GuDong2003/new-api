@@ -19,11 +19,13 @@ For commercial licensing, please contact support@quantumnous.com
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
-import { afterEach, describe, expect, it } from 'vitest'
+import { toast } from 'sonner'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { login } from '@/features/gallery/__tests__/fixtures'
 import type { CanvasSetting } from '@/features/playground/types'
 import { api } from '@/lib/api'
+import { createAppQueryClient } from '@/lib/query-client'
 import { useAuthStore } from '@/stores/auth-store'
 import { useDrawingStore } from '@/stores/drawing-store'
 
@@ -33,6 +35,11 @@ import {
 } from '../../lib/image-settings'
 import { useDrawingPersistence } from '../use-drawing-persistence'
 import { useImageOptions } from '../use-image-options'
+
+const NO_CANVAS_SETTING: CanvasSetting = {
+  default_model: '',
+  disabled_resolutions: [],
+}
 
 describe('Drawing settings and persistence', () => {
   afterEach(() => useAuthStore.getState().auth.reset())
@@ -68,6 +75,7 @@ describe('Drawing settings and persistence', () => {
       ['drawing-models', 812, 'default'],
       [{ value: 'dall-e-3', label: 'dall-e-3' }]
     )
+    client.setQueryData(['canvas-setting', 812], NO_CANVAS_SETTING)
     const hook = renderHook(() => useImageOptions(812), {
       wrapper: (props: { children: ReactNode }) => (
         <QueryClientProvider client={client}>
@@ -113,6 +121,7 @@ describe('Drawing settings and persistence', () => {
         { value: 'nai-diffusion-4-5-full', label: 'NAI' },
       ]
     )
+    client.setQueryData(['canvas-setting', 813], NO_CANVAS_SETTING)
     const hook = renderHook(() => useImageOptions(813), {
       wrapper: (props: { children: ReactNode }) => (
         <QueryClientProvider client={client}>
@@ -210,16 +219,17 @@ describe('the canvas setting of the user group', () => {
   const adapter = api.defaults.adapter
   afterEach(() => {
     api.defaults.adapter = adapter
+    vi.restoreAllMocks()
   })
 
   function renderImageOptions(
     userId: number,
     models: string[],
-    canvasSetting?: CanvasSetting
-  ) {
-    const client = new QueryClient({
+    canvasSetting?: CanvasSetting,
+    client = new QueryClient({
       defaultOptions: { queries: { retry: false, staleTime: Infinity } },
     })
+  ) {
     client.setQueryData(
       ['drawing-groups', userId],
       [{ value: 'default', label: 'default', ratio: 1 }]
@@ -281,14 +291,53 @@ describe('the canvas setting of the user group', () => {
     view.unmount()
   })
 
-  it('picks a model by itself when the canvas setting cannot be read', async () => {
+  it('picks a model by itself, without an error toast, when the canvas setting cannot be read', async () => {
     api.defaults.adapter = async () => {
       throw new Error('The server is unavailable.')
     }
+    const toastError = vi.spyOn(toast, 'error')
     startCanvas(863)
-    const view = renderImageOptions(863, ['nano-banana-pro', 'gpt-image-2'])
+    const view = renderImageOptions(
+      863,
+      ['nano-banana-pro', 'gpt-image-2'],
+      undefined,
+      createAppQueryClient()
+    )
     await waitFor(() =>
       expect(useDrawingStore.getState().settings.model).toBe('gpt-image-2')
+    )
+    expect(toastError).not.toHaveBeenCalled()
+    view.unmount()
+  })
+
+  it('waits for the group default before picking a model for a new canvas', async () => {
+    let answer = () => {}
+    api.defaults.adapter = (config) =>
+      new Promise((resolve) => {
+        answer = () =>
+          resolve({
+            config,
+            status: 200,
+            statusText: 'OK',
+            headers: {},
+            data: {
+              success: true,
+              data: {
+                default_model: 'nano-banana-pro',
+                disabled_resolutions: [],
+              },
+            },
+          })
+      })
+    startCanvas(866)
+    const view = renderImageOptions(866, ['gpt-image-2', 'nano-banana-pro'])
+    expect(useDrawingStore.getState().settings.model).toBe('')
+    await waitFor(() =>
+      expect(view.hook.result.current.imageModels).toHaveLength(2)
+    )
+    act(() => answer())
+    await waitFor(() =>
+      expect(useDrawingStore.getState().settings.model).toBe('nano-banana-pro')
     )
     view.unmount()
   })
@@ -304,6 +353,44 @@ describe('the canvas setting of the user group', () => {
     // 16:9 at 2K.
     await waitFor(() =>
       expect(useDrawingStore.getState().settings.size).toBe('2560x1440')
+    )
+    view.unmount()
+  })
+
+  it('keeps the size it picked when reused settings name a model the group lacks', async () => {
+    startCanvas(867)
+    const view = renderImageOptions(867, ['dall-e-3'], {
+      default_model: '',
+      disabled_resolutions: ['4K'],
+    })
+    // Reusing an image made with GPT Image 2 at 16:9 4K.
+    act(() =>
+      useDrawingStore.getState().updateSettings({
+        model: 'gpt-image-2',
+        size: '3328x1872',
+        prompt: 'A cup',
+      })
+    )
+    await waitFor(() =>
+      expect(useDrawingStore.getState().settings.model).toBe('dall-e-3')
+    )
+    expect(useDrawingStore.getState().settings.size).toBe('1024x1024')
+    expect(
+      validateImageSettings(useDrawingStore.getState().settings, 0)
+    ).toBeNull()
+    view.unmount()
+  })
+
+  it('moves a size carried over from another model off a withheld tier', async () => {
+    startCanvas(868, 'gpt-image-2')
+    // DALL·E 3's widest size, which GPT Image 2 renders at 2K.
+    useDrawingStore.getState().updateSettings({ size: '1792x1024' })
+    const view = renderImageOptions(868, ['gpt-image-2'], {
+      default_model: '',
+      disabled_resolutions: ['2K'],
+    })
+    await waitFor(() =>
+      expect(useDrawingStore.getState().settings.size).toBe('1024x1024')
     )
     view.unmount()
   })

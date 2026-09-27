@@ -57,7 +57,12 @@ function renderSection(props: {
     if (config.url === '/api/channel/models_enabled') {
       return reply({
         success: true,
-        data: ['nano-banana-pro', 'gpt-5', 'gpt-image-2'],
+        data: [
+          'nano-banana-pro',
+          'gpt-5',
+          'nai-diffusion-4-5-full',
+          'gpt-image-2',
+        ],
       })
     }
     throw new Error(`Unexpected request to ${config.url}`)
@@ -82,7 +87,7 @@ function renderSection(props: {
   return saved
 }
 
-it('offers only the enabled image models, leaving the choice to the canvas when none is set', async () => {
+it('offers the enabled models prompted in words, leaving the choice to the canvas when none is set', async () => {
   renderSection({ defaultModels: '{}', disabledResolutions: '{}' })
   const model = await screen.findByRole('combobox', {
     name: 'Default model for vip',
@@ -143,12 +148,18 @@ it('keeps a saved default model listed after it stops being an enabled image mod
   ).toBeInTheDocument()
 })
 
-it('lists a group that is gone while it still holds a canvas setting', async () => {
-  renderSection({
+it('clears the setting of a group that is gone, sending only that option', async () => {
+  const saved = renderSection({
     defaultModels: '{}',
     disabledResolutions: '{"retired":["4K"]}',
   })
-  expect(
+  const user = userEvent.setup()
+  await user.click(
     await screen.findByRole('switch', { name: 'Offer 4K to retired' })
-  ).not.toBeChecked()
+  )
+  await user.click(screen.getByRole('button', { name: 'Save canvas settings' }))
+  await waitFor(() => expect(saved).toHaveLength(1))
+  expect(saved).toEqual([
+    { key: 'canvas_setting.disabled_resolutions', value: '{}' },
+  ])
 })

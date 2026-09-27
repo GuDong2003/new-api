@@ -25,6 +25,7 @@ import { getCanvasSetting, getUserGroups, getUserModels } from '../../api'
 import { filterImageModels } from '../lib/image-models'
 import {
   getImagePresetSize,
+  getImageResolutionTier,
   getImageSizePreset,
   nearestOfferedResolution,
   settingsForImageModel,
@@ -105,18 +106,24 @@ export function useImageOptions(userId: number) {
     generationMode,
   ])
   useEffect(() => {
+    // Read the store rather than this render: the pick above may have just
+    // replaced the model and its size.
+    const current = useDrawingStore.getState().settings
     // Only preset models pick their size by tier. A fixed-size model's size is
     // its own, even when it happens to match a preset.
-    if (!supportsImageSizePresets(model)) return
-    const preset = getImageSizePreset(size, model)
-    if (!preset) return
-    const resolution = nearestOfferedResolution(
-      preset.resolution,
-      disabledResolutions
-    )
-    if (resolution === preset.resolution) return
+    if (!current.model || !supportsImageSizePresets(current.model)) return
+    if (current.size === 'auto') return
+    // A size carried over from another model is billed by its longest side.
+    const preset = getImageSizePreset(current.size, current.model)
+    const tier = preset?.resolution ?? getImageResolutionTier(current.size)
+    const offered = nearestOfferedResolution(tier, disabledResolutions)
+    if (offered === tier) return
     useDrawingStore.getState().updateSettings({
-      size: getImagePresetSize(preset.aspectRatio, resolution, model),
+      size: getImagePresetSize(
+        preset?.aspectRatio ?? '1:1',
+        offered,
+        current.model
+      ),
     })
   }, [size, model, disabledResolutions])
   return { groups, models, imageModels, disabledResolutions }

@@ -36,7 +36,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { getEnabledModels } from '@/features/channels/api'
-import { getImageModelFamily } from '@/features/playground/drawing/lib/image-models'
+import { filterImageModels } from '@/features/playground/drawing/lib/image-models'
 import { IMAGE_RESOLUTIONS } from '@/features/playground/drawing/lib/image-settings'
 import { getGroups } from '@/features/users/api'
 import { requireServerSuccess } from '@/lib/server-error-message'
@@ -50,6 +50,10 @@ import { safeJsonParse } from '../utils/json-parser'
 
 const DEFAULT_MODELS_KEY = 'canvas_setting.default_models'
 const DISABLED_RESOLUTIONS_KEY = 'canvas_setting.disabled_resolutions'
+
+type CanvasOptionKey =
+  | typeof DEFAULT_MODELS_KEY
+  | typeof DISABLED_RESOLUTIONS_KEY
 
 const canvasSchema = z.object({
   rows: z.array(
@@ -67,7 +71,9 @@ const canvasSchema = z.object({
 type CanvasFormValues = z.infer<typeof canvasSchema>
 
 /** The two saved options the rows stand for, with groups in row order. */
-function canvasOptionValues(rows: CanvasFormValues['rows']) {
+function canvasOptionValues(
+  rows: CanvasFormValues['rows']
+): Record<CanvasOptionKey, string> {
   const defaultModels: Record<string, string> = {}
   const disabledResolutions: Record<string, string[]> = {}
   for (const row of rows) {
@@ -101,10 +107,18 @@ export function CanvasSettingsSection(props: CanvasSettingsSectionProps) {
     queryKey: ['enabled-models'],
     queryFn: async () => requireServerSuccess(await getEnabledModels()),
   })
+  // A new canvas starts in description mode and only takes a default made
+  // for it, so models prompted with tags are left out.
   const imageModels = useMemo(
     () =>
-      (enabledModels.data?.data ?? [])
-        .filter((model) => getImageModelFamily(model) !== null)
+      filterImageModels(
+        (enabledModels.data?.data ?? []).map((model) => ({
+          value: model,
+          label: model,
+        })),
+        'description'
+      )
+        .map((option) => option.value)
         .sort((a, b) => a.localeCompare(b)),
     [enabledModels.data]
   )
@@ -176,7 +190,11 @@ function CanvasSettingsForm(props: CanvasSettingsFormProps) {
   const onSubmit = async (values: CanvasFormValues) => {
     const saved = canvasOptionValues(formDefaults.rows)
     const next = canvasOptionValues(values.rows)
-    for (const key of [DEFAULT_MODELS_KEY, DISABLED_RESOLUTIONS_KEY] as const) {
+    const keys: CanvasOptionKey[] = [
+      DEFAULT_MODELS_KEY,
+      DISABLED_RESOLUTIONS_KEY,
+    ]
+    for (const key of keys) {
       if (next[key] === saved[key]) continue
       await updateOption.mutateAsync({ key, value: next[key] })
     }
@@ -193,7 +211,7 @@ function CanvasSettingsForm(props: CanvasSettingsFormProps) {
         <div className='text-muted-foreground flex flex-col gap-1 text-sm'>
           <p>
             {t(
-              'For each user group, set the model the canvas picks by itself and the resolution tiers it offers. A model the user picked stays selected.'
+              'For each user group, set the model a canvas picks when it has no usable model selected, and the resolution tiers it offers. A model already selected on a canvas stays selected.'
             )}
           </p>
           <p>
@@ -225,7 +243,7 @@ function CanvasSettingsForm(props: CanvasSettingsFormProps) {
                 savedModel !== '' && !props.imageModels.includes(savedModel)
               return (
                 <TableRow key={row.group}>
-                  <TableCell>{row.group}</TableCell>
+                  <TableHead scope='row'>{row.group}</TableHead>
                   <TableCell>
                     <NativeSelect
                       aria-label={t('Default model for {{group}}', {

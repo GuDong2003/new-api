@@ -36,7 +36,7 @@
     "Enter an address starting with http:// or https://": "请输入以 http:// 或 https:// 开头的地址",
     "Every user is always held to their own RPM: the one set for them, else their group's, else the default.": "每个用户始终受自己的 RPM 限制：优先使用为该用户单独设置的，其次是所在分组的，都没有时使用默认 RPM。",
     "Export original": "导出原画布",
-    "For each user group, set the model the canvas picks by itself and the resolution tiers it offers. A model the user picked stays selected.": "按用户分组设置画布自动选用的模型，以及画布里可选的分辨率档位。用户自己选过的模型不会被替换。",
+    "For each user group, set the model a canvas picks when it has no usable model selected, and the resolution tiers it offers. A model already selected on a canvas stays selected.": "按用户分组设置画布在没有可用模型时自动选用的模型，以及画布里可选的分辨率档位。画布上已选中的模型不会被替换。",
     "For users whose group has no RPM of its own. 0 = unlimited.": "所在分组没有设置 RPM 的用户使用这个值。0 = 不限。",
     "Generating": "图片生成中",
     "Generation mode": "生成方式",

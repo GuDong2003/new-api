@@ -59,6 +59,10 @@ function renderSettings() {
     ['drawing-models', 851, 'default'],
     [{ value: 'gpt-image-1', label: 'gpt-image-1' }]
   )
+  client.setQueryData(['canvas-setting', 851], {
+    default_model: '',
+    disabled_resolutions: [],
+  })
   render(
     <QueryClientProvider client={client}>
       <DrawingSettings
@@ -131,6 +135,10 @@ describe('DrawingSettings generation modes', () => {
         { value: 'qwen-image', label: 'qwen-image' },
       ]
     )
+    client.setQueryData(['canvas-setting', 852], {
+      default_model: '',
+      disabled_resolutions: [],
+    })
     render(
       <QueryClientProvider client={client}>
         <DrawingSettings
