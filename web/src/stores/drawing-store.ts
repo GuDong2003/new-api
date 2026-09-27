@@ -533,8 +533,9 @@ export const useDrawingStore = create<DrawingState>((set, get) => ({
         revision: state.revision + 1,
       }
     }),
-  setViewport: (viewport) =>
-    set((state) => ({ viewport, revision: state.revision + 1 })),
+  // Moving or zooming the view changes nothing on the canvas; where the view
+  // stands is saved with the next change.
+  setViewport: (viewport) => set({ viewport }),
   toggleReference: (id) =>
     set((state) => {
       if (state.referenceIds.includes(id)) {

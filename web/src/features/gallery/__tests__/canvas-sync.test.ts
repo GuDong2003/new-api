@@ -262,6 +262,96 @@ it('commits real editor changes only after the two second local debounce', async
   expect(posts()).toHaveLength(0)
 })
 
+it('writes nothing to this browser for an editor change that leaves the saved canvas as it was', async () => {
+  const canvas = await createCanvasProject(identity, 'drawing')
+  await startCanvasEditor(identity, 'drawing')
+  useDrawingStore.getState().addNodes([
+    {
+      id: 'node-pending',
+      type: 'image',
+      position: { x: 0, y: 0 },
+      data: {
+        prompt: '狐狸',
+        settings: useDrawingStore.getState().settings,
+        status: 'pending',
+        createdAt: 1,
+      },
+    },
+  ])
+  await flushLocalEditors(identity)
+  const saved = required(await loadLocalCanvas(813, canvas.id))
+
+  // A generation's progress shows on its node but is never stored.
+  useDrawingStore.getState().updateNodeData('node-pending', {
+    progress: { startedAt: 1, phase: 'decoding', previewCount: 0 },
+  })
+  await flushLocalEditors(identity)
+
+  expect(required(await loadLocalCanvas(813, canvas.id)).revision).toBe(
+    saved.revision
+  )
+  expect(getCanvasEditorState('drawing')?.localStatus).toBe('saved')
+})
+
+it('remembers a moved view once it settles, without saving it as a change', async () => {
+  const canvas = await createCanvasProject(identity, 'drawing')
+  await startCanvasEditor(identity, 'drawing')
+  useDrawingStore.getState().updateSettings({ prompt: '第一次编辑' })
+  await flushLocalEditors(identity)
+  const saved = required(await loadLocalCanvas(813, canvas.id))
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
+
+  useDrawingStore.getState().setViewport({ x: 120, y: 80, zoom: 2 })
+  expect(getCanvasEditorState('drawing')?.localStatus).toBe('saved')
+  await vi.advanceTimersByTimeAsync(2000)
+
+  await vi.waitFor(async () =>
+    expect(
+      required(await loadLocalCanvas(813, canvas.id)).document.viewport
+    ).toEqual({ x: 120, y: 80, zoom: 2 })
+  )
+  const current = required(await loadLocalCanvas(813, canvas.id))
+  expect(current).toMatchObject({
+    revision: saved.revision,
+    localSavedAt: saved.localSavedAt,
+    status: saved.status,
+    cloudSavedRevision: saved.cloudSavedRevision,
+  })
+  expect(getCanvasEditorState('drawing')?.localStatus).toBe('saved')
+})
+
+it('remembers where the view stands once the page is left, without a new revision', async () => {
+  const canvas = await createCanvasProject(identity, 'drawing')
+  await startCanvasEditor(identity, 'drawing')
+  useDrawingStore.getState().updateSettings({ prompt: '第一次编辑' })
+  await flushLocalEditors(identity)
+  const saved = required(await loadLocalCanvas(813, canvas.id))
+
+  useDrawingStore.getState().setViewport({ x: 120, y: 80, zoom: 2 })
+  window.dispatchEvent(new Event('pagehide'))
+  await flushLocalEditors(identity)
+
+  const current = required(await loadLocalCanvas(813, canvas.id))
+  expect(current.document.viewport).toEqual({ x: 120, y: 80, zoom: 2 })
+  expect(current.revision).toBe(saved.revision)
+})
+
+it('keeps the undo history when coming back to a canvas whose view it remembered', async () => {
+  await createCanvasProject(identity, 'drawing')
+  await startCanvasEditor(identity, 'drawing')
+  useDrawingStore.getState().checkpoint()
+  useDrawingStore.getState().updateSettings({ prompt: '第一次编辑' })
+  await flushLocalEditors(identity)
+
+  useDrawingStore.getState().setViewport({ x: 120, y: 80, zoom: 2 })
+  window.dispatchEvent(new Event('pagehide'))
+  await flushLocalEditors(identity)
+  window.dispatchEvent(new Event('focus'))
+  await flushLocalEditors(identity)
+
+  expect(useDrawingStore.getState().past).toHaveLength(1)
+})
+
 it('persists full pause and prevents manual, leave and logout publications', async () => {
   const canvas = await createCanvasProject(identity, 'drawing')
   full = true

@@ -408,6 +408,57 @@ it('keeps saving a canvas opened from thumbnails after the gallery lost an origi
   expect((await readCanvasAssets(813, canvasId))[0]?.previewOnly).toBe(true)
 })
 
+// Opens the remote canvas from thumbnails, with its original served under the
+// checksum the gallery recorded for it.
+async function openThumbnailCanvasWithItsOriginal() {
+  await startCanvasEditor(identity, 'drawing')
+  const remote = remoteDrawingCanvas(useDrawingStore.getState().settings)
+  const digest = await crypto.subtle.digest(
+    'SHA-256',
+    new TextEncoder().encode('original')
+  )
+  const sha256 = Array.from(new Uint8Array(digest), (byte) =>
+    byte.toString(16).padStart(2, '0')
+  ).join('')
+  serveRemoteDrawingCanvas({
+    ...remote,
+    assets: [{ ...remote.assets[0], sha256 }],
+  })
+  await openCanvasProject(identity, canvasId, undefined, 'drawing')
+}
+
+it('keeps the original a save downloads for a thumbnail even when nothing on the canvas changed', async () => {
+  await openThumbnailCanvasWithItsOriginal()
+  const nodeId = useDrawingStore.getState().nodes[0].id
+
+  // Measuring a node changes nothing the canvas stores.
+  for (const width of [256, 257]) {
+    useDrawingStore.getState().changeNodes([
+      {
+        type: 'dimensions',
+        id: nodeId,
+        dimensions: { width, height: width },
+      },
+    ])
+    await flushLocalEditors(identity)
+  }
+
+  expect(fileParams).toEqual([{ thumbnail: true }, undefined])
+  expect((await readCanvasAssets(813, canvasId))[0]?.previewOnly).toBeFalsy()
+})
+
+it('keeps the original a save downloads for a thumbnail after another tab saved the canvas', async () => {
+  await openThumbnailCanvasWithItsOriginal()
+  // Another tab renames the canvas, which changes nothing it holds.
+  const stored = required(await loadLocalCanvas(813, canvasId))
+  await canvasRepository.saveLocalCanvas({ ...stored, name: '另一个标签页' }, [])
+
+  await flushLocalEditors(identity)
+
+  expect(fileParams).toEqual([{ thumbnail: true }, undefined])
+  expect((await readCanvasAssets(813, canvasId))[0]?.previewOnly).toBeFalsy()
+})
+
 // Base64 is only worth its cost when the document has to outlive the tab, as an
 // export does. Encoding every picture on the way into the editor is what made a
 // canvas sit on "loading" after its images had already arrived.

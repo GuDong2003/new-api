@@ -44,6 +44,7 @@ import {
   loadLocalCanvas,
   readCanvasAliases,
   readCanvasAssets,
+  rememberCanvasViewport,
   saveLocalCanvas,
 } from './canvas-repository'
 import {
@@ -119,7 +120,7 @@ export function canvasOriginalReader(
 }
 function content(document: Record<string, unknown>) {
   const { viewport: _viewport, ...rest } = document
-  return JSON.stringify(rest)
+  return documentKey(rest)
 }
 
 function remapEditorDocument(
@@ -307,6 +308,19 @@ export function bindEditor(identity: GalleryIdentity, initial: LocalCanvas) {
     }
     base = { revision: canvas.revision, document: canvas.document }
   }
+  // Whenever there is nothing else to save, where the view stands is kept in
+  // this browser without counting as a change.
+  const rememberViewport = async (stored: LocalCanvas) => {
+    // A signed-out editor shows a reset view, not this canvas's.
+    if (!active || !isGalleryIdentityCurrent(identity)) return
+    const viewport = store.getState().viewport
+    if (documentKey(viewport) === documentKey(stored.document.viewport)) return
+    try {
+      await rememberCanvasViewport(owner, initial.id, viewport)
+    } catch {
+      // A view left unremembered costs the canvas nothing.
+    }
+  }
   const save = async () => {
     if (!active || !isGalleryIdentityCurrent(identity)) return
     if (!store.getState().ready) return
@@ -322,13 +336,17 @@ export function bindEditor(identity: GalleryIdentity, initial: LocalCanvas) {
         }
         if (!current || current.deleted) return
         // Only another drawing document can be merged into this one; the
-        // former NAI page stored a different kind of canvas.
+        // former NAI page stored a different kind of canvas. A remembered view
+        // is no change another tab made.
         const foreign =
           current.kind === kind &&
           (current.revision !== base.revision ||
-            documentKey(current.document) !== documentKey(base.document))
+            content(current.document) !== content(base.document))
         const edited = store.getState().revision !== savedEditorRevision
-        if (!edited && !waiting && !foreign) return
+        if (!edited && !waiting && !foreign) {
+          await rememberViewport(current)
+          return
+        }
         if (edited && !reported) {
           reported = true
           updateState(kind, {
@@ -397,13 +415,45 @@ export function bindEditor(identity: GalleryIdentity, initial: LocalCanvas) {
         const settings =
           documentKey(document.settings) !==
           documentKey(encoded.document.settings)
+        // A save can bring the original of an image kept here only as a
+        // preview, which is worth keeping even when nothing else changed.
+        const upgraded = assets.some(
+          (asset) =>
+            !asset.previewOnly &&
+            !asset.remoteSource &&
+            stored.some((item) => item.id === asset.id && item.previewOnly)
+        )
         // Unedited and no original arrived: there is nothing new to keep.
         if (
           latestEditor.revision === savedEditorRevision &&
           links === waiting &&
+          !upgraded &&
           content(document) === content(current.document)
         ) {
           if (foreign) await adopt(current, latestEditor.revision, settings)
+          await rememberViewport(current)
+          return
+        }
+        // An edit can leave what the canvas holds as it was, as a generation's
+        // progress does, since it is never stored. Writing it again would only
+        // queue the same canvas for another upload.
+        if (
+          links === waiting &&
+          !upgraded &&
+          content(document) === content(current.document)
+        ) {
+          savedEditorRevision = latestEditor.revision
+          if (theirs) await adopt(current, latestEditor.revision, settings)
+          else base = { revision: current.revision, document: current.document }
+          updateState(kind, {
+            canvas: current,
+            localStatus:
+              store.getState().revision === savedEditorRevision
+                ? 'saved'
+                : 'saving',
+            pendingOriginals: waiting,
+          })
+          await rememberViewport(current)
           return
         }
         try {
@@ -464,12 +514,16 @@ export function bindEditor(identity: GalleryIdentity, initial: LocalCanvas) {
     return queue
   }
   const unsubscribe = store.subscribe((state, previous) => {
-    if (
-      !active ||
-      applying ||
-      !state.ready ||
-      state.revision === previous.revision
-    ) {
+    if (!active || applying || !state.ready) return
+    if (state.revision === previous.revision) {
+      // A moved view is no change to save, but once it settles the next save
+      // remembers it; a page being closed is no time to count on.
+      if (state.viewport !== previous.viewport) {
+        if (timer) clearTimeout(timer)
+        timer = setTimeout(() => {
+          void flush()
+        }, 2000)
+      }
       return
     }
     updateState(kind, {

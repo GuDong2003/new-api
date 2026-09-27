@@ -355,6 +355,36 @@ export async function updateCanvasCloudState(
   })
 }
 
+const viewportSchema = z.object({
+  x: z.number().finite(),
+  y: z.number().finite(),
+  zoom: z.number().min(0.1).max(4),
+})
+
+/**
+ * Where the view stands is no change to the canvas: it keeps the revision, so
+ * nothing is uploaded for it and the cloud copy takes it with the next change.
+ * Only the view is replaced; the rest stays exactly as stored.
+ */
+export async function rememberCanvasViewport(
+  userId: number,
+  id: string,
+  viewport: unknown
+): Promise<void> {
+  const view = viewportSchema.parse(viewport)
+  await transact('readwrite', async (tx) => {
+    const store = tx.objectStore('canvases')
+    const canvas: LocalCanvas | undefined = await requestValue(
+      store.get([userId, id])
+    )
+    if (!canvas || canvas.deleted) return
+    store.put({ ...canvas, document: { ...canvas.document, viewport: view } }, [
+      userId,
+      id,
+    ])
+  })
+}
+
 /** Only a latest acknowledged document can retire obsolete mask binaries. */
 export async function retireCanvasMasks(
   userId: number,
