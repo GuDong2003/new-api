@@ -739,6 +739,11 @@ func TestContentAuditRecordsLaterRequestsWhileAStreamingCaptureIsOpen(t *testing
 	r.queue <- finished
 	ctx, cancel := context.WithCancel(context.Background())
 	r.workers.Go(func() { r.worker(ctx) })
+	// Stop the worker before the fixture puts the database back.
+	t.Cleanup(func() {
+		cancel()
+		r.workers.Wait()
+	})
 	assert.Eventually(t, func() bool {
 		saved, _, err := ReadContentAuditPayload(context.Background(), finished.record.AuditID)
 		return err == nil && saved.Status == model.ContentAuditReady

@@ -353,7 +353,9 @@ func (r *contentAuditRuntime) worker(ctx context.Context) {
 			}
 			// A streaming capture lasts as long as its request. On its own
 			// goroutine a slow or stuck request no longer holds the worker the
-			// later records wait on; admission already caps how many run.
+			// later records wait on. Each capture keeps its memory charge
+			// until its record is written, so the memory budget caps how many
+			// run at once.
 			r.workers.Go(func() { r.runJob(ctx, job) })
 		}
 	}
