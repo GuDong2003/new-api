@@ -119,7 +119,7 @@ export type ContentAuditImage = {
   index: number
   address?: string
   status: string
-  mime?: 'image/jpeg'
+  mime?: 'image/jpeg' | 'image/png'
   width?: number
   height?: number
   original_status: string

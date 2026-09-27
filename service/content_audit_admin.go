@@ -294,48 +294,50 @@ func (v *contentAuditTextView) appendSemantic(value any) {
 	}
 }
 
-func ReadContentAuditThumbnail(ctx context.Context, id string, index int) ([]byte, error) {
+// ReadContentAuditThumbnail returns an image's audit thumbnail and its type: a
+// JPEG, or a PNG when the picture has transparency.
+func ReadContentAuditThumbnail(ctx context.Context, id string, index int) ([]byte, string, error) {
 	if index < 0 {
-		return nil, model.ErrContentAuditInvalid
+		return nil, "", model.ErrContentAuditInvalid
 	}
 	record, state, store, err := contentAuditReadable(ctx, id)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	var files []model.ContentAuditFile
 	if record.FormatVersion == 2 {
 		var row model.ContentAuditImage
 		if err := model.DB.WithContext(ctx).Where("audit_id = ? AND attempt = ? AND image_index = ? AND committed = ?", id, record.Attempt, index, true).First(&row).Error; err != nil {
-			return nil, err
+			return nil, "", err
 		}
 		descriptor, _, err := store.imageDescriptor(ctx, state, record, row)
 		if err != nil {
-			return nil, err
+			return nil, "", err
 		}
 		if descriptor.Thumbnail == nil {
-			return nil, gorm.ErrRecordNotFound
+			return nil, "", gorm.ErrRecordNotFound
 		}
 		files = []model.ContentAuditFile{*descriptor.Thumbnail}
 	} else if common.UnmarshalJsonStr(record.FilesJSON, &files) != nil || len(files) > 5 {
-		return nil, model.ErrContentAuditUnavailable
+		return nil, "", model.ErrContentAuditUnavailable
 	}
 	for _, file := range files {
 		if file.Kind != "thumbnail" || file.ImageIndex != index {
 			continue
 		}
-		if file.MIME != "image/jpeg" || file.PlainBytes > contentAuditMaxThumbnailBytes {
-			return nil, model.ErrContentAuditUnavailable
+		if (file.MIME != "image/jpeg" && file.MIME != "image/png") || file.PlainBytes > contentAuditMaxThumbnailBytes {
+			return nil, "", model.ErrContentAuditUnavailable
 		}
 		data, err := store.read(state, record, file)
 		if err != nil {
-			return nil, err
+			return nil, "", err
 		}
 		if _, _, _, err := contentAuditReadable(ctx, id); err != nil {
-			return nil, err
+			return nil, "", err
 		}
-		return data, nil
+		return data, file.MIME, nil
 	}
-	return nil, gorm.ErrRecordNotFound
+	return nil, "", gorm.ErrRecordNotFound
 }
 
 func ReadContentAuditImagePage(ctx context.Context, id string, after, limit int) (*ContentAuditImagePage, error) {

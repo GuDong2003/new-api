@@ -236,7 +236,7 @@ func (r *contentAuditRuntime) saveOriginalPreview(ctx context.Context, store *co
 	if err != nil {
 		return nil
 	}
-	file := model.ContentAuditFile{ID: contentAuditRandomID(), Kind: "thumbnail", MIME: "image/jpeg", PlainBytes: len(thumbnail.Data), Width: thumbnail.Width, Height: thumbnail.Height, ImageIndex: row.ImageIndex}
+	file := model.ContentAuditFile{ID: contentAuditRandomID(), Kind: "thumbnail", MIME: thumbnail.MIME, PlainBytes: len(thumbnail.Data), Width: thumbnail.Width, Height: thumbnail.Height, ImageIndex: row.ImageIndex}
 	encoded, err := store.envelope(record.StorageID, record.AuditID, record.Attempt, file.ID, "thumbnail", thumbnail.Data, false)
 	if err != nil {
 		return err
@@ -254,7 +254,7 @@ func (r *contentAuditRuntime) saveOriginalPreview(ctx context.Context, store *co
 	}
 	next := *descriptor
 	next.Thumbnail = &file
-	next.View.Status, next.View.MIME, next.View.Width, next.View.Height = "ready", "image/jpeg", file.Width, file.Height
+	next.View.Status, next.View.MIME, next.View.Width, next.View.Height = "ready", file.MIME, file.Width, file.Height
 	if err := store.saveImageDescriptor(ctx, record, directory, row, &next); err != nil {
 		if errors.Is(err, model.ErrContentAuditCapacity) {
 			return removeContentAuditImageFiles(ctx, directory, record, []string{file.ID}, file.Bytes)

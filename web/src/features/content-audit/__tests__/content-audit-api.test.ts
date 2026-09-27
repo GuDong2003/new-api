@@ -278,12 +278,25 @@ it('never refreshes and replays a spent proof after HTTP 401, and exposes no raw
   expect(error).not.toHaveProperty('config')
 })
 
+// A picture with transparency keeps it in a PNG thumbnail.
+it.each(['image/jpeg', 'image/png'])(
+  'shows a %s thumbnail response',
+  async (type) => {
+    const blob = new Blob(['thumbnail'], { type })
+    transport = installAuditTransport(() => ({ body: blob }))
+
+    await expect(
+      getContentAuditThumbnail(auditId, 0, new AbortController().signal)
+    ).resolves.toBe(blob)
+  }
+)
+
 it.each([
   new Blob(['<svg onload="alert(1)"></svg>'], { type: 'image/svg+xml' }),
   new Blob([new Uint8Array(300 * 1024 + 1)], { type: 'image/jpeg' }),
-  new Blob([], { type: 'image/jpeg' }),
+  new Blob([], { type: 'image/png' }),
 ])(
-  'rejects non-JPEG, empty or oversized thumbnail responses before display',
+  'rejects other types, empty or oversized thumbnail responses before display',
   async (blob) => {
     transport = installAuditTransport(() => ({ body: blob }))
     await expect(

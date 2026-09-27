@@ -103,6 +103,63 @@ func contentAuditTestPNG(t *testing.T) []byte {
 	return data.Bytes()
 }
 
+// contentAuditTestPicture is opaque on its left half, red or noise, and on its
+// right half transparent when transparent is set.
+func contentAuditTestPicture(t *testing.T, width, height int, noisy, transparent bool) []byte {
+	t.Helper()
+	picture := image.NewNRGBA(image.Rect(0, 0, width, height))
+	for y := range height {
+		for x := range width {
+			pixel := color.NRGBA{R: 0xff, A: 0xff}
+			if noisy {
+				noise := uint32(x)*2654435761 ^ uint32(y)*40503
+				pixel = color.NRGBA{R: uint8(noise), G: uint8(noise >> 8), B: uint8(noise >> 16), A: 0xff}
+			}
+			if transparent && x >= width/2 {
+				pixel = color.NRGBA{}
+			}
+			picture.SetNRGBA(x, y, pixel)
+		}
+	}
+	var data bytes.Buffer
+	require.NoError(t, png.Encode(&data, picture))
+	return data.Bytes()
+}
+
+// JPEG cannot hold transparency, so a picture with any keeps it in a PNG audit
+// thumbnail; one whose PNG fits the size limit at no size falls back to JPEG
+// over white, and an opaque picture keeps a JPEG.
+func TestContentAuditThumbnailKeepsTransparency(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		picture []byte
+		mime    string
+		// At the middle of the picture's right half.
+		alpha uint32
+		white bool
+	}{
+		{name: "transparent", picture: contentAuditTestPicture(t, 1024, 512, false, true), mime: "image/png", alpha: 0},
+		{name: "opaque", picture: contentAuditTestPicture(t, 1024, 512, false, false), mime: "image/jpeg", alpha: 0xffff},
+		{name: "transparent-too-large", picture: contentAuditTestPicture(t, 1024, 1024, true, true), mime: "image/jpeg", alpha: 0xffff, white: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			thumbnail, err := makeContentAuditThumbnail(context.Background(), test.picture, "image/png")
+			require.NoError(t, err)
+			assert.Equal(t, test.mime, thumbnail.MIME)
+			assert.LessOrEqual(t, len(thumbnail.Data), contentAuditMaxThumbnailBytes)
+			decoded, format, err := image.Decode(bytes.NewReader(thumbnail.Data))
+			require.NoError(t, err)
+			assert.Equal(t, strings.TrimPrefix(test.mime, "image/"), format)
+			assert.Equal(t, image.Rect(0, 0, thumbnail.Width, thumbnail.Height), decoded.Bounds())
+			r, g, b, alpha := decoded.At(thumbnail.Width*3/4, thumbnail.Height/2).RGBA()
+			assert.Equal(t, test.alpha, alpha)
+			if test.white {
+				assert.Greater(t, min(r, g, b), uint32(0xf000), "the fallback is flattened onto white")
+			}
+		})
+	}
+}
+
 func TestListContentAuditsHidesEmptyAsyncImageSubmission(t *testing.T) {
 	contentAuditTestRuntime(t)
 	now := time.Now().Unix()
@@ -1686,12 +1743,13 @@ func TestContentAuditCaptureProtocolsAndBodyOwnership(t *testing.T) {
 			if record.Kind == "image" {
 				require.Len(t, payload.Images, 1)
 				assert.Equal(t, "ready", payload.Images[0].Status)
-				thumbnail, err := ReadContentAuditThumbnail(context.Background(), id, 0)
+				thumbnail, _, err := ReadContentAuditThumbnail(context.Background(), id, 0)
 				require.NoError(t, err)
 				assert.LessOrEqual(t, len(thumbnail), contentAuditMaxThumbnailBytes)
 				config, format, err := image.DecodeConfig(bytes.NewReader(thumbnail))
 				require.NoError(t, err)
-				assert.Equal(t, "jpeg", format)
+				// The fixture is transparent but for one pixel.
+				assert.Equal(t, "png", format)
 				assert.LessOrEqual(t, max(config.Width, config.Height), 1024)
 			}
 			assert.Zero(t, r.memory.used.Load())
@@ -1747,11 +1805,12 @@ func TestContentAuditNativeGeneratedImagesAreReadableWithoutChangingRelay(t *tes
 			assert.Equal(t, "complete", record.Integrity)
 			require.Len(t, payload.Images, 1, "a completed Responses image repeated in the terminal event is one preview")
 			assert.Equal(t, "ready", payload.Images[0].Status)
-			thumbnail, err := ReadContentAuditThumbnail(context.Background(), id, 0)
+			thumbnail, _, err := ReadContentAuditThumbnail(context.Background(), id, 0)
 			require.NoError(t, err)
 			decoded, format, err := image.Decode(bytes.NewReader(thumbnail))
 			require.NoError(t, err)
-			assert.Equal(t, "jpeg", format)
+			// The fixture is transparent but for one pixel.
+			assert.Equal(t, "png", format)
 			assert.Equal(t, image.Rect(0, 0, 8, 4), decoded.Bounds())
 			encoded, err := common.Marshal(payload)
 			require.NoError(t, err)
@@ -1813,7 +1872,7 @@ func TestContentAuditNativeImageFailuresRespectThumbnailSwitch(t *testing.T) {
 			} else {
 				assert.Equal(t, "thumbnail_disabled", payload.Images[0].Status)
 			}
-			_, err = ReadContentAuditThumbnail(context.Background(), id, 0)
+			_, _, err = ReadContentAuditThumbnail(context.Background(), id, 0)
 			assert.Error(t, err)
 			assert.NotContains(t, string(payload.Response), "invalid-image-base64!")
 			assert.Zero(t, r.memory.used.Load())
@@ -1905,7 +1964,7 @@ func TestContentAuditNativeStreamImageLimitCountsUniqueOutputs(t *testing.T) {
 	assert.Zero(t, record.OmittedImages, "terminal events repeat source identities without dropping the fifth original")
 	for index, preview := range payload.Images {
 		assert.Equal(t, "ready", preview.Status)
-		_, err := ReadContentAuditThumbnail(context.Background(), id, index)
+		_, _, err := ReadContentAuditThumbnail(context.Background(), id, index)
 		assert.NoError(t, err)
 	}
 	assert.Zero(t, r.memory.used.Load())
@@ -1923,7 +1982,7 @@ func TestContentAuditNativeFinalImageReplacesEarlierFailedResult(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, payload.Images, 1)
 	assert.Equal(t, "ready", payload.Images[0].Status)
-	_, err = ReadContentAuditThumbnail(context.Background(), id, 0)
+	_, _, err = ReadContentAuditThumbnail(context.Background(), id, 0)
 	assert.NoError(t, err)
 	assert.Zero(t, r.memory.used.Load())
 }
@@ -2143,11 +2202,13 @@ func TestContentAuditSingleInstanceLocalReadiness(t *testing.T) {
 	record, payload, err := ReadContentAuditPayload(ctx, job.record.AuditID)
 	require.NoError(t, err)
 	assert.Contains(t, string(payload.Request), "local fox")
-	thumbnail, err := ReadContentAuditThumbnail(ctx, record.AuditID, 0)
+	thumbnail, mime, err := ReadContentAuditThumbnail(ctx, record.AuditID, 0)
 	require.NoError(t, err)
 	_, format, err := image.Decode(bytes.NewReader(thumbnail))
 	require.NoError(t, err)
-	assert.Equal(t, "jpeg", format)
+	// The fixture is transparent but for one pixel.
+	assert.Equal(t, "png", format)
+	assert.Equal(t, "image/png", mime)
 	require.NoError(t, RequestContentAuditDeletion(ctx, ContentAuditDeleteRequest{IDs: []string{record.AuditID}}))
 	require.NoError(t, cleanupContentAudits(ctx, store))
 	_, err = model.GetContentAudit(ctx, record.AuditID)

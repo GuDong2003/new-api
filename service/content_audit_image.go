@@ -12,7 +12,7 @@ import (
 	"image/color"
 	"image/draw"
 	"image/jpeg"
-	_ "image/png"
+	"image/png"
 	"io"
 	"mime"
 	"net"
@@ -377,6 +377,7 @@ func contentAuditImageFormat(data []byte) (string, bool) {
 
 type contentAuditThumbnail struct {
 	Data   []byte
+	MIME   string
 	Width  int
 	Height int
 }
@@ -420,21 +421,38 @@ func makeContentAuditThumbnail(ctx context.Context, data []byte, contentType str
 	if err != nil || actualFormat != format || decoded.Bounds().Dx() != config.Width || decoded.Bounds().Dy() != config.Height {
 		return nil, errContentAuditImage
 	}
-	for attempt, edge := range []int{1024, 768, 512} {
-		if ctx.Err() != nil {
-			return nil, errContentAuditImage
-		}
-		width, height := config.Width, config.Height
-		if max(width, height) > edge {
-			width, height = max(1, width*edge/max(config.Width, config.Height)), max(1, height*edge/max(config.Width, config.Height))
-		}
-		out := image.NewRGBA(image.Rect(0, 0, width, height))
-		draw.Draw(out, out.Bounds(), &image.Uniform{C: color.White}, image.Point{}, draw.Src)
-		xdraw.ApproxBiLinear.Scale(out, out.Bounds(), decoded, decoded.Bounds(), draw.Over, nil)
-		buffer := &contentAuditLimitedBuffer{}
-		buffer.Grow(contentAuditMaxThumbnailBytes)
-		if err := jpeg.Encode(buffer, out, &jpeg.Options{Quality: 80 - attempt*20}); err == nil {
-			return &contentAuditThumbnail{Data: buffer.Bytes(), Width: width, Height: height}, nil
+	// JPEG cannot hold transparency and would flatten it onto white, so a picture
+	// with any keeps it in a PNG thumbnail when one fits at some size; JPEG over
+	// white stays the fallback.
+	formats := []string{"image/jpeg"}
+	if picture, ok := decoded.(interface{ Opaque() bool }); ok && !picture.Opaque() {
+		formats = []string{"image/png", "image/jpeg"}
+	}
+	for _, mime := range formats {
+		for attempt, edge := range []int{1024, 768, 512} {
+			if ctx.Err() != nil {
+				return nil, errContentAuditImage
+			}
+			width, height := config.Width, config.Height
+			if max(width, height) > edge {
+				width, height = max(1, width*edge/max(config.Width, config.Height)), max(1, height*edge/max(config.Width, config.Height))
+			}
+			out := image.NewRGBA(image.Rect(0, 0, width, height))
+			if mime == "image/jpeg" {
+				draw.Draw(out, out.Bounds(), &image.Uniform{C: color.White}, image.Point{}, draw.Src)
+			}
+			xdraw.ApproxBiLinear.Scale(out, out.Bounds(), decoded, decoded.Bounds(), draw.Over, nil)
+			buffer := &contentAuditLimitedBuffer{}
+			buffer.Grow(contentAuditMaxThumbnailBytes)
+			var encodeErr error
+			if mime == "image/png" {
+				encodeErr = png.Encode(buffer, out)
+			} else {
+				encodeErr = jpeg.Encode(buffer, out, &jpeg.Options{Quality: 80 - attempt*20})
+			}
+			if encodeErr == nil {
+				return &contentAuditThumbnail{Data: buffer.Bytes(), MIME: mime, Width: width, Height: height}, nil
+			}
 		}
 	}
 	return nil, errContentAuditImage

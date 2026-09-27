@@ -323,7 +323,7 @@ func GetContentAuditThumbnail(c *gin.Context) {
 		contentAuditAPIError(c, err)
 		return
 	}
-	data, err := service.ReadContentAuditThumbnail(c.Request.Context(), id, index)
+	data, mime, err := service.ReadContentAuditThumbnail(c.Request.Context(), id, index)
 	if logErr := recordContentAuditAccess(c, operationID, "content_audit.thumbnail.read", "result", []string{id}, err == nil); logErr != nil {
 		contentAuditAPIError(c, logErr)
 		return
@@ -336,7 +336,7 @@ func GetContentAuditThumbnail(c *gin.Context) {
 		return
 	}
 	c.Header("X-Content-Type-Options", "nosniff")
-	c.Data(http.StatusOK, "image/jpeg", data)
+	c.Data(http.StatusOK, mime, data)
 }
 
 func DeleteContentAudits(c *gin.Context) {

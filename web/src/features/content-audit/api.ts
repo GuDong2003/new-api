@@ -215,9 +215,11 @@ export async function getContentAuditThumbnail(
       }
     )
     signal.throwIfAborted()
+    // A JPEG, or a PNG when the picture has transparency.
     if (
       !(response.data instanceof Blob) ||
-      response.data.type !== 'image/jpeg' ||
+      (response.data.type !== 'image/jpeg' &&
+        response.data.type !== 'image/png') ||
       response.data.size === 0 ||
       response.data.size > 300 * 1024
     ) {
