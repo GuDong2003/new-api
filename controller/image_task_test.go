@@ -1317,8 +1317,8 @@ func TestAsyncImageTaskReportsWhyTheProviderRefused(t *testing.T) {
 
 // Every channel judges a prompt alike, so a provider refusing it ends the
 // request at once: another try only keeps the user waiting, and its answer
-// would replace the refusal with an unrelated error. The prompt is at fault,
-// so the refusal comes back as the caller's own error.
+// would replace the refusal with an unrelated error. The refusal comes back
+// as the provider sent it.
 func TestImageRequestStopsAtAProviderRefusal(t *testing.T) {
 	previousRetries := common.RetryTimes
 	common.RetryTimes = 2
@@ -1333,7 +1333,7 @@ func TestImageRequestStopsAtAProviderRefusal(t *testing.T) {
 
 	recorder := fixture.generate(t, "/pg/images/generations", "")
 
-	assert.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+	assert.Equal(t, http.StatusBadGateway, recorder.Code, recorder.Body.String())
 	assert.Contains(t, recorder.Body.String(), "提示词有安全风险，请调整提示词重试")
 	assert.Equal(t, int32(1), calls.Load())
 }

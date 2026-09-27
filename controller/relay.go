@@ -248,12 +248,6 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		service.RecordPolicyFailure(c, channel.Id, newAPIError, decision)
 		processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError, relayInfo)
 
-		if refused {
-			// The logs keep the status the upstream sent; the caller learns the
-			// prompt is at fault, so a client that retries server errors does
-			// not send it again.
-			newAPIError.StatusCode = http.StatusBadRequest
-		}
 		if decision.Action != "retry" {
 			break
 		}
