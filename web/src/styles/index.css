@@ -913,3 +913,31 @@ For commercial licensing, please contact support@quantumnous.com
     display: none;
   }
 }
+
+/* ── Canvas editor header on phones ──
+ * Below the desktop layout the header sets its controls like text: inline boxes
+ * on lines that wrap where they run out of room, with the save state running
+ * on right after the save button. A flex row could only move a long message
+ * down whole, which left the end of the row above it empty. The margins stand
+ * in for the gaps a flex row gives, 8px either side of a separator.
+ *
+ * Only the controls of the header's own groups are matched. Being unlayered,
+ * these rules override margin, alignment and display utilities on them. */
+@media (width < 64rem) {
+  .canvas-editor-header > * > [data-slot='button'],
+  .canvas-editor-header > * > [data-slot='input'],
+  .canvas-editor-header > * > [data-slot='separator'] {
+    margin-block: 3px;
+    vertical-align: middle;
+  }
+
+  .canvas-editor-header > * > [data-slot='button'],
+  .canvas-editor-header > * > [data-slot='input'] {
+    margin-inline-end: 0.25rem;
+  }
+
+  .canvas-editor-header > * > [data-slot='separator'] {
+    display: inline-block;
+    margin-inline-end: 0.5rem;
+  }
+}

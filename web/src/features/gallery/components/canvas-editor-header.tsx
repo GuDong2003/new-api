@@ -142,19 +142,22 @@ export function CanvasEditorHeader(props: {
 
   return (
     <>
-      {/* Beside the title a phone leaves the tools a sliver, cut off
-          mid-button, so below the desktop layout they take a row of their own
-          and wrap; the title and the save state share the row below. */}
+      {/* Below the desktop layout every control runs in one sequence set like
+          text — the tools, the canvas title, then the save actions — wrapping
+          where it runs out of room, and the save state runs on right after the
+          save button, so only what does not fit moves to the next line. The
+          inline setting is in src/styles/index.css. From 1024px the groups
+          become the header's three columns. */}
       <header
-        className='bg-background grid min-w-0 shrink-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-x-2 gap-y-1.5 border-b px-3 py-2 lg:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]'
+        className='canvas-editor-header bg-background min-w-0 shrink-0 border-b px-3 py-2 max-lg:py-[5px] max-lg:text-xs lg:grid lg:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] lg:items-center lg:gap-x-2'
         role='toolbar'
         aria-label={props.toolbarLabel ?? t('Canvas tools')}
       >
-        <div className='col-span-2 flex min-w-0 flex-wrap items-center gap-1 overflow-x-auto overflow-y-hidden lg:col-span-1 lg:flex-nowrap'>
+        <div className='contents lg:flex lg:min-w-0 lg:items-center lg:gap-1 lg:overflow-x-auto lg:overflow-y-hidden'>
           {props.children}
         </div>
 
-        <div className='flex min-w-0 items-center gap-1 lg:max-w-[min(42vw,28rem)] lg:justify-center'>
+        <div className='contents lg:flex lg:max-w-[min(42vw,28rem)] lg:min-w-0 lg:items-center lg:justify-center lg:gap-1'>
           <Button
             type='button'
             variant='ghost'
@@ -174,7 +177,7 @@ export function CanvasEditorHeader(props: {
               placeholder={t('New canvas')}
               maxLength={255}
               disabled={!current || busy}
-              className='h-7 min-w-0 text-center text-sm'
+              className='h-7 w-[min(32vw,20rem)] min-w-0 text-center text-sm lg:w-full'
               onChange={(event) => setTitle(event.target.value)}
               onBlur={saveTitle}
               onKeyDown={(event) => {
@@ -213,7 +216,7 @@ export function CanvasEditorHeader(props: {
           </Button>
         </div>
 
-        <div className='flex min-w-0 flex-wrap items-center justify-end gap-1 lg:flex-nowrap'>
+        <div className='contents lg:flex lg:min-w-0 lg:items-center lg:justify-end lg:gap-1'>
           {props.statusDetail}
           <Button
             type='button'
@@ -226,14 +229,14 @@ export function CanvasEditorHeader(props: {
           >
             <HugeiconsIcon icon={SaveIcon} size={16} aria-hidden='true' />
           </Button>
-          <div className='max-w-64 min-w-0'>
+          <div className='inline empty:hidden lg:max-w-64 lg:min-w-0'>
             <CanvasSaveStatus
               localStatus={canvas.localStatus}
               cloudStatus={canvas.cloudStatus}
               statusText={canvas.statusText}
               error={canvas.localError}
               pendingOriginals={canvas.pendingOriginals}
-              className='truncate'
+              className='inline break-words max-lg:me-1 lg:block lg:truncate'
             />
           </div>
           {canvas.localStatus === 'error' ||

@@ -16,6 +16,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 */
 import { Blob as NodeBlob } from 'node:buffer'
 import { webcrypto } from 'node:crypto'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import {
@@ -36,6 +38,7 @@ import {
 } from 'axios'
 import { IDBFactory } from 'fake-indexeddb'
 import i18next from 'i18next'
+import postcss from 'postcss'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { useCanvasFiles } from '@/features/playground/drawing/hooks/use-canvas-files'
@@ -1458,42 +1461,113 @@ it('goes to the canvas straight away rather than downloading it first', async ()
   releaseDownload()
 })
 
-// The tools sit on one line and are scrolled sideways when they do not fit.
-// Asking only for horizontal scrolling silently grants vertical scrolling too,
-// which put a scrollbar down the middle of the toolbar the moment a rerender
-// made the row a fraction taller than its box.
-it('scrolls the canvas tools sideways without scrolling them vertically', () => {
+// On the desktop layout the tools sit on one line and are scrolled sideways
+// when they do not fit. Asking only for horizontal scrolling silently grants
+// vertical scrolling too, which put a scrollbar down the middle of the toolbar
+// the moment a rerender made the row a fraction taller than its box.
+it('scrolls the canvas tools sideways without scrolling them vertically on the desktop layout', () => {
   render(<CanvasEditorHeader kind='drawing' />)
 
   const tools = screen.getByRole('toolbar').firstElementChild
-  expect(tools).toHaveClass('overflow-x-auto')
-  expect(tools).toHaveClass('overflow-y-hidden')
+  expect(tools).toHaveClass('lg:overflow-x-auto', 'lg:overflow-y-hidden')
 })
 
-// A phone leaves the tools a sliver beside the title, cut off mid-button and
-// hiding most of them. Below the desktop layout they take a row of their own
-// and wrap instead.
-it('gives the canvas tools a wrapping row of their own below the desktop layout', () => {
-  render(<CanvasEditorHeader kind='drawing' />)
+// Below the desktop layout the header split the row under the tools into
+// columns, so a long save message squeezed in beside the save button and
+// knocked the row out of line. Every control now runs in one sequence that
+// wraps where it runs out of room; the groups become columns only on the
+// desktop layout.
+it('runs the header controls in one wrapping sequence below the desktop layout', () => {
+  render(
+    <CanvasEditorHeader kind='drawing'>
+      <button type='button'>Undo</button>
+    </CanvasEditorHeader>
+  )
 
   const header = screen.getByRole('toolbar')
-  expect(header).toHaveClass(
-    'grid-cols-[auto_minmax(0,1fr)]',
-    'lg:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]'
-  )
-  expect(header.firstElementChild).toHaveClass(
-    'col-span-2',
-    'flex-wrap',
-    'lg:col-span-1',
-    'lg:flex-nowrap'
-  )
+  expect(header).toHaveClass('canvas-editor-header', 'lg:grid')
+  // A flex or grid box would stop its controls from sitting on lines as text.
+  expect(header).not.toHaveClass('flex')
+  expect(header).not.toHaveClass('grid')
+  for (const name of ['Undo', 'Canvas title', 'Save canvas']) {
+    const group = screen.getByRole('button', { name }).parentElement
+    expect(group?.parentElement).toBe(header)
+    expect(group).toHaveClass('contents', 'lg:flex')
+  }
 })
 
-it('wraps the save actions instead of spilling them over the canvas title', () => {
+// A flex row could only move a long save message down whole, which left the
+// end of the row above it empty. Set as inline boxes on lines, like text, the
+// controls wrap where they run out of room and the message starts right after
+// the last of them.
+it('sets the header controls as inline boxes below the desktop layout', () => {
+  const phone = new Map<string, Map<string, string>>()
+  postcss
+    .parse(
+      readFileSync(
+        resolve(import.meta.dirname, '../../../styles/index.css'),
+        'utf8'
+      )
+    )
+    .walkAtRules('media', (media) => {
+      if (media.params !== '(width < 64rem)') return
+      media.walkRules((rule) => {
+        for (const selector of rule.selectors) {
+          const values = phone.get(selector) ?? new Map<string, string>()
+          rule.walkDecls((declaration) => {
+            values.set(declaration.prop, declaration.value)
+          })
+          phone.set(selector, values)
+        }
+      })
+    })
+
+  expect(
+    phone
+      .get(".canvas-editor-header > * > [data-slot='separator']")
+      ?.get('display')
+  ).toBe('inline-block')
+  for (const slot of ['button', 'input', 'separator']) {
+    expect(
+      phone
+        .get(`.canvas-editor-header > * > [data-slot='${slot}']`)
+        ?.get('vertical-align')
+    ).toBe('middle')
+  }
+})
+
+// A field as wide as the header took a line of its own the moment the title
+// was edited, sending every control after it onto new lines. It keeps to the
+// width the title itself may take.
+it('keeps the title field to the width of the title while it is edited below the desktop layout', async () => {
+  await localImage()
   render(<CanvasEditorHeader kind='drawing' />)
 
-  const actions = screen.getByRole('button', {
-    name: 'Save canvas',
-  }).parentElement
-  expect(actions).toHaveClass('flex-wrap', 'justify-end', 'lg:flex-nowrap')
+  await userEvent.click(screen.getByRole('button', { name: 'Canvas title' }))
+
+  const field = await screen.findByRole('textbox', { name: 'Canvas title' })
+  expect(field).toHaveClass('w-[min(32vw,20rem)]', 'lg:w-full')
+  expect(field).not.toHaveClass('w-full')
+})
+
+// The save message runs on as text right after the save button, so a short
+// one shares its line and a long one moves only what does not fit to the next
+// line, keeping the gap a control would before whatever follows it. The
+// desktop layout still clips it to its column.
+it('runs the save state on as text after the save button below the desktop layout', async () => {
+  await localImage()
+  render(<CanvasEditorHeader kind='drawing' />)
+
+  const status = await screen.findByRole('status')
+  expect(status).toHaveClass(
+    'inline',
+    'break-words',
+    'max-lg:me-1',
+    'lg:block',
+    'lg:truncate'
+  )
+  expect(status.parentElement).toHaveClass('inline', 'empty:hidden')
+  expect(status.parentElement?.previousElementSibling).toBe(
+    screen.getByRole('button', { name: 'Save canvas' })
+  )
 })
