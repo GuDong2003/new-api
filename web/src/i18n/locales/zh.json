@@ -44,6 +44,8 @@
     "Link the upstream site’s check-in pages, and add the accounts that check in on this channel.": "填写上游站点的签到页和充值页，并添加在这个渠道签到的账号。",
     "List what you want to see, as tags or short phrases.": "用标签或短语写出想要的内容。",
     "Manual verification required": "需要手动验证",
+    "Maximum quota amount awarded for check-in ({{formattedQuota}})": "签到奖励的最大额度（{{formattedQuota}}）",
+    "Minimum quota amount awarded for check-in ({{formattedQuota}})": "签到奖励的最小额度（{{formattedQuota}}）",
     "Must be ≥ 1": "必须 ≥ 1",
     "No account checks in on this channel yet.": "这个渠道还没有签到账号。",
     "Not fetched yet": "未获取",

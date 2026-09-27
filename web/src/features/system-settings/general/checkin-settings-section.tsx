@@ -33,6 +33,7 @@ import {
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
+import { formatQuota } from '@/lib/format'
 
 import {
   SettingsForm,
@@ -162,7 +163,12 @@ export function CheckinSettingsSection({
                       />
                     </FormControl>
                     <FormDescription>
-                      {t('Minimum quota amount awarded for check-in')}
+                      {t(
+                        'Minimum quota amount awarded for check-in ({{formattedQuota}})',
+                        {
+                          formattedQuota: formatQuota(Number(field.value) || 0),
+                        }
+                      )}
                     </FormDescription>
                     <FormMessage />
                   </FormItem>
@@ -184,7 +190,12 @@ export function CheckinSettingsSection({
                       />
                     </FormControl>
                     <FormDescription>
-                      {t('Maximum quota amount awarded for check-in')}
+                      {t(
+                        'Maximum quota amount awarded for check-in ({{formattedQuota}})',
+                        {
+                          formattedQuota: formatQuota(Number(field.value) || 0),
+                        }
+                      )}
                     </FormDescription>
                     <FormMessage />
                   </FormItem>
