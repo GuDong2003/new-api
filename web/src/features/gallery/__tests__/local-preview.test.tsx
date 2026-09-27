@@ -61,7 +61,13 @@ beforeEach(() => {
         public width: number,
         public height: number
       ) {}
-      getContext = () => ({ drawImage: vi.fn() })
+      getContext = () => ({
+        drawImage: vi.fn(),
+        // An opaque picture.
+        getImageData: (_x: number, _y: number, w: number, h: number) => ({
+          data: new Uint8ClampedArray(w * h * 4).fill(255),
+        }),
+      })
       convertToBlob = async () => preview
     }
   )

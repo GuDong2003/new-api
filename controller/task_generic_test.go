@@ -475,7 +475,8 @@ func TestImageTaskArtifactsUseGalleryPreviewAndOriginal(t *testing.T) {
 	previewContext.Request = httptest.NewRequest(http.MethodGet, artifact.PreviewURL, nil)
 	TaskArtifactContent(previewContext)
 	assert.Equal(t, http.StatusOK, previewRecorder.Code)
-	assert.Equal(t, "image/jpeg", previewRecorder.Header().Get("Content-Type"))
+	// The fixture is fully transparent, which only a PNG thumbnail keeps.
+	assert.Equal(t, "image/png", previewRecorder.Header().Get("Content-Type"))
 
 	originalRecorder := httptest.NewRecorder()
 	originalContext, _ := gin.CreateTestContext(originalRecorder)

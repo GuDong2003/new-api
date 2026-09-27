@@ -21,11 +21,15 @@ import { Blob as NodeBlob } from 'node:buffer'
 import { IDBFactory } from 'fake-indexeddb'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 
-import { readGalleryThumbnail } from '../lib/gallery-thumbnail-cache'
+import {
+  readGalleryThumbnail,
+  writeGalleryThumbnail,
+} from '../lib/gallery-thumbnail-cache'
 import {
   getLocalThumbnail,
   getServerThumbnail,
   localThumbnailFingerprint,
+  renderLocalThumbnail,
 } from '../lib/local-thumbnail'
 
 const original = new NodeBlob(['a full sized picture'], {
@@ -42,6 +46,69 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals()
+})
+
+/**
+ * Stands in for the browser's rasteriser: a 1024x512 picture, opaque but for
+ * its last pixel, whose alpha is given.
+ */
+function stubRasteriser(lastAlpha: number) {
+  vi.stubGlobal(
+    'createImageBitmap',
+    vi.fn().mockResolvedValue({ width: 1024, height: 512, close: vi.fn() })
+  )
+  vi.stubGlobal(
+    'OffscreenCanvas',
+    class {
+      getContext() {
+        return {
+          drawImage: vi.fn(),
+          getImageData: (_x: number, _y: number, w: number, h: number) => {
+            const data = new Uint8ClampedArray(w * h * 4).fill(255)
+            data[data.length - 1] = lastAlpha
+            return { data }
+          },
+        }
+      }
+      async convertToBlob(options: { type: string }) {
+        return new Blob(['preview'], { type: options.type })
+      }
+    }
+  )
+}
+
+// JPEG cannot hold transparency and paints it black, so a picture with any
+// keeps it in a PNG preview, as the server's previews do.
+it.each([
+  { pixel: 'a fully transparent pixel', alpha: 0, type: 'image/png' },
+  { pixel: 'a translucent pixel', alpha: 254, type: 'image/png' },
+  { pixel: 'opaque pixels only', alpha: 255, type: 'image/jpeg' },
+])('renders a $type preview for a picture with $pixel', async (test) => {
+  stubRasteriser(test.alpha)
+
+  const result = await renderLocalThumbnail(original)
+
+  expect(result?.type).toBe(test.type)
+})
+
+// Entries the previous build wrote painted transparency black, and nothing
+// else would ever replace them.
+it('derives again a local preview cached before previews kept transparency', async () => {
+  await writeGalleryThumbnail(9, 'asset-a', 'local:sha-1:512', preview)
+  const render = vi.fn().mockResolvedValue(preview)
+
+  await getLocalThumbnail(9, 'asset-a', 'sha-1', original, render)
+
+  expect(render).toHaveBeenCalledTimes(1)
+})
+
+it('downloads again a server preview cached before previews kept transparency', async () => {
+  await writeGalleryThumbnail(9, 'asset-b', 'asset:asset-b', preview)
+  const download = vi.fn().mockResolvedValue(original)
+
+  await getServerThumbnail(9, 'asset-b', download, async () => null)
+
+  expect(download).toHaveBeenCalledTimes(1)
 })
 
 it('downscales a local original once and serves the cache after that', async () => {

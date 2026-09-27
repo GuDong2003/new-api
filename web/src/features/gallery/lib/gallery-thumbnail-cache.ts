@@ -89,6 +89,12 @@ function sweepExpiredEntries(store: IDBObjectStore) {
 }
 
 /**
+ * Previews made before revision 2 painted transparent pixels black, and the
+ * server has since remade its own; no copy cached before then is shown again.
+ */
+export const GALLERY_PREVIEW_REVISION = 2
+
+/**
  * Every surface showing a gallery picture — the images tab, a canvas cover, a
  * canvas being opened — shares one entry per image, so they must all describe
  * it the same way. Two schemes over the same key meant each surface treated the
@@ -96,10 +102,10 @@ function sweepExpiredEntries(store: IDBObjectStore) {
  *
  * The id alone identifies the bytes: what a gallery image stores never changes
  * after it is written, and its thumbnail is dropped only when the image itself
- * is being removed.
+ * is being removed. The one exception is covered by the revision.
  */
 export function galleryAssetFingerprint(imageId: string): string {
-  return `asset:${imageId}`
+  return `asset:${imageId}:${GALLERY_PREVIEW_REVISION}`
 }
 
 export async function readGalleryThumbnail(

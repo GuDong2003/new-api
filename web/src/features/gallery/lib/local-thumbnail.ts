@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import {
+  GALLERY_PREVIEW_REVISION,
   galleryAssetFingerprint,
   readGalleryThumbnail,
   writeGalleryThumbnail,
@@ -35,12 +36,11 @@ import {
  * node can tell when it has been drawn large enough to outgrow one.
  */
 export const GALLERY_PREVIEW_EDGE = 512
-const LOCAL_THUMBNAIL_TYPE = 'image/jpeg'
 const LOCAL_THUMBNAIL_QUALITY = 0.8
 
 /** Content addressed: the same bytes never need downscaling twice. */
 export function localThumbnailFingerprint(sha256: string) {
-  return `local:${sha256}:${GALLERY_PREVIEW_EDGE}`
+  return `local:${sha256}:${GALLERY_PREVIEW_EDGE}:${GALLERY_PREVIEW_REVISION}`
 }
 
 export async function renderLocalThumbnail(blob: Blob): Promise<Blob | null> {
@@ -57,10 +57,21 @@ export async function renderLocalThumbnail(blob: Blob): Promise<Blob | null> {
     const context = canvas.getContext('2d')
     if (!context) return null
     context.drawImage(bitmap, 0, 0, width, height)
-    return await canvas.convertToBlob({
-      type: LOCAL_THUMBNAIL_TYPE,
-      quality: LOCAL_THUMBNAIL_QUALITY,
-    })
+    // JPEG cannot hold transparency and paints it black, so a picture with any
+    // keeps it in a PNG preview, as the server's previews do.
+    const pixels = context.getImageData(0, 0, width, height).data
+    let opaque = true
+    for (let alpha = 3; alpha < pixels.length; alpha += 4) {
+      if (pixels[alpha] < 255) {
+        opaque = false
+        break
+      }
+    }
+    return await canvas.convertToBlob(
+      opaque
+        ? { type: 'image/jpeg', quality: LOCAL_THUMBNAIL_QUALITY }
+        : { type: 'image/png' }
+    )
   } catch {
     // A browser that cannot rasterise this picture still shows the original.
     return null

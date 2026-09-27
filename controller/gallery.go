@@ -164,7 +164,7 @@ func SaveGalleryImage(c *gin.Context) {
 
 func GetGalleryFile(c *gin.Context) {
 	thumbnail := c.Query("thumbnail") == "true"
-	f, record, err := service.OpenGalleryImage(c.Request.Context(), c.GetInt("id"), c.Param("id"), thumbnail)
+	f, mime, err := service.OpenGalleryImage(c.Request.Context(), c.GetInt("id"), c.Param("id"), thumbnail)
 	if err != nil {
 		galleryAPIError(c, err)
 		return
@@ -174,10 +174,6 @@ func GetGalleryFile(c *gin.Context) {
 	if err != nil {
 		galleryAPIError(c, model.ErrGalleryUnavailable)
 		return
-	}
-	mime := record.MIMEType
-	if thumbnail && record.HasThumbnail {
-		mime = "image/jpeg"
 	}
 	c.Header("Cache-Control", "private, no-store")
 	c.Header("X-Content-Type-Options", "nosniff")

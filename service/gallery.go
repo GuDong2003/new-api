@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -531,19 +532,21 @@ func saveTaskGalleryImage(ctx context.Context, user int, metadata GalleryMetadat
 	return record, nil
 }
 
-func OpenGalleryImage(ctx context.Context, user int, id string, thumbnail bool) (*os.File, *model.GalleryImage, error) {
+// OpenGalleryImage opens an image's original, or its thumbnail when one is
+// asked for and stored, and returns the type of the file it opened.
+func OpenGalleryImage(ctx context.Context, user int, id string, thumbnail bool) (*os.File, string, error) {
 	galleryMu.RLock()
 	defer galleryMu.RUnlock()
 	record, err := model.OwnedGalleryImage(ctx, user, id, time.Now().Unix())
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, nil, gorm.ErrRecordNotFound
+			return nil, "", gorm.ErrRecordNotFound
 		}
-		return nil, nil, model.ErrGalleryUnavailable
+		return nil, "", model.ErrGalleryUnavailable
 	}
 	root, err := galleryRoot()
 	if err != nil {
-		return nil, nil, err
+		return nil, "", err
 	}
 	kind := "original"
 	if thumbnail && record.HasThumbnail {
@@ -551,9 +554,21 @@ func OpenGalleryImage(ctx context.Context, user int, id string, thumbnail bool) 
 	}
 	file, err := openGalleryFile(root, id, kind)
 	if err != nil {
-		return nil, nil, model.ErrGalleryUnavailable
+		return nil, "", model.ErrGalleryUnavailable
 	}
-	return file, record, nil
+	if kind == "original" {
+		return file, record.MIMEType, nil
+	}
+	signature := make([]byte, len(galleryPNGSignature))
+	_, readErr := io.ReadFull(file, signature)
+	if _, err = file.Seek(0, io.SeekStart); err != nil {
+		file.Close()
+		return nil, "", model.ErrGalleryUnavailable
+	}
+	if readErr == nil && bytes.Equal(signature, galleryPNGSignature) {
+		return file, "image/png", nil
+	}
+	return file, "image/jpeg", nil
 }
 
 func DeleteGalleryImage(ctx context.Context, user int, id string) error {
@@ -635,6 +650,9 @@ func StartGallery() {
 	galleryDone = make(chan struct{})
 	if err := CleanupGallery(ctx); err != nil {
 		common.SysError("Gallery storage is unavailable.")
+	}
+	if err := remakeTransparentGalleryThumbnails(ctx); err != nil {
+		common.SysError("Gallery thumbnails that lost transparency could not be remade.")
 	}
 	go func() {
 		defer close(galleryDone)

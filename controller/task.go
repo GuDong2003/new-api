@@ -412,7 +412,7 @@ func TaskArtifactContent(c *gin.Context) {
 			writeTaskArtifactError(c, http.StatusNotFound, "artifact_not_found", "Task or artifact not found")
 			return
 		}
-		file, record, openErr := service.OpenGalleryImage(c.Request.Context(), task.UserId, imageID, variant == "thumbnail")
+		file, mimeType, openErr := service.OpenGalleryImage(c.Request.Context(), task.UserId, imageID, variant == "thumbnail")
 		// The task did produce this artifact, but its stored copy was removed
 		// with the canvas it belonged to, or by retention. Say so instead of
 		// reporting a generic miss that reads as a transient failure.
@@ -429,10 +429,6 @@ func TaskArtifactContent(c *gin.Context) {
 		if statErr != nil {
 			writeTaskArtifactError(c, http.StatusNotFound, "artifact_not_found", "Task or artifact not found")
 			return
-		}
-		mimeType := record.MIMEType
-		if variant == "thumbnail" && record.HasThumbnail {
-			mimeType = "image/jpeg"
 		}
 		c.Header("Cache-Control", "private, no-store")
 		c.Header("X-Content-Type-Options", "nosniff")
