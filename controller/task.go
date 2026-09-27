@@ -432,7 +432,7 @@ func TaskArtifactContent(c *gin.Context) {
 		}
 		c.Header("Cache-Control", "private, no-store")
 		c.Header("X-Content-Type-Options", "nosniff")
-		c.Header("Content-Disposition", `inline; filename="`+artifactKey+`"`)
+		c.Header("Content-Disposition", `inline; filename="`+imageFilename(artifactKey, mimeType)+`"`)
 		c.DataFromReader(http.StatusOK, info.Size(), mimeType, file, nil)
 		return
 	}

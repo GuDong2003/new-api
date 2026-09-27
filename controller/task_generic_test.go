@@ -478,6 +478,9 @@ func TestImageTaskArtifactsUseGalleryPreviewAndOriginal(t *testing.T) {
 	// The fixture is transparent and smaller than a thumbnail, so its original
 	// stands in for one.
 	assert.Equal(t, "image/png", previewRecorder.Header().Get("Content-Type"))
+	// A browser saves an image under the name the response gives it, and one
+	// without an extension is saved as a file nothing opens.
+	assert.Equal(t, `inline; filename="image-0.png"`, previewRecorder.Header().Get("Content-Disposition"))
 
 	originalRecorder := httptest.NewRecorder()
 	originalContext, _ := gin.CreateTestContext(originalRecorder)
@@ -487,7 +490,35 @@ func TestImageTaskArtifactsUseGalleryPreviewAndOriginal(t *testing.T) {
 	TaskArtifactContent(originalContext)
 	assert.Equal(t, http.StatusOK, originalRecorder.Code)
 	assert.Equal(t, "image/png", originalRecorder.Header().Get("Content-Type"))
+	assert.Equal(t, `inline; filename="image-0.png"`, originalRecorder.Header().Get("Content-Disposition"))
 	assert.Equal(t, original.Bytes(), originalRecorder.Body.Bytes())
+
+	galleryRecorder := httptest.NewRecorder()
+	galleryContext, _ := gin.CreateTestContext(galleryRecorder)
+	galleryContext.Set("id", task.UserId)
+	galleryContext.Params = gin.Params{{Key: "id", Value: saved.ID}}
+	galleryContext.Request = httptest.NewRequest(http.MethodGet, "/api/gallery/images/"+saved.ID+"/file", nil)
+	GetGalleryFile(galleryContext)
+	assert.Equal(t, http.StatusOK, galleryRecorder.Code)
+	assert.Equal(t, `inline; filename="gallery-image.png"`, galleryRecorder.Header().Get("Content-Disposition"))
+}
+
+// An opaque picture's thumbnail is a JPEG, and a saved image keeps the
+// extension of what was served; a type with no known extension gets none
+// rather than a wrong one.
+func TestImageFilenameFollowsTheServedType(t *testing.T) {
+	for _, tc := range []struct {
+		mimeType string
+		want     string
+	}{
+		{mimeType: "image/png", want: "image-0.png"},
+		{mimeType: "image/jpeg", want: "image-0.jpg"},
+		{mimeType: "image/webp", want: "image-0.webp"},
+		{mimeType: "image/gif", want: "image-0.gif"},
+		{mimeType: "application/octet-stream", want: "image-0"},
+	} {
+		assert.Equal(t, tc.want, imageFilename("image-0", tc.mimeType), tc.mimeType)
+	}
 }
 
 func TestProxyTaskMediaForwardsRangeAndFiltersResponseHeaders(t *testing.T) {

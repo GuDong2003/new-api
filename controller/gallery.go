@@ -80,7 +80,7 @@ func ReadGalleryOriginal(c *gin.Context) {
 	}
 	c.Header("Cache-Control", "private, no-store")
 	c.Header("X-Content-Type-Options", "nosniff")
-	c.Header("Content-Disposition", `attachment; filename="original"`)
+	c.Header("Content-Disposition", `attachment; filename="`+imageFilename("original", mime)+`"`)
 	// No success headers are committed before acquisition and full validation.
 	c.DataFromReader(http.StatusOK, info.Size(), mime, file, nil)
 }
@@ -177,8 +177,25 @@ func GetGalleryFile(c *gin.Context) {
 	}
 	c.Header("Cache-Control", "private, no-store")
 	c.Header("X-Content-Type-Options", "nosniff")
-	c.Header("Content-Disposition", `inline; filename="gallery-image"`)
+	c.Header("Content-Disposition", `inline; filename="`+imageFilename("gallery-image", mime)+`"`)
 	c.DataFromReader(http.StatusOK, info.Size(), mime, f, nil)
+}
+
+// imageFilename names a served image for whoever saves it. A browser saves a
+// response under the filename it gives, extension and all, so one without an
+// extension becomes a file nothing on the desktop knows how to open.
+func imageFilename(name, mimeType string) string {
+	switch mimeType {
+	case "image/png":
+		return name + ".png"
+	case "image/jpeg":
+		return name + ".jpg"
+	case "image/webp":
+		return name + ".webp"
+	case "image/gif":
+		return name + ".gif"
+	}
+	return name
 }
 
 func DeleteGalleryImage(c *gin.Context) {
