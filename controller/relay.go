@@ -235,16 +235,11 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 		newAPIError = service.NormalizeViolationFeeError(newAPIError)
 		relayInfo.LastError = newAPIError
-		refused := relayFormat == types.RelayFormatOpenAIImage &&
-			recordImageAttemptFailure(c, newAPIError) == imageFailureContentPolicy
+		if relayFormat == types.RelayFormatOpenAIImage {
+			recordImageAttemptFailure(c, newAPIError)
+		}
 
 		decision := decideRelayRetry(c, newAPIError, common.RetryTimes-retryParam.GetRetry())
-		if refused && decision.Action == "retry" {
-			// Every channel judges a prompt alike, so a refusal is final: another
-			// try only keeps the user waiting, and its answer would replace the
-			// refusal with an unrelated error.
-			decision = service.PolicyDecision{Action: "stop", Reason: "content_policy_refusal", Source: "upstream"}
-		}
 		service.RecordPolicyFailure(c, channel.Id, newAPIError, decision)
 		processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError, relayInfo)
 
