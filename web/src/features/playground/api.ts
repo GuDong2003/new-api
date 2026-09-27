@@ -21,6 +21,7 @@ import { requireServerSuccess } from '@/lib/server-error-message'
 
 import { API_ENDPOINTS } from './constants'
 import type {
+  CanvasSetting,
   ChatCompletionRequest,
   ChatCompletionResponse,
   ModelOption,
@@ -82,4 +83,17 @@ export async function getUserGroups(): Promise<GroupOption[]> {
     ratio: info.ratio,
     desc: info.desc,
   }))
+}
+
+/**
+ * Get what the canvas starts from for the signed-in user's group: its default
+ * model and the resolution tiers it withholds.
+ */
+export async function getCanvasSetting(): Promise<CanvasSetting> {
+  const res = await api.get(API_ENDPOINTS.CANVAS_SETTING)
+  requireServerSuccess(res.data)
+  return {
+    default_model: res.data?.data?.default_model ?? '',
+    disabled_resolutions: res.data?.data?.disabled_resolutions ?? [],
+  }
 }

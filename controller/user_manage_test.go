@@ -14,12 +14,15 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/service/authz"
 	"github.com/QuantumNous/new-api/setting"
+	"github.com/QuantumNous/new-api/setting/config"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/alicebob/miniredis/v2"
 	"github.com/go-redis/redis/v8"
 
@@ -887,4 +890,34 @@ func TestUserListsAndProfileShowTheRPMEachUserIsHeldTo(t *testing.T) {
 	}
 	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &self))
 	assert.Equal(t, 9999, self.Data.RequestRPM)
+}
+
+// The canvas asks only for its own user's group: a vip user gets the vip
+// default model and withheld resolutions, whatever other groups are set to.
+func TestCanvasSettingAnswersTheSignedInUsersGroup(t *testing.T) {
+	canvas := config.GlobalConfig.Get("canvas_setting").(*operation_setting.CanvasSetting)
+	previous := *canvas
+	t.Cleanup(func() { *canvas = previous })
+	require.NoError(t, config.UpdateConfigFromMap(canvas, map[string]string{
+		"default_models":       `{"vip":"gpt-image-2","default":"nano-banana-pro"}`,
+		"disabled_resolutions": `{"vip":["4K"],"default":["2K","4K"]}`,
+	}))
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/user/canvas_setting", nil)
+	common.SetContextKey(c, constant.ContextKeyUserGroup, "vip")
+	GetCanvasSetting(c)
+
+	var response struct {
+		Success bool                                 `json:"success"`
+		Data    operation_setting.CanvasGroupSetting `json:"data"`
+	}
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+	assert.True(t, response.Success)
+	assert.Equal(t, operation_setting.CanvasGroupSetting{
+		DefaultModel:        "gpt-image-2",
+		DisabledResolutions: []string{"4K"},
+	}, response.Data)
 }

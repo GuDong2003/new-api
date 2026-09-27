@@ -38,6 +38,7 @@ import {
   getImageSizes,
   getImageAspectRatios,
   IMAGE_RESOLUTIONS,
+  nearestOfferedResolution,
   supportsAutomaticImageSize,
   supportsImageSizePresets,
   type ImageAspectRatio,
@@ -48,8 +49,13 @@ type ImageSizeFieldsProps = {
   model: string
   mode: 'generate' | 'edit'
   size: string
+  /** Tiers the canvas withholds from the user's group. */
+  disabledResolutions?: readonly string[]
   onChange: (size: string) => void
 }
+
+// The offered tiers always fill the row, however many the group keeps.
+const TIER_COLUMNS = ['grid-cols-1', 'grid-cols-2', 'grid-cols-3']
 
 export function ImageSizeFields(props: ImageSizeFieldsProps) {
   const { t } = useTranslation()
@@ -59,7 +65,11 @@ export function ImageSizeFields(props: ImageSizeFieldsProps) {
   const offersAutomatic =
     supportsAutomaticImageSize(props.model) && props.mode === 'edit'
   const preset = getImageSizePreset(props.size, props.model)
-  const resolution = preset?.resolution ?? '1K'
+  const withheld = props.disabledResolutions ?? []
+  const resolution = nearestOfferedResolution(
+    preset?.resolution ?? '1K',
+    withheld
+  )
   const [width = '', height = ''] = props.size.split('x')
   const aspectRatio =
     preset?.aspectRatio ??
@@ -124,6 +134,9 @@ export function ImageSizeFields(props: ImageSizeFieldsProps) {
   }
 
   const selectedResolution = automatic ? [] : [resolution]
+  const offeredResolutions = IMAGE_RESOLUTIONS.filter(
+    (step) => !withheld.includes(step)
+  )
 
   return (
     <FieldGroup className='gap-3'>
@@ -205,9 +218,12 @@ export function ImageSizeFields(props: ImageSizeFieldsProps) {
           variant='outline'
           size='sm'
           spacing={1}
-          className='grid w-full grid-cols-3 gap-1.5'
+          className={cn(
+            'grid w-full gap-1.5',
+            TIER_COLUMNS[offeredResolutions.length - 1]
+          )}
         >
-          {IMAGE_RESOLUTIONS.map((step) => (
+          {offeredResolutions.map((step) => (
             <ToggleGroupItem key={step} value={step} disabled={automatic}>
               {step}
             </ToggleGroupItem>

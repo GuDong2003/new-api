@@ -492,6 +492,26 @@ export function getImageSizePreset(
   return null
 }
 
+/**
+ * The offered tier closest to the one asked for, the lower on a tie. The
+ * server keeps at least one tier offered to every group.
+ */
+export function nearestOfferedResolution(
+  resolution: ImageResolution,
+  withheld: readonly string[]
+): ImageResolution {
+  const index = IMAGE_RESOLUTIONS.indexOf(resolution)
+  let nearest = resolution
+  let nearestDistance = Infinity
+  IMAGE_RESOLUTIONS.forEach((candidate, candidateIndex) => {
+    const distance = Math.abs(candidateIndex - index)
+    if (withheld.includes(candidate) || distance >= nearestDistance) return
+    nearest = candidate
+    nearestDistance = distance
+  })
+  return nearest
+}
+
 export function getImageQualities(model: string): string[] {
   const family = getImageModelFamily(model)
   if (family === 'dall-e-2') return ['standard']

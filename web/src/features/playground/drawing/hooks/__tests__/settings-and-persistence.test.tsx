@@ -22,10 +22,15 @@ import type { ReactNode } from 'react'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import { login } from '@/features/gallery/__tests__/fixtures'
+import type { CanvasSetting } from '@/features/playground/types'
+import { api } from '@/lib/api'
 import { useAuthStore } from '@/stores/auth-store'
 import { useDrawingStore } from '@/stores/drawing-store'
 
-import { validateImageSettings } from '../../lib/image-settings'
+import {
+  settingsForImageModel,
+  validateImageSettings,
+} from '../../lib/image-settings'
 import { useDrawingPersistence } from '../use-drawing-persistence'
 import { useImageOptions } from '../use-image-options'
 
@@ -198,5 +203,119 @@ describe('Drawing settings and persistence', () => {
     )
     useDrawingStore.getState().initialize(816)
     expect(useDrawingStore.getState().modeSettings).toEqual({})
+  })
+})
+
+describe('the canvas setting of the user group', () => {
+  const adapter = api.defaults.adapter
+  afterEach(() => {
+    api.defaults.adapter = adapter
+  })
+
+  function renderImageOptions(
+    userId: number,
+    models: string[],
+    canvasSetting?: CanvasSetting
+  ) {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: Infinity } },
+    })
+    client.setQueryData(
+      ['drawing-groups', userId],
+      [{ value: 'default', label: 'default', ratio: 1 }]
+    )
+    client.setQueryData(
+      ['drawing-models', userId, 'default'],
+      models.map((value) => ({ value, label: value }))
+    )
+    if (canvasSetting) {
+      client.setQueryData(['canvas-setting', userId], canvasSetting)
+    }
+    const hook = renderHook(() => useImageOptions(userId), {
+      wrapper: (props: { children: ReactNode }) => (
+        <QueryClientProvider client={client}>
+          {props.children}
+        </QueryClientProvider>
+      ),
+    })
+    return {
+      hook,
+      unmount: () => {
+        hook.unmount()
+        client.clear()
+      },
+    }
+  }
+
+  function startCanvas(userId: number, model = '') {
+    useDrawingStore.getState().initialize(userId)
+    useDrawingStore.getState().hydrate(null)
+    if (model) {
+      useDrawingStore
+        .getState()
+        .updateSettings(
+          settingsForImageModel(useDrawingStore.getState().settings, model)
+        )
+    }
+  }
+
+  it('starts a new canvas on the group default model rather than its own pick', async () => {
+    startCanvas(861)
+    const view = renderImageOptions(861, ['gpt-image-2', 'nano-banana-pro'], {
+      default_model: 'nano-banana-pro',
+      disabled_resolutions: [],
+    })
+    await waitFor(() =>
+      expect(useDrawingStore.getState().settings.model).toBe('nano-banana-pro')
+    )
+    view.unmount()
+  })
+
+  it('keeps the model a canvas already uses when the group default differs', () => {
+    startCanvas(862, 'gpt-image-2')
+    const view = renderImageOptions(862, ['gpt-image-2', 'nano-banana-pro'], {
+      default_model: 'nano-banana-pro',
+      disabled_resolutions: [],
+    })
+    expect(useDrawingStore.getState().settings.model).toBe('gpt-image-2')
+    view.unmount()
+  })
+
+  it('picks a model by itself when the canvas setting cannot be read', async () => {
+    api.defaults.adapter = async () => {
+      throw new Error('The server is unavailable.')
+    }
+    startCanvas(863)
+    const view = renderImageOptions(863, ['nano-banana-pro', 'gpt-image-2'])
+    await waitFor(() =>
+      expect(useDrawingStore.getState().settings.model).toBe('gpt-image-2')
+    )
+    view.unmount()
+  })
+
+  it('moves a canvas off a withheld tier to the nearest tier offered', async () => {
+    startCanvas(864, 'gpt-image-2')
+    // 16:9 at 4K.
+    useDrawingStore.getState().updateSettings({ size: '3328x1872' })
+    const view = renderImageOptions(864, ['gpt-image-2'], {
+      default_model: '',
+      disabled_resolutions: ['4K'],
+    })
+    // 16:9 at 2K.
+    await waitFor(() =>
+      expect(useDrawingStore.getState().settings.size).toBe('2560x1440')
+    )
+    view.unmount()
+  })
+
+  it('leaves a fixed-size model on its size when the matching tier is withheld', () => {
+    startCanvas(865, 'dall-e-3')
+    const view = renderImageOptions(865, ['dall-e-3'], {
+      default_model: '',
+      disabled_resolutions: ['1K'],
+    })
+    expect(view.hook.result.current.disabledResolutions).toEqual(['1K'])
+    expect(useDrawingStore.getState().settings.size).toBe('1024x1024')
+    view.unmount()
   })
 })

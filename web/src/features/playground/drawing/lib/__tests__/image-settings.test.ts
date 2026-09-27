@@ -34,6 +34,7 @@ import {
   type ImageAspectRatio,
   type ImageResolution,
   getImageSizes,
+  nearestOfferedResolution,
   normalizeStoredImageSettings,
   settingsForImageModel,
   validateImageSettings,
@@ -526,6 +527,18 @@ describe('preset sizes follow the provider recommendations', () => {
         expect(Math.max(width, height)).toBeLessThanOrEqual(3808)
       }
     }
+  })
+})
+
+describe('a withheld tier gives way to the nearest one offered', () => {
+  it.each([
+    ['4K', ['4K'], '2K'],
+    ['1K', ['1K', '2K'], '4K'],
+    // Equally near both ways, the cheaper tier wins.
+    ['2K', ['2K'], '1K'],
+    ['2K', ['4K'], '2K'],
+  ] as const)('moves %s withholding %j to %s', (tier, withheld, expected) => {
+    expect(nearestOfferedResolution(tier, withheld)).toBe(expected)
   })
 })
 

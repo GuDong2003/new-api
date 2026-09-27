@@ -712,6 +712,14 @@ func GetUserModels(c *gin.Context) {
 	})
 }
 
+// GetCanvasSetting answers what the canvas starts from for the signed-in user:
+// the default model and the withheld resolutions of their own group, which
+// the dashboard authentication has just read.
+func GetCanvasSetting(c *gin.Context) {
+	group := common.GetContextKeyString(c, constant.ContextKeyUserGroup)
+	common.ApiSuccess(c, operation_setting.GetCanvasGroupSetting(group))
+}
+
 type updateUserRequest struct {
 	Id               int                        `json:"id"`
 	Username         *string                    `json:"username"`

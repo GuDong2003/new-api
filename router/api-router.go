@@ -99,6 +99,7 @@ func SetApiRouter(router *gin.Engine) {
 				selfRoute.GET("/self/groups", controller.GetUserGroups)
 				selfRoute.GET("/self", controller.GetSelf)
 				selfRoute.GET("/models", controller.GetUserModels)
+				selfRoute.GET("/canvas_setting", controller.GetCanvasSetting)
 				selfRoute.PUT("/self", middleware.CriticalRateLimit(), middleware.DisableCache(), controller.UpdateSelf)
 				selfRoute.POST("/avatar", middleware.CriticalRateLimit(), middleware.DisableCache(), controller.UpdateSelfAvatar)
 				selfRoute.DELETE("/avatar", middleware.CriticalRateLimit(), middleware.DisableCache(), controller.DeleteSelfAvatar)

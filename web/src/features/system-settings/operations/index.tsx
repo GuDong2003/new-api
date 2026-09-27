@@ -56,6 +56,8 @@ const defaultOperationsSettings: OperationsSettings = {
   'perf_metrics_setting.flush_interval': 5,
   'perf_metrics_setting.bucket_time': 'hour',
   'perf_metrics_setting.retention_days': 0,
+  'canvas_setting.default_models': '{}',
+  'canvas_setting.disabled_resolutions': '{}',
 }
 
 export function OperationsSettings() {

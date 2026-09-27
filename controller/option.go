@@ -488,6 +488,24 @@ func UpdateOption(c *gin.Context) {
 			})
 			return
 		}
+	case "canvas_setting.default_models":
+		value, _ := option.Value.(string)
+		if err = operation_setting.ValidateCanvasDefaultModels(value); err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": err.Error(),
+			})
+			return
+		}
+	case "canvas_setting.disabled_resolutions":
+		value, _ := option.Value.(string)
+		if err = operation_setting.ValidateCanvasDisabledResolutions(value); err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": err.Error(),
+			})
+			return
+		}
 	}
 	if model.IsPasskeyDomainOption(option.Key) {
 		change, updateErr := model.UpdatePasskeyDomainOptions(map[string]string{option.Key: option.Value.(string)}, false, "")

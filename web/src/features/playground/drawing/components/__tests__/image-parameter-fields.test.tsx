@@ -54,6 +54,7 @@ function ParameterFieldsWithChinese() {
 
 function ResolutionForm(props: {
   settings?: Partial<ImageSettings>
+  disabledResolutions?: string[]
   onSubmit?: (payload: ReturnType<typeof buildImagePayload>) => void
 }) {
   // Mirror production, where picking a model runs its settings through
@@ -71,7 +72,7 @@ function ResolutionForm(props: {
           props.onSubmit?.(buildImagePayload(settings))
         )}
       >
-        <ImageParameterFields />
+        <ImageParameterFields disabledResolutions={props.disabledResolutions} />
         <button type='submit'>Generate</button>
       </form>
     </FormProvider>
@@ -507,6 +508,19 @@ describe('the tier row fills its grid', () => {
       expect(within(tiers).getAllByRole('button')).toHaveLength(3)
     }
   )
+})
+
+describe('a group can withhold resolution tiers', () => {
+  it('offers only the tiers left on, filling the row with them', () => {
+    render(<ResolutionForm disabledResolutions={['4K']} />)
+    const tiers = screen.getByRole('group', { name: 'Image resolution' })
+    expect(
+      within(tiers)
+        .getAllByRole('button')
+        .map((tier) => tier.textContent)
+    ).toEqual(['1K', '2K'])
+    expect(tiers).toHaveClass('grid-cols-2')
+  })
 })
 
 describe('the model selector groups by vendor', () => {

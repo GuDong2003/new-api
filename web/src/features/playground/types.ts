@@ -152,3 +152,11 @@ export interface GroupOption {
   ratio: number
   desc?: string
 }
+
+/** What the canvas starts from for the signed-in user's group. */
+export interface CanvasSetting {
+  /** The model the canvas picks when it chooses one itself; empty for none. */
+  default_model: string
+  /** Resolution tiers the canvas withholds from the user's group. */
+  disabled_resolutions: string[]
+}

@@ -23,6 +23,7 @@ import { EmailSettingsSection } from '../integrations/email-settings-section'
 import { MonitoringSettingsSection } from '../integrations/monitoring-settings-section'
 import { WorkerSettingsSection } from '../integrations/worker-settings-section'
 import { BackupSettingsSection } from '../maintenance/backup-section'
+import { CanvasSettingsSection } from '../maintenance/canvas-settings-section'
 import { ContentAuditSettingsSection } from '../maintenance/content-audit-section'
 import { LogSettingsSection } from '../maintenance/log-settings-section'
 import { PerformanceSection } from '../maintenance/performance-section'
@@ -133,6 +134,16 @@ const OPERATIONS_SECTIONS = [
           'performance_setting.monitor_disk_threshold':
             settings['performance_setting.monitor_disk_threshold'] ?? 95,
         }}
+      />
+    ),
+  },
+  {
+    id: 'canvas',
+    titleKey: 'Canvas management',
+    build: (settings: OperationsSettings) => (
+      <CanvasSettingsSection
+        defaultModels={settings['canvas_setting.default_models']}
+        disabledResolutions={settings['canvas_setting.disabled_resolutions']}
       />
     ),
   },

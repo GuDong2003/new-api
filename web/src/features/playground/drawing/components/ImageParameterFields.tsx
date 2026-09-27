@@ -68,6 +68,8 @@ function ParameterSelect(props: SelectFieldProps) {
 }
 
 export function ImageParameterFields(props: {
+  /** Tiers the canvas withholds from the user's group. */
+  disabledResolutions?: readonly string[]
   onSizeChange?: (size: string) => void
 }) {
   const { t } = useTranslation()
@@ -91,6 +93,7 @@ export function ImageParameterFields(props: {
         model={settings.model}
         mode={settings.mode}
         size={settings.size}
+        disabledResolutions={props.disabledResolutions}
         onChange={(size) => {
           form.setValue('size', size, { shouldDirty: true })
           form.clearErrors('root')

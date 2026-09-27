@@ -99,7 +99,9 @@ export function DrawingSettings(props: DrawingSettingsProps) {
   const switchGenerationMode = useDrawingStore(
     (state) => state.switchGenerationMode
   )
-  const { groups, models, imageModels } = useImageOptions(props.userId)
+  const { groups, models, imageModels, disabledResolutions } = useImageOptions(
+    props.userId
+  )
   const references = getAvailableReferenceNodes(nodes, referenceIds).flatMap(
     (node) => (node.data.asset ? [{ id: node.id, asset: node.data.asset }] : [])
   )
@@ -470,6 +472,7 @@ export function DrawingSettings(props: DrawingSettingsProps) {
             <TagParameterFields onChange={updateSettings} />
           ) : (
             <ImageParameterFields
+              disabledResolutions={disabledResolutions}
               onSizeChange={(size) => updateSettings({ size })}
             />
           )}

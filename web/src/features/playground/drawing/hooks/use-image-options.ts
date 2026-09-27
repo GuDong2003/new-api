@@ -21,13 +21,22 @@ import { useEffect, useMemo } from 'react'
 
 import { useDrawingStore } from '@/stores/drawing-store'
 
-import { getUserGroups, getUserModels } from '../../api'
+import { getCanvasSetting, getUserGroups, getUserModels } from '../../api'
 import { filterImageModels } from '../lib/image-models'
-import { settingsForImageModel } from '../lib/image-settings'
+import {
+  getImagePresetSize,
+  getImageSizePreset,
+  nearestOfferedResolution,
+  settingsForImageModel,
+  supportsImageSizePresets,
+} from '../lib/image-settings'
+
+const NO_WITHHELD_RESOLUTIONS: readonly string[] = []
 
 export function useImageOptions(userId: number) {
   const group = useDrawingStore((state) => state.settings.group)
   const model = useDrawingStore((state) => state.settings.model)
+  const size = useDrawingStore((state) => state.settings.size)
   const generationMode = useDrawingStore(
     (state) => state.settings.generationMode
   )
@@ -40,6 +49,17 @@ export function useImageOptions(userId: number) {
     queryFn: () => getUserModels(group),
     enabled: Boolean(group),
   })
+  // What the admin set for the user's own group. Without it the canvas keeps
+  // choosing for itself, so a failed read is not worth an error toast.
+  const canvasSetting = useQuery({
+    queryKey: ['canvas-setting', userId],
+    queryFn: getCanvasSetting,
+    retry: false,
+    meta: { errorToast: false },
+  })
+  const defaultModel = canvasSetting.data?.default_model
+  const disabledResolutions =
+    canvasSetting.data?.disabled_resolutions ?? NO_WITHHELD_RESOLUTIONS
   const imageModels = useMemo(
     () => filterImageModels(models.data || [], generationMode),
     [models.data, generationMode]
@@ -56,10 +76,13 @@ export function useImageOptions(userId: number) {
       .updateSettings({ group: groups.data[0].value, model: '' })
   }, [groups.data, group])
   useEffect(() => {
-    if (!models.isSuccess) return
+    // Wait for the group's default model, or the canvas would settle on its
+    // own pick first and keep it.
+    if (!models.isSuccess || canvasSetting.isPending) return
     const modelStillAvailable = imageModels.some((item) => item.value === model)
     if (modelStillAvailable) return
     const preferred =
+      imageModels.find((item) => item.value === defaultModel) ||
       (generationMode === 'description' &&
         imageModels.find((item) =>
           /gpt-image|dall-e|chatgpt-image/.test(item.value)
@@ -73,6 +96,28 @@ export function useImageOptions(userId: number) {
     } else if (model) {
       useDrawingStore.getState().updateSettings({ model: '' })
     }
-  }, [imageModels, models.isSuccess, model, generationMode])
-  return { groups, models, imageModels }
+  }, [
+    imageModels,
+    models.isSuccess,
+    canvasSetting.isPending,
+    defaultModel,
+    model,
+    generationMode,
+  ])
+  useEffect(() => {
+    // Only preset models pick their size by tier. A fixed-size model's size is
+    // its own, even when it happens to match a preset.
+    if (!supportsImageSizePresets(model)) return
+    const preset = getImageSizePreset(size, model)
+    if (!preset) return
+    const resolution = nearestOfferedResolution(
+      preset.resolution,
+      disabledResolutions
+    )
+    if (resolution === preset.resolution) return
+    useDrawingStore.getState().updateSettings({
+      size: getImagePresetSize(preset.aspectRatio, resolution, model),
+    })
+  }, [size, model, disabledResolutions])
+  return { groups, models, imageModels, disabledResolutions }
 }
