@@ -798,9 +798,9 @@ func classifyImageFailure(status int, code, message string) imageTaskFailure {
 }
 
 // recordImageAttemptFailure notes why one relay attempt of an image request
-// failed, in the words that attempt would have answered with. A repeat of the
-// cause just before it adds nothing.
-func recordImageAttemptFailure(c *gin.Context, err *types.NewAPIError) {
+// failed, in the words that attempt would have answered with, and returns the
+// kind of cause. A repeat of the cause just before it adds nothing.
+func recordImageAttemptFailure(c *gin.Context, err *types.NewAPIError) string {
 	shown := err.ToOpenAIError()
 	code := ""
 	if shown.Code != nil {
@@ -809,9 +809,10 @@ func recordImageAttemptFailure(c *gin.Context, err *types.NewAPIError) {
 	failure := classifyImageFailure(err.StatusCode, code, shown.Message)
 	failures, _ := c.Value(imageAttemptFailuresKey).([]imageTaskFailure)
 	if len(failures) >= maxImageTaskFailures || (len(failures) > 0 && failures[len(failures)-1] == failure) {
-		return
+		return failure.Kind
 	}
 	c.Set(imageAttemptFailuresKey, append(failures, failure))
+	return failure.Kind
 }
 
 // imageTaskFailureData records why a finished image task failed. A relay that

@@ -14,6 +14,7 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1312,6 +1313,29 @@ func TestAsyncImageTaskReportsWhyTheProviderRefused(t *testing.T) {
 	require.NoError(t, common.Unmarshal(fetch.Body.Bytes(), &payload))
 	assert.Equal(t, "failed", payload.Status)
 	assert.Equal(t, []imageTaskFailure{{Kind: imageFailureContentPolicy, Status: http.StatusBadGateway, Message: "提示词有安全风险，请调整提示词重试"}}, payload.FailureReasons)
+}
+
+// Every channel judges a prompt alike, so a provider refusing it ends the
+// request at once: another try only keeps the user waiting, and its answer
+// would replace the refusal with an unrelated error. The prompt is at fault,
+// so the refusal comes back as the caller's own error.
+func TestImageRequestStopsAtAProviderRefusal(t *testing.T) {
+	previousRetries := common.RetryTimes
+	common.RetryTimes = 2
+	t.Cleanup(func() { common.RetryTimes = previousRetries })
+	var calls atomic.Int32
+	fixture := newImageRelayFixture(t, func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = io.WriteString(w, `{"error":{"message":"提示词有安全风险，请调整提示词重试","type":"upstream_error"}}`)
+	})
+
+	recorder := fixture.generate(t, "/pg/images/generations", "")
+
+	assert.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+	assert.Contains(t, recorder.Body.String(), "提示词有安全风险，请调整提示词重试")
+	assert.Equal(t, int32(1), calls.Load())
 }
 
 func TestClassifyImageFailure(t *testing.T) {
