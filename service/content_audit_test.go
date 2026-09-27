@@ -719,6 +719,45 @@ func TestContentAuditOriginalShutdownDoesNotWaitForActiveProducer(t *testing.T) 
 	assert.Zero(t, r.memory.used.Load())
 }
 
+// A streaming capture lasts as long as its request. One whose request never
+// finishes must not keep the worker from recording the requests after it.
+func TestContentAuditRecordsLaterRequestsWhileAStreamingCaptureIsOpen(t *testing.T) {
+	r, _, state := contentAuditTestRuntime(t)
+	_, finished := contentAuditServeCaptured(t, r, "/v1/chat/completions", "application/json", []byte(`{"messages":[]}`), []byte(`{"choices":[{"message":{"content":"answer"},"finish_reason":"stop"}]}`), false, false)
+	require.NotNil(t, finished)
+
+	// A Responses request that is still waiting on its upstream.
+	images := &contentAuditImages{budget: &r.memory, enabled: true, protocol: "openai_responses"}
+	response := newContentAuditResponse(1024, images)
+	record := model.ContentAudit{AuditID: contentAuditRandomID(), Attempt: contentAuditRandomID(), Owner: r.processID, Epoch: state.Epoch, UserID: 7, ExpiresAt: time.Now().Unix() + 600, Kind: "text", Protocol: "openai_responses", Integrity: "complete"}
+	open := &contentAuditJob{images: images, record: record, charged: 1024}
+	open.owners.Store(2)
+	images.session.initial = record
+	require.True(t, r.memory.acquire(open.charged))
+
+	r.queue <- open
+	r.queue <- finished
+	ctx, cancel := context.WithCancel(context.Background())
+	r.workers.Go(func() { r.worker(ctx) })
+	assert.Eventually(t, func() bool {
+		saved, _, err := ReadContentAuditPayload(context.Background(), finished.record.AuditID)
+		return err == nil && saved.Status == model.ContentAuditReady
+	}, 5*time.Second, 20*time.Millisecond, "the finished request waited on the unfinished one")
+
+	// The request ends, and its own capture is recorded as well.
+	response.write([]byte(`{"output":[],"status":"completed"}`), false)
+	open.payload = ContentAuditPayload{Request: []byte("{}"), Response: response.snapshot(), Images: []ContentAuditImageView{}}
+	close(images.session.done)
+	assert.Eventually(t, func() bool {
+		saved, _, err := ReadContentAuditPayload(context.Background(), record.AuditID)
+		return err == nil && saved.Status == model.ContentAuditReady
+	}, 5*time.Second, 20*time.Millisecond)
+	cancel()
+	r.workers.Wait()
+	r.release(open)
+	assert.Zero(t, r.memory.used.Load())
+}
+
 func TestContentAuditOriginalIncrementalLastByteClaim(t *testing.T) {
 	r, _, state := contentAuditTestRuntime(t)
 	ctx := context.Background()

@@ -347,7 +347,14 @@ func (r *contentAuditRuntime) worker(ctx context.Context) {
 				}
 			}
 		case job := <-r.queue:
-			r.runJob(ctx, job)
+			if job.images.session == nil {
+				r.runJob(ctx, job)
+				continue
+			}
+			// A streaming capture lasts as long as its request. On its own
+			// goroutine a slow or stuck request no longer holds the worker the
+			// later records wait on; admission already caps how many run.
+			r.workers.Go(func() { r.runJob(ctx, job) })
 		}
 	}
 }
