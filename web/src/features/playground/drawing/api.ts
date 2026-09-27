@@ -59,6 +59,9 @@ export type GenerateImagesOptions = {
   onPartial: (result: ImageResult, index: number) => void
   // Reports the accepted task so the canvas can resume it after a reload.
   onTask?: (taskId: string) => void
+  // Reports why the attempts before the one running failed, at each check
+  // while the gateway retries the task.
+  onRetry?: (failures: ImageTaskFailureReason[]) => void
   // Resumes an already accepted task instead of submitting a new request.
   taskId?: string
   // Answers on this request even without streaming, for images a task could
@@ -103,7 +106,7 @@ export async function generateImages(
       ? options.settings.outputFormat
       : 'png'
   if (options.taskId) {
-    return await pollImageTask(options.taskId, outputFormat, options.signal)
+    return await pollImageTask(options.taskId, outputFormat, options)
   }
   const validation = validateImageSettings(
     options.settings,
@@ -259,7 +262,7 @@ async function runImageTask(
     // Whether the gateway accepted the task is unknown, but the task was named
     // before it was sent, so it can be looked for under that name.
     options.onTask?.(taskId)
-    return await pollImageTask(taskId, outputFormat, options.signal, {
+    return await pollImageTask(taskId, outputFormat, options, {
       reason: lostSubmissionReason(error),
       deadline: Date.now() + LOST_SUBMISSION_WAIT_MS,
     })
@@ -273,15 +276,16 @@ async function runImageTask(
     }
   }
   options.onTask?.(accepted.task_id)
-  return await pollImageTask(accepted.task_id, outputFormat, options.signal)
+  return await pollImageTask(accepted.task_id, outputFormat, options)
 }
 
 async function pollImageTask(
   taskId: string,
   outputFormat: string,
-  signal: AbortSignal,
+  options: Pick<GenerateImagesOptions, 'signal' | 'onRetry'>,
   lostSubmission?: LostSubmission
 ): Promise<ImageGenerationResult> {
+  const signal = options.signal
   let unreachableSince: number | undefined
   for (let attempt = 0; ; attempt++) {
     signal.throwIfAborted()
@@ -326,6 +330,12 @@ async function pollImageTask(
     }
     if (task?.status === 'failed') {
       throw new Error(describeImageTaskFailure(task))
+    }
+    // Each check passes on every cause so far rather than only new ones, so a
+    // node that missed them, such as one an undo held off the canvas, catches
+    // up.
+    if (task?.attempt_failures?.length) {
+      options.onRetry?.(task.attempt_failures)
     }
     await waitBeforeNextPoll(
       IMAGE_TASK_POLL_DELAYS[
@@ -405,21 +415,27 @@ function lostSubmissionReason(error: unknown): string {
   )
 }
 
-// Explains a failed task in terms its owner can act on: each distinct cause its
-// attempts met, the first plainly and the rest as what a retry ran into. A task
-// that recorded no causes falls back to the gateway's message.
+/**
+ * Explains the causes a task's attempts met in terms its owner can act on, one
+ * line each: every distinct cause, the first plainly and the rest as what a
+ * retry ran into.
+ */
+export function describeImageTaskFailures(
+  causes: ImageTaskFailureReason[]
+): string[] {
+  return [...new Set(causes.map(describeFailureCause))].map((cause, index) =>
+    index === 0 ? cause : t('After a retry: {{reason}}', { reason: cause })
+  )
+}
+
+// Explains a failed task through the causes it recorded. A task that recorded
+// none falls back to the gateway's message.
 function describeImageTaskFailure(task: ImageTaskResponse): string {
-  const causes = [
-    ...new Set((task.failure_reasons ?? []).map(describeFailureCause)),
-  ]
-  if (causes.length === 0) {
+  const lines = describeImageTaskFailures(task.failure_reasons ?? [])
+  if (lines.length === 0) {
     return task.error?.message || 'Image generation failed.'
   }
-  return causes
-    .map((cause, index) =>
-      index === 0 ? cause : t('After a retry: {{reason}}', { reason: cause })
-    )
-    .join('\n')
+  return lines.join('\n')
 }
 
 function describeFailureCause(cause: ImageTaskFailureReason): string {

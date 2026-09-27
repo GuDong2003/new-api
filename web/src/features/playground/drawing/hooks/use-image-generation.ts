@@ -180,6 +180,31 @@ async function executeImageJob(
           state.updateNodeData(id, { taskId }, input.job.id)
         }
       },
+      onRetry: (failedAttempts) => {
+        if (!isCurrentJob(input) || input.job.controller.signal.aborted) return
+        const state = useDrawingStore.getState()
+        for (const id of input.job.nodeIds) {
+          const progress = state.nodes.find((node) => node.id === id)?.data
+            .progress
+          // The causes only grow while the task runs, so a node showing as many
+          // already shows these.
+          if (progress?.failedAttempts?.length === failedAttempts.length) {
+            continue
+          }
+          state.updateNodeData(
+            id,
+            {
+              progress: {
+                startedAt: progress?.startedAt ?? Date.now(),
+                phase: progress?.phase ?? 'generating',
+                previewCount: progress?.previewCount ?? 0,
+                failedAttempts,
+              },
+            },
+            input.job.id
+          )
+        }
+      },
       onPartial: (image, index) => {
         const state = useDrawingStore.getState()
         const id = input.job.nodeIds[index]

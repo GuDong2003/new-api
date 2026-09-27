@@ -603,6 +603,15 @@ func (t *Task) UpdateWithStatus(fromStatus TaskStatus) (bool, error) {
 	return result.RowsAffected > 0, nil
 }
 
+// UpdateRunningTaskData replaces the data a task reports while it is still in
+// progress. A task that has finished in the meantime, including one a sweeper
+// failed, keeps the data it finished with.
+func UpdateRunningTaskData(ctx context.Context, taskID string, data json.RawMessage) error {
+	return DB.WithContext(ctx).Model(&Task{}).
+		Where("task_id = ? AND status = ?", taskID, TaskStatusInProgress).
+		Update("data", data).Error
+}
+
 // TaskBulkUpdateByID performs an unconditional bulk UPDATE by primary key IDs.
 // WARNING: This function has NO CAS (Compare-And-Swap) guard — it will overwrite
 // any concurrent status changes. DO NOT use in billing/quota lifecycle flows

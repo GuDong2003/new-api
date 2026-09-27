@@ -14,6 +14,7 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1101,6 +1102,57 @@ func TestBuildImageTaskPayload(t *testing.T) {
 		}, response.FailureReasons)
 	})
 
+	t.Run("running task reports why its earlier attempts failed", func(t *testing.T) {
+		task := &model.Task{
+			TaskID:     "task_retrying",
+			Status:     model.TaskStatusInProgress,
+			Progress:   "0%",
+			SubmitTime: 1700000000,
+			Data:       json.RawMessage(`{"attempt_failures":[{"kind":"content_policy","status":422,"message":"当前提示词暂时无法生成，请更换提示词后重试"}]}`),
+		}
+		task.Properties.OriginModelName = "gpt-image-2"
+
+		payload, err := buildImageTaskPayload(task, "/pg/images/generations/task_retrying")
+		require.NoError(t, err)
+		assert.JSONEq(t, `{
+			"data": [],
+			"task_id": "task_retrying",
+			"status": "in_progress",
+			"progress": 0,
+			"status_url": "/pg/images/generations/task_retrying",
+			"created_at": 1700000000,
+			"model": "gpt-image-2",
+			"attempt_failures": [{"kind": "content_policy", "status": 422, "message": "当前提示词暂时无法生成，请更换提示词后重试"}]
+		}`, string(payload))
+	})
+
+	// A sweeper fails a task without recording causes of its own, so the
+	// attempts the task reported failing while it ran still come first.
+	t.Run("failed task a restart cut short lists the attempts that failed before", func(t *testing.T) {
+		task := &model.Task{
+			TaskID:     "task_cut_short",
+			Status:     model.TaskStatusFailure,
+			Progress:   "100%",
+			SubmitTime: 1700000000,
+			FailReason: service.ImageTaskInterruptedReason,
+			Data:       json.RawMessage(`{"attempt_failures":[{"kind":"content_policy","status":422,"message":"当前提示词暂时无法生成，请更换提示词后重试"}]}`),
+		}
+
+		payload, err := buildImageTaskPayload(task, "/pg/images/generations/task_cut_short")
+		require.NoError(t, err)
+
+		var response struct {
+			FailureReasons  []imageTaskFailure `json:"failure_reasons"`
+			AttemptFailures []imageTaskFailure `json:"attempt_failures"`
+		}
+		require.NoError(t, common.Unmarshal(payload, &response))
+		assert.Equal(t, []imageTaskFailure{
+			{Kind: imageFailureContentPolicy, Status: http.StatusUnprocessableEntity, Message: "当前提示词暂时无法生成，请更换提示词后重试"},
+			{Kind: imageFailureInterrupted},
+		}, response.FailureReasons)
+		assert.Nil(t, response.AttemptFailures, "a finished task reports its causes once")
+	})
+
 	// Tasks that failed before their causes were recorded, or on a path that
 	// records none, still name what went wrong.
 	for _, tc := range []struct {
@@ -1312,6 +1364,103 @@ func TestAsyncImageTaskReportsWhyTheProviderRefused(t *testing.T) {
 	require.NoError(t, common.Unmarshal(fetch.Body.Bytes(), &payload))
 	assert.Equal(t, "failed", payload.Status)
 	assert.Equal(t, []imageTaskFailure{{Kind: imageFailureContentPolicy, Status: http.StatusBadGateway, Message: "提示词有安全风险，请调整提示词重试"}}, payload.FailureReasons)
+}
+
+// A provider can refuse a prompt minutes before a retry elsewhere ends, and the
+// refusal is the one cause the owner can act on by rewording. The task already
+// says why its attempts failed while that retry runs, and stops once it
+// succeeds.
+func TestAsyncImageTaskReportsFailedAttemptsWhileItRetries(t *testing.T) {
+	const taskID = "task_0123456789abcdefghijABCDEFGHIJ02"
+	previousRetryTimes := common.RetryTimes
+	common.RetryTimes = 1
+	t.Cleanup(func() { common.RetryTimes = previousRetryTimes })
+	var attempts atomic.Int32
+	whileRetrying := make(chan []byte, 1)
+	var fixture *imageRelayFixture
+	fixture = newImageRelayFixture(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if attempts.Add(1) == 1 {
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			_, _ = io.WriteString(w, `{"error":{"message":"当前提示词暂时无法生成，请更换提示词后重试","type":"upstream_error"}}`)
+			return
+		}
+		// What the owner reads while the retry is running.
+		fetch := httptest.NewRecorder()
+		fixture.engine.ServeHTTP(fetch, httptest.NewRequest(http.MethodGet, "/pg/images/generations/"+taskID, nil))
+		whileRetrying <- fetch.Body.Bytes()
+		_, _ = io.WriteString(w, `{"created":1,"data":[{"url":"https://example.com/generated.png"}]}`)
+	})
+	// The retry selects its channel from the abilities table, whose column
+	// names are set when the database is initialized.
+	previousLogDB, previousLogDatabase := model.LOG_DB, common.LogDatabaseType()
+	require.NoError(t, model.InitLogDB())
+	t.Cleanup(func() {
+		model.LOG_DB = previousLogDB
+		common.SetLogDatabaseType(previousLogDatabase)
+	})
+	require.NoError(t, fixture.database.AutoMigrate(&model.Ability{}))
+	require.NoError(t, fixture.database.Create(&model.Ability{Group: "default", Model: "async-image-test", ChannelId: 73, Enabled: true}).Error)
+
+	recorder := fixture.generate(t, "/pg/images/generations?async=true", taskID)
+	require.Equal(t, http.StatusAccepted, recorder.Code, recorder.Body.String())
+	require.Equal(t, model.TaskStatus(model.TaskStatusSuccess), fixture.awaitFinish(t))
+
+	type taskView struct {
+		Status          string             `json:"status"`
+		AttemptFailures []imageTaskFailure `json:"attempt_failures"`
+	}
+	require.Len(t, whileRetrying, 1, "the task must have been retried")
+	var running taskView
+	require.NoError(t, common.Unmarshal(<-whileRetrying, &running))
+	assert.Equal(t, taskView{
+		Status:          "in_progress",
+		AttemptFailures: []imageTaskFailure{{Kind: imageFailureContentPolicy, Status: http.StatusUnprocessableEntity, Message: "当前提示词暂时无法生成，请更换提示词后重试"}},
+	}, running)
+	fetch := httptest.NewRecorder()
+	fixture.engine.ServeHTTP(fetch, httptest.NewRequest(http.MethodGet, "/pg/images/generations/"+taskID, nil))
+	var finished taskView
+	require.NoError(t, common.Unmarshal(fetch.Body.Bytes(), &finished))
+	assert.Equal(t, taskView{Status: "completed"}, finished)
+}
+
+// A relay still retrying may report after the timeout sweeper has already
+// failed its task. That task keeps the reason it was failed with. Set
+// TEST_TASK_DB_DIALECT to run this on MySQL or PostgreSQL.
+func TestImageTaskRetryReportLeavesAFinishedTaskAlone(t *testing.T) {
+	database, dialect := openTaskDialectDatabase(t, &model.Task{})
+	previousDB, previousDatabase := model.DB, common.MainDatabaseType()
+	model.DB = database
+	common.SetMainDatabaseType(dialect)
+	t.Cleanup(func() {
+		model.DB = previousDB
+		common.SetMainDatabaseType(previousDatabase)
+	})
+	running := &model.Task{TaskID: "task_still_running", Platform: constant.TaskPlatformImage, Status: model.TaskStatusInProgress, Progress: "0%", SubmitTime: 1700000000}
+	swept := &model.Task{TaskID: "task_swept", Platform: constant.TaskPlatformImage, Status: model.TaskStatusFailure, Progress: "100%", SubmitTime: 1700000000, FailReason: "任务超时（30分钟）"}
+	require.NoError(t, running.Insert())
+	require.NoError(t, swept.Insert())
+	refusal := imageTaskFailure{Kind: imageFailureContentPolicy, Status: http.StatusUnprocessableEntity, Message: "当前提示词暂时无法生成，请更换提示词后重试"}
+
+	for _, task := range []*model.Task{running, swept} {
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = httptest.NewRequest(http.MethodPost, "/pg/images/generations", nil)
+		c.Set(string(constant.ContextKeyAsyncImageTaskID), task.TaskID)
+		c.Set(imageAttemptFailuresKey, []imageTaskFailure{refusal})
+		reportImageTaskRetry(c)
+	}
+
+	stored := map[string]imageTaskFailureRecord{}
+	for _, task := range []*model.Task{running, swept} {
+		row, exists, err := model.GetByOnlyTaskId(task.TaskID)
+		require.NoError(t, err)
+		require.True(t, exists)
+		stored[task.TaskID] = recordedImageTaskFailures(row)
+	}
+	assert.Equal(t, map[string]imageTaskFailureRecord{
+		running.TaskID: {AttemptFailures: []imageTaskFailure{refusal}},
+		swept.TaskID:   {},
+	}, stored)
 }
 
 func TestClassifyImageFailure(t *testing.T) {

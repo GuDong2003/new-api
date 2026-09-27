@@ -821,15 +821,28 @@ For commercial licensing, please contact support@quantumnous.com
 }
 
 /* The picture area with nothing in it yet: the word is the only thing there is
- * to show, so it takes the room. Sized against the box rather than in fixed
+ * to show, so it takes the room — all of it, or what a notice under it, such as
+ * why an attempt failed, leaves. Sized against that room rather than in fixed
  * pixels, because a node can be dragged to any size. Width sets it so the word
  * spans the card; height caps it so the box, 4.6875em tall, stays inside. */
-.drawing-generation-fill {
+.drawing-generation-fill .drawing-generation-stage {
   container-type: size;
+  flex: 1 1 0;
+  min-height: 0;
 }
 
 .drawing-generation-fill .drawing-generation {
   font-size: min(17cqw, 20cqh);
+}
+
+/* A notice in a small node can leave the word too little room to be read, and
+ * what is left of it is only a speck of colour, so it gives way entirely. The
+ * status it announces stays for screen readers; only what draws it goes. */
+@container (height < 3rem) {
+  .drawing-generation-stage .drawing-generation-letter,
+  .drawing-generation-stage .drawing-generation-flare {
+    visibility: hidden;
+  }
 }
 
 .drawing-generation-letter {

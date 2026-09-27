@@ -219,24 +219,204 @@ it('lights a translation of another length over that same span', () => {
   }
 })
 
+// A provider can refuse a prompt minutes before a retry elsewhere ends. Only a
+// refusal it answered as a client error is a verdict on the prompt; the same
+// words in a server error are how some proxies word any failure.
+it.each([
+  {
+    answer: 'a client error',
+    failures: [
+      {
+        kind: 'content_policy',
+        status: 422,
+        message: '当前提示词暂时无法生成，请更换提示词后重试',
+      },
+    ],
+    notice:
+      'An upstream service refused this prompt. Retrying automatically; you can also edit the prompt and generate again.',
+    reasons: ['当前提示词暂时无法生成，请更换提示词后重试'],
+  },
+  {
+    answer: 'a server error',
+    failures: [
+      {
+        kind: 'content_policy',
+        status: 502,
+        message: '提示词有安全风险，请调整提示词重试',
+      },
+      { kind: 'timeout', status: 524 },
+    ],
+    notice: 'The last attempt failed. Retrying automatically…',
+    reasons: [
+      '提示词有安全风险，请调整提示词重试',
+      'After a retry: The upstream service timed out.',
+    ],
+  },
+])(
+  'announces why an attempt the provider answered with $answer failed while it retries',
+  (test) => {
+    render(
+      <ImageGenerationProgress
+        progress={{
+          startedAt: Date.now(),
+          phase: 'generating',
+          previewCount: 0,
+          failedAttempts: test.failures,
+        }}
+      />
+    )
+
+    const notice = screen.getByText(test.notice).closest('[aria-live="polite"]')
+    expect(notice).not.toBeNull()
+    for (const reason of test.reasons) {
+      expect(notice).toContainElement(screen.getByText(reason))
+    }
+  }
+)
+
+// Screen readers often skip a live region that arrives already filled, so the
+// region is there from the start and the notice goes into it.
+it('announces a failed attempt through a region that was there before it', () => {
+  const progress = {
+    startedAt: Date.now(),
+    phase: 'generating' as const,
+    previewCount: 0,
+  }
+  const view = render(<ImageGenerationProgress progress={progress} />)
+  const region = view.container.querySelector('[aria-live="polite"]')
+  expect(region).toBeEmptyDOMElement()
+
+  view.rerender(
+    <ImageGenerationProgress
+      progress={{
+        ...progress,
+        failedAttempts: [{ kind: 'timeout', status: 524 }],
+      }}
+    />
+  )
+
+  expect(region).toContainElement(
+    screen.getByText('The last attempt failed. Retrying automatically…')
+  )
+})
+
+it('stops saying it is retrying once the image is being prepared', () => {
+  render(
+    <ImageGenerationProgress
+      progress={{
+        startedAt: Date.now(),
+        phase: 'decoding',
+        previewCount: 0,
+        failedAttempts: [{ kind: 'timeout', status: 524 }],
+      }}
+    />
+  )
+
+  expect(screen.getByRole('status')).toHaveAccessibleName('Preparing image…')
+  expect(
+    screen.queryByText('The last attempt failed. Retrying automatically…')
+  ).toBeNull()
+})
+
+function styleSheet() {
+  return postcss.parse(
+    readFileSync(
+      resolve(import.meta.dirname, '../../../../../styles/index.css'),
+      'utf8'
+    )
+  )
+}
+
+function styleDeclarations() {
+  const declarations = new Map<string, Map<string, string>>()
+  styleSheet().walkRules((rule) => {
+    const values = declarations.get(rule.selector) ?? new Map()
+    rule.walkDecls((declaration) => {
+      values.set(declaration.prop, declaration.value)
+    })
+    declarations.set(rule.selector, values)
+  })
+  return declarations
+}
+
+// The word takes the whole picture area of an empty node, which left a notice
+// under it, such as why an attempt failed, pushed out of the card. The word is
+// sized against the room the notice leaves instead.
+it('sizes the word against the room a notice under it leaves', () => {
+  render(
+    <ImageGenerationProgress
+      progress={{
+        startedAt: Date.now(),
+        phase: 'generating',
+        previewCount: 0,
+        failedAttempts: [{ kind: 'timeout', status: 524 }],
+      }}
+    />
+  )
+  const stage = screen
+    .getByRole('status', { name: 'Generating image…' })
+    .closest('.drawing-generation-stage')
+  const notice = screen
+    .getByText('The last attempt failed. Retrying automatically…')
+    .closest('[aria-live="polite"]')
+
+  expect(stage).not.toBeNull()
+  expect(stage).not.toContainElement(notice as HTMLElement)
+  const room = styleDeclarations().get(
+    '.drawing-generation-fill .drawing-generation-stage'
+  )
+  expect(room?.get('container-type')).toBe('size')
+  expect(room?.get('flex')).toBe('1 1 0')
+  expect(room?.get('min-height')).toBe('0')
+})
+
+// A notice longer than the smallest node has room for was cut off at its top
+// and bottom, heading first. It scrolls instead, and the wheel scrolls it
+// rather than zooming the canvas.
+it('scrolls a notice longer than the node has room for', () => {
+  render(
+    <ImageGenerationProgress
+      progress={{
+        startedAt: Date.now(),
+        phase: 'generating',
+        previewCount: 0,
+        failedAttempts: [{ kind: 'timeout', status: 524 }],
+      }}
+    />
+  )
+
+  const notice = screen
+    .getByText('The last attempt failed. Retrying automatically…')
+    .closest('[aria-live="polite"]')
+  expect(notice).toHaveClass('min-h-0', 'overflow-y-auto', 'nowheel', 'nodrag')
+})
+
+// In the smallest node the notice leaves the word a sliver of room, which only
+// drew a speck of colour above the notice. What draws the word gives way, while
+// the status it announces stays for screen readers.
+it('hides the word when a notice leaves it too little room to be read', () => {
+  const hidden: string[] = []
+  styleSheet().walkAtRules('container', (query) => {
+    query.walkRules((rule) => {
+      rule.walkDecls('visibility', (declaration) => {
+        if (declaration.value !== 'hidden') return
+        hidden.push(
+          ...rule.selectors.map((selector) => `${query.params} ${selector}`)
+        )
+      })
+    })
+  })
+
+  expect(hidden).toEqual([
+    '(height < 3rem) .drawing-generation-stage .drawing-generation-letter',
+    '(height < 3rem) .drawing-generation-stage .drawing-generation-flare',
+  ])
+})
+
 // The colour behind the word is a ring sized to the box around the letters, so
 // the box is what keeps the ring as close to the lit letter as in the template.
 it('keeps the template box around the word however tall the node is', () => {
-  const declarations = new Map<string, Map<string, string>>()
-  postcss
-    .parse(
-      readFileSync(
-        resolve(import.meta.dirname, '../../../../../styles/index.css'),
-        'utf8'
-      )
-    )
-    .walkRules((rule) => {
-      const values = declarations.get(rule.selector) ?? new Map()
-      rule.walkDecls((declaration) => {
-        values.set(declaration.prop, declaration.value)
-      })
-      declarations.set(rule.selector, values)
-    })
+  const declarations = styleDeclarations()
   const box = declarations.get('.drawing-generation')
   const filled = declarations.get(
     '.drawing-generation-fill .drawing-generation'

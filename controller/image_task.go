@@ -164,6 +164,14 @@ type imageTaskFailure struct {
 // often the reason, and a retry elsewhere only adds a timeout on top.
 const imageAttemptFailuresKey = "image_attempt_failures"
 
+// imageTaskFailureRecord is what an image task without a result keeps in its
+// data: why each attempt failed so far while it still runs, and why it failed
+// once it has.
+type imageTaskFailureRecord struct {
+	AttemptFailures []imageTaskFailure `json:"attempt_failures,omitempty"`
+	FailureReasons  []imageTaskFailure `json:"failure_reasons,omitempty"`
+}
+
 // maxImageTaskFailures bounds the causes one task keeps.
 const maxImageTaskFailures = 8
 
@@ -814,6 +822,25 @@ func recordImageAttemptFailure(c *gin.Context, err *types.NewAPIError) {
 	c.Set(imageAttemptFailuresKey, append(failures, failure))
 }
 
+// reportImageTaskRetry lets the owner of an async image task see, while it
+// still runs, why the attempts before this retry failed. A provider can refuse
+// the prompt minutes before a retry elsewhere ends, and that refusal is the one
+// cause its owner can act on by rewording.
+func reportImageTaskRetry(c *gin.Context) {
+	taskID := common.GetContextKeyString(c, constant.ContextKeyAsyncImageTaskID)
+	failures, _ := c.Value(imageAttemptFailuresKey).([]imageTaskFailure)
+	if taskID == "" || len(failures) == 0 {
+		return
+	}
+	data, err := common.Marshal(imageTaskFailureRecord{AttemptFailures: failures})
+	if err == nil {
+		err = model.UpdateRunningTaskData(c.Request.Context(), taskID, data)
+	}
+	if err != nil {
+		logger.LogWarn(c, fmt.Sprintf("report retry of image task %s failed: %v", taskID, err))
+	}
+}
+
 // imageTaskFailureData records why a finished image task failed. A relay that
 // answered with an error failed every attempt it made, so each attempt's cause
 // is kept in order; any other failure lies in the answer itself.
@@ -830,7 +857,7 @@ func imageTaskFailureData(run *asyncImageRun, recorder *asyncImageResponseRecord
 	default:
 		failures = []imageTaskFailure{classifyImageFailure(0, "", err.Error())}
 	}
-	data, marshalErr := common.Marshal(map[string][]imageTaskFailure{"failure_reasons": failures})
+	data, marshalErr := common.Marshal(imageTaskFailureRecord{FailureReasons: failures})
 	if marshalErr != nil {
 		return nil
 	}
@@ -1233,6 +1260,18 @@ func buildImageTaskPayload(task *model.Task, statusURL string) ([]byte, error) {
 			return nil, err
 		}
 	}
+	if status == imageTaskStatusInProgress {
+		if failures := recordedImageTaskFailures(task).AttemptFailures; len(failures) > 0 {
+			reported, err := common.Marshal(failures)
+			if err != nil {
+				return nil, err
+			}
+			payload, err = sjson.SetRawBytes(payload, "attempt_failures", reported)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
 	if status == imageTaskStatusFailed {
 		payload, err = sjson.SetBytes(payload, "error", types.OpenAIError{
 			Message: task.FailReason,
@@ -1254,32 +1293,43 @@ func buildImageTaskPayload(task *model.Task, statusURL string) ([]byte, error) {
 	return payload, nil
 }
 
+// recordedImageTaskFailures reads the failures an image task without a result
+// keeps in its data.
+func recordedImageTaskFailures(task *model.Task) imageTaskFailureRecord {
+	var recorded imageTaskFailureRecord
+	if common.GetJsonType(task.Data) != "object" || common.Unmarshal(task.Data, &recorded) != nil {
+		return imageTaskFailureRecord{}
+	}
+	return recorded
+}
+
 // imageTaskFailures lists why a failed image task failed. A task this gateway
 // finished records its causes; one that failed without recording any, or before
-// causes were recorded at all, is read from its failure reason.
+// causes were recorded at all, is read from its failure reason. A sweeper that
+// failed a task still running records nothing, so the attempts that task
+// reported failing come first.
 func imageTaskFailures(task *model.Task) []imageTaskFailure {
-	var recorded struct {
-		FailureReasons []imageTaskFailure `json:"failure_reasons"`
-	}
-	if common.GetJsonType(task.Data) == "object" && common.Unmarshal(task.Data, &recorded) == nil && len(recorded.FailureReasons) > 0 {
+	recorded := recordedImageTaskFailures(task)
+	if len(recorded.FailureReasons) > 0 {
 		return recorded.FailureReasons
 	}
+	failures := append([]imageTaskFailure{}, recorded.AttemptFailures...)
 	reason := strings.TrimSpace(task.FailReason)
 	switch {
 	case reason == "":
-		return []imageTaskFailure{}
+		return failures
 	case reason == service.ImageTaskInterruptedReason:
-		return []imageTaskFailure{{Kind: imageFailureInterrupted}}
+		return append(failures, imageTaskFailure{Kind: imageFailureInterrupted})
 	case reason == asyncImageQueueTimeoutReason:
-		return []imageTaskFailure{{Kind: imageFailureQueueTimeout}}
+		return append(failures, imageTaskFailure{Kind: imageFailureQueueTimeout})
 	case strings.HasPrefix(reason, "image result exceeds"):
-		return []imageTaskFailure{{Kind: imageFailureTooLarge}}
+		return append(failures, imageTaskFailure{Kind: imageFailureTooLarge})
 	}
 	if quoted := upstreamFailureReason.FindStringSubmatch(reason); quoted != nil {
 		status, _ := strconv.Atoi(quoted[1])
-		return []imageTaskFailure{classifyImageFailure(status, "", quoted[2])}
+		return append(failures, classifyImageFailure(status, "", quoted[2]))
 	}
-	return []imageTaskFailure{classifyImageFailure(0, "", reason)}
+	return append(failures, classifyImageFailure(0, "", reason))
 }
 
 func asyncImageProgress(progress string) int {

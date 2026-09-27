@@ -199,6 +199,9 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			newAPIError = billingErr
 			break
 		}
+		if relayFormat == types.RelayFormatOpenAIImage && retryParam.GetRetry() > 0 {
+			reportImageTaskRetry(c)
+		}
 
 		bodyStorage, bodyErr := common.GetBodyStorage(c)
 		if bodyErr != nil {

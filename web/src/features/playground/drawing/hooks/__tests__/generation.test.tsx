@@ -103,6 +103,7 @@ afterEach(() => {
   useAuthStore.getState().auth.reset()
   api.defaults.adapter = adapter
   vi.unstubAllGlobals()
+  vi.useRealTimers()
 })
 
 function generationReference(
@@ -697,6 +698,116 @@ describe('Image generation jobs', () => {
     hook.unmount()
     client.clear()
   })
+  // A provider can refuse a prompt minutes before a retry elsewhere ends, and
+  // the node keeps waiting on that retry while it says why.
+  it('shows on a pending node why the earlier attempts of its task failed', async () => {
+    const client = new QueryClient()
+    const hook = renderHook(useImageGeneration, {
+      wrapper: (props: { children: ReactNode }) => (
+        <QueryClientProvider client={client}>
+          {props.children}
+        </QueryClientProvider>
+      ),
+    })
+    const refusal = {
+      kind: 'content_policy',
+      status: 422,
+      message: '当前提示词暂时无法生成，请更换提示词后重试',
+    }
+    vi.spyOn(api, 'get').mockResolvedValue({
+      data: {
+        task_id: 'task_retrying',
+        status: 'in_progress',
+        attempt_failures: [refusal],
+      },
+    })
+    act(() =>
+      useDrawingStore.getState().addNodes([
+        {
+          ...generationReference('retrying', { x: 0, y: 0 }),
+          data: {
+            ...generationReference('retrying', { x: 0, y: 0 }).data,
+            asset: undefined,
+            status: 'pending',
+            jobId: undefined,
+            taskId: 'task_retrying',
+          },
+        },
+      ])
+    )
+
+    act(() => resumeImageGenerationJobs((key: string) => key))
+
+    await waitFor(() =>
+      expect(
+        useDrawingStore.getState().nodes[0].data.progress?.failedAttempts
+      ).toEqual([refusal])
+    )
+    expect(useDrawingStore.getState().nodes[0].data.status).toBe('pending')
+    act(() => hook.result.current.cancel())
+    hook.unmount()
+    client.clear()
+  })
+
+  // A node an undo holds off the canvas misses what its task reports meanwhile.
+  // Once a redo brings it back, the next check shows the causes on it again.
+  it('shows the failed attempts again on a node a redo brings back', async () => {
+    vi.useFakeTimers()
+    const client = new QueryClient()
+    const hook = renderHook(useImageGeneration, {
+      wrapper: (props: { children: ReactNode }) => (
+        <QueryClientProvider client={client}>
+          {props.children}
+        </QueryClientProvider>
+      ),
+    })
+    const refusal = {
+      kind: 'content_policy',
+      status: 422,
+      message: '当前提示词暂时无法生成，请更换提示词后重试',
+    }
+    vi.spyOn(api, 'get')
+      .mockResolvedValueOnce({
+        data: { task_id: 'task_redone', status: 'in_progress' },
+      })
+      .mockResolvedValue({
+        data: {
+          task_id: 'task_redone',
+          status: 'in_progress',
+          attempt_failures: [refusal],
+        },
+      })
+    act(() =>
+      useDrawingStore.getState().addNodes([
+        {
+          ...generationReference('redone', { x: 0, y: 0 }),
+          data: {
+            ...generationReference('redone', { x: 0, y: 0 }).data,
+            asset: undefined,
+            status: 'pending',
+            jobId: undefined,
+            taskId: 'task_redone',
+          },
+        },
+      ])
+    )
+    act(() => resumeImageGenerationJobs((key: string) => key))
+    await act(() => vi.advanceTimersByTimeAsync(0))
+
+    act(() => useDrawingStore.getState().undo())
+    // The first cause arrives while the node is off the canvas.
+    await act(() => vi.advanceTimersByTimeAsync(800))
+    act(() => useDrawingStore.getState().redo())
+    await act(() => vi.advanceTimersByTimeAsync(1500))
+
+    expect(
+      useDrawingStore.getState().nodes[0].data.progress?.failedAttempts
+    ).toEqual([refusal])
+    act(() => hook.result.current.cancel())
+    hook.unmount()
+    client.clear()
+  })
+
   // A canvas does not persist progress, so a node reopened days later has none.
   // Falling back to when the node was first created counted the whole time the
   // canvas sat closed as generation time.

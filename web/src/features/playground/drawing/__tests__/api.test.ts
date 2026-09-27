@@ -413,6 +413,60 @@ describe('Image request transport', () => {
     )
   })
 
+  // A provider can refuse a prompt minutes before a retry elsewhere ends, so
+  // every check passes on the causes the task has reported so far.
+  it('passes on the failed attempts at every check while its task retries', async () => {
+    vi.useFakeTimers()
+    const refusal = {
+      kind: 'content_policy',
+      status: 422,
+      message: '当前提示词暂时无法生成，请更换提示词后重试',
+    }
+    const timeout = { kind: 'timeout', status: 524 }
+    const retrying = (failures: unknown[]) => ({
+      data: {
+        task_id: 'task_retrying',
+        status: 'in_progress',
+        attempt_failures: failures,
+      },
+    })
+    vi.spyOn(api, 'post').mockResolvedValue(
+      streamed({ task_id: 'task_retrying', status: 'in_progress' })
+    )
+    vi.spyOn(api, 'get')
+      .mockResolvedValueOnce({
+        data: { task_id: 'task_retrying', status: 'in_progress' },
+      })
+      .mockResolvedValueOnce(retrying([refusal]))
+      .mockResolvedValueOnce(retrying([refusal]))
+      .mockResolvedValueOnce(retrying([refusal, timeout]))
+      .mockResolvedValueOnce({
+        data: {
+          task_id: 'task_retrying',
+          status: 'completed',
+          data: [{ url: 'https://cdn.example/retried.png' }],
+        },
+      })
+    const onRetry = vi.fn()
+
+    const outcome = generateImages({
+      settings: DALL_E_SETTINGS,
+      references: [],
+      signal: new AbortController().signal,
+      onPartial: vi.fn(),
+      onRetry,
+    })
+    await vi.advanceTimersByTimeAsync(60 * 1000)
+    const result = await outcome
+
+    expect(onRetry.mock.calls).toEqual([
+      [[refusal]],
+      [[refusal]],
+      [[refusal, timeout]],
+    ])
+    expect(result.images[0].src).toBe('https://cdn.example/retried.png')
+  })
+
   it('keeps watching its task through a dropped connection', async () => {
     vi.spyOn(api, 'post').mockResolvedValue(
       streamed({ task_id: 'task_flaky', status: 'queued' })

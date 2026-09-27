@@ -53,6 +53,8 @@ export type ImageGenerationProgress = {
   startedAt: number
   phase: 'generating' | 'decoding'
   previewCount: number
+  // Why the attempts before the one running failed, while the gateway retries.
+  failedAttempts?: ImageTaskFailureReason[]
 }
 export type DrawingNode = Node<ImageNodeData, 'image'>
 export type DrawingMask = { referenceId: string; asset: ImageAsset }
@@ -97,4 +99,6 @@ export type ImageTaskResponse = ImageResponse & {
   progress?: number
   status_url?: string
   failure_reasons?: ImageTaskFailureReason[]
+  // Why each attempt so far failed, sent while the task is still retrying.
+  attempt_failures?: ImageTaskFailureReason[]
 }
