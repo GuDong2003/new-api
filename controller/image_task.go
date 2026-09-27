@@ -169,7 +169,7 @@ const maxImageTaskFailures = 8
 
 var (
 	imageRefusalCodes = []string{"content_policy_violation", "moderation_blocked", "content_filter", "sensitive_words_detected"}
-	imageRefusalWords = []string{"安全风险", "违规", "违禁", "敏感", "审核", "更换提示词", "safety", "moderation", "content policy", "content_policy"}
+	imageRefusalWords = []string{"安全风险", "违规", "违禁", "违反", "内容政策", "敏感", "色情", "裸露", "审核", "更换提示词", "修改提示", "safety", "moderation", "violate", "content polic", "content_policy"}
 	imageTimeoutWords = []string{"timeout", "timed out", "deadline exceeded", "超时"}
 	// requestIDSuffix is what the relay appends to the message it answers with.
 	requestIDSuffix = regexp.MustCompile(`\s*\(request id: [^)]*\)\s*$`)
