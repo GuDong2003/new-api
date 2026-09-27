@@ -367,7 +367,7 @@ func prepareGalleryCanvasAssets(ctx context.Context, root string, reader *multip
 	// thumbnail is not written over, and it doubles as the full decode that
 	// proves the bytes are a real image rather than a bounded-size header.
 	for _, asset := range uploaded {
-		thumbnail, err := makeGalleryThumbnail(ctx, root, asset)
+		thumbnail, _, err := makeGalleryThumbnail(ctx, root, asset)
 		if err != nil {
 			return err
 		}

@@ -361,9 +361,14 @@ func TestGalleryCanvasDocumentStorageType(t *testing.T) {
 	}
 }
 
+// galleryPNG is opaque, as generated pictures mostly are, so it keeps a JPEG
+// thumbnail.
 func galleryPNG(t *testing.T) []byte {
 	t.Helper()
 	img := image.NewRGBA(image.Rect(0, 0, 16, 8))
+	for i := range img.Pix {
+		img.Pix[i] = 0xff
+	}
 	img.Set(0, 0, color.RGBA{R: 255, A: 255})
 	var b bytes.Buffer
 	require.NoError(t, png.Encode(&b, img))
@@ -392,7 +397,7 @@ func gallerySave(t *testing.T, user int, source, id string, data []byte) (*model
 
 func TestSaveTaskGalleryImageStoresOriginalAndThumbnail(t *testing.T) {
 	galleryFixture(t, sqlite.Open(filepath.Join(t.TempDir(), "gallery.db")))
-	original := galleryPNG(t)
+	original := galleryLargePNG(t, true)
 
 	saved, err := service.SaveTaskGalleryImage(
 		context.Background(),
@@ -409,22 +414,14 @@ func TestSaveTaskGalleryImageStoresOriginalAndThumbnail(t *testing.T) {
 	assert.Equal(t, "task_gallery:image-0", saved.SourceID)
 	assert.True(t, saved.HasThumbnail)
 
-	file, _, err := service.OpenGalleryImage(context.Background(), 7, saved.ID, false)
-	require.NoError(t, err)
-	storedOriginal, err := io.ReadAll(file)
-	file.Close()
-	require.NoError(t, err)
-	assert.Equal(t, original, storedOriginal)
+	storedOriginal, _ := readGalleryImage(t, 7, saved.ID, false)
+	assert.Equal(t, sha256.Sum256(original), sha256.Sum256(storedOriginal))
 
-	thumbnail, _, err := service.OpenGalleryImage(context.Background(), 7, saved.ID, true)
+	thumbnail, _ := readGalleryImage(t, 7, saved.ID, true)
+	picture, format, err := image.Decode(bytes.NewReader(thumbnail))
 	require.NoError(t, err)
-	thumbnailBytes, err := io.ReadAll(thumbnail)
-	thumbnail.Close()
-	require.NoError(t, err)
-	_, format, err := image.Decode(bytes.NewReader(thumbnailBytes))
-	require.NoError(t, err)
-	// The fixture is transparent but for one pixel.
 	assert.Equal(t, "png", format)
+	assert.Equal(t, image.Rect(0, 0, 512, 341), picture.Bounds())
 }
 
 // galleryLargePNG is a noisy 1536x1024 picture, larger than a thumbnail, whose
@@ -455,45 +452,67 @@ func galleryThumbnailFile(t *testing.T, id string) []byte {
 	return data
 }
 
-// writeLegacyGalleryThumbnail stores the JPEG thumbnail builds wrote before
-// thumbnails kept transparency, with its transparent pixels black, and charges
-// it to the image in place of the one it replaces.
+func readGalleryImage(t *testing.T, user int, id string, thumbnail bool) ([]byte, string) {
+	t.Helper()
+	file, mime, err := service.OpenGalleryImage(context.Background(), user, id, thumbnail)
+	require.NoError(t, err)
+	defer file.Close()
+	data, err := io.ReadAll(file)
+	require.NoError(t, err)
+	return data, mime
+}
+
+// writeLegacyGalleryThumbnail gives a saved image the black JPEG thumbnail that
+// builds before thumbnails kept transparency made of a transparent picture, and
+// charges it in place of any thumbnail the image had.
 func writeLegacyGalleryThumbnail(t *testing.T, id string) []byte {
 	t.Helper()
-	current := galleryThumbnailFile(t, id)
-	picture, _, err := image.Decode(bytes.NewReader(current))
-	require.NoError(t, err)
 	var legacy bytes.Buffer
-	require.NoError(t, jpeg.Encode(&legacy, picture, &jpeg.Options{Quality: 80}))
+	require.NoError(t, jpeg.Encode(&legacy, image.NewRGBA(image.Rect(0, 0, 512, 256)), &jpeg.Options{Quality: 80}))
 	path := filepath.Join(os.Getenv("GALLERY_STORAGE_DIR"), "gallery-"+id+".thumbnail")
+	var current int64
+	if info, err := os.Stat(path); err == nil {
+		current = info.Size()
+	}
 	require.NoError(t, os.WriteFile(path, legacy.Bytes(), 0600))
 	var record model.GalleryImage
 	require.NoError(t, model.DB.First(&record, "id = ?", id).Error)
-	require.NoError(t, model.DB.Model(&record).Update("storage_bytes", record.StorageBytes-int64(len(current))+int64(legacy.Len())).Error)
+	require.NoError(t, model.DB.Model(&record).Updates(map[string]any{"has_thumbnail": true, "storage_bytes": record.StorageBytes - current + int64(legacy.Len())}).Error)
 	return legacy.Bytes()
 }
 
 // JPEG cannot hold transparency and paints it black, so a picture with any keeps
-// a PNG thumbnail, served as what it is; an opaque picture keeps the smaller JPEG.
+// a PNG thumbnail, served as what it is; an opaque picture keeps the smaller
+// JPEG, and one whose PNG would be no smaller than itself keeps none.
 func TestGalleryThumbnailKeepsTransparency(t *testing.T) {
 	galleryFixture(t, sqlite.Open(filepath.Join(t.TempDir(), "gallery.db")))
+	// Past the check of thumbnails stored before this rule, as after any start.
+	require.NoError(t, service.RemakeTransparentGalleryThumbnails(context.Background()))
 	gin.SetMode(gin.TestMode)
 	engine := gin.New()
 	engine.Use(func(c *gin.Context) { c.Set("id", 1) })
 	engine.GET("/images/:id/file", controller.GetGalleryFile)
+	var smallTransparent bytes.Buffer
+	require.NoError(t, png.Encode(&smallTransparent, image.NewNRGBA(image.Rect(0, 0, 16, 8))))
 	for _, test := range []struct {
-		name        string
-		transparent bool
-		mime        string
-		alpha       uint32
+		name      string
+		original  []byte
+		thumbnail bool
+		mime      string
+		bounds    image.Rectangle
+		// Inside the transparent part, when the picture has one.
+		point image.Point
+		alpha uint32
 	}{
-		{name: "transparent", transparent: true, mime: "image/png", alpha: 0},
-		{name: "opaque", transparent: false, mime: "image/jpeg", alpha: 0xffff},
+		{name: "transparent", original: galleryLargePNG(t, true), thumbnail: true, mime: "image/png", bounds: image.Rect(0, 0, 512, 341), point: image.Pt(400, 170), alpha: 0},
+		{name: "opaque", original: galleryLargePNG(t, false), thumbnail: true, mime: "image/jpeg", bounds: image.Rect(0, 0, 512, 341), point: image.Pt(400, 170), alpha: 0xffff},
+		// Within the thumbnail size, its PNG thumbnail would only copy it.
+		{name: "small-transparent", original: smallTransparent.Bytes(), thumbnail: false, mime: "image/png", bounds: image.Rect(0, 0, 16, 8), point: image.Pt(8, 4), alpha: 0},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			saved, err := gallerySave(t, 1, "drawing", test.name, galleryLargePNG(t, test.transparent))
+			saved, err := gallerySave(t, 1, "drawing", test.name, test.original)
 			require.NoError(t, err)
-			require.True(t, saved.HasThumbnail)
+			assert.Equal(t, test.thumbnail, saved.HasThumbnail)
 
 			response := httptest.NewRecorder()
 			engine.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/images/"+saved.ID+"/file?thumbnail=true", nil))
@@ -503,18 +522,21 @@ func TestGalleryThumbnailKeepsTransparency(t *testing.T) {
 			thumbnail, format, err := image.Decode(bytes.NewReader(response.Body.Bytes()))
 			require.NoError(t, err)
 			assert.Equal(t, strings.TrimPrefix(test.mime, "image/"), format)
-			assert.Equal(t, image.Rect(0, 0, 512, 341), thumbnail.Bounds())
-			// A point well inside the right half of the picture.
-			_, _, _, alpha := thumbnail.At(400, 170).RGBA()
+			assert.Equal(t, test.bounds, thumbnail.Bounds())
+			_, _, _, alpha := thumbnail.At(test.point.X, test.point.Y).RGBA()
 			assert.Equal(t, test.alpha, alpha)
+			if !test.thumbnail {
+				assert.Equal(t, sha256.Sum256(test.original), sha256.Sum256(response.Body.Bytes()), "the original stands in")
+			}
 		})
 	}
 }
 
 // Thumbnails were once JPEG only, so a transparent picture saved then has a
-// black one. Starting the gallery remakes those before any request could cache
-// the black copy, leaves a JPEG that is right alone, and checks only once.
-func TestGalleryStartRemakesThumbnailsThatLostTransparency(t *testing.T) {
+// black one. Until those have been checked, the original stands in for a JPEG
+// thumbnail of any PNG or WebP picture; the check then remakes the black ones,
+// leaves a JPEG that is right alone, and runs once.
+func TestGalleryRemakesThumbnailsThatLostTransparency(t *testing.T) {
 	dialects := map[string]gorm.Dialector{"sqlite": sqlite.Open(filepath.Join(t.TempDir(), "gallery.db"))}
 	if dsn := os.Getenv("GALLERY_TEST_MYSQL_DSN"); dsn != "" {
 		dialects["mysql"] = mysql.Open(dsn)
@@ -522,44 +544,68 @@ func TestGalleryStartRemakesThumbnailsThatLostTransparency(t *testing.T) {
 	if dsn := os.Getenv("GALLERY_TEST_POSTGRES_DSN"); dsn != "" {
 		dialects["postgres"] = postgres.Open(dsn)
 	}
+	// Lossless, 1024x512, its right half transparent: a PNG thumbnail of it would
+	// outweigh the whole original.
+	transparentWebP, err := base64.StdEncoding.DecodeString("UklGRkAAAABXRUJQVlA4TDMAAAAv/8N/EA8Q8x/zHwyCbJv7Sx9gAI3o/wQ8vzz/8R//8R//8R//8R//8R//8R//8R//cRwA")
+	require.NoError(t, err)
 	for name, dialect := range dialects {
 		t.Run(name, func(t *testing.T) {
 			galleryFixture(t, dialect)
-			transparent, err := gallerySave(t, 1, "drawing", "transparent", galleryLargePNG(t, true))
+			ctx := context.Background()
+			original := galleryLargePNG(t, true)
+			transparent, err := gallerySave(t, 1, "drawing", "transparent", original)
 			require.NoError(t, err)
 			opaque, err := gallerySave(t, 1, "drawing", "opaque", galleryLargePNG(t, false))
 			require.NoError(t, err)
+			webpImage, err := gallerySave(t, 1, "drawing", "webp", transparentWebP)
+			require.NoError(t, err)
 			legacy := writeLegacyGalleryThumbnail(t, transparent.ID)
-			var before model.GalleryImage
+			webpLegacy := writeLegacyGalleryThumbnail(t, webpImage.ID)
+			var before, webpBefore model.GalleryImage
 			require.NoError(t, model.DB.First(&before, "id = ?", transparent.ID).Error)
+			require.NoError(t, model.DB.First(&webpBefore, "id = ?", webpImage.ID).Error)
 			opaqueThumbnail := galleryThumbnailFile(t, opaque.ID)
 
-			service.StartGallery()
-			t.Cleanup(service.StopGallery)
+			served, mime := readGalleryImage(t, 1, transparent.ID, true)
+			assert.Equal(t, "image/png", mime)
+			assert.Equal(t, sha256.Sum256(original), sha256.Sum256(served), "the original stands in for an unchecked thumbnail")
+			_, mime = readGalleryImage(t, 1, opaque.ID, true)
+			assert.Equal(t, "image/png", mime, "the original stands in for an unchecked thumbnail")
 
-			remade := galleryThumbnailFile(t, transparent.ID)
+			require.NoError(t, service.RemakeTransparentGalleryThumbnails(ctx))
+
+			remade, mime := readGalleryImage(t, 1, transparent.ID, true)
+			assert.Equal(t, "image/png", mime)
 			picture, format, err := image.Decode(bytes.NewReader(remade))
 			require.NoError(t, err)
 			assert.Equal(t, "png", format)
+			assert.Equal(t, image.Rect(0, 0, 512, 341), picture.Bounds())
 			_, _, _, alpha := picture.At(400, 170).RGBA()
 			assert.Zero(t, alpha)
-			var after model.GalleryImage
+			var after, webpAfter model.GalleryImage
 			require.NoError(t, model.DB.First(&after, "id = ?", transparent.ID).Error)
+			require.NoError(t, model.DB.First(&webpAfter, "id = ?", webpImage.ID).Error)
 			assert.True(t, after.HasThumbnail)
 			assert.Equal(t, before.StorageBytes-int64(len(legacy))+int64(len(remade)), after.StorageBytes)
-			assert.Equal(t, sha256.Sum256(opaqueThumbnail), sha256.Sum256(galleryThumbnailFile(t, opaque.ID)))
+			assert.False(t, webpAfter.HasThumbnail)
+			assert.Equal(t, webpBefore.StorageBytes-int64(len(webpLegacy)), webpAfter.StorageBytes)
+			served, mime = readGalleryImage(t, 1, webpImage.ID, true)
+			assert.Equal(t, "image/webp", mime)
+			assert.Equal(t, sha256.Sum256(transparentWebP), sha256.Sum256(served))
+			thumbnail, mime := readGalleryImage(t, 1, opaque.ID, true)
+			assert.Equal(t, "image/jpeg", mime)
+			assert.Equal(t, sha256.Sum256(opaqueThumbnail), sha256.Sum256(thumbnail))
 
-			service.StopGallery()
 			legacy = writeLegacyGalleryThumbnail(t, transparent.ID)
-			service.StartGallery()
-			assert.Equal(t, sha256.Sum256(legacy), sha256.Sum256(galleryThumbnailFile(t, transparent.ID)), "a later start must not scan again")
+			require.NoError(t, service.RemakeTransparentGalleryThumbnails(ctx))
+			assert.Equal(t, sha256.Sum256(legacy), sha256.Sum256(galleryThumbnailFile(t, transparent.ID)), "a later pass must not scan again")
 		})
 	}
 }
 
 // With no room left for the larger PNG, a black thumbnail is dropped rather than
 // charged past the owner's limit, and the original stands in for it.
-func TestGalleryStartDropsBlackThumbnailWithoutRoomForItsRemake(t *testing.T) {
+func TestGalleryRemakeDropsBlackThumbnailWithoutRoomForItsPNG(t *testing.T) {
 	galleryFixture(t, sqlite.Open(filepath.Join(t.TempDir(), "gallery.db")))
 	ctx := context.Background()
 	original := galleryLargePNG(t, true)
@@ -575,8 +621,7 @@ func TestGalleryStartDropsBlackThumbnailWithoutRoomForItsRemake(t *testing.T) {
 	settings.UserMaxBytes = used
 	require.NoError(t, model.WriteGallerySettings(ctx, *settings))
 
-	service.StartGallery()
-	t.Cleanup(service.StopGallery)
+	require.NoError(t, service.RemakeTransparentGalleryThumbnails(ctx))
 
 	var after model.GalleryImage
 	require.NoError(t, model.DB.First(&after, "id = ?", saved.ID).Error)
@@ -584,13 +629,33 @@ func TestGalleryStartDropsBlackThumbnailWithoutRoomForItsRemake(t *testing.T) {
 	assert.Equal(t, before.StorageBytes-int64(len(legacy)), after.StorageBytes)
 	_, err = os.Stat(filepath.Join(os.Getenv("GALLERY_STORAGE_DIR"), "gallery-"+saved.ID+".thumbnail"))
 	assert.True(t, os.IsNotExist(err))
-	file, mime, err := service.OpenGalleryImage(ctx, 1, saved.ID, true)
-	require.NoError(t, err)
-	served, err := io.ReadAll(file)
-	require.NoError(t, file.Close())
-	require.NoError(t, err)
+	served, mime := readGalleryImage(t, 1, saved.ID, true)
 	assert.Equal(t, sha256.Sum256(original), sha256.Sum256(served))
 	assert.Equal(t, "image/png", mime)
+}
+
+// A pass that cannot read an original stops short of marking the gallery
+// checked, so the next run takes it up instead of leaving the black thumbnail.
+func TestGalleryRemakeRetriesAfterAnUnreadableOriginal(t *testing.T) {
+	galleryFixture(t, sqlite.Open(filepath.Join(t.TempDir(), "gallery.db")))
+	ctx := context.Background()
+	saved, err := gallerySave(t, 1, "drawing", "transparent", galleryLargePNG(t, true))
+	require.NoError(t, err)
+	legacy := writeLegacyGalleryThumbnail(t, saved.ID)
+	path := filepath.Join(os.Getenv("GALLERY_STORAGE_DIR"), "gallery-"+saved.ID+".original")
+	require.NoError(t, os.Rename(path, path+".away"))
+	// There, but not a file that can be read.
+	require.NoError(t, os.Mkdir(path, 0700))
+
+	assert.Error(t, service.RemakeTransparentGalleryThumbnails(ctx))
+	assert.Equal(t, sha256.Sum256(legacy), sha256.Sum256(galleryThumbnailFile(t, saved.ID)))
+
+	require.NoError(t, os.Remove(path))
+	require.NoError(t, os.Rename(path+".away", path))
+	require.NoError(t, service.RemakeTransparentGalleryThumbnails(ctx))
+	_, format, err := image.Decode(bytes.NewReader(galleryThumbnailFile(t, saved.ID)))
+	require.NoError(t, err)
+	assert.Equal(t, "png", format)
 }
 
 func TestTaskGalleryImageIsReusedWhenCanvasIsSaved(t *testing.T) {
@@ -1367,28 +1432,13 @@ func TestGalleryCanvasLinkedPreviewMetadataAndTombstoneAccounting(t *testing.T) 
 func TestGalleryCanvasDerivesThumbnailWhenClientSendsNone(t *testing.T) {
 	galleryFixture(t, sqlite.Open(filepath.Join(t.TempDir(), "gallery.db")))
 	ctx := context.Background()
-	// Opaque, so its preview is a JPEG: a transparent picture this small keeps a
-	// PNG preview that equals its original byte for byte.
-	picture := image.NewRGBA(image.Rect(0, 0, 16, 8))
-	for i := range picture.Pix {
-		picture.Pix[i] = 0xff
-	}
-	var encoded bytes.Buffer
-	require.NoError(t, png.Encode(&encoded, picture))
-	original := encoded.Bytes()
-	metadata := canvasSaveMetadata(t)
-	asset := metadata["assets"].([]any)[0].(map[string]any)
-	asset["bytes"], asset["sha256"] = len(original), fmt.Sprintf("%x", sha256.Sum256(original))
-	saved, err := saveCanvasMetadata(t, 41, metadata, []string{"file:" + canvasFixtureAsset, string(original)})
+	original := galleryPNG(t)
+	saved, err := saveCanvasMetadata(t, 41, canvasSaveMetadata(t), []string{"file:" + canvasFixtureAsset, string(original)})
 	require.NoError(t, err)
 	require.Len(t, saved.Assets, 1)
 	assert.True(t, saved.Assets[0].HasThumbnail)
 
-	f, _, err := service.OpenGalleryImage(ctx, 41, canvasFixtureAsset, true)
-	require.NoError(t, err)
-	data, err := io.ReadAll(f)
-	require.NoError(t, f.Close())
-	require.NoError(t, err)
+	data := galleryThumbnailFile(t, canvasFixtureAsset)
 	assert.NotEqual(t, original, data, "the preview must not be the original")
 	_, err = jpeg.Decode(bytes.NewReader(data))
 	require.NoError(t, err)
@@ -1402,6 +1452,9 @@ func TestGalleryCanvasDerivesThumbnailWhenClientSendsNone(t *testing.T) {
 func TestGalleryCanvasThumbnailActualBytesAndNAICloudRoundtrip(t *testing.T) {
 	galleryFixture(t, sqlite.Open(filepath.Join(t.TempDir(), "gallery.db")))
 	ctx := context.Background()
+	// Past the check of thumbnails stored before they kept transparency, as
+	// after any start, so the stored thumbnail is what gets served.
+	require.NoError(t, service.RemakeTransparentGalleryThumbnails(ctx))
 	metadata := canvasSaveMetadata(t)
 	var thumb bytes.Buffer
 	require.NoError(t, jpeg.Encode(&thumb, image.NewRGBA(image.Rect(0, 0, 16, 8)), &jpeg.Options{Quality: 80}))

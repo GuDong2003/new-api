@@ -1,7 +1,6 @@
 package service
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -307,7 +306,7 @@ func SaveGalleryImage(ctx context.Context, user int, reader *multipart.Reader) (
 	if err != nil {
 		return nil, model.ErrGalleryInvalid
 	}
-	thumbnail, err := makeGalleryThumbnail(ctx, root, record)
+	thumbnail, _, err := makeGalleryThumbnail(ctx, root, record)
 	if err != nil {
 		return nil, err
 	}
@@ -497,7 +496,7 @@ func saveTaskGalleryImage(ctx context.Context, user int, metadata GalleryMetadat
 	if !errors.Is(duplicateErr, gorm.ErrRecordNotFound) {
 		return nil, model.ErrGalleryUnavailable
 	}
-	thumbnail, err := makeGalleryThumbnail(ctx, root, record)
+	thumbnail, _, err := makeGalleryThumbnail(ctx, root, record)
 	if err != nil {
 		return nil, err
 	}
@@ -559,14 +558,22 @@ func OpenGalleryImage(ctx context.Context, user int, id string, thumbnail bool) 
 	if kind == "original" {
 		return file, record.MIMEType, nil
 	}
-	signature := make([]byte, len(galleryPNGSignature))
-	_, readErr := io.ReadFull(file, signature)
+	isPNG := isPNGGalleryThumbnail(file)
 	if _, err = file.Seek(0, io.SeekStart); err != nil {
 		file.Close()
 		return nil, "", model.ErrGalleryUnavailable
 	}
-	if readErr == nil && bytes.Equal(signature, galleryPNGSignature) {
+	if isPNG {
 		return file, "image/png", nil
+	}
+	// A JPEG thumbnail of a PNG or WebP picture may paint its transparency black
+	// until every thumbnail has been checked; the original stands in till then.
+	if record.MIMEType != "image/jpeg" && !galleryThumbnailsChecked(root) {
+		file.Close()
+		if file, err = openGalleryFile(root, id, "original"); err != nil {
+			return nil, "", model.ErrGalleryUnavailable
+		}
+		return file, record.MIMEType, nil
 	}
 	return file, "image/jpeg", nil
 }
@@ -651,11 +658,13 @@ func StartGallery() {
 	if err := CleanupGallery(ctx); err != nil {
 		common.SysError("Gallery storage is unavailable.")
 	}
-	if err := remakeTransparentGalleryThumbnails(ctx); err != nil {
-		common.SysError("Gallery thumbnails that lost transparency could not be remade.")
-	}
 	go func() {
 		defer close(galleryDone)
+		// Off the startup path, since it decodes originals: until it is done,
+		// originals stand in for the thumbnails it has yet to check.
+		if err := RemakeTransparentGalleryThumbnails(ctx); err != nil && ctx.Err() == nil {
+			common.SysError("Gallery thumbnails that lost transparency could not be remade.")
+		}
 		ticker := time.NewTicker(time.Minute)
 		defer ticker.Stop()
 		for {
@@ -665,6 +674,10 @@ func StartGallery() {
 			case <-ticker.C:
 				if err := CleanupGallery(ctx); err != nil && ctx.Err() == nil {
 					common.SysError("Gallery storage is unavailable.")
+				}
+				// Picks up a failed run; once one has finished, this is one stat.
+				if err := RemakeTransparentGalleryThumbnails(ctx); err != nil && ctx.Err() == nil {
+					common.SysError("Gallery thumbnails that lost transparency could not be remade.")
 				}
 			}
 		}

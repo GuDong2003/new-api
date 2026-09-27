@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"hash/crc32"
 	"image"
 	"image/jpeg"
@@ -14,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/google/uuid"
 	"github.com/shirou/gopsutil/disk"
@@ -28,8 +30,20 @@ var galleryPNGSignature = []byte("\x89PNG\r\n\x1a\n")
 
 // galleryTransparentThumbnailsMarker marks, inside the storage directory it
 // describes, that every thumbnail there keeps its original's transparency.
-// Builds before it wrote every thumbnail as JPEG, painting transparency black.
+// Builds before it wrote every thumbnail as JPEG, painting transparency black;
+// until it exists, originals stand in for JPEG thumbnails of PNG and WebP ones.
 const galleryTransparentThumbnailsMarker = ".transparent-thumbnails"
+
+func galleryThumbnailsChecked(root string) bool {
+	_, err := os.Lstat(filepath.Join(root, galleryTransparentThumbnailsMarker))
+	return err == nil
+}
+
+func isPNGGalleryThumbnail(r io.Reader) bool {
+	signature := make([]byte, len(galleryPNGSignature))
+	_, err := io.ReadFull(r, signature)
+	return err == nil && bytes.Equal(signature, galleryPNGSignature)
+}
 
 func galleryRoot() (string, error) {
 	root := os.Getenv("GALLERY_STORAGE_DIR")
@@ -367,24 +381,29 @@ func (b *galleryThumbnailBuffer) Write(data []byte) (int, error) {
 	return b.Buffer.Write(data)
 }
 
-func makeGalleryThumbnail(ctx context.Context, root string, record *model.GalleryImage) ([]byte, error) {
+// makeGalleryThumbnail makes an original's thumbnail: a JPEG, or a PNG when the
+// picture has transparency, which JPEG would paint black, and reports whether it
+// found any. An original too large to decode safely gets none, and so does a
+// transparent one whose PNG would be no smaller than itself, as one within the
+// thumbnail size is: the original stands in for those.
+func makeGalleryThumbnail(ctx context.Context, root string, record *model.GalleryImage) ([]byte, bool, error) {
 	if ctx.Err() != nil {
-		return nil, model.ErrGallerySave
+		return nil, false, model.ErrGallerySave
 	}
 	if record.Bytes > 16<<20 || record.Width > 8192 || record.Height > 8192 || int64(record.Width)*int64(record.Height) > 16777216 {
-		return nil, nil
+		return nil, false, nil
 	}
 	f, err := openGalleryFile(root, record.ID, "original")
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	defer f.Close()
 	decoded, _, err := image.Decode(f)
 	if err != nil {
-		return nil, model.ErrGalleryInvalid
+		return nil, false, model.ErrGalleryInvalid
 	}
 	if ctx.Err() != nil {
-		return nil, model.ErrGallerySave
+		return nil, false, model.ErrGallerySave
 	}
 	width, height := record.Width, record.Height
 	if max(width, height) > 512 {
@@ -392,31 +411,33 @@ func makeGalleryThumbnail(ctx context.Context, root string, record *model.Galler
 	}
 	scaled := image.NewRGBA(image.Rect(0, 0, width, height))
 	draw.ApproxBiLinear.Scale(scaled, scaled.Bounds(), decoded, decoded.Bounds(), draw.Src, nil)
+	transparent := !scaled.Opaque()
 	var encoded galleryThumbnailBuffer
-	if scaled.Opaque() {
-		err = jpeg.Encode(&encoded, scaled, &jpeg.Options{Quality: 80})
-	} else {
+	if transparent {
 		err = png.Encode(&encoded, scaled)
+	} else {
+		err = jpeg.Encode(&encoded, scaled, &jpeg.Options{Quality: 80})
 	}
-	if err != nil {
-		return nil, nil
+	if err != nil || (transparent && int64(encoded.Len()) >= record.Bytes) {
+		return nil, transparent, nil
 	}
-	return encoded.Bytes(), nil
+	return encoded.Bytes(), transparent, nil
 }
 
-// remakeTransparentGalleryThumbnails gives every PNG or WebP original whose JPEG
-// thumbnail painted its transparency black a PNG thumbnail, once per storage
-// directory. It must finish before requests are served: a browser caching a
-// thumbnail meanwhile would keep the black copy.
-func remakeTransparentGalleryThumbnails(ctx context.Context) error {
+// RemakeTransparentGalleryThumbnails checks, once per storage directory, every
+// JPEG thumbnail of a PNG or WebP original. A transparent picture's is replaced
+// by a PNG, or dropped when that would be no smaller than the original or would
+// not fit its owner's limit, and the original stands in. It is safe to repeat:
+// a failed run leaves what it did not reach to the next.
+func RemakeTransparentGalleryThumbnails(ctx context.Context) error {
 	root, err := galleryRoot()
 	if err != nil {
 		return err
 	}
-	marker := filepath.Join(root, galleryTransparentThumbnailsMarker)
-	if _, err = os.Lstat(marker); err == nil {
+	if galleryThumbnailsChecked(root) {
 		return nil
 	}
+	checked, changed := 0, 0
 	after := ""
 	for {
 		var ids []string
@@ -430,92 +451,113 @@ func remakeTransparentGalleryThumbnails(ctx context.Context) error {
 			break
 		}
 		for _, id := range ids {
-			if err = remakeTransparentGalleryThumbnail(ctx, root, id); err != nil {
+			remade, err := remakeTransparentGalleryThumbnail(ctx, root, id)
+			if err != nil {
 				return err
+			}
+			checked++
+			if remade {
+				changed++
 			}
 		}
 		after = ids[len(ids)-1]
 	}
-	if err = os.WriteFile(marker, nil, 0600); err != nil {
+	if err = os.WriteFile(filepath.Join(root, galleryTransparentThumbnailsMarker), nil, 0600); err != nil {
 		return model.ErrGallerySave
 	}
+	common.SysLog(fmt.Sprintf("Gallery thumbnails keep transparency now: %d checked, %d remade or dropped.", checked, changed))
 	return nil
 }
 
-// remakeTransparentGalleryThumbnail replaces one image's JPEG thumbnail with a
-// PNG when its original has transparency. Without room for a larger file under
-// the owner's limit, the black thumbnail still goes: the original stands in.
-func remakeTransparentGalleryThumbnail(ctx context.Context, root, id string) error {
+// remakeTransparentGalleryThumbnail treats one image as
+// RemakeTransparentGalleryThumbnails describes, and reports whether its
+// thumbnail changed.
+func remakeTransparentGalleryThumbnail(ctx context.Context, root, id string) (bool, error) {
 	galleryMu.Lock()
 	defer galleryMu.Unlock()
 	var record model.GalleryImage
 	err := model.DB.WithContext(ctx).Where("id = ? AND state = ? AND has_thumbnail = ?", id, "ready", true).First(&record).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil
+		return false, nil
 	}
 	if err != nil {
-		return model.ErrGalleryUnavailable
+		return false, model.ErrGalleryUnavailable
 	}
 	path, err := galleryFilePath(root, id, "thumbnail")
 	if err != nil {
-		return err
+		return false, err
+	}
+	if _, err = os.Lstat(path); os.IsNotExist(err) {
+		// A thumbnail lost with a restore is not this pass's to make.
+		return false, nil
 	}
 	file, err := openGalleryFile(root, id, "thumbnail")
 	if err != nil {
-		// A thumbnail lost with a restore is not this pass's to make.
-		return nil
+		return false, err
 	}
-	current, err := io.ReadAll(io.LimitReader(file, 1<<20+1))
+	info, statErr := file.Stat()
+	isPNG := isPNGGalleryThumbnail(file)
 	file.Close()
-	if err != nil || len(current) > 1<<20 || bytes.HasPrefix(current, galleryPNGSignature) {
+	if statErr != nil {
+		return false, model.ErrGalleryUnavailable
+	}
+	if isPNG {
 		// A PNG thumbnail keeps transparency already.
-		return nil
+		return false, nil
 	}
-	remade, err := makeGalleryThumbnail(ctx, root, &record)
+	remade, transparent, err := makeGalleryThumbnail(ctx, root, &record)
+	if errors.Is(err, model.ErrGalleryUnavailable) {
+		if lost, lostErr := galleryOriginalLost(root, id); lostErr == nil && lost {
+			// An original lost with a restore cannot tell whether it had
+			// transparency, and its thumbnail is all that is left of it.
+			return false, nil
+		}
+		return false, model.ErrGalleryUnavailable
+	}
 	if errors.Is(err, model.ErrGallerySave) {
-		return err
+		return false, err
 	}
-	if err != nil || !bytes.HasPrefix(remade, galleryPNGSignature) {
-		// An original lost with a restore or no longer decodable keeps what it
-		// has, and so does an opaque one, whose JPEG is right.
-		return nil
+	if err != nil || !transparent {
+		// An original that no longer decodes keeps its thumbnail, and so does an
+		// opaque one, whose JPEG is right.
+		return false, nil
 	}
 	settings, err := GetGallerySettings(ctx)
 	if err != nil {
-		return err
+		return false, err
 	}
 	_, used, total, err := model.GalleryTotals(ctx, record.UserID)
 	if err != nil {
-		return model.ErrGalleryUnavailable
+		return false, model.ErrGalleryUnavailable
 	}
 	room := min(settings.UserMaxBytes-used, settings.TotalMaxBytes-total)
 	// Drop the black thumbnail first, so stopping part way leaves the original
 	// standing in for it rather than a record naming a missing file.
-	storageBytes := max(0, record.StorageBytes-int64(len(current)))
+	storageBytes := max(0, record.StorageBytes-info.Size())
 	if err = model.DB.WithContext(ctx).Model(&record).Updates(map[string]any{"has_thumbnail": false, "storage_bytes": storageBytes}).Error; err != nil {
-		return model.ErrGalleryUnavailable
+		return false, model.ErrGalleryUnavailable
 	}
 	if err = os.Remove(path); err != nil && !os.IsNotExist(err) {
-		return model.ErrGalleryUnavailable
+		return true, model.ErrGalleryUnavailable
 	}
-	if int64(len(remade)-len(current)) > max(room, 0) {
-		return nil
+	if remade == nil || int64(len(remade))-info.Size() > max(room, 0) {
+		return true, nil
 	}
 	writer, err := newGalleryWriter(ctx, root, id, "thumbnail", int64(len(remade)))
 	if err != nil {
-		return err
+		return true, err
 	}
 	_, writeErr := writer.Write(remade)
 	closeErr := writer.Close()
 	if writeErr != nil || closeErr != nil {
 		// Out of disk, say: the original keeps standing in.
 		if err = os.Remove(path); err != nil && !os.IsNotExist(err) {
-			return model.ErrGalleryUnavailable
+			return true, model.ErrGalleryUnavailable
 		}
-		return nil
+		return true, nil
 	}
 	if err = model.DB.WithContext(ctx).Model(&record).Updates(map[string]any{"has_thumbnail": true, "storage_bytes": storageBytes + writer.written}).Error; err != nil {
-		return model.ErrGalleryUnavailable
+		return true, model.ErrGalleryUnavailable
 	}
-	return nil
+	return true, nil
 }
