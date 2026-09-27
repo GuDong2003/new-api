@@ -451,7 +451,10 @@ it('keeps the original a save downloads for a thumbnail after another tab saved 
   await openThumbnailCanvasWithItsOriginal()
   // Another tab renames the canvas, which changes nothing it holds.
   const stored = required(await loadLocalCanvas(813, canvasId))
-  await canvasRepository.saveLocalCanvas({ ...stored, name: '另一个标签页' }, [])
+  await canvasRepository.saveLocalCanvas(
+    { ...stored, name: '另一个标签页' },
+    []
+  )
 
   await flushLocalEditors(identity)
 
@@ -1439,4 +1442,32 @@ it('scrolls the canvas tools sideways without scrolling them vertically', () => 
   const tools = screen.getByRole('toolbar').firstElementChild
   expect(tools).toHaveClass('overflow-x-auto')
   expect(tools).toHaveClass('overflow-y-hidden')
+})
+
+// A phone leaves the tools a sliver beside the title, cut off mid-button and
+// hiding most of them. Below the desktop layout they take a row of their own
+// and wrap instead.
+it('gives the canvas tools a wrapping row of their own below the desktop layout', () => {
+  render(<CanvasEditorHeader kind='drawing' />)
+
+  const header = screen.getByRole('toolbar')
+  expect(header).toHaveClass(
+    'grid-cols-[auto_minmax(0,1fr)]',
+    'lg:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]'
+  )
+  expect(header.firstElementChild).toHaveClass(
+    'col-span-2',
+    'flex-wrap',
+    'lg:col-span-1',
+    'lg:flex-nowrap'
+  )
+})
+
+it('wraps the save actions instead of spilling them over the canvas title', () => {
+  render(<CanvasEditorHeader kind='drawing' />)
+
+  const actions = screen.getByRole('button', {
+    name: 'Save canvas',
+  }).parentElement
+  expect(actions).toHaveClass('flex-wrap', 'justify-end', 'lg:flex-nowrap')
 })

@@ -142,16 +142,19 @@ export function CanvasEditorHeader(props: {
 
   return (
     <>
+      {/* Beside the title a phone leaves the tools a sliver, cut off
+          mid-button, so below the desktop layout they take a row of their own
+          and wrap; the title and the save state share the row below. */}
       <header
-        className='bg-background grid min-w-0 shrink-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 border-b px-3 py-2'
+        className='bg-background grid min-w-0 shrink-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-x-2 gap-y-1.5 border-b px-3 py-2 lg:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]'
         role='toolbar'
         aria-label={props.toolbarLabel ?? t('Canvas tools')}
       >
-        <div className='flex min-w-0 items-center gap-1 overflow-x-auto overflow-y-hidden'>
+        <div className='col-span-2 flex min-w-0 flex-wrap items-center gap-1 overflow-x-auto overflow-y-hidden lg:col-span-1 lg:flex-nowrap'>
           {props.children}
         </div>
 
-        <div className='flex max-w-[min(42vw,28rem)] min-w-0 items-center justify-center gap-1'>
+        <div className='flex min-w-0 items-center gap-1 lg:max-w-[min(42vw,28rem)] lg:justify-center'>
           <Button
             type='button'
             variant='ghost'
@@ -210,7 +213,7 @@ export function CanvasEditorHeader(props: {
           </Button>
         </div>
 
-        <div className='flex min-w-0 items-center justify-end gap-1'>
+        <div className='flex min-w-0 flex-wrap items-center justify-end gap-1 lg:flex-nowrap'>
           {props.statusDetail}
           <Button
             type='button'
