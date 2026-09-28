@@ -1690,7 +1690,7 @@ function serveClientIdentityVersions(clientType: string, profile: string) {
   })
 }
 
-test('the client identity tab saves a Claude CLI identity picked for an Anthropic channel at the latest version', async () => {
+test('the client identity tab saves a Claude CLI identity for an Anthropic channel that follows the latest official version', async () => {
   editingChannel = { ...editingChannel, type: 14 }
   serveClientIdentityVersions('claude', 'claude_cli')
   const put = vi
@@ -1705,11 +1705,10 @@ test('the client identity tab saves a Claude CLI identity picked for an Anthropi
 
   await user.click(screen.getByRole('combobox', { name: 'Client identity' }))
   await user.click(screen.getByRole('option', { name: 'Claude CLI' }))
-  await waitFor(() =>
-    expect(
-      screen.getByRole('combobox', { name: 'Client version' })
-    ).toHaveTextContent('2.1.283')
-  )
+  await screen.findByText('Latest official version: 2.1.283')
+  expect(
+    screen.getByRole('combobox', { name: 'Client version' })
+  ).toHaveTextContent('Follow latest official version')
   await user.click(screen.getByRole('button', { name: 'Update Channel' }))
 
   await waitFor(() => expect(put).toHaveBeenCalled())
@@ -1717,9 +1716,96 @@ test('the client identity tab saves a Claude CLI identity picked for an Anthropi
   expect(JSON.parse(payload.settings).client_identity).toEqual({
     client_type: 'claude',
     profile: 'claude_cli',
-    version: '2.1.283',
     source: { kind: 'official' },
   })
+})
+
+test('picking a client version on the client identity tab pins the channel to it', async () => {
+  editingChannel = { ...editingChannel, type: 14 }
+  serveClientIdentityVersions('claude', 'claude_cli')
+  const put = vi
+    .spyOn(api, 'put')
+    .mockResolvedValue({ data: { success: true } })
+  const user = userEvent.setup()
+  render(<ConfigurationHarness currentRow={editingChannel} />)
+  await screen.findByDisplayValue('Existing channel')
+  await user.click(
+    screen.getByRole('tab', { name: /Client Identity & Version/ })
+  )
+  await user.click(screen.getByRole('combobox', { name: 'Client identity' }))
+  await user.click(screen.getByRole('option', { name: 'Claude CLI' }))
+  await screen.findByText('Latest official version: 2.1.283')
+
+  await user.click(screen.getByRole('combobox', { name: 'Client version' }))
+  await user.click(screen.getByRole('option', { name: '2.1.282' }))
+  await user.click(screen.getByRole('button', { name: 'Update Channel' }))
+
+  await waitFor(() => expect(put).toHaveBeenCalled())
+  const payload = put.mock.calls[0]?.[1] as { settings: string }
+  expect(JSON.parse(payload.settings).client_identity).toMatchObject({
+    profile: 'claude_cli',
+    version: '2.1.282',
+  })
+})
+
+test('a saved client version the official source no longer lists stays selected on the client identity tab', async () => {
+  editingChannel = {
+    ...editingChannel,
+    type: 14,
+    settings: JSON.stringify({
+      client_identity: {
+        client_type: 'claude',
+        profile: 'claude_cli',
+        version: '2.1.214',
+        source: { kind: 'official' },
+      },
+    }),
+  }
+  serveClientIdentityVersions('claude', 'claude_cli')
+  const user = userEvent.setup()
+  render(<ConfigurationHarness currentRow={editingChannel} />)
+  await screen.findByDisplayValue('Existing channel')
+
+  await user.click(
+    screen.getByRole('tab', { name: /Client Identity & Version/ })
+  )
+
+  await screen.findByText('Latest official version: 2.1.283')
+  expect(
+    screen.getByRole('combobox', { name: 'Client version' })
+  ).toHaveTextContent('2.1.214 (retained selection)')
+})
+
+test('the client identity tab says an empty version follows the latest official version when the version list fails to load', async () => {
+  editingChannel = { ...editingChannel, type: 62 }
+  const originalGet = vi.mocked(api.get).getMockImplementation()
+  vi.mocked(api.get).mockImplementation(async (url, config) => {
+    if (url === '/api/channel/client-identity/versions') {
+      return {
+        data: {
+          success: false,
+          message:
+            'official client identity versions are unavailable and no cached version exists',
+        },
+      }
+    }
+    return originalGet?.(url, config)
+  })
+  const user = userEvent.setup()
+  render(<ConfigurationHarness currentRow={editingChannel} />)
+  await screen.findByDisplayValue('Existing channel')
+
+  await user.click(
+    screen.getByRole('tab', { name: /Client Identity & Version/ })
+  )
+
+  await screen.findByText(/Failed to load client versions/)
+  expect(
+    screen.getByText('Leave empty to follow the latest official version')
+  ).toBeVisible()
+  expect(screen.getByRole('textbox', { name: 'Client version' })).toHaveValue(
+    ''
+  )
 })
 
 test('a Claude Code channel keeps its 1M context switch on the client identity tab', async () => {

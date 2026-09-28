@@ -222,7 +222,8 @@ export function ChannelClientIdentitySection(
   const hasSelectedVersion = Boolean(
     selectedVersion && versionOptions.includes(selectedVersion)
   )
-  const displayVersion = hasSelectedVersion ? selectedVersion : 'default'
+  // An empty version follows the latest official version at request time.
+  const displayVersion = selectedVersion || 'default'
   const selectedPlatform = platform || 'default'
   const isNoClient = effectiveProfile === 'none'
   const setClientIdentityValue = props.setValue
@@ -237,7 +238,7 @@ export function ChannelClientIdentitySection(
     },
   ]
   const versionSelectItems = [
-    { value: 'default', label: t('Use default client version') },
+    { value: 'default', label: t('Follow latest official version') },
     ...(selectedVersion && !hasSelectedVersion
       ? [
           {
@@ -257,33 +258,23 @@ export function ChannelClientIdentitySection(
   ]
 
   useEffect(() => {
-    if (isNoClient) return
-
-    if (source !== automaticSource) {
-      setClientIdentityValue('client_identity_source', automaticSource, {
-        shouldDirty: false,
-        shouldValidate: true,
-      })
-    }
-
-    if (!lookup) return
-    if (lookup.latest && !version?.trim()) {
-      setClientIdentityValue('client_identity_version', lookup.latest, {
-        shouldDirty: false,
-        shouldValidate: true,
-      })
-    }
-  }, [
-    automaticSource,
-    isNoClient,
-    lookup,
-    setClientIdentityValue,
-    source,
-    version,
-  ])
+    if (isNoClient || source === automaticSource) return
+    setClientIdentityValue('client_identity_source', automaticSource, {
+      shouldDirty: false,
+      shouldValidate: true,
+    })
+  }, [automaticSource, isNoClient, setClientIdentityValue, source])
 
   const sourceLabel =
     automaticSource === 'official' ? 'Official source' : 'Manual'
+  let versionDescription = t('Enter a version manually')
+  if (lookup?.latest) {
+    versionDescription = t('Latest official version: {{version}}', {
+      version: lookup.latest,
+    })
+  } else if (automaticSource === 'official') {
+    versionDescription = t('Leave empty to follow the latest official version')
+  }
 
   if (!supported) return null
 
@@ -453,7 +444,7 @@ export function ChannelClientIdentitySection(
                   <FormControl>
                     <SelectTrigger className='w-full'>
                       <SelectValue
-                        placeholder={t('Use default client version')}
+                        placeholder={t('Follow latest official version')}
                       />
                     </SelectTrigger>
                   </FormControl>
@@ -463,7 +454,7 @@ export function ChannelClientIdentitySection(
                   >
                     <SelectGroup>
                       <SelectItem value='default'>
-                        {t('Use default client version')}
+                        {t('Follow latest official version')}
                       </SelectItem>
                       {selectedVersion && !hasSelectedVersion && (
                         <SelectItem value={selectedVersion}>
@@ -490,13 +481,7 @@ export function ChannelClientIdentitySection(
                   />
                 </FormControl>
               )}
-              <FormDescription>
-                {lookup?.latest
-                  ? t('Latest official version: {{version}}', {
-                      version: lookup.latest,
-                    })
-                  : t('Enter a version manually')}
-              </FormDescription>
+              <FormDescription>{versionDescription}</FormDescription>
               <FormMessage />
             </FormItem>
           )}

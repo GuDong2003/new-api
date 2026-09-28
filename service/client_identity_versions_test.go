@@ -5,9 +5,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -319,4 +323,169 @@ func TestClientIdentityVersionServiceRejectsInvalidWorkBuddyProductVersion(t *te
 	_, err := service.ListVersions(t.Context(), dto.ClientIdentityProfileCodeBuddy, "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid WorkBuddy product version")
+}
+
+// clientIdentityRegistry is a fake npm registry. It answers a package with its
+// latest version, or 502 when that version is empty or missing, and counts the
+// requests per package.
+type clientIdentityRegistry struct {
+	mu       sync.Mutex
+	latest   map[string]string
+	requests map[string]int
+}
+
+func newClientIdentityRegistry(t *testing.T, latest map[string]string) (*clientIdentityRegistry, *httptest.Server) {
+	t.Helper()
+	registry := &clientIdentityRegistry{latest: latest, requests: make(map[string]int)}
+	server := httptest.NewServer(registry)
+	t.Cleanup(server.Close)
+	return registry, server
+}
+
+func (r *clientIdentityRegistry) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	name := strings.TrimPrefix(req.URL.Path, "/")
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.requests[name]++
+	version := r.latest[name]
+	if version == "" {
+		w.WriteHeader(http.StatusBadGateway)
+		return
+	}
+	_, _ = fmt.Fprintf(w, `{"name":%q,"dist-tags":{"latest":%q},"versions":{%q:{}}}`, name, version, version)
+}
+
+func (r *clientIdentityRegistry) setLatest(name, version string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.latest[name] = version
+}
+
+func (r *clientIdentityRegistry) requestCount(name string) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.requests[name]
+}
+
+func TestClientIdentityLatestVersionIsCheckedInTheBackground(t *testing.T) {
+	now := time.Date(2026, time.September, 28, 0, 0, 0, 0, time.UTC)
+	registry, server := newClientIdentityRegistry(t, map[string]string{
+		dto.ClientIdentityNPMClaudeCodePackage: "2.1.283",
+	})
+	versions := NewClientIdentityVersionService(ClientIdentityVersionServiceOptions{
+		HTTPClient:       server.Client(),
+		NPMRegistryURL:   server.URL,
+		CacheTTL:         time.Hour,
+		Now:              func() time.Time { return now },
+		BackgroundChecks: true,
+	})
+
+	// Until the first check answers, callers keep their built-in version.
+	assert.Empty(t, versions.LatestVersion(dto.ClientIdentityProfileClaudeCode, ""))
+	versions.background.Wait()
+	assert.Equal(t, "2.1.283", versions.LatestVersion(dto.ClientIdentityProfileClaudeCode, ""))
+
+	// A version checked a cache period ago is still used while the next
+	// check runs.
+	registry.setLatest(dto.ClientIdentityNPMClaudeCodePackage, "2.1.284")
+	now = now.Add(time.Hour)
+	assert.Equal(t, "2.1.283", versions.LatestVersion(dto.ClientIdentityProfileClaudeCode, ""))
+	versions.background.Wait()
+	assert.Equal(t, "2.1.284", versions.LatestVersion(dto.ClientIdentityProfileClaudeCode, ""))
+	assert.Equal(t, 2, registry.requestCount(dto.ClientIdentityNPMClaudeCodePackage))
+}
+
+func TestClientIdentityLatestVersionRetriesAnUnansweredSourceLater(t *testing.T) {
+	now := time.Date(2026, time.September, 28, 0, 0, 0, 0, time.UTC)
+	registry, server := newClientIdentityRegistry(t, map[string]string{})
+	versions := NewClientIdentityVersionService(ClientIdentityVersionServiceOptions{
+		HTTPClient:       server.Client(),
+		NPMRegistryURL:   server.URL,
+		CacheTTL:         time.Hour,
+		Now:              func() time.Time { return now },
+		BackgroundChecks: true,
+	})
+	check := func() string {
+		versions.LatestVersion(dto.ClientIdentityProfileCodexCLI, "")
+		versions.background.Wait()
+		return versions.LatestVersion(dto.ClientIdentityProfileCodexCLI, "")
+	}
+
+	// With nothing cached, a source that does not answer is not asked again
+	// until the retry delay has passed.
+	assert.Empty(t, check())
+	assert.Empty(t, check())
+	assert.Equal(t, 1, registry.requestCount(dto.ClientIdentityNPMCodexPackage))
+	registry.setLatest(dto.ClientIdentityNPMCodexPackage, "0.158.0")
+	now = now.Add(clientIdentityCheckRetry)
+	assert.Equal(t, "0.158.0", check())
+	assert.Equal(t, 2, registry.requestCount(dto.ClientIdentityNPMCodexPackage))
+
+	// A cached version outlives a failed check, which is retried after the
+	// retry delay rather than after another cache period.
+	registry.setLatest(dto.ClientIdentityNPMCodexPackage, "")
+	now = now.Add(time.Hour)
+	assert.Equal(t, "0.158.0", check())
+	registry.setLatest(dto.ClientIdentityNPMCodexPackage, "0.159.0")
+	now = now.Add(clientIdentityCheckRetry)
+	assert.Equal(t, "0.159.0", check())
+	assert.Equal(t, 4, registry.requestCount(dto.ClientIdentityNPMCodexPackage))
+}
+
+func TestClientIdentityLatestVersionWithoutBackgroundChecksUsesAdminLookups(t *testing.T) {
+	registry, server := newClientIdentityRegistry(t, map[string]string{
+		dto.ClientIdentityNPMClaudeCodePackage: "2.1.283",
+	})
+	versions := NewClientIdentityVersionService(ClientIdentityVersionServiceOptions{
+		HTTPClient:     server.Client(),
+		NPMRegistryURL: server.URL,
+	})
+
+	assert.Empty(t, versions.LatestVersion(dto.ClientIdentityProfileClaudeCLI, ""))
+	versions.background.Wait()
+	assert.Zero(t, registry.requestCount(dto.ClientIdentityNPMClaudeCodePackage))
+
+	_, err := versions.ListVersions(t.Context(), dto.ClientIdentityProfileClaudeCLI, "")
+	require.NoError(t, err)
+	assert.Equal(t, "2.1.283", versions.LatestVersion(dto.ClientIdentityProfileClaudeCLI, ""))
+}
+
+func TestClientIdentityVersionChecksCoverEnabledChannelsFollowingTheLatestVersion(t *testing.T) {
+	truncate(t)
+	channels := []*model.Channel{
+		{Id: 1, Type: constant.ChannelTypeClaudeCode, Name: "claude code", Key: "sk-1", Status: common.ChannelStatusEnabled},
+		{
+			Id: 2, Type: constant.ChannelTypeAnthropic, Name: "anthropic", Key: "sk-2", Status: common.ChannelStatusEnabled,
+			OtherSettings: `{"client_identity":{"client_type":"claude","profile":"claude_cli","platform":"macos-arm64"}}`,
+		},
+		{
+			Id: 3, Type: constant.ChannelTypeCodexCompatibility, Name: "pinned codex", Key: "sk-3", Status: common.ChannelStatusEnabled,
+			OtherSettings: `{"client_identity":{"client_type":"codex","profile":"codex_compatibility","version":"0.150.0"}}`,
+		},
+		{Id: 4, Type: constant.ChannelTypeCodexCompatibility, Name: "disabled codex", Key: "sk-4", Status: common.ChannelStatusManuallyDisabled},
+		{Id: 5, Type: constant.ChannelTypeOpenAI, Name: "openai", Key: "sk-5", Status: common.ChannelStatusEnabled},
+		{Id: 6, Type: constant.ChannelTypeCodex, Name: "codex", Key: "sk-6", Status: common.ChannelStatusEnabled},
+	}
+	for _, channel := range channels {
+		require.NoError(t, model.DB.Create(channel).Error)
+	}
+	registry, server := newClientIdentityRegistry(t, map[string]string{
+		dto.ClientIdentityNPMClaudeCodePackage: "2.1.283",
+		dto.ClientIdentityNPMCodexPackage:      "0.158.0",
+	})
+	versions := NewClientIdentityVersionService(ClientIdentityVersionServiceOptions{
+		HTTPClient:       server.Client(),
+		NPMRegistryURL:   server.URL,
+		BackgroundChecks: true,
+	})
+
+	versions.checkChannelVersions()
+	versions.background.Wait()
+
+	// The Claude Code channel and the Claude CLI identity are checked. The
+	// pinned and disabled Codex compatibility channels, the Codex channel
+	// without a saved identity and the plain OpenAI channel are not.
+	assert.Zero(t, registry.requestCount(dto.ClientIdentityNPMCodexPackage))
+	assert.Equal(t, "2.1.283", versions.LatestVersion(dto.ClientIdentityProfileClaudeCode, ""))
+	assert.Equal(t, "2.1.283", versions.LatestVersion(dto.ClientIdentityProfileClaudeCLI, dto.ClientIdentityPlatformMacOSArm64))
 }

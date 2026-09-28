@@ -13,7 +13,11 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relaykit/dto"
+
+	"github.com/bytedance/gopkg/util/gopool"
 )
 
 const (
@@ -23,6 +27,10 @@ const (
 	clientIdentityRequestLimit = 10 * time.Second
 	clientIdentityMaxBodyBytes = 8 << 20
 	clientIdentityMaxVersions  = 64
+	// clientIdentityCheckRetry is how long a source that did not answer is
+	// left alone before it is asked again, whether or not a version checked
+	// before is cached.
+	clientIdentityCheckRetry = 10 * time.Minute
 )
 
 // ClientIdentityVersionServiceOptions is intentionally limited to testable
@@ -35,6 +43,9 @@ type ClientIdentityVersionServiceOptions struct {
 	RequestTimeout     time.Duration
 	MaxBodyBytes       int64
 	Now                func() time.Time
+	// BackgroundChecks lets LatestVersion check the official source by
+	// itself. The shared service turns it on when the gateway starts.
+	BackgroundChecks bool
 }
 
 type clientIdentityVersionCacheEntry struct {
@@ -74,8 +85,14 @@ type ClientIdentityVersionService struct {
 	maxBodyBytes   int64
 	now            func() time.Time
 
-	mu    sync.Mutex
-	cache map[string]clientIdentityVersionCacheEntry
+	mu               sync.Mutex
+	cache            map[string]clientIdentityVersionCacheEntry
+	backgroundChecks bool
+	checking         map[string]struct{}
+	retryAt          map[string]time.Time
+	// background tracks the checks LatestVersion starts, so tests can wait
+	// for them.
+	background sync.WaitGroup
 }
 
 func NewClientIdentityVersionService(options ClientIdentityVersionServiceOptions) *ClientIdentityVersionService {
@@ -108,14 +125,17 @@ func NewClientIdentityVersionService(options ClientIdentityVersionServiceOptions
 		now = time.Now
 	}
 	return &ClientIdentityVersionService{
-		client:         client,
-		npmRegistryURL: npmRegistryURL,
-		workBuddyURL:   workBuddyURL,
-		cacheTTL:       cacheTTL,
-		requestTimeout: requestTimeout,
-		maxBodyBytes:   maxBodyBytes,
-		now:            now,
-		cache:          make(map[string]clientIdentityVersionCacheEntry),
+		client:           client,
+		npmRegistryURL:   npmRegistryURL,
+		workBuddyURL:     workBuddyURL,
+		cacheTTL:         cacheTTL,
+		requestTimeout:   requestTimeout,
+		maxBodyBytes:     maxBodyBytes,
+		now:              now,
+		cache:            make(map[string]clientIdentityVersionCacheEntry),
+		backgroundChecks: options.BackgroundChecks,
+		checking:         make(map[string]struct{}),
+		retryAt:          make(map[string]time.Time),
 	}
 }
 
@@ -135,6 +155,52 @@ func HasDueCachedClientIdentityVersions() bool {
 
 func RefreshCachedClientIdentityVersions(ctx context.Context) (ClientIdentityVersionRefreshSummary, error) {
 	return defaultClientIdentityVersionService.RefreshCachedVersions(ctx)
+}
+
+// LatestClientIdentityVersion returns the newest official version the gateway
+// has checked for a client profile and platform, or "" when none is known
+// yet. It never waits on the official source.
+func LatestClientIdentityVersion(profile, platform string) string {
+	return defaultClientIdentityVersionService.LatestVersion(profile, platform)
+}
+
+// StartClientIdentityVersionChecks lets client identities without a pinned
+// version follow the latest official client version. It also checks the
+// versions that enabled channels follow, so their first requests after a
+// restart do not fall back to the built-in versions.
+func StartClientIdentityVersionChecks() {
+	versions := defaultClientIdentityVersionService
+	versions.mu.Lock()
+	versions.backgroundChecks = true
+	versions.mu.Unlock()
+	gopool.Go(versions.checkChannelVersions)
+}
+
+// checkChannelVersions starts a background check for each version that an
+// enabled channel follows. A channel follows the latest version when its
+// client identity, or the default identity of its type, pins no version.
+// Codex channels send no client identity until one is saved.
+func (s *ClientIdentityVersionService) checkChannelVersions() {
+	channels, err := model.GetAllChannels(0, 0, true, false)
+	if err != nil {
+		common.SysError("failed to load channels for client identity version checks: " + err.Error())
+		return
+	}
+	for _, channel := range channels {
+		if channel.Status != common.ChannelStatusEnabled || !dto.SupportsClientIdentityChannelType(channel.Type) {
+			continue
+		}
+		identity := dto.DefaultClientIdentityConfig(channel.Type)
+		if settings := channel.GetOtherSettings(); settings.ClientIdentity != nil && !settings.ClientIdentity.IsZero() {
+			identity = *settings.ClientIdentity
+		} else if channel.Type == constant.ChannelTypeCodex {
+			continue
+		}
+		if identity.Normalize(channel.Type) != nil || identity.Version != "" {
+			continue
+		}
+		s.LatestVersion(identity.Profile, identity.Platform)
+	}
 }
 
 func (s *ClientIdentityVersionService) HasDueVersions() bool {
@@ -193,6 +259,57 @@ func (s *ClientIdentityVersionService) RefreshVersions(ctx context.Context, prof
 	return s.lookup(ctx, profile, platform, true)
 }
 
+// LatestVersion returns the newest official version already checked for a
+// profile and platform, or "" when none is known. It never waits on the
+// official source. With background checks on, a version that was never
+// checked, or was checked a cache period ago, starts one check, and later
+// calls return its result; until then a day-old version is still returned.
+func (s *ClientIdentityVersionService) LatestVersion(profile, platform string) string {
+	profile, err := dto.NormalizeClientIdentityProfile(profile)
+	if err != nil {
+		return ""
+	}
+	platform, err = dto.NormalizeClientIdentityPlatform(platform)
+	if err != nil {
+		return ""
+	}
+	kind, _, err := dto.ClientIdentitySourceForProfile(profile)
+	if err != nil || (kind != dto.ClientIdentitySourceNPM && kind != dto.ClientIdentitySourceWorkBuddy) {
+		return ""
+	}
+	if profile == dto.ClientIdentityProfileCodeBuddy {
+		if _, err := dto.WorkBuddyUpdatePlatform(platform); err != nil {
+			return ""
+		}
+	}
+
+	key := profile + "|" + platform
+	now := s.now()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	entry, cached := s.cache[key]
+	_, checking := s.checking[key]
+	due := !cached || !now.Before(entry.expiresAt)
+	if s.backgroundChecks && due && !checking && !now.Before(s.retryAt[key]) {
+		s.checking[key] = struct{}{}
+		s.background.Go(func() {
+			_, err := s.lookup(context.Background(), profile, platform, false)
+			if err != nil {
+				common.SysError(fmt.Sprintf("failed to check client identity version: profile=%s platform=%s err=%v", profile, platform, err))
+			}
+			s.mu.Lock()
+			defer s.mu.Unlock()
+			delete(s.checking, key)
+			if err != nil {
+				s.retryAt[key] = s.now().Add(clientIdentityCheckRetry)
+				return
+			}
+			delete(s.retryAt, key)
+		})
+	}
+	return entry.lookup.Latest
+}
+
 func (s *ClientIdentityVersionService) lookup(ctx context.Context, profile, platform string, forceRefresh bool) (ClientIdentityVersionLookup, error) {
 	profile, err := dto.NormalizeClientIdentityProfile(profile)
 	if err != nil {
@@ -237,11 +354,13 @@ func (s *ClientIdentityVersionService) lookup(ctx context.Context, profile, plat
 		fallback.Cached = true
 		fallback.Stale = true
 		// Avoid retrying the same unavailable upstream on every subsequent
-		// request. The next normal lookup will try again after one cache period,
-		// while an explicit refresh still bypasses this value immediately.
+		// request. The next normal lookup, and the next request following this
+		// version, try again after clientIdentityCheckRetry, while an explicit
+		// refresh still bypasses this value immediately.
+		common.SysError(fmt.Sprintf("failed to check client identity version, keeping the version checked before: profile=%s platform=%s err=%v", profile, platform, err))
 		s.mu.Lock()
 		if current, ok := s.cache[key]; ok && current.expiresAt.Equal(entry.expiresAt) {
-			current.expiresAt = now.Add(s.cacheTTL)
+			current.expiresAt = now.Add(min(s.cacheTTL, clientIdentityCheckRetry))
 			s.cache[key] = current
 		}
 		s.mu.Unlock()
@@ -344,7 +463,9 @@ func (s *ClientIdentityVersionService) fetchNPMVersions(ctx context.Context, pac
 		Name     string            `json:"name"`
 		Version  string            `json:"version"`
 		DistTags map[string]string `json:"dist-tags"`
-		Versions map[string]any    `json:"versions"`
+		// Only the version names are read; struct{} skips each version's
+		// metadata instead of allocating it.
+		Versions map[string]struct{} `json:"versions"`
 	}
 	if err := common.Unmarshal(body, &payload); err != nil {
 		return nil, fmt.Errorf("invalid npm metadata: %w", err)

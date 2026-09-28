@@ -135,6 +135,10 @@ func main() {
 	// Subscription quota reset task (daily/weekly/monthly/custom)
 	service.StartSubscriptionQuotaResetTask()
 
+	// Client identities without a pinned version follow the latest official
+	// client version.
+	service.StartClientIdentityVersionChecks()
+
 	// Report this process as a system instance so the System Info page can show
 	// all currently alive nodes in multi-instance deployments.
 	service.StartContentAudit()

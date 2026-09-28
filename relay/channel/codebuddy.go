@@ -96,9 +96,13 @@ func codeBuddySystemPromptWithModel(model string) string {
 
 func applyCodeBuddyHeaders(headers http.Header, apiKey, conversationID string, isStream bool, identity *dto.ClientIdentityConfig) {
 	config := resolveRuntimeClientIdentity(dto.ClientIdentityChannelTypeCodeBuddy, identity)
-	productVersion := strings.TrimSpace(config.Version)
-	if productVersion == "" {
-		productVersion = codeBuddyProductVersion
+	productVersion := clientIdentityVersion(config, codeBuddyProductVersion)
+	if config.Version == "" {
+		// The update service names a build major.minor.patch.build, while the
+		// desktop client sends major.minor.patch.
+		if parts := strings.SplitN(productVersion, ".", 4); len(parts) == 4 {
+			productVersion = strings.Join(parts[:3], ".")
+		}
 	}
 	conversationID = strings.TrimSpace(conversationID)
 	if conversationID == "" {

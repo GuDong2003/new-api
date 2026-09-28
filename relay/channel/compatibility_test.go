@@ -453,6 +453,92 @@ func TestConfiguredClientIdentityAppliesVersionAndPlatformWithoutReplacingCreden
 	}
 }
 
+func TestClientIdentityWithoutPinnedVersionSendsLatestCheckedVersion(t *testing.T) {
+	checked := map[string]string{
+		dto.ClientIdentityProfileCodexCLI:           "0.158.0",
+		dto.ClientIdentityProfileClaudeCLI:          "2.1.283",
+		dto.ClientIdentityProfileCodexLegacy:        "0.158.0",
+		dto.ClientIdentityProfileCodexCompatibility: "0.158.0",
+		dto.ClientIdentityProfileClaudeCode:         "2.1.283",
+		dto.ClientIdentityProfileCodeBuddy:          "5.6.2.39298511",
+	}
+	original := latestClientIdentityVersion
+	latestClientIdentityVersion = func(profile, platform string) string { return checked[profile] }
+	t.Cleanup(func() { latestClientIdentityVersion = original })
+
+	tests := []struct {
+		name   string
+		apply  func(http.Header)
+		wantUA string
+	}{
+		{
+			name: "OpenAI channel as Codex CLI",
+			apply: func(headers http.Header) {
+				ApplyLightweightClientIdentity(headers, &dto.ClientIdentityConfig{Profile: dto.ClientIdentityProfileCodexCLI})
+			},
+			wantUA: "codex_cli_rs/0.158.0",
+		},
+		{
+			name: "Anthropic channel as Claude CLI",
+			apply: func(headers http.Header) {
+				ApplyLightweightClientIdentity(headers, &dto.ClientIdentityConfig{
+					Profile:  dto.ClientIdentityProfileClaudeCLI,
+					Platform: dto.ClientIdentityPlatformMacOSArm64,
+				})
+			},
+			wantUA: "claude-cli/2.1.283 (external, cli; macos-arm64)",
+		},
+		{
+			name: "Codex channel",
+			apply: func(headers http.Header) {
+				ApplyCodexLegacyClientIdentity(headers, &dto.ClientIdentityConfig{Profile: dto.ClientIdentityProfileCodexLegacy})
+			},
+			wantUA: "codex_cli_rs/0.158.0",
+		},
+		{
+			name: "Codex compatibility channel without a saved identity",
+			apply: func(headers http.Header) {
+				ApplyCompatibilityHeadersWithClientIdentity(constant.ChannelTypeCodexCompatibility, headers, "codex-key", false, "", nil)
+			},
+			wantUA: "codex_cli_rs/0.158.0",
+		},
+		{
+			name: "Claude Code channel without a saved identity",
+			apply: func(headers http.Header) {
+				ApplyClaudeCodeCompatibilityHeadersWithIdentity(headers, "claude-key", false, "", true, nil)
+			},
+			wantUA: "claude-cli/2.1.283 (external, cli)",
+		},
+		{
+			name: "WorkBuddy channel without a saved identity",
+			apply: func(headers http.Header) {
+				ApplyCompatibilityHeadersWithClientIdentity(constant.ChannelTypeCodeBuddy, headers, "buddy-key", false, "conversation-id", nil)
+			},
+			// The desktop client sends the update service's build without its
+			// build number.
+			wantUA: "WorkBuddy/5.6.2 WorkBuddy/5.6.2 CLI/2.115.0",
+		},
+		{
+			name: "Claude Code channel with a pinned version",
+			apply: func(headers http.Header) {
+				ApplyClaudeCodeCompatibilityHeadersWithIdentity(headers, "claude-key", false, "", true, &dto.ClientIdentityConfig{
+					Profile: dto.ClientIdentityProfileClaudeCode,
+					Version: "2.1.280",
+				})
+			},
+			wantUA: "claude-cli/2.1.280 (external, cli)",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			headers := http.Header{}
+			test.apply(headers)
+			assert.Equal(t, test.wantUA, headers.Get("User-Agent"))
+		})
+	}
+}
+
 func TestConfiguredClientIdentityDefaultsDoNotReplaceHeaderOverride(t *testing.T) {
 	config := &dto.ClientIdentityConfig{
 		Profile:  dto.ClientIdentityProfileCodexCompatibility,

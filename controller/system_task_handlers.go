@@ -30,8 +30,9 @@ func RegisterScheduledSystemTasks() {
 }
 
 // clientIdentityVersionRefreshHandler checks the official client catalogs once
-// per day for entries that have already been requested by an administrator.
-// Manual refreshes continue to use the channel endpoint and bypass this cache.
+// per day for the entries already looked up, by an administrator or for the
+// channels that follow the latest version. Manual refreshes continue to use
+// the channel endpoint and bypass this cache.
 type clientIdentityVersionRefreshHandler struct{}
 
 func (clientIdentityVersionRefreshHandler) Type() string {

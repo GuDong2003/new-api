@@ -6,6 +6,7 @@ import (
 
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/relaykit/dto"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/google/uuid"
 )
 
@@ -15,6 +16,10 @@ const (
 	claudeCodeCompatibilityUA    = "claude-cli/2.1.214 (external, cli)"
 	claudeCodeContext1MBetaToken = "context-1m-2025-08-07"
 )
+
+// latestClientIdentityVersion reads the newest official client version the
+// gateway has checked. It is a variable so tests can supply that version.
+var latestClientIdentityVersion = service.LatestClientIdentityVersion
 
 // ApplyCompatibilityHeaders applies the default upstream identity for API-key
 // compatibility channels. Request construction must apply Header Override
@@ -60,11 +65,7 @@ func ApplyCodexLegacyClientIdentity(headers http.Header, identity *dto.ClientIde
 		return
 	}
 	config := resolveRuntimeClientIdentity(constant.ChannelTypeCodex, identity)
-	version := strings.TrimSpace(config.Version)
-	if version == "" {
-		version = strings.TrimPrefix(codexCompatibilityUserAgent, "codex_cli_rs/")
-	}
-	headers.Set("User-Agent", clientIdentityUserAgent("codex_cli_rs", version, config.Platform))
+	headers.Set("User-Agent", codexCompatibilityUserAgentFor(config))
 }
 
 // ApplyLightweightClientIdentity applies only the verified, low-risk identity
@@ -77,22 +78,9 @@ func ApplyLightweightClientIdentity(headers http.Header, identity *dto.ClientIde
 
 	switch identity.Profile {
 	case dto.ClientIdentityProfileCodexCLI:
-		version := strings.TrimSpace(identity.Version)
-		if version == "" {
-			version = strings.TrimPrefix(codexCompatibilityUserAgent, "codex_cli_rs/")
-		}
-		headers.Set("User-Agent", clientIdentityUserAgent("codex_cli_rs", version, identity.Platform))
+		headers.Set("User-Agent", codexCompatibilityUserAgentFor(*identity))
 	case dto.ClientIdentityProfileClaudeCLI:
-		config := *identity
-		version := strings.TrimSpace(config.Version)
-		if version == "" {
-			version = strings.TrimPrefix(claudeCodeCompatibilityUA, "claude-cli/")
-			if index := strings.Index(version, " "); index >= 0 {
-				version = version[:index]
-			}
-		}
-		config.Version = version
-		headers.Set("User-Agent", claudeCodeUserAgentFor(config))
+		headers.Set("User-Agent", claudeCodeUserAgentFor(*identity))
 	case dto.ClientIdentityProfileCodeBuddyCLI:
 		// This header is documented for CodeBuddy's local HTTP API. The
 		// lightweight profile opts into that single marker and nothing else.
@@ -200,22 +188,27 @@ func resolveRuntimeClientIdentity(channelType int, identity *dto.ClientIdentityC
 	return config
 }
 
-func codexCompatibilityUserAgentFor(config dto.ClientIdentityConfig) string {
-	version := strings.TrimSpace(config.Version)
-	if version == "" {
-		version = strings.TrimPrefix(codexCompatibilityUserAgent, "codex_cli_rs/")
+// clientIdentityVersion returns the version a client identity sends: its
+// pinned version, else the latest official version the gateway has checked,
+// else builtIn.
+func clientIdentityVersion(config dto.ClientIdentityConfig, builtIn string) string {
+	if version := strings.TrimSpace(config.Version); version != "" {
+		return version
 	}
+	if latest := latestClientIdentityVersion(config.Profile, config.Platform); latest != "" {
+		return latest
+	}
+	return builtIn
+}
+
+func codexCompatibilityUserAgentFor(config dto.ClientIdentityConfig) string {
+	version := clientIdentityVersion(config, strings.TrimPrefix(codexCompatibilityUserAgent, "codex_cli_rs/"))
 	return clientIdentityUserAgent("codex_cli_rs", version, config.Platform)
 }
 
 func claudeCodeUserAgentFor(config dto.ClientIdentityConfig) string {
-	version := strings.TrimSpace(config.Version)
-	if version == "" {
-		version = strings.TrimPrefix(claudeCodeCompatibilityUA, "claude-cli/")
-		if index := strings.Index(version, " "); index >= 0 {
-			version = version[:index]
-		}
-	}
+	builtIn, _, _ := strings.Cut(strings.TrimPrefix(claudeCodeCompatibilityUA, "claude-cli/"), " ")
+	version := clientIdentityVersion(config, builtIn)
 	platform, err := dto.NormalizeClientIdentityPlatform(config.Platform)
 	if err != nil || platform == "" {
 		return "claude-cli/" + version + " (external, cli)"

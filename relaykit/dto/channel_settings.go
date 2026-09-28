@@ -142,7 +142,8 @@ type ClientIdentitySourceMetadata struct {
 
 // ClientIdentityConfig is the persisted, channel-scoped client identity
 // contract. An absent client_identity object, or an object with only empty
-// values, keeps the legacy runtime defaults unchanged.
+// values, keeps the default behavior of the channel type. An identity
+// without a version follows the latest official client version.
 type ClientIdentityConfig struct {
 	ClientType       string                        `json:"client_type,omitempty"`
 	Profile          string                        `json:"profile,omitempty"`
@@ -485,8 +486,9 @@ func ValidateClientIdentityVersion(profile, version string) error {
 	return validateClientIdentityVersion(profile, strings.TrimSpace(version))
 }
 
-// Normalize trims and fills the profile fields while preserving empty version
-// and platform values as the legacy defaults.
+// Normalize trims and fills the profile fields. It keeps an empty version,
+// which follows the latest official client version, and an empty platform,
+// which keeps the client's default platform.
 func (c *ClientIdentityConfig) Normalize(channelType int) error {
 	if c == nil {
 		return nil
