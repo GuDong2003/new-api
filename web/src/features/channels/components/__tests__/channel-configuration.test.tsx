@@ -1355,7 +1355,7 @@ test('editing opens the shared configuration and omits an unchanged key on updat
   expect(await screen.findByDisplayValue('Existing channel')).toBeVisible()
   expect(screen.queryByLabelText('Type *')).not.toBeInTheDocument()
   expect(screen.getByRole('button', { name: 'Change provider' })).toBeVisible()
-  expect(screen.getAllByRole('tab')).toHaveLength(5)
+  expect(screen.getAllByRole('tab')).toHaveLength(6)
   expect(
     screen.getByRole('tab', { name: /Connection & Models/ })
   ).toHaveAccessibleName(/Ready/)
@@ -1665,6 +1665,98 @@ test('an Ollama channel marks a saved OpenAI-compatible chat setting in Request 
   expect(JSON.parse(payload.settings)).toMatchObject({
     ollama_openai_chat: false,
   })
+})
+
+function serveClientIdentityVersions(clientType: string, profile: string) {
+  const originalGet = vi.mocked(api.get).getMockImplementation()
+  vi.mocked(api.get).mockImplementation(async (url, config) => {
+    if (url === '/api/channel/client-identity/versions') {
+      return {
+        data: {
+          success: true,
+          data: {
+            client_type: clientType,
+            profile,
+            versions: ['2.1.283', '2.1.282'],
+            latest: '2.1.283',
+            source: { kind: 'official' },
+            cached: true,
+            stale: false,
+          },
+        },
+      }
+    }
+    return originalGet?.(url, config)
+  })
+}
+
+test('the client identity tab saves a Claude CLI identity picked for an Anthropic channel at the latest version', async () => {
+  editingChannel = { ...editingChannel, type: 14 }
+  serveClientIdentityVersions('claude', 'claude_cli')
+  const put = vi
+    .spyOn(api, 'put')
+    .mockResolvedValue({ data: { success: true } })
+  const user = userEvent.setup()
+  render(<ConfigurationHarness currentRow={editingChannel} />)
+  await screen.findByDisplayValue('Existing channel')
+  await user.click(
+    screen.getByRole('tab', { name: /Client Identity & Version/ })
+  )
+
+  await user.click(screen.getByRole('combobox', { name: 'Client identity' }))
+  await user.click(screen.getByRole('option', { name: 'Claude CLI' }))
+  await waitFor(() =>
+    expect(
+      screen.getByRole('combobox', { name: 'Client version' })
+    ).toHaveTextContent('2.1.283')
+  )
+  await user.click(screen.getByRole('button', { name: 'Update Channel' }))
+
+  await waitFor(() => expect(put).toHaveBeenCalled())
+  const payload = put.mock.calls[0]?.[1] as { settings: string }
+  expect(JSON.parse(payload.settings).client_identity).toEqual({
+    client_type: 'claude',
+    profile: 'claude_cli',
+    version: '2.1.283',
+    source: { kind: 'official' },
+  })
+})
+
+test('a Claude Code channel keeps its 1M context switch on the client identity tab', async () => {
+  editingChannel = { ...editingChannel, type: 62 }
+  serveClientIdentityVersions('claude_code', 'claude_code')
+  const user = userEvent.setup()
+  render(<ConfigurationHarness currentRow={editingChannel} />)
+  await screen.findByDisplayValue('Existing channel')
+
+  await user.click(
+    screen.getByRole('tab', { name: /Client Identity & Version/ })
+  )
+
+  expect(
+    screen.getByRole('switch', { name: 'Enable 1M context' })
+  ).toBeVisible()
+})
+
+test('a provider change that removes the client identity tab returns to Connection & Models for good', async () => {
+  const user = userEvent.setup()
+  render(<ConfigurationHarness currentRow={editingChannel} />)
+  await screen.findByDisplayValue('Existing channel')
+  await user.click(
+    screen.getByRole('tab', { name: /Client Identity & Version/ })
+  )
+
+  await user.click(screen.getByRole('button', { name: 'Change provider' }))
+  await user.click(screen.getByRole('option', { name: /^DeepSeek / }))
+  expect(
+    screen.queryByRole('tab', { name: /Client Identity & Version/ })
+  ).not.toBeInTheDocument()
+  await user.click(screen.getByRole('button', { name: 'Change provider' }))
+  await user.click(screen.getByRole('option', { name: 'OpenAI Built-in #1' }))
+
+  expect(
+    screen.getByRole('tab', { name: /Connection & Models/ })
+  ).toHaveAttribute('aria-selected', 'true')
 })
 
 test('an invalid edit switches categories and replaces configured styling with the field error', async () => {

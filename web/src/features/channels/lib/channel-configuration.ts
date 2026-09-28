@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import type { FieldErrors, FieldPath } from 'react-hook-form'
 
 import {
+  CHANNEL_TYPE_CLAUDE_CODE,
   CHANNEL_TYPE_OLLAMA,
   CLAUDE_FIELD_PASSTHROUGH_TYPES,
   MODEL_FETCHABLE_TYPES,
@@ -27,6 +28,7 @@ import {
 import { CHANNEL_TYPE_ADVANCED_CUSTOM } from './advanced-custom'
 import {
   CHECKIN_FORM_FIELDS,
+  CLIENT_IDENTITY_CHANNEL_TYPES,
   channelFormSchema,
   type ChannelFormValues,
 } from './channel-form'
@@ -41,6 +43,7 @@ export type ChannelConfigurationSection =
   | 'checkin'
   | 'routing'
   | 'request'
+  | 'identity'
   | 'other'
 
 export type ChannelConfigurationStatus =
@@ -69,6 +72,17 @@ const CONFIGURATION_BLOCKS = {
       'ollama_openai_chat',
       'system_prompt',
       'system_prompt_override',
+    ],
+  },
+  clientIdentity: {
+    section: 'identity',
+    fields: [
+      'client_identity_client_type',
+      'client_identity_profile',
+      'client_identity_version',
+      'client_identity_platform',
+      'client_identity_context_1m_enabled',
+      'client_identity_source',
     ],
   },
   fieldPassthrough: {
@@ -169,6 +183,14 @@ export function getChannelConfigurationState(
       values.system_prompt?.trim() ||
       values.system_prompt_override
     ),
+    clientIdentity:
+      CLIENT_IDENTITY_CHANNEL_TYPES.has(values.type) &&
+      Boolean(
+        (values.client_identity_profile &&
+          values.client_identity_profile !== 'none') ||
+        (values.type === CHANNEL_TYPE_CLAUDE_CODE &&
+          values.client_identity_context_1m_enabled)
+      ),
     fieldPassthrough: Boolean(
       ((openaiPassthrough || claudePassthrough) &&
         (values.allow_service_tier || values.allow_inference_geo)) ||
@@ -207,6 +229,7 @@ export function getChannelConfigurationState(
     checkin: 'idle',
     routing: 'idle',
     request: 'idle',
+    identity: 'idle',
     other: 'idle',
   }
 

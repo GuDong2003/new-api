@@ -48,6 +48,8 @@ type ChannelConfigurationProps = {
   checkin: ReactNode
   routing: ReactNode
   request: ReactNode
+  /** Client identity settings; the tab is left out when there are none. */
+  identity?: ReactNode
   other: ReactNode
 }
 
@@ -102,13 +104,16 @@ export function ChannelConfiguration(props: ChannelConfigurationProps) {
       return new Set([...previous, props.section])
     })
   }, [props.section])
-  const sections = [
+  const sections: Array<{ id: ChannelConfigurationSection; label: string }> = [
     { id: 'connection', label: t('Connection & Models') },
     { id: 'checkin', label: t('Automatic Check-in') },
     { id: 'routing', label: t('Routing & Mapping') },
     { id: 'request', label: t('Request & Response') },
-    { id: 'other', label: t('Other Settings') },
-  ] as const
+  ]
+  if (props.identity) {
+    sections.push({ id: 'identity', label: t('Client Identity & Version') })
+  }
+  sections.push({ id: 'other', label: t('Other Settings') })
 
   return (
     <Tabs
@@ -191,6 +196,16 @@ export function ChannelConfiguration(props: ChannelConfigurationProps) {
         {(props.section === 'request' || visited.has('request')) &&
           props.request}
       </TabsContent>
+      {props.identity && (
+        <TabsContent
+          value='identity'
+          keepMounted
+          className='-m-1 min-h-0 min-w-0 overflow-x-hidden overflow-y-auto overscroll-contain p-1'
+        >
+          {(props.section === 'identity' || visited.has('identity')) &&
+            props.identity}
+        </TabsContent>
+      )}
       <TabsContent
         value='other'
         keepMounted

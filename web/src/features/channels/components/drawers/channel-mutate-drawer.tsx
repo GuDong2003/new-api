@@ -166,6 +166,7 @@ import {
 import {
   CHANNEL_FORM_DEFAULT_VALUES,
   CHANNEL_TYPE_ADVANCED_CUSTOM,
+  CLIENT_IDENTITY_CHANNEL_TYPES,
   channelFormSchema,
   channelsQueryKeys,
   getAdvancedCustomStats,
@@ -242,6 +243,7 @@ import {
   ChannelApiAccessSection,
   ChannelAuthSection,
   ChannelBasicSection,
+  ChannelClientIdentitySection,
   ChannelEditorLoadingState,
   ChannelModelsSection,
   ChannelUpstreamAccountFields,
@@ -857,6 +859,14 @@ export function ChannelMutateDrawer({
       }
       setProviderTarget(target)
       setChoosingProvider(false)
+      const nextType =
+        target.kind === 'plugin' ? CHANNEL_TYPE_TASK_PLUGIN : target.type
+      // Only the types with client identities have that tab.
+      if (!CLIENT_IDENTITY_CHANNEL_TYPES.has(nextType)) {
+        setConfigurationSection((section) =>
+          section === 'identity' ? 'connection' : section
+        )
+      }
     },
     [
       canBindTaskPlugin,
@@ -3540,6 +3550,26 @@ export function ChannelMutateDrawer({
     </div>
   )
 
+  const identitySection = CLIENT_IDENTITY_CHANNEL_TYPES.has(currentType) ? (
+    <div
+      role='group'
+      aria-label={t('Client Identity & Version')}
+      className={channelConfigurationBlockClassName(
+        configuration.blocks.clientIdentity
+      )}
+    >
+      <fieldset disabled={sensitiveLocked} className='disabled:opacity-60'>
+        <ChannelClientIdentitySection
+          control={form.control}
+          setValue={form.setValue}
+          channelType={currentType}
+          disabled={sensitiveLocked}
+          isSubmitting={isSubmitting}
+        />
+      </fieldset>
+    </div>
+  ) : null
+
   const connectionSection = (
     <div className='scroll-mt-4'>
       <ChannelApiAccessSection>
@@ -4650,6 +4680,7 @@ export function ChannelMutateDrawer({
           )
         }
         checkin={checkinSection}
+        identity={identitySection}
         routing={
           <>
             {redirectPanelActive ? redirectPanelNotice : modelMappingFields}
