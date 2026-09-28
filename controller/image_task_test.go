@@ -1052,6 +1052,47 @@ func TestBuildImageTaskPayload(t *testing.T) {
 		assert.Equal(t, "https://cdn.example/a.png", response.Data[0].URL)
 	})
 
+	// A canvas stores each picture a task produced under its gallery copy, so
+	// every device that watches the task keeps the same picture under the same
+	// name. An API caller's result stays as the provider shaped it.
+	t.Run("a drawing task names the gallery copy of each image", func(t *testing.T) {
+		for _, tc := range []struct {
+			source string
+			want   []string
+		}{
+			{source: "drawing", want: []string{"11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222"}},
+			{source: "api", want: []string{"", ""}},
+		} {
+			task := &model.Task{
+				TaskID:     "task_done",
+				Status:     model.TaskStatusSuccess,
+				Progress:   "100%",
+				SubmitTime: 1700000000,
+				Data:       json.RawMessage(`{"data":[{"url":"https://gateway.example/a"},{"url":"https://gateway.example/b"}]}`),
+				PrivateData: model.TaskPrivateData{
+					GallerySource:   tc.source,
+					GalleryImageIDs: map[string]string{"image-0": "11111111-1111-4111-8111-111111111111", "image-1": "22222222-2222-4222-8222-222222222222"},
+				},
+			}
+
+			payload, err := buildImageTaskPayload(task, "/pg/images/generations/task_done")
+			require.NoError(t, err)
+
+			var response struct {
+				Data []struct {
+					URL            string `json:"url"`
+					GalleryImageID string `json:"gallery_image_id"`
+				} `json:"data"`
+			}
+			require.NoError(t, common.Unmarshal(payload, &response))
+			require.Len(t, response.Data, 2)
+			for index, want := range tc.want {
+				assert.Equal(t, want, response.Data[index].GalleryImageID, tc.source)
+			}
+			assert.Equal(t, "https://gateway.example/b", response.Data[1].URL)
+		}
+	})
+
 	t.Run("failed task reports the reason", func(t *testing.T) {
 		task := &model.Task{
 			TaskID:     "task_failed",

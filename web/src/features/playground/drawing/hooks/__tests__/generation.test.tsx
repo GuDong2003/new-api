@@ -698,6 +698,107 @@ describe('Image generation jobs', () => {
     hook.unmount()
     client.clear()
   })
+  // Taking in another version of the canvas can leave a generating node without
+  // the job watching its task. That job goes on watching it alone.
+  it('watches a task once when its node loses the job watching it', async () => {
+    const client = new QueryClient()
+    const hook = renderHook(useImageGeneration, {
+      wrapper: (props: { children: ReactNode }) => (
+        <QueryClientProvider client={client}>
+          {props.children}
+        </QueryClientProvider>
+      ),
+    })
+    // The task runs on until the job stops watching it.
+    vi.spyOn(api, 'get').mockImplementation(
+      (_url, config) =>
+        new Promise((_resolve, reject) =>
+          config?.signal?.addEventListener?.('abort', () =>
+            reject(new DOMException('Aborted', 'AbortError'))
+          )
+        )
+    )
+    act(() =>
+      useDrawingStore.getState().addNodes([
+        {
+          ...generationReference('watched', { x: 0, y: 0 }),
+          data: {
+            ...generationReference('watched', { x: 0, y: 0 }).data,
+            asset: undefined,
+            status: 'pending',
+            jobId: undefined,
+            taskId: 'task_watched',
+          },
+        },
+      ])
+    )
+    act(() => resumeImageGenerationJobs((key: string) => key))
+    expect(hook.result.current.pendingCount).toBe(1)
+
+    act(() =>
+      useDrawingStore.getState().updateNodeData('watched', { jobId: undefined })
+    )
+    act(() => resumeImageGenerationJobs((key: string) => key))
+
+    expect(hook.result.current.pendingCount).toBe(1)
+    act(() => hook.result.current.cancel())
+    await waitFor(() => expect(hook.result.current.pendingCount).toBe(0))
+    hook.unmount()
+    client.clear()
+  })
+  // Each device watching a task stores its picture under the gallery copy the
+  // task names, so their canvases agree on what the node shows instead of each
+  // naming the same picture its own way.
+  it('stores a task picture under the gallery copy the task names', async () => {
+    const client = new QueryClient()
+    const hook = renderHook(useImageGeneration, {
+      wrapper: (props: { children: ReactNode }) => (
+        <QueryClientProvider client={client}>
+          {props.children}
+        </QueryClientProvider>
+      ),
+    })
+    vi.spyOn(api, 'get').mockResolvedValue({
+      data: {
+        task_id: 'task_shared',
+        status: 'completed',
+        data: [
+          {
+            b64_json: 'YWJj',
+            gallery_image_id: '11111111-1111-4111-8111-111111111111',
+          },
+        ],
+      },
+    })
+    act(() =>
+      useDrawingStore.getState().addNodes([
+        {
+          ...generationReference('shared', { x: 0, y: 0 }),
+          data: {
+            ...generationReference('shared', { x: 0, y: 0 }).data,
+            asset: undefined,
+            status: 'pending',
+            jobId: undefined,
+            taskId: 'task_shared',
+          },
+        },
+      ])
+    )
+
+    const decoderIndex = decoders.length
+    act(() => resumeImageGenerationJobs((key: string) => key))
+    await waitFor(() => expect(decoders.length).toBeGreaterThan(decoderIndex))
+    await act(async () =>
+      decoders[decoderIndex].dispatchEvent(new Event('load'))
+    )
+    await waitFor(() => expect(hook.result.current.pendingCount).toBe(0))
+
+    expect(useDrawingStore.getState().nodes[0].data.asset?.id).toBe(
+      '11111111-1111-4111-8111-111111111111'
+    )
+    hook.unmount()
+    client.clear()
+  })
   // A provider can refuse a prompt minutes before a retry elsewhere ends, and
   // the node keeps waiting on that retry while it says why.
   it('shows on a pending node why the earlier attempts of its task failed', async () => {

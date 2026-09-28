@@ -27,6 +27,7 @@ import { getGalleryFile, readRemoteCanvasOriginal } from '../api'
 import type { CanvasKind, GalleryIdentity, LocalCanvas } from '../types'
 import { replayCanvasRemovals } from './canvas-deletion'
 import {
+  canvasContentKey as content,
   canvasDocumentAssetIds,
   decodeCanvas,
   documentKey,
@@ -50,6 +51,7 @@ import {
 import {
   CANVAS_CLOUD_INTERVAL,
   checkCanvasCapacity,
+  pullCanvas,
   syncCanvas,
 } from './canvas-sync'
 import {
@@ -117,10 +119,6 @@ export function canvasOriginalReader(
     if (!blob.size) throw new Error('Canvas original is unavailable.')
     return blob
   }
-}
-function content(document: Record<string, unknown>) {
-  const { viewport: _viewport, ...rest } = document
-  return documentKey(rest)
 }
 
 function remapEditorDocument(
@@ -292,10 +290,45 @@ export function bindEditor(identity: GalleryIdentity, initial: LocalCanvas) {
     const assets = await readCanvasAssets(owner, initial.id)
     if (!active || store.getState().revision !== encodedRevision) return
     const document = await decodeCanvas(canvas, assets, true)
+    // A generation running here stays with its node. A stored copy knows
+    // nothing of the job watching it, and reads a node whose task the gateway
+    // has not named yet as stopped.
+    const running = new Map(
+      store
+        .getState()
+        .nodes.flatMap((node) =>
+          node.data.status === 'pending' && node.data.jobId
+            ? [[node.id, node.data] as const]
+            : []
+        )
+    )
     applying = true
     try {
       useDrawingStore.setState({
-        nodes: document.nodes,
+        nodes: document.nodes.map((node) => {
+          const here = running.get(node.id)
+          // Finished elsewhere, a node shows how it ended.
+          if (
+            !here ||
+            node.data.status === 'complete' ||
+            node.data.status === 'error'
+          ) {
+            return node
+          }
+          return {
+            ...node,
+            data: {
+              ...node.data,
+              status: 'pending',
+              jobId: here.jobId,
+              // The task this tab watches stays the one it shows, even should
+              // another device have retried the node meanwhile.
+              taskId: here.taskId ?? node.data.taskId,
+              progress: here.progress,
+              ...(here.asset ? { asset: here.asset } : {}),
+            },
+          }
+        }),
         edges: document.edges,
         referenceIds: document.referenceIds,
         mask: document.mask,
@@ -541,13 +574,14 @@ export function bindEditor(identity: GalleryIdentity, initial: LocalCanvas) {
   const leave = () => {
     void flush().then(() => syncCanvas(identity, initial.id, 'timer'))
   }
-  // Coming back to this tab shows what another tab saved meanwhile.
+  // Coming back to this tab shows what another tab saved meanwhile, and what
+  // another device saved to the cloud.
   const visibility = () => {
     if (document.visibilityState === 'hidden') leave()
-    else void flush()
+    else void flush().then(() => pullCanvas(identity, initial.id))
   }
   const focus = () => {
-    void flush()
+    void flush().then(() => pullCanvas(identity, initial.id))
   }
   const interval = setInterval(() => {
     void replayCanvasRemovals(identity)

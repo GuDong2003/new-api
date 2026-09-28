@@ -24,6 +24,7 @@ import { getGalleryUsage } from '@/features/gallery/api'
 import { readCanvasNodeOriginal } from '@/features/gallery/hooks/use-canvas-node-image'
 import { persistCanvasGenerationResult } from '@/features/gallery/lib/canvas-generation'
 import { preserveCanvasOriginalSource } from '@/features/gallery/lib/canvas-original'
+import { syncCanvasNow } from '@/features/gallery/lib/canvas-sync'
 import { useAuthStore } from '@/stores/auth-store'
 import { useDrawingStore } from '@/stores/drawing-store'
 
@@ -179,6 +180,13 @@ async function executeImageJob(
         for (const id of input.job.nodeIds) {
           state.updateNodeData(id, { taskId }, input.job.id)
         }
+        // Another device that opens this canvas watches the task from now on.
+        if (input.canvasId) {
+          void syncCanvasNow(
+            { userId: input.userId, sessionId: input.sessionId },
+            input.canvasId
+          )
+        }
       },
       onRetry: (failedAttempts) => {
         if (!isCurrentJob(input) || input.job.controller.signal.aborted) return
@@ -271,7 +279,11 @@ async function executeImageJob(
                 decodeController.signal
               )
           )
-          return asset
+          // Every device watching the task stores the picture under the same
+          // gallery copy, so their canvases agree on what the node shows.
+          return image.galleryImageId
+            ? { ...asset, id: image.galleryImageId }
+            : asset
         })
     )
     if (input.job.cancelReason === 'user') {
@@ -423,6 +435,13 @@ async function executeImageJob(
   } finally {
     activeJobs.delete(input.job.id)
     notifyJobListeners()
+    // Another device waiting on this generation learns how it ended.
+    if (input.canvasId) {
+      void syncCanvasNow(
+        { userId: input.userId, sessionId: input.sessionId },
+        input.canvasId
+      )
+    }
   }
 }
 
@@ -708,10 +727,17 @@ function reattachToImageTask(
 // task is polled again instead of being reported as cancelled.
 export function resumeImageGenerationJobs(translate: Translate) {
   const nodesByTask = new Map<string, DrawingNode[]>()
+  // A node can come back from storage without the job that watches its task.
+  const watched = new Set(
+    [...activeJobs.values()].flatMap((input) =>
+      input.taskId ? [input.taskId] : []
+    )
+  )
   for (const node of useDrawingStore.getState().nodes) {
     const taskId = node.data.taskId
     if (node.data.status !== 'pending' || !taskId) continue
     if (node.data.jobId && activeJobs.has(node.data.jobId)) continue
+    if (watched.has(taskId)) continue
     nodesByTask.set(taskId, [...(nodesByTask.get(taskId) ?? []), node])
   }
   for (const [taskId, nodes] of nodesByTask) {

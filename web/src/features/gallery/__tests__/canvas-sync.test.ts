@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 import { Blob as NodeBlob } from 'node:buffer'
 import { webcrypto } from 'node:crypto'
 
+import { act, renderHook } from '@testing-library/react'
 import {
   AxiosError,
   type AxiosAdapter,
@@ -26,7 +27,9 @@ import { IDBFactory, IDBObjectStore } from 'fake-indexeddb'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { logout } from '@/features/auth/api'
+import { useImageGeneration } from '@/features/playground/drawing/hooks/use-image-generation'
 import * as legacyDrawing from '@/features/playground/drawing/lib/canvas-storage'
+import { DEFAULT_IMAGE_SETTINGS } from '@/features/playground/drawing/lib/image-settings'
 import { api } from '@/lib/api'
 import { useAuthStore } from '@/stores/auth-store'
 import { useDrawingStore } from '@/stores/drawing-store'
@@ -41,6 +44,7 @@ import {
 import {
   createCanvasProject,
   overwriteCanvasProject,
+  reloadCanvasProject,
   startCanvasEditor,
   openCanvasProject,
 } from '../lib/canvas-projects'
@@ -58,6 +62,7 @@ import {
   checkCanvasCapacity,
   flushCanvasSession,
   cancelCanvasSession,
+  reconcileCanvasRecord,
 } from '../lib/canvas-sync'
 import type { CanvasRecord, CanvasSaveMetadata } from '../types'
 import { login, required, response, usage } from './fixtures'
@@ -91,6 +96,40 @@ beforeEach(async () => {
       const meta = JSON.parse(
         String((config.data as FormData).get('metadata'))
       ) as CanvasSaveMetadata
+      // The server keeps a canvas as it normalizes it, which leaves out what it
+      // does not know. The Grok switch stands in for such a field.
+      const settingsOf = (value: unknown) =>
+        (value as { settings?: Record<string, unknown> }).settings
+      for (const holder of [
+        meta.document,
+        ...((meta.document.nodes as { data: unknown }[]) ?? []).map(
+          (node) => node.data
+        ),
+      ]) {
+        delete settingsOf(holder)?.nsfw
+      }
+      // A save names the revision it succeeds; any other is refused.
+      if (
+        remote &&
+        remote.state === 'ready' &&
+        meta.base_revision !== remote.revision
+      ) {
+        throw new AxiosError(
+          'conflict',
+          '',
+          config,
+          {},
+          {
+            ...response(config, {}),
+            status: 409,
+            data: {
+              success: false,
+              message: 'Canvas conflict.',
+              code: 'canvas_conflict',
+            },
+          }
+        )
+      }
       remote = {
         ...meta,
         revision: meta.base_revision + 1,
@@ -108,6 +147,15 @@ beforeEach(async () => {
         asset_id_map: {},
       }
       return response(config, remote)
+    }
+    // The cloud holds every original a canvas uploaded, which is this image.
+    if (config.url?.endsWith('/file')) {
+      return {
+        ...response(config, {}),
+        data: new Blob([Uint8Array.from(atob(png), (c) => c.charCodeAt(0))], {
+          type: 'image/png',
+        }),
+      }
     }
     if (!remote) {
       throw new AxiosError(
@@ -529,11 +577,30 @@ it('keeps transaction failures visibly unsaved and the last complete document in
   failure.mockRestore()
 })
 
-it('retains a conflicting local document and never overwrites the server', async () => {
+// What this browser stored before it kept the cloud version its edits start
+// from: nothing tells which side changed what.
+async function forgetCommonVersion(id: string) {
+  const done = <T>(request: IDBRequest<T>) =>
+    new Promise<T>((resolve, reject) => {
+      request.addEventListener('success', () => resolve(request.result))
+      request.addEventListener('error', () => reject(request.error))
+    })
+  const database = await done(indexedDB.open('new-api-gallery-canvases', 1))
+  const store = database
+    .transaction('canvases', 'readwrite')
+    .objectStore('canvases')
+  const canvas = (await done(store.get([813, id]))) as Record<string, unknown>
+  delete canvas.cloudBase
+  await done(store.put(canvas, [813, id]))
+  database.close()
+}
+
+it('retains a conflicting local document it cannot merge and never overwrites the server', async () => {
   let canvas = await createCanvasProject(identity, 'drawing')
   await syncCanvas(identity, canvas.id, 'manual')
   canvas = required(await loadLocalCanvas(813, canvas.id))
   await saveLocalCanvas({ ...canvas, name: '保留本地名字' }, [])
+  await forgetCommonVersion(canvas.id)
   remote = { ...required(remote), revision: 9 }
   await syncCanvas(identity, canvas.id, 'manual')
   expect(await loadLocalCanvas(813, canvas.id)).toMatchObject({
@@ -550,7 +617,8 @@ it('replaces the cloud version with the local one as its successor', async () =>
   let canvas = await createCanvasProject(identity, 'drawing')
   await syncCanvas(identity, canvas.id, 'manual')
   canvas = required(await loadLocalCanvas(813, canvas.id))
-  // A real conflict is a document that diverged, not just a renamed one.
+  // A real conflict is a document that diverged, not just a renamed one, on a
+  // canvas that cannot tell what both versions came from.
   await saveLocalCanvas(
     {
       ...canvas,
@@ -559,6 +627,7 @@ it('replaces the cloud version with the local one as its successor', async () =>
     },
     []
   )
+  await forgetCommonVersion(canvas.id)
   remote = {
     ...required(remote),
     revision: 9,
@@ -1108,6 +1177,530 @@ describe('a canvas another tab saves too', () => {
       status: 'complete',
       asset: { id: targetId },
     })
+  })
+})
+
+describe('a canvas another device saves too', () => {
+  type StoredNode = {
+    id: string
+    position: unknown
+    data: Record<string, unknown>
+  } & Record<string, unknown>
+  // Another device's save reaches the cloud and nothing else here.
+  const saveOnAnotherDevice = (
+    change: (document: Record<string, unknown>) => Record<string, unknown>
+  ) => {
+    const current = required(remote)
+    remote = {
+      ...current,
+      revision: current.revision + 1,
+      document: change(required(current.document)),
+    }
+  }
+  const syncedCanvas = async () => {
+    const canvas = await createCanvasProject(identity, 'drawing')
+    await startCanvasEditor(identity, 'drawing')
+    addOriginal()
+    await flushLocalEditors(identity)
+    await syncCanvas(identity, canvas.id, 'manual')
+    return canvas
+  }
+  // Another device adds a picture this browser does not hold yet.
+  const addPictureOnAnotherDevice = async (nodeId: string, assetId: string) => {
+    const bytes = Uint8Array.from(atob(png), (c) => c.charCodeAt(0))
+    const digest = await crypto.subtle.digest('SHA-256', bytes)
+    const sha256 = Array.from(new Uint8Array(digest), (byte) =>
+      byte.toString(16).padStart(2, '0')
+    ).join('')
+    saveOnAnotherDevice((document) => ({
+      ...document,
+      nodes: [
+        ...(document.nodes as StoredNode[]),
+        {
+          id: nodeId,
+          type: 'image',
+          position: { x: 300, y: 0 },
+          data: {
+            prompt: '',
+            settings: {},
+            status: 'complete',
+            createdAt: 7,
+            asset: {
+              id: assetId,
+              name: 'there.png',
+              width: 1,
+              height: 1,
+              mimeType: 'image/png',
+            },
+          },
+        },
+      ],
+    }))
+    const current = required(remote)
+    remote = {
+      ...current,
+      assets: [
+        ...current.assets,
+        {
+          id: assetId,
+          role: 'generated',
+          node_id: nodeId,
+          sha256,
+          bytes: bytes.length,
+          width: 1,
+          height: 1,
+          mime_type: 'image/png',
+          has_thumbnail: false,
+        },
+      ],
+    }
+  }
+
+  // A generation started there reaches this canvas still generating, with the
+  // task to watch, instead of this canvas holding on to what it had.
+  it('takes the version another device saved when nothing changed here since', async () => {
+    const canvas = await syncedCanvas()
+    saveOnAnotherDevice((document) => ({
+      ...document,
+      nodes: [
+        ...(document.nodes as StoredNode[]),
+        {
+          id: 'generating-there',
+          type: 'image',
+          position: { x: 0, y: 400 },
+          data: {
+            prompt: '另一台设备在生成',
+            settings: {},
+            status: 'pending',
+            taskId: 'task_there',
+            createdAt: 5,
+          },
+        },
+      ],
+    }))
+
+    window.dispatchEvent(new Event('focus'))
+
+    await vi.waitFor(() =>
+      expect(
+        useDrawingStore
+          .getState()
+          .nodes.find((node) => node.id === 'generating-there')?.data
+      ).toMatchObject({ status: 'pending', taskId: 'task_there' })
+    )
+    expect(required(await loadLocalCanvas(813, canvas.id))).toMatchObject({
+      cloudRevision: 2,
+      status: 'synced',
+    })
+    expect(posts()).toHaveLength(1)
+  })
+
+  // A slow look at the cloud can come back after this copy already moved on.
+  it('keeps its copy when the cloud answers with a version older than the one it follows', async () => {
+    const canvas = await syncedCanvas()
+    const older = required(remote)
+    useDrawingStore.getState().updateSettings({ prompt: '更新的版本' })
+    await flushLocalEditors(identity)
+    await syncCanvas(identity, canvas.id, 'manual')
+
+    await reconcileCanvasRecord(
+      identity,
+      required(await loadLocalCanvas(813, canvas.id)),
+      older
+    )
+
+    expect(required(await loadLocalCanvas(813, canvas.id))).toMatchObject({
+      cloudRevision: 2,
+      status: 'synced',
+      document: { settings: { prompt: '更新的版本' } },
+    })
+  })
+
+  // Downloading what another device added takes as long as its pictures do.
+  it('keeps saving edits made here while it downloads a picture another device added', async () => {
+    const canvas = await syncedCanvas()
+    await addPictureOnAnotherDevice('added-there', targetId)
+    let release!: () => void
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    let asked = false
+    const cloud = required(api.defaults.adapter) as AxiosAdapter
+    api.defaults.adapter = async (config) => {
+      if (config.url?.endsWith(`/${targetId}/file`)) {
+        asked = true
+        await held
+      }
+      return cloud(config)
+    }
+
+    window.dispatchEvent(new Event('focus'))
+    await vi.waitFor(() => expect(asked).toBe(true))
+    useDrawingStore.getState().updateSettings({ prompt: '下载时的修改' })
+    await flushLocalEditors(identity)
+
+    expect(
+      required(await loadLocalCanvas(813, canvas.id)).document.settings
+    ).toMatchObject({ prompt: '下载时的修改' })
+    release()
+    await vi.waitFor(() =>
+      expect(useDrawingStore.getState().nodes.map((node) => node.id)).toContain(
+        'added-there'
+      )
+    )
+  })
+
+  // This canvas can take in another device's version while it generates an
+  // image itself, even before the gateway has named the task.
+  it("keeps watching a generation of its own when it takes another device's version", async () => {
+    const canvas = await syncedCanvas()
+    const state = useDrawingStore.getState()
+    state.addNodes([
+      {
+        id: 'generating-here',
+        type: 'image',
+        position: { x: 0, y: 400 },
+        data: {
+          settings: state.settings,
+          prompt: '这里在生成',
+          status: 'pending',
+          createdAt: 3,
+          jobId: 'job-here',
+        },
+      },
+    ])
+    await flushLocalEditors(identity)
+    await syncCanvas(identity, canvas.id, 'manual')
+    saveOnAnotherDevice((document) => ({
+      ...document,
+      settings: {
+        ...(document.settings as object),
+        prompt: '另一台设备的提示词',
+      },
+    }))
+
+    window.dispatchEvent(new Event('focus'))
+
+    await vi.waitFor(() =>
+      expect(useDrawingStore.getState().settings.prompt).toBe(
+        '另一台设备的提示词'
+      )
+    )
+    expect(
+      useDrawingStore
+        .getState()
+        .nodes.find((node) => node.id === 'generating-here')?.data
+    ).toMatchObject({ status: 'pending', jobId: 'job-here' })
+  })
+
+  // The canvas can be closed here while another device's version arrives.
+  it("keeps where this device's view stands when it takes another device's version", async () => {
+    const canvas = await syncedCanvas()
+    useDrawingStore.getState().setViewport({ x: 120, y: 80, zoom: 2 })
+    await flushLocalEditors(identity)
+    stopCanvasEditors(identity)
+    saveOnAnotherDevice((document) => ({
+      ...document,
+      viewport: { x: -500, y: -300, zoom: 0.5 },
+      settings: {
+        ...(document.settings as object),
+        prompt: '另一台设备的提示词',
+      },
+    }))
+
+    await syncCanvas(identity, canvas.id, 'manual')
+
+    const stored = required(await loadLocalCanvas(813, canvas.id))
+    expect(stored.document.settings).toMatchObject({
+      prompt: '另一台设备的提示词',
+    })
+    expect(stored.document.viewport).toEqual({ x: 120, y: 80, zoom: 2 })
+  })
+
+  // Another device can save between this upload's look at the cloud and the
+  // upload itself. What it saved is merged in, and the merge goes up at once.
+  it('uploads the merge at once when another device saved just before this upload', async () => {
+    const canvas = await syncedCanvas()
+    useDrawingStore.getState().updateSettings({ prompt: '这边的修改' })
+    await flushLocalEditors(identity)
+    let first = true
+    const cloud = required(api.defaults.adapter) as AxiosAdapter
+    api.defaults.adapter = async (config) => {
+      if (config.method === 'post' && first) {
+        first = false
+        saveOnAnotherDevice((document) => ({
+          ...document,
+          nodes: [
+            ...(document.nodes as StoredNode[]),
+            {
+              id: 'generating-there',
+              type: 'image',
+              position: { x: 0, y: 400 },
+              data: {
+                prompt: '另一台设备在生成',
+                settings: {},
+                status: 'pending',
+                taskId: 'task_there',
+                createdAt: 5,
+              },
+            },
+          ],
+        }))
+        throw new AxiosError(
+          'conflict',
+          '',
+          config,
+          {},
+          {
+            ...response(config, {}),
+            status: 409,
+            data: {
+              success: false,
+              message: 'Canvas conflict.',
+              code: 'canvas_conflict',
+            },
+          }
+        )
+      }
+      return cloud(config)
+    }
+
+    await syncCanvas(identity, canvas.id, 'manual')
+
+    await vi.waitFor(() => expect(required(remote).revision).toBe(3))
+    const saved = required(required(remote).document)
+    expect(saved.settings).toMatchObject({ prompt: '这边的修改' })
+    expect((saved.nodes as StoredNode[]).map((node) => node.id)).toContain(
+      'generating-there'
+    )
+    expect(required(await loadLocalCanvas(813, canvas.id)).status).toBe(
+      'synced'
+    )
+  })
+
+  // A picture download can fail on a flaky connection. The canvas stays one a
+  // later sync merges, not a conflict for its owner to resolve.
+  it('tries the merge again later when a picture another device added fails to download', async () => {
+    const canvas = await syncedCanvas()
+    useDrawingStore.getState().updateSettings({ prompt: '这边的修改' })
+    await flushLocalEditors(identity)
+    let online = false
+    let first = true
+    const cloud = required(api.defaults.adapter) as AxiosAdapter
+    api.defaults.adapter = async (config) => {
+      if (config.url?.endsWith(`/${targetId}/file`) && !online) {
+        throw new AxiosError('offline', AxiosError.ERR_NETWORK, config)
+      }
+      if (config.method === 'post' && first) {
+        first = false
+        await addPictureOnAnotherDevice('added-there', targetId)
+      }
+      return cloud(config)
+    }
+
+    await syncCanvas(identity, canvas.id, 'manual')
+    expect(required(await loadLocalCanvas(813, canvas.id)).status).toBe('error')
+    online = true
+    await syncCanvas(identity, canvas.id, 'manual')
+
+    expect(required(await loadLocalCanvas(813, canvas.id)).status).toBe(
+      'synced'
+    )
+    const saved = required(required(remote).document)
+    expect(saved.settings).toMatchObject({ prompt: '这边的修改' })
+    expect((saved.nodes as StoredNode[]).map((node) => node.id)).toContain(
+      'added-there'
+    )
+  })
+
+  // Without the version both sides started from there is nothing to merge, so
+  // the pictures the other side added are not worth fetching.
+  it('downloads nothing for a canvas it cannot merge', async () => {
+    const canvas = await syncedCanvas()
+    useDrawingStore.getState().updateSettings({ prompt: '这边的修改' })
+    await flushLocalEditors(identity)
+    await forgetCommonVersion(canvas.id)
+    await addPictureOnAnotherDevice('added-there', targetId)
+
+    await syncCanvas(identity, canvas.id, 'manual')
+
+    expect(required(await loadLocalCanvas(813, canvas.id)).status).toBe(
+      'conflict'
+    )
+    expect(requests.some((request) => request.url?.endsWith('/file'))).toBe(
+      false
+    )
+  })
+
+  // Each device keeps its own view of a canvas, which is no edit to it.
+  it('agrees with another device that saved the same canvas from another view', async () => {
+    const canvas = await syncedCanvas()
+    useDrawingStore.getState().updateSettings({ prompt: '两台设备一样的修改' })
+    await flushLocalEditors(identity)
+    const stored = required(await loadLocalCanvas(813, canvas.id))
+    saveOnAnotherDevice(() => ({
+      ...stored.document,
+      viewport: { x: 300, y: 200, zoom: 2 },
+    }))
+
+    await syncCanvas(identity, canvas.id, 'manual')
+
+    expect(required(await loadLocalCanvas(813, canvas.id))).toMatchObject({
+      cloudRevision: 2,
+      status: 'synced',
+    })
+    expect(posts()).toHaveLength(1)
+  })
+
+  it('merges an edit made here with one another device saved meanwhile', async () => {
+    const canvas = await syncedCanvas()
+    saveOnAnotherDevice((document) => ({
+      ...document,
+      settings: {
+        ...(document.settings as object),
+        prompt: '另一台设备的提示词',
+      },
+    }))
+    useDrawingStore.getState().changeNodes([
+      {
+        id: `node-${sourceId}`,
+        type: 'position',
+        position: { x: 50, y: 60 },
+      },
+    ])
+    await flushLocalEditors(identity)
+
+    await syncCanvas(identity, canvas.id, 'manual')
+
+    const saved = required(required(remote).document)
+    expect(required(remote).revision).toBe(3)
+    expect(saved.settings).toMatchObject({
+      prompt: '另一台设备的提示词',
+    })
+    expect((saved.nodes as StoredNode[])[0].position).toEqual({
+      x: 50,
+      y: 60,
+    })
+    expect(required(await loadLocalCanvas(813, canvas.id)).status).toBe(
+      'synced'
+    )
+    await vi.waitFor(() =>
+      expect(useDrawingStore.getState().settings.prompt).toBe(
+        '另一台设备的提示词'
+      )
+    )
+  })
+
+  // Reloading takes the cloud version as the one later edits start from, so
+  // they merge with what another device saves next.
+  it('merges edits on a canvas reloaded from the cloud with the next version another device saves', async () => {
+    const canvas = await syncedCanvas()
+    saveOnAnotherDevice((document) => ({
+      ...document,
+      settings: { ...(document.settings as object), prompt: '第一次' },
+    }))
+    await reloadCanvasProject(identity, canvas.id)
+    saveOnAnotherDevice((document) => ({
+      ...document,
+      settings: { ...(document.settings as object), prompt: '第二次' },
+    }))
+    useDrawingStore.getState().changeNodes([
+      {
+        id: `node-${sourceId}`,
+        type: 'position',
+        position: { x: 70, y: 80 },
+      },
+    ])
+    await flushLocalEditors(identity)
+
+    await syncCanvas(identity, canvas.id, 'manual')
+
+    const saved = required(required(remote).document)
+    expect(saved.settings).toMatchObject({ prompt: '第二次' })
+    expect((saved.nodes as StoredNode[])[0].position).toEqual({
+      x: 70,
+      y: 80,
+    })
+    expect(required(await loadLocalCanvas(813, canvas.id)).status).toBe(
+      'synced'
+    )
+  })
+
+  // Another device waits on the cloud copy for a generation started here: first
+  // to learn which task to watch, then for the picture.
+  it('uploads a canvas once its generation task is accepted and again once the picture arrives', async () => {
+    vi.stubGlobal(
+      'Image',
+      class extends EventTarget {
+        naturalWidth = 1
+        naturalHeight = 1
+        set src(_value: string) {
+          queueMicrotask(() => this.dispatchEvent(new Event('load')))
+        }
+      }
+    )
+    const canvas = await createCanvasProject(identity, 'drawing')
+    await startCanvasEditor(identity, 'drawing')
+    useDrawingStore.getState().updateSettings({ prompt: '已经在云端' })
+    await flushLocalEditors(identity)
+    await syncCanvas(identity, canvas.id, 'manual')
+    const taskId = `task_${'a'.repeat(32)}`
+    let finish!: () => void
+    const finished = new Promise<void>((resolve) => {
+      finish = resolve
+    })
+    const cloud = required(api.defaults.adapter) as AxiosAdapter
+    api.defaults.adapter = async (config) => {
+      if (config.url === `/pg/images/generations/${taskId}`) {
+        await finished
+        // The task endpoint answers as the image API does, without the envelope.
+        return {
+          ...response(config, {}),
+          data: {
+            task_id: taskId,
+            status: 'completed',
+            data: [{ b64_json: png, gallery_image_id: targetId }],
+          },
+        }
+      }
+      return cloud(config)
+    }
+    vi.spyOn(api, 'post').mockResolvedValue({
+      headers: { 'content-type': 'application/json' },
+      data: new Response(JSON.stringify({ task_id: taskId, status: 'queued' }))
+        .body,
+    })
+    const uploadedNode = () => {
+      const upload = posts().at(-1)
+      if (!upload || posts().length < 2) return undefined
+      const metadata = JSON.parse(
+        String((upload.data as FormData).get('metadata'))
+      ) as CanvasSaveMetadata
+      return (metadata.document.nodes as StoredNode[]).at(-1)
+    }
+    const hook = renderHook(useImageGeneration)
+
+    act(() => {
+      hook.result.current.generate(
+        { ...DEFAULT_IMAGE_SETTINGS, model: 'gpt-image-1', prompt: 'A fox' },
+        { x: 0, y: 0 }
+      )
+    })
+
+    await vi.waitFor(() =>
+      expect(uploadedNode()?.data).toMatchObject({ status: 'pending', taskId })
+    )
+    act(() => finish())
+    await vi.waitFor(() =>
+      expect(uploadedNode()?.data).toMatchObject({
+        status: 'complete',
+        asset: { id: targetId },
+      })
+    )
+    expect(required(await loadLocalCanvas(813, canvas.id)).status).toBe(
+      'synced'
+    )
+    hook.unmount()
   })
 })
 

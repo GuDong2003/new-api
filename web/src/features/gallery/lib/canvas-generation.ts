@@ -84,6 +84,7 @@ async function persistCanvasGenerationResultUnsafe(options: {
           ...node.data,
           status: 'error' as const,
           progress: undefined,
+          taskId: undefined,
           error: options.errors?.[index] ?? 'The image could not be loaded.',
         },
       }
@@ -95,6 +96,9 @@ async function persistCanvasGenerationResultUnsafe(options: {
         asset,
         status: 'complete' as const,
         progress: undefined,
+        // Stored as on an open canvas: a finished task leaves nothing for
+        // another device to watch.
+        taskId: undefined,
         error: undefined,
         ...(options.revisedPrompts?.[index]
           ? { revisedPrompt: options.revisedPrompts[index] }

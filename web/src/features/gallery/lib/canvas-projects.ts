@@ -57,7 +57,7 @@ import {
   updateCanvasCloudState,
   updateCanvasUserState,
 } from './canvas-repository'
-import { reconcileCanvasRecord, syncCanvas } from './canvas-sync'
+import { cloudBaseOf, reconcileCanvasRecord, syncCanvas } from './canvas-sync'
 import { loadGalleryFile } from './gallery-file-source'
 import {
   galleryOwner,
@@ -205,16 +205,19 @@ async function downloadCloudCanvas(
       document: remote.document,
       status: 'pending',
       needsExplicitSave: false,
-      cloudRevision: remote.revision,
     },
     assets
   )
+  // The copy is the cloud's version as it is: nothing is left to upload, and
+  // later edits start from it.
   return acknowledgeCanvasSave(galleryOwner(identity), remote.id, {
     localRevision: canvas.revision,
     cloudRevision: remote.revision,
     expiresAt: remote.expires_at,
-    assetIdMap: remote.asset_id_map,
+    // The cloud's version already names every image as the cloud does.
+    assetIdMap: {},
     assets: remote.assets,
+    cloudBase: cloudBaseOf(remote.kind, remote),
   })
 }
 export function openCanvasProject(

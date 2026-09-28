@@ -412,6 +412,14 @@ func imageTaskGallerySource(info *relaycommon.RelayInfo, _ *dto.ImageRequest) st
 	return "drawing"
 }
 
+// isDrawingImageTask reports whether the drawing page asked for a task. Its
+// images belong on its owner's canvas; an API caller's go to whoever the caller
+// serves.
+func isDrawingImageTask(task *model.Task) bool {
+	source := task.PrivateData.GallerySource
+	return source == "drawing" || source == "nai"
+}
+
 // acceptProposedImageTaskID checks the task ID a caller chose for its image
 // request. It must look like one the gateway generates and must not name any
 // existing task: task IDs are not unique in the database, and some reads find a
@@ -1267,6 +1275,20 @@ func buildImageTaskPayload(task *model.Task, statusURL string) ([]byte, error) {
 				return nil, err
 			}
 			payload, err = sjson.SetRawBytes(payload, "attempt_failures", reported)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+	// A canvas keeps each picture under its gallery copy, so every device that
+	// watches this task stores the same picture under the same name.
+	if status == imageTaskStatusCompleted && isDrawingImageTask(task) {
+		for index := range int(gjson.GetBytes(payload, "data.#").Int()) {
+			imageID := task.PrivateData.GalleryImageIDs[fmt.Sprintf("image-%d", index)]
+			if imageID == "" {
+				continue
+			}
+			payload, err = sjson.SetBytes(payload, fmt.Sprintf("data.%d.gallery_image_id", index), imageID)
 			if err != nil {
 				return nil, err
 			}

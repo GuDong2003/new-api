@@ -22,18 +22,27 @@ import { useAuthStore } from '@/stores/auth-store'
 
 import { getCanvasRecord, getGalleryUsage, saveCanvasRecord } from '../api'
 import type {
+  CanvasBinary,
+  CanvasCloudBase,
+  CanvasKind,
   CanvasRecord,
   CanvasSaveMetadata,
   GalleryIdentity,
   LocalCanvas,
   GalleryUsage,
 } from '../types'
-import { canvasDocumentAssetIds, documentKey } from './canvas-document'
+import {
+  canvasContentKey,
+  canvasDocumentAssetIds,
+  mergeCanvasDocuments,
+  normalizeCanvasDocument,
+} from './canvas-document'
 import {
   canvasEditors,
   emitCanvasEvent,
   notifyCanvasProjects,
 } from './canvas-events'
+import { enqueueCanvasMutation } from './canvas-mutation-queue'
 import {
   acknowledgeCanvasSave,
   listLocalCanvases,
@@ -43,9 +52,11 @@ import {
   removeLocalCanvas,
   removeLocalCanvasAsset,
   retireCanvasMasks,
+  saveLocalCanvas,
   updateCanvasCloudState,
   updateCanvasUserState,
 } from './canvas-repository'
+import { loadGalleryFile } from './gallery-file-source'
 import {
   galleryOwner,
   assertGalleryIdentity,
@@ -53,6 +64,8 @@ import {
 } from './session'
 
 export const CANVAS_CLOUD_INTERVAL = 300_000
+// Coming back to a canvas looks at the cloud copy at most this often.
+const CANVAS_PULL_INTERVAL = 10_000
 export const CANVAS_FULL_MESSAGE = '已保存到本地，云端空间不足，暂未上传。'
 type Session = {
   identity: GalleryIdentity
@@ -60,6 +73,7 @@ type Session = {
   uploads: Map<string, Promise<void>>
   requests: Map<string, AbortController>
   lastUploads: Map<string, number>
+  lastPulls: Map<string, number>
 }
 const sessions = new Map<string, Session>()
 const key = (identity: GalleryIdentity) =>
@@ -74,6 +88,7 @@ function sessionFor(identity: GalleryIdentity) {
       uploads: new Map(),
       requests: new Map(),
       lastUploads: new Map(),
+      lastPulls: new Map(),
     }
     sessions.set(key(identity), session)
   }
@@ -140,6 +155,27 @@ async function pause(
   notifyCanvasProjects()
 }
 
+/**
+ * What a cloud record holds, in the form this browser stores a canvas. The
+ * server leaves out fields it does not know, so only in that form do a cloud
+ * version and a copy stored here compare and merge field by field.
+ */
+export function cloudBaseOf(
+  kind: CanvasKind,
+  record: Pick<CanvasRecord, 'revision' | 'name' | 'document'>
+): CanvasCloudBase | undefined {
+  if (!record.document) return undefined
+  try {
+    return {
+      revision: record.revision,
+      name: record.name,
+      document: normalizeCanvasDocument(kind, record.document),
+    }
+  } catch {
+    return undefined
+  }
+}
+
 export async function reconcileCanvasRecord(
   identity: GalleryIdentity,
   local: LocalCanvas,
@@ -199,11 +235,23 @@ export async function reconcileCanvasRecord(
     if (canvas) await emitCanvasEvent({ identity, canvas })
     return canvas
   }
+  // A slow answer can come after this copy already moved on.
+  if (remote.revision < local.cloudRevision) return local
   if (remote.revision !== local.cloudRevision) {
+    const cloud = cloudBaseOf(local.kind, remote)
+    // Each device keeps its own view of a canvas, which is no edit to it.
     if (
-      documentKey(remote.document) === documentKey(local.document) &&
+      cloud &&
+      canvasContentKey(cloud.document) === canvasContentKey(local.document) &&
       remote.name === local.name
     ) {
+      // The map names what an upload from here was given. Another device's
+      // upload renamed images this browser never held.
+      const assetIdMap = Object.fromEntries(
+        Object.entries(remote.asset_id_map).filter(([sourceId]) =>
+          stored.some((asset) => asset.id === sourceId)
+        )
+      )
       const acknowledged = await acknowledgeCanvasSave(
         galleryOwner(identity),
         local.id,
@@ -211,27 +259,167 @@ export async function reconcileCanvasRecord(
           localRevision: local.revision,
           cloudRevision: remote.revision,
           expiresAt: remote.expires_at,
-          assetIdMap: remote.asset_id_map,
+          assetIdMap,
           assets: remote.assets,
+          cloudBase: cloud,
         }
       )
-      await emitCanvasEvent({
-        identity,
-        canvas: acknowledged,
-        assetIdMap: remote.asset_id_map,
-      })
+      await emitCanvasEvent({ identity, canvas: acknowledged, assetIdMap })
       return acknowledged
     }
+    const adopted = await adoptCloudCanvas(identity, local, remote)
+    if (adopted) return adopted
     await cloudStatus(identity, local.id, 'conflict')
     return null
   }
   return local
 }
 
+/**
+ * Brings this browser's copy of a canvas up to a newer cloud version, such as
+ * one another device saved. A copy with nothing left to upload takes that
+ * version as it is. One with edits of its own merges them onto it from the
+ * version both started from, and still owes the cloud the result. Without that
+ * version nothing tells which side changed what, so it stays for the owner to
+ * resolve.
+ */
+async function adoptCloudCanvas(
+  identity: GalleryIdentity,
+  local: LocalCanvas,
+  remote: CanvasRecord
+): Promise<LocalCanvas | null> {
+  const cloudBase = cloudBaseOf(local.kind, remote)
+  if (remote.state !== 'ready' || !cloudBase || remote.kind !== local.kind) {
+    return null
+  }
+  const cloudDocument = cloudBase.document
+  const owner = galleryOwner(identity)
+  const current = await loadLocalCanvas(owner, local.id)
+  if (!current || current.deleted) return null
+  // A copy with edits of its own merges only from the version it still
+  // follows, and only a drawing canvas merges at all. Otherwise its pictures
+  // are not worth fetching.
+  if (
+    current.revision !== current.cloudSavedRevision &&
+    (current.cloudBase?.revision !== current.cloudRevision ||
+      current.kind !== 'drawing')
+  ) {
+    return null
+  }
+  // Its pictures arrive first and outside the queue: they take as long as they
+  // take, and edits made here meanwhile go on being saved.
+  const stored = await readCanvasAssets(owner, local.id)
+  const shown = new Set(canvasDocumentAssetIds(cloudDocument))
+  const arrived: CanvasBinary[] = await Promise.all(
+    remote.assets
+      .filter(
+        (asset) =>
+          shown.has(asset.id) && !stored.some((item) => item.id === asset.id)
+      )
+      .map(async (asset) => ({
+        id: asset.id,
+        role: asset.role,
+        nodeId: asset.node_id,
+        sha256: asset.sha256,
+        previewOnly: asset.has_thumbnail,
+        blob: await loadGalleryFile(
+          identity,
+          asset.id,
+          asset.has_thumbnail,
+          sessionFor(identity).controller.signal
+        ),
+      }))
+  )
+  assertGalleryIdentity(identity)
+  const adopted = await enqueueCanvasMutation(identity, local.id, async () => {
+    const latest = await loadLocalCanvas(owner, local.id)
+    if (!latest || latest.deleted) return null
+    // This copy reached that version, or a later one, meanwhile.
+    if (remote.revision <= latest.cloudRevision) return latest
+    const unchanged = latest.revision === latest.cloudSavedRevision
+    let name = remote.name
+    // Where this device's view stands stays its own.
+    let document: Record<string, unknown> = {
+      ...cloudDocument,
+      viewport: latest.document.viewport,
+    }
+    if (!unchanged) {
+      // Only the version the copy still follows is what both sides started from.
+      const base =
+        latest.cloudBase?.revision === latest.cloudRevision
+          ? latest.cloudBase
+          : undefined
+      // The former NAI page stored another kind of canvas, which has no merge.
+      if (!base || latest.kind !== 'drawing') return null
+      const merged = mergeCanvasDocuments(
+        base.document,
+        latest.document,
+        cloudDocument,
+        [...latest.removedAssetIds, ...remote.removed_asset_ids]
+      )
+      try {
+        document = normalizeCanvasDocument(latest.kind, merged)
+      } catch {
+        // A mask can end up fitting neither side's reference image.
+        document = normalizeCanvasDocument(latest.kind, {
+          ...merged,
+          mask: null,
+        })
+      }
+      // Renamed on one side only, the new name stands; renamed on both, both
+      // devices settle on the same one.
+      if (latest.name === base.name) name = remote.name
+      else if (remote.name === base.name) name = latest.name
+      else name = latest.name <= remote.name ? latest.name : remote.name
+    }
+    const kept = new Set(canvasDocumentAssetIds(document))
+    const saved = await saveLocalCanvas(
+      {
+        ...latest,
+        name,
+        document,
+        status: 'pending',
+        needsExplicitSave: false,
+        // Merged edits are a successor of the version they were merged onto.
+        ...(unchanged
+          ? {}
+          : {
+              cloudRevision: remote.revision,
+              expiresAt: remote.expires_at,
+              cloudBase,
+            }),
+      },
+      arrived.filter((asset) => kept.has(asset.id))
+    )
+    if (!unchanged) return saved
+    return acknowledgeCanvasSave(owner, local.id, {
+      localRevision: saved.revision,
+      cloudRevision: remote.revision,
+      expiresAt: remote.expires_at,
+      // The cloud's version already names every image as the cloud does.
+      assetIdMap: {},
+      assets: remote.assets,
+      cloudBase,
+    })
+  })
+  if (!adopted) return null
+  await emitCanvasEvent({ identity, canvas: adopted })
+  // The open editor shows the new version once it looks at storage again,
+  // merging in whatever it has not saved yet.
+  await [...canvasEditors.values()]
+    .find(
+      (editor) =>
+        editor.canvasId === local.id && key(editor.identity) === key(identity)
+    )
+    ?.flush()
+  return adopted
+}
+
 async function upload(
   session: Session,
   id: string,
-  reason: 'timer' | 'leave' | 'manual'
+  reason: 'timer' | 'leave' | 'manual',
+  afterConflict = false
 ) {
   const { identity } = session
   const userId = galleryOwner(identity)
@@ -269,17 +457,7 @@ async function upload(
       if (canvasResponseStatus(error) !== 404) throw error
     }
     signal.throwIfAborted()
-    if (
-      remote &&
-      !(
-        canvas.status === 'error' &&
-        remote.state === 'ready' &&
-        remote.revision !== canvas.cloudRevision &&
-        documentKey(remote.document) !== documentKey(canvas.document)
-      )
-    ) {
-      canvas = await reconcileCanvasRecord(identity, canvas, remote)
-    }
+    if (remote) canvas = await reconcileCanvasRecord(identity, canvas, remote)
     if (!canvas || canvas.deleted || canvas.status === 'conflict') return
     if (canvas.needsExplicitSave && reason !== 'manual') return
     if (canvas.revision === canvas.cloudSavedRevision) return
@@ -361,6 +539,7 @@ async function upload(
       expiresAt: saved.expires_at,
       assetIdMap: saved.asset_id_map,
       assets: saved.assets,
+      cloudBase: cloudBaseOf(canvas.kind, saved),
     })
     await emitCanvasEvent({
       identity,
@@ -401,15 +580,39 @@ async function upload(
         (axios.isAxiosError(error) &&
           error.response?.data?.code === 'canvas_conflict')
       ) {
+        let resolved = false
+        let owed = false
+        let failed = false
         try {
           const latest = await loadLocalCanvas(userId, id)
           const remote = await getCanvasRecord(identity, id, signal)
-          if (latest) await reconcileCanvasRecord(identity, latest, remote)
+          if (latest) {
+            const reconciled = await reconcileCanvasRecord(
+              identity,
+              latest,
+              remote
+            )
+            // Another device saved first, and what it saved was taken in here.
+            if (
+              reconciled &&
+              reconciled.cloudRevision !== latest.cloudRevision
+            ) {
+              resolved = true
+              owed = reconciled.revision !== reconciled.cloudSavedRevision
+            }
+          }
         } catch {
-          /* Last complete local content remains available. */
+          // A picture that failed to download, say, leaves the canvas as it
+          // was; a later sync catches up with the cloud again.
+          failed = true
         }
-        if (canvasResponseStatus(error) !== 410) {
+        if (failed) {
+          await cloudStatus(identity, id, 'error')
+        } else if (canvasResponseStatus(error) !== 410 && !resolved) {
           await cloudStatus(identity, id, 'conflict')
+        } else if (owed && !afterConflict) {
+          // The merge goes up now rather than with the next timer.
+          await upload(session, id, 'leave', true)
         }
       } else await cloudStatus(identity, id, 'error')
     } else await cloudStatus(identity, id, 'error')
@@ -435,6 +638,80 @@ export async function syncCanvas(
   )
   session.uploads.set(canvasId, work)
   await work
+}
+
+/**
+ * Looks at the cloud copy for a version saved elsewhere, such as on another
+ * device, and brings this browser's copy up to it.
+ */
+export async function pullCanvas(
+  identity: GalleryIdentity,
+  canvasId: string
+): Promise<void> {
+  if (!isGalleryIdentityCurrent(identity)) return
+  const session = sessionFor(identity)
+  // An upload looks at the cloud copy on its own.
+  if (session.uploads.has(canvasId)) return
+  if (
+    Date.now() - (session.lastPulls.get(canvasId) ?? 0) <
+    CANVAS_PULL_INTERVAL
+  ) {
+    return
+  }
+  session.lastPulls.set(canvasId, Date.now())
+  const owner = galleryOwner(identity)
+  const canvas = await loadLocalCanvas(owner, canvasId)
+  if (
+    !canvas ||
+    canvas.deleted ||
+    canvas.status === 'conflict' ||
+    canvas.cloudRevision === 0
+  ) {
+    return
+  }
+  try {
+    const remote = await getCanvasRecord(
+      identity,
+      canvasId,
+      session.controller.signal
+    )
+    if (remote.revision === canvas.cloudRevision && remote.state === 'ready') {
+      return
+    }
+    const latest = await loadLocalCanvas(owner, canvasId)
+    if (!latest || latest.deleted || latest.status === 'conflict') return
+    const reconciled = await reconcileCanvasRecord(identity, latest, remote)
+    // Merged edits from here are still owed to the cloud.
+    if (reconciled && reconciled.revision !== reconciled.cloudSavedRevision) {
+      await syncCanvas(identity, canvasId, 'leave')
+    }
+  } catch {
+    // The next sync looks at the cloud copy again.
+  }
+}
+
+/**
+ * Uploads a canvas another device may be waiting on, without waiting for the
+ * timer: the task a generation started, then what the task produced.
+ */
+export async function syncCanvasNow(
+  identity: GalleryIdentity,
+  canvasId: string
+): Promise<void> {
+  if (!isGalleryIdentityCurrent(identity)) return
+  try {
+    await [...canvasEditors.values()]
+      .find(
+        (editor) =>
+          editor.canvasId === canvasId && key(editor.identity) === key(identity)
+      )
+      ?.flush()
+    // An upload already under way read the canvas before this change.
+    await sessions.get(key(identity))?.uploads.get(canvasId)
+    await syncCanvas(identity, canvasId, 'leave')
+  } catch {
+    // The timer uploads it later.
+  }
 }
 
 export async function checkCanvasCapacity(

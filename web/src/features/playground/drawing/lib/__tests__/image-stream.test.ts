@@ -46,6 +46,22 @@ describe('OpenAI image responses', () => {
       revisedPrompt: 'Revised',
     })
   })
+  // Every device watching a task stores its picture under the gallery copy the
+  // task names. Only an ID a canvas can store is taken.
+  it.each([
+    {
+      id: '11111111-1111-4111-8111-111111111111',
+      galleryImageId: '11111111-1111-4111-8111-111111111111',
+    },
+    { id: '../escape', galleryImageId: undefined },
+  ])('names a task image after the gallery copy $id', (test) => {
+    expect(
+      parseImageResponse(
+        { data: [{ b64_json: 'YWJj', gallery_image_id: test.id }] },
+        'png'
+      )[0].galleryImageId
+    ).toBe(test.galleryImageId)
+  })
   it('rejects an empty result, a provider error and an unsafe image URL', () => {
     expect(() => parseImageResponse({ data: [] }, 'png')).toThrow(
       'The server returned no images.'

@@ -485,6 +485,63 @@ it('stores a drawing result on its original canvas while another canvas is open'
   hook.unmount()
 })
 
+// A picture that arrives while another canvas is open is stored as it would be
+// on its own canvas: finished, with no task left for another device to watch.
+it('stores a task result on its original canvas without the finished task', async () => {
+  const source = await createCanvasProject(identity, 'drawing', '源画布')
+  await startCanvasEditor(identity, 'drawing')
+  const taskId = `task_${'b'.repeat(32)}`
+  let finish!: () => void
+  const finished = new Promise<void>((resolve) => {
+    finish = resolve
+  })
+  api.defaults.adapter = async (config) => {
+    if (config.url === `/pg/images/generations/${taskId}`) {
+      await finished
+      // The task endpoint answers as the image API does, without the envelope.
+      return {
+        ...response(config, {}),
+        data: {
+          task_id: taskId,
+          status: 'completed',
+          data: [{ b64_json: png }],
+        },
+      }
+    }
+    return response(config, usage)
+  }
+  vi.spyOn(api, 'post').mockResolvedValue({
+    headers: { 'content-type': 'application/json' },
+    data: new Response(JSON.stringify({ task_id: taskId, status: 'queued' }))
+      .body,
+  })
+  const hook = renderHook(useImageGeneration)
+  act(() =>
+    hook.result.current.generate(
+      { ...DEFAULT_IMAGE_SETTINGS, model: 'gpt-image-1', prompt: 'A forest' },
+      { x: 0, y: 0 }
+    )
+  )
+  await waitFor(() =>
+    expect(useDrawingStore.getState().nodes[0]?.data.taskId).toBe(taskId)
+  )
+  const nodeId = useDrawingStore.getState().nodes[0].id
+  const target = await createCanvasProject(identity, 'drawing', '目标画布')
+  await openCanvasProject(identity, target.id)
+
+  act(() => finish())
+
+  await waitFor(async () => {
+    const stored = required(await loadLocalCanvas(813, source.id))
+    const node = (
+      stored.document.nodes as { id: string; data: Record<string, unknown> }[]
+    ).find((item) => item.id === nodeId)
+    expect(node?.data.status).toBe('complete')
+    expect(node?.data.taskId).toBeUndefined()
+  })
+  hook.unmount()
+})
+
 it('does not resurrect a generation result after explicit canvas deletion', async () => {
   const canvas = await createCanvasProject(identity, 'drawing')
   await startCanvasEditor(identity, 'drawing')

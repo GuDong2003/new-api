@@ -20,6 +20,7 @@ import { z } from 'zod'
 
 import type {
   CanvasBinary,
+  CanvasCloudBase,
   CanvasRemoteAsset,
   CanvasUserState,
   LocalCanvas,
@@ -277,6 +278,25 @@ async function persistCanvas(
     ) {
       status = 'pending'
     }
+    // A copy stored before the cloud version it follows was kept holds that
+    // version while it has nothing unsynced.
+    let cloudBase = cloudMetadata.cloudBase
+    if (
+      cloudBase?.revision !== cloudMetadata.cloudRevision &&
+      current &&
+      cloudMetadata === current &&
+      current.cloudRevision > 0 &&
+      current.revision === current.cloudSavedRevision
+    ) {
+      cloudBase = {
+        revision: current.cloudRevision,
+        name: current.name,
+        document: current.document,
+      }
+    }
+    // What the former NAI page stored merges with nothing a drawing canvas
+    // holds, so it is no base once the canvas is upgraded.
+    if (current && current.kind !== canvas.kind) cloudBase = undefined
     const next: LocalCanvas = {
       id: canvas.id,
       userId: canvas.userId,
@@ -292,6 +312,7 @@ async function persistCanvas(
       needsExplicitSave: canvas.needsExplicitSave,
       removedAssetIds,
       deleted: false,
+      cloudBase,
     }
     canvases.put(next, [canvas.userId, canvas.id])
     return next
@@ -582,6 +603,8 @@ export type CanvasSaveAcknowledgement = {
   expiresAt: number
   assetIdMap: Readonly<Record<string, string>>
   assets: readonly CanvasRemoteAsset[]
+  /** What the cloud holds at `cloudRevision`, as the cloud names its images. */
+  cloudBase?: CanvasCloudBase
 }
 
 /** Apply only the server's verified identifier map to the latest local edits. */
@@ -697,6 +720,7 @@ export async function acknowledgeCanvasSave(
       ),
       expiresAt: ack.expiresAt,
       status: canvas.revision === ack.localRevision ? 'synced' : 'pending',
+      cloudBase: ack.cloudBase ?? canvas.cloudBase,
     }
     tx.objectStore('canvases').put(next, [userId, id])
     return next

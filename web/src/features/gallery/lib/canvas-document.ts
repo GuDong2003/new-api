@@ -62,7 +62,9 @@ export type CanvasCodecContext = {
 }
 
 const placeholder = 'data:image/png;base64,AA=='
-const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+/** What a canvas accepts as the ID of an image it stores. */
+export const CANVAS_ASSET_ID =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const count = z
   .number()
   .int()
@@ -159,7 +161,9 @@ export function normalizeCanvasDocument(
       ? serializeDrawingDocument(parsed as DrawingDocument)
       : serializeLegacyNaiDocument(parsed as LegacyNaiDocument)
   return mapDocumentAssets(serialized, (asset) => {
-    if (!uuid.test(asset.id)) throw new Error('Invalid canvas asset ID.')
+    if (!CANVAS_ASSET_ID.test(asset.id)) {
+      throw new Error('Invalid canvas asset ID.')
+    }
     return descriptor(asset)
   }) as Record<string, unknown>
 }
@@ -185,6 +189,12 @@ export function isCanvasDocumentEmpty(
 ): boolean {
   const nodes = document.nodes
   return !Array.isArray(nodes) || nodes.length === 0
+}
+
+/** What a canvas holds, leaving out where its view stands. */
+export function canvasContentKey(document: Record<string, unknown>): string {
+  const { viewport: _viewport, ...rest } = document
+  return documentKey(rest)
 }
 
 /** Text equal for equal stored documents, whatever order their keys are in. */
@@ -413,7 +423,9 @@ export async function encodeCanvas(
     if (!ids.has(asset.id)) {
       ids.set(
         asset.id,
-        uuid.test(asset.id) ? asset.id.toLowerCase() : crypto.randomUUID()
+        CANVAS_ASSET_ID.test(asset.id)
+          ? asset.id.toLowerCase()
+          : crypto.randomUUID()
       )
     }
     return { ...asset, id: ids.get(asset.id), src: placeholder }

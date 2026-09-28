@@ -71,9 +71,16 @@ export type ImageResult = {
   src: string
   mimeType: string
   revisedPrompt?: string
+  // The gallery copy of a task's image, which a canvas stores it under.
+  galleryImageId?: string
 }
 export type ImageResponse = {
-  data?: { b64_json?: string; url?: string; revised_prompt?: string }[]
+  data?: {
+    b64_json?: string
+    url?: string
+    revised_prompt?: string
+    gallery_image_id?: string
+  }[]
   output_format?: string
   usage?: Record<string, unknown>
   error?: { message?: string }

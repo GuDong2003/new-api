@@ -152,6 +152,17 @@ export type LocalCanvas = {
   needsExplicitSave: boolean
   removedAssetIds: string[]
   deleted: boolean
+  /**
+   * What the cloud held at a revision. While that is still `cloudRevision`,
+   * edits made here and a later cloud version both start from it, which is
+   * what lets them merge.
+   */
+  cloudBase?: CanvasCloudBase
+}
+export type CanvasCloudBase = {
+  revision: number
+  name: string
+  document: Record<string, unknown>
 }
 export type CanvasUserState = {
   lastOpened: Partial<Record<CanvasKind, string>>

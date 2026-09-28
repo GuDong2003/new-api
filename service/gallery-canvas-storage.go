@@ -265,11 +265,10 @@ func prepareGalleryCanvasAssets(ctx context.Context, root string, reader *multip
 			return model.ErrGalleryInvalid
 		}
 		if asset.State != "pending" {
-			// Transparent legacy reuse can receive both redundant original and
-			// thumbnail parts. Validate them without changing canonical files.
-			if remap[inputID] == "" {
-				return model.ErrGalleryInvalid
-			}
+			// A picture the gallery keeps already can arrive again: under the
+			// name a browser gave it before reuse renamed it, or under the task's
+			// gallery copy it is stored as while this canvas has not linked it.
+			// Validate the parts without changing canonical files.
 			if kind == "thumbnail" {
 				if err := discardGalleryCanvasThumbnail(part); err != nil {
 					return err

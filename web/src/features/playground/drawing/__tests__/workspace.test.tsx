@@ -71,6 +71,7 @@ afterEach(() => {
   stopCanvasEditors({ userId: 811, sessionId: 'gallery-session' })
   stopCanvasEditors({ userId: 821, sessionId: 'gallery-session' })
   stopCanvasEditors({ userId: 831, sessionId: 'gallery-session' })
+  stopCanvasEditors({ userId: 841, sessionId: 'gallery-session' })
   useAuthStore.getState().auth.reset()
   client?.clear()
   api.defaults.adapter = adapter
@@ -113,6 +114,49 @@ function renderWorkspace(userId: number) {
 }
 
 describe('Drawing workspace', () => {
+  // A node another device saved while it generates can arrive on the open
+  // canvas. Its task is watched from then on, not only when the canvas opens.
+  it('watches the task of a generating node that arrives on the open canvas', async () => {
+    const requests: string[] = []
+    api.defaults.adapter = async (config) => {
+      requests.push(String(config.url))
+      throw new AxiosError(
+        'not found',
+        '',
+        config,
+        {},
+        { ...response(config, {}), status: 404 }
+      )
+    }
+    const { client, view } = renderWorkspace(841)
+    await waitFor(() =>
+      expect(screen.getByText('Room for every idea')).toBeTruthy()
+    )
+
+    act(() => {
+      useDrawingStore.getState().addNodes([
+        {
+          id: 'generating-there',
+          type: 'image',
+          position: { x: 0, y: 0 },
+          data: {
+            prompt: 'A fox',
+            settings: DEFAULT_IMAGE_SETTINGS,
+            status: 'pending',
+            taskId: 'task_there',
+            createdAt: 1,
+          },
+        },
+      ])
+    })
+
+    await waitFor(() =>
+      expect(requests).toContain('/pg/images/generations/task_there')
+    )
+    view.unmount()
+    client.clear()
+  })
+
   it('shows the empty canvas and settings when no reference image or mask exists', async () => {
     const { client, view } = renderWorkspace(801)
     await waitFor(() =>

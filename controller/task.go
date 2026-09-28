@@ -58,7 +58,7 @@ var (
 // its links to people who should not read its prompts.
 func taskImageDisposition(task *model.Task, artifactKey, mimeType string) string {
 	plain := `inline; filename="` + imageFilename(artifactKey, mimeType) + `"`
-	if source := task.PrivateData.GallerySource; source != "drawing" && source != "nai" {
+	if !isDrawingImageTask(task) {
 		return plain
 	}
 	words := strings.Fields(unsafeFilenameCharacters.ReplaceAllString(task.Properties.Input, " "))

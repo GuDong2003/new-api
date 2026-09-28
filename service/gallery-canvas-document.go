@@ -126,7 +126,9 @@ func normalizeCanvasSettings(kind string, input map[string]any) (map[string]any,
 	fields = append(fields,
 		canvasDocumentField{name: "mode", typeName: "string", values: []string{"generate", "edit"}, fallback: "generate"},
 		canvasDocumentField{name: "size", typeName: "string", fallback: "1024x1024"},
-		canvasDocumentField{name: "quality", typeName: "string", values: []string{"auto", "low", "medium", "high", "xhigh", "max", "standard", "hd"}, fallback: "auto"},
+		// The drawing page also reads quality as the resolution tier a model is
+		// billed by.
+		canvasDocumentField{name: "quality", typeName: "string", values: []string{"auto", "low", "medium", "high", "xhigh", "max", "standard", "hd", "1k", "2k", "4k"}, fallback: "auto"},
 		canvasDocumentField{name: "n", typeName: "integer", min: 1, max: 10, fallback: float64(1)},
 		canvasDocumentField{name: "background", typeName: "string", values: []string{"auto", "transparent", "opaque"}, fallback: "auto"},
 		canvasDocumentField{name: "outputFormat", typeName: "string", values: []string{"png", "jpeg", "webp"}, fallback: "png"},
@@ -138,6 +140,8 @@ func normalizeCanvasSettings(kind string, input map[string]any) (map[string]any,
 		canvasDocumentField{name: "stream", typeName: "boolean", fallback: false},
 		canvasDocumentField{name: "partialImages", typeName: "integer", max: 3, fallback: float64(1)},
 		canvasDocumentField{name: "user", typeName: "string", max: 512, fallback: ""},
+		// Only Grok reads it; a canvas saved before it existed has none.
+		canvasDocumentField{name: "nsfw", typeName: "boolean", optional: true},
 		// The drawing page also generates with tag-prompted models: NovelAI and
 		// Alibaba's image models. Their parameters are optional, so nodes of
 		// other models carry none of them.
@@ -317,7 +321,12 @@ func NormalizeGalleryCanvasDocument(kind string, document map[string]any) (*Gall
 			{name: "createdAt", typeName: "number", min: -math.MaxFloat64, max: math.MaxFloat64},
 		}
 		if kind == "drawing" {
-			dataFields = append(dataFields, canvasDocumentField{name: "revisedPrompt", typeName: "string", max: 64000, optional: true})
+			dataFields = append(dataFields,
+				canvasDocumentField{name: "revisedPrompt", typeName: "string", max: 64000, optional: true},
+				// The task still producing a pending node, so another device that
+				// opens the canvas can watch it rather than report it stopped.
+				canvasDocumentField{name: "taskId", typeName: "string", max: 128, optional: true},
+			)
 		}
 		normalizedData, err := normalizeCanvasFields(data, dataFields)
 		if err != nil {

@@ -16,11 +16,18 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { CANVAS_ASSET_ID } from '@/features/gallery/lib/canvas-document'
+
 import type { ImageResponse, ImageResult } from '../types'
 import { isSafeImageSource } from './image-assets'
 
 export function parseImageResult(
-  item: { b64_json?: string; url?: string; revised_prompt?: string },
+  item: {
+    b64_json?: string
+    url?: string
+    revised_prompt?: string
+    gallery_image_id?: string
+  },
   format = 'png'
 ): ImageResult {
   const mimeType = ['jpeg', 'webp'].includes(format)
@@ -32,7 +39,14 @@ export function parseImageResult(
   if (!src || !isSafeImageSource(src)) {
     throw new Error('The image response is invalid.')
   }
-  return { src, mimeType, revisedPrompt: item.revised_prompt }
+  return {
+    src,
+    mimeType,
+    revisedPrompt: item.revised_prompt,
+    galleryImageId: CANVAS_ASSET_ID.test(item.gallery_image_id ?? '')
+      ? item.gallery_image_id
+      : undefined,
+  }
 }
 
 export function parseImageResponse(

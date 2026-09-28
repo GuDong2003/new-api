@@ -146,6 +146,49 @@ func TestGalleryCanvasDocumentPreservesEditorRelationsAndSettings(t *testing.T) 
 	}
 }
 
+// Every setting the drawing page stores comes back on another device: the
+// Grok nsfw switch, and the resolution tiers a model is billed by. A value the
+// cloud did not know refused the whole canvas, which then never left this
+// browser.
+func TestGalleryCanvasDocumentKeepsEveryDrawingSetting(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		field string
+		value any
+	}{
+		{name: "nsfw", field: "nsfw", value: true},
+		{name: "a resolution tier", field: "quality", value: "4k"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			doc := galleryCanvasDocument(t, "drawing")
+			doc["settings"].(map[string]any)[tc.field] = tc.value
+
+			info, err := service.NormalizeGalleryCanvasDocument("drawing", doc)
+			require.NoError(t, err)
+			assert.Equal(t, tc.value, info.Document["settings"].(map[string]any)[tc.field])
+		})
+	}
+}
+
+// A pending node keeps the task that produces its image. Another device that
+// opens the canvas watches that task, where without it the generation read as
+// stopped there while it finished on the device that started it.
+func TestGalleryCanvasDocumentKeepsTheTaskOfAPendingNode(t *testing.T) {
+	doc := galleryCanvasDocument(t, "drawing")
+	var node map[string]any
+	require.NoError(t, common.UnmarshalJsonStr(`{"id":"pending-node","type":"image","position":{"x":0,"y":0},"data":{"prompt":"a white fox","settings":{},"status":"pending","taskId":"task_6nuNRfJNcbtvjOBtIrD1mJhJrJKjmZng","createdAt":100}}`, &node))
+	doc["nodes"] = []any{node}
+
+	info, err := service.NormalizeGalleryCanvasDocument("drawing", doc)
+	require.NoError(t, err)
+	data := info.Document["nodes"].([]any)[0].(map[string]any)["data"].(map[string]any)
+	require.Equal(t, "task_6nuNRfJNcbtvjOBtIrD1mJhJrJKjmZng", data["taskId"])
+
+	node["data"].(map[string]any)["taskId"] = strings.Repeat("t", 129)
+	_, err = service.NormalizeGalleryCanvasDocument("drawing", doc)
+	require.ErrorIs(t, err, model.ErrGalleryInvalid)
+}
+
 func TestGalleryCanvasDocumentRejectsMalformedContent(t *testing.T) {
 	for name, mutate := range map[string]func(map[string]any){
 		"wrong version":        func(d map[string]any) { d["version"] = float64(2) },
@@ -678,6 +721,30 @@ func TestTaskGalleryImageIsReusedWhenCanvasIsSaved(t *testing.T) {
 			assert.Equal(t, saved.ID, linked.CanvasID)
 		})
 	}
+}
+
+// Every device watching a task stores its picture under the task's gallery
+// copy, and uploads the picture as it does any image the cloud has not linked
+// to the canvas yet. The save takes that copy over instead of refusing it.
+func TestCanvasSavedUnderTaskGalleryImageTakesItOver(t *testing.T) {
+	galleryFixture(t, sqlite.Open(filepath.Join(t.TempDir(), "gallery.db")))
+	original := galleryPNG(t)
+	taskImage, err := service.SaveTaskGalleryImageWithSource(context.Background(), 41, "task_canvas", "image-0", "drawing", "gpt-image-1", "fox", "image/png", bytes.NewReader(original))
+	require.NoError(t, err)
+	metadata := canvasSaveMetadata(t)
+	metadata["assets"].([]any)[0].(map[string]any)["id"] = taskImage.ID
+	node := metadata["document"].(map[string]any)["nodes"].([]any)[0].(map[string]any)
+	node["data"].(map[string]any)["asset"].(map[string]any)["id"] = taskImage.ID
+
+	saved, err := saveCanvasMetadata(t, 41, metadata, []string{"file:" + taskImage.ID, string(original)})
+	require.NoError(t, err)
+	assert.Empty(t, saved.AssetIDMap)
+	require.Len(t, saved.Assets, 1)
+	assert.Equal(t, taskImage.ID, saved.Assets[0].ID)
+
+	var linked model.GalleryImage
+	require.NoError(t, model.DB.Where("id = ?", taskImage.ID).First(&linked).Error)
+	assert.Equal(t, saved.ID, linked.CanvasID)
 }
 
 func TestCanvasReferenceStaysApartFromTaskGalleryImage(t *testing.T) {

@@ -661,6 +661,52 @@ describe('canvas originals and browser persistence', () => {
     ).toEqual([maskId, otherId])
   })
 
+  // What the former NAI page stored merges with nothing a drawing canvas holds,
+  // so the version it followed is no base for the drawing canvas it becomes.
+  it('forgets the cloud version a canvas followed once it changes kind', async () => {
+    const viewport = { x: 0, y: 0, zoom: 1 }
+    const naiDocument = { version: 1, nodes: [], viewport, settings: {} }
+    const nai = await saveLocalCanvas(
+      {
+        id: '00000000-0000-4000-8000-0000000000aa',
+        userId: 813,
+        kind: 'nai',
+        name: 'NAI',
+        document: naiDocument,
+        revision: 0,
+        cloudRevision: 3,
+        localSavedAt: 0,
+        cloudSavedRevision: 0,
+        expiresAt: 0,
+        status: 'pending',
+        needsExplicitSave: false,
+        removedAssetIds: [],
+        deleted: false,
+        cloudBase: { revision: 3, name: 'NAI', document: naiDocument },
+      },
+      []
+    )
+
+    const upgraded = await saveLocalCanvas(
+      {
+        ...nai,
+        kind: 'drawing',
+        document: {
+          version: 1,
+          nodes: [],
+          edges: [],
+          referenceIds: [],
+          mask: null,
+          viewport,
+          settings: {},
+        },
+      },
+      []
+    )
+
+    expect(upgraded.cloudBase).toBeUndefined()
+  })
+
   it('retains acknowledged cloud metadata when an edit without remapped assets finishes later', async () => {
     const encoded = await encodedDrawing()
     const saved = await saveLocalCanvas(local(encoded.document), encoded.assets)

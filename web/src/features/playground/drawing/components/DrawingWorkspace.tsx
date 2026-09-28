@@ -95,12 +95,23 @@ export function DrawingWorkspace(props: { userId: number }) {
     (state) => state.ready && state.userId === props.userId
   )
   const canvasId = useDrawingStore((state) => state.canvasId)
+  // Keyed as a string so only a change in which tasks are awaited matters.
+  const awaitedTasks = useDrawingStore((state) =>
+    state.nodes
+      .flatMap((node) =>
+        node.data.status === 'pending' && node.data.taskId
+          ? [node.data.taskId]
+          : []
+      )
+      .join(' ')
+  )
   // Image tasks keep generating on the gateway while a canvas is closed, so a
-  // freshly loaded canvas reattaches to whatever is still running.
+  // freshly loaded canvas reattaches to whatever is still running, as it does
+  // to a task behind a node another device saved while it generates.
   useEffect(() => {
     if (!ready) return
     resumeImageGenerationJobs(t)
-  }, [ready, canvasId, t])
+  }, [ready, canvasId, awaitedTasks, t])
   const nodes = useDrawingStore((state) => state.nodes)
   const edges = useDrawingStore((state) => state.edges)
   const canUndo = useDrawingStore((state) => state.past.length > 0)
