@@ -24,6 +24,16 @@ type Redemption struct {
 	UsedUserId   int            `json:"used_user_id"`
 	DeletedAt    gorm.DeletedAt `gorm:"index"`
 	ExpiredTime  int64          `json:"expired_time" gorm:"bigint"` // 过期时间，0 表示不过期
+	// Codes created by one request form a batch. With BatchOnePerUser an
+	// account may redeem only one code of the batch.
+	BatchId         string `json:"batch_id" gorm:"type:varchar(32);index"`
+	BatchOnePerUser bool   `json:"batch_one_per_user"`
+	// MaxUses is how many accounts may redeem the code, each of them once.
+	MaxUses   int   `json:"max_uses" gorm:"default:1"`
+	UsedCount int   `json:"used_count" gorm:"default:0"`
+	BatchSize int64 `json:"batch_size,omitempty" gorm:"-:all"` // only in GET /api/redemption/:id
+	// UsedUsername names the latest account to redeem the code, in lists.
+	UsedUsername string `json:"used_username,omitempty" gorm:"-:all"`
 }
 
 func GetAllRedemptions(startIdx int, num int) (redemptions []*Redemption, total int64, err error) {
@@ -57,6 +67,9 @@ func GetAllRedemptions(startIdx int, num int) (redemptions []*Redemption, total 
 		return nil, 0, err
 	}
 
+	if err = nameRedemptionRedeemers(redemptions); err != nil {
+		return nil, 0, err
+	}
 	return redemptions, total, nil
 }
 
@@ -121,7 +134,36 @@ func SearchRedemptions(keyword string, status string, startIdx int, num int) (re
 		return nil, 0, err
 	}
 
+	if err = nameRedemptionRedeemers(redemptions); err != nil {
+		return nil, 0, err
+	}
 	return redemptions, total, nil
+}
+
+// nameRedemptionRedeemers fills in the username of the latest account to
+// redeem each listed code, deleted accounts included.
+func nameRedemptionRedeemers(redemptions []*Redemption) error {
+	userIds := make([]int, 0, len(redemptions))
+	for _, redemption := range redemptions {
+		if redemption.UsedUserId > 0 {
+			userIds = append(userIds, redemption.UsedUserId)
+		}
+	}
+	if len(userIds) == 0 {
+		return nil
+	}
+	var users []User
+	if err := DB.Unscoped().Select("id", "username").Where("id IN ?", userIds).Find(&users).Error; err != nil {
+		return err
+	}
+	usernames := make(map[int]string, len(users))
+	for _, user := range users {
+		usernames[user.Id] = user.Username
+	}
+	for _, redemption := range redemptions {
+		redemption.UsedUsername = usernames[redemption.UsedUserId]
+	}
+	return nil
 }
 
 func GetRedemptionById(id int) (*Redemption, error) {
@@ -159,14 +201,50 @@ func Redeem(key string, userId int) (quota int, err error) {
 		if redemption.ExpiredTime != 0 && redemption.ExpiredTime < common.GetTimestamp() {
 			return errors.New("该兑换码已过期")
 		}
-		// Compare-and-swap on status: only the transaction that flips
-		// enabled -> used may credit quota, so a concurrent redeem of the
-		// same code loses here even without a row lock (e.g. on SQLite).
+		maxUses := max(redemption.MaxUses, 1)
+		if redemption.UsedCount >= maxUses {
+			return errors.New("该兑换码已用完")
+		}
+		var redeemed int64
+		err = tx.Model(&RedemptionRecord{}).Where("redemption_id = ? AND user_id = ?", redemption.Id, userId).Count(&redeemed).Error
+		if err != nil {
+			return err
+		}
+		if redeemed > 0 {
+			return errors.New("该用户已兑换过这个兑换码")
+		}
+		record := &RedemptionRecord{
+			RedemptionId: redemption.Id,
+			UserId:       userId,
+			BatchId:      redemption.BatchId,
+			Quota:        redemption.Quota,
+		}
+		if redemption.BatchOnePerUser && redemption.BatchId != "" {
+			// Redemptions made before the batch rule was turned on count too.
+			err = tx.Model(&RedemptionRecord{}).Where("batch_id = ? AND user_id = ?", redemption.BatchId, userId).Count(&redeemed).Error
+			if err != nil {
+				return err
+			}
+			if redeemed > 0 {
+				return errors.New("该用户已兑换过同一批次的兑换码")
+			}
+			record.OnePerUserBatchId = &redemption.BatchId
+		}
+		now := common.GetTimestamp()
+		usedCount := redemption.UsedCount + 1
+		status := common.RedemptionCodeStatusEnabled
+		if usedCount >= maxUses {
+			status = common.RedemptionCodeStatusUsed
+		}
+		// Compare-and-swap on the count read above: only one of several
+		// concurrent redeems of the code moves it on, even without a row
+		// lock (e.g. on SQLite).
 		result := tx.Model(&Redemption{}).
-			Where("id = ? AND status = ?", redemption.Id, common.RedemptionCodeStatusEnabled).
+			Where("id = ? AND status = ? AND used_count = ?", redemption.Id, common.RedemptionCodeStatusEnabled, redemption.UsedCount).
 			Updates(map[string]any{
-				"redeemed_time": common.GetTimestamp(),
-				"status":        common.RedemptionCodeStatusUsed,
+				"redeemed_time": now,
+				"status":        status,
+				"used_count":    usedCount,
 				"used_user_id":  userId,
 			})
 		if result.Error != nil {
@@ -174,6 +252,12 @@ func Redeem(key string, userId int) (quota int, err error) {
 		}
 		if result.RowsAffected == 0 {
 			return errors.New("该兑换码已被使用")
+		}
+		// When two redeems pass the checks above together, the unique indexes
+		// on the records refuse the second one.
+		record.CreatedTime = now
+		if err := tx.Create(record).Error; err != nil {
+			return err
 		}
 		return creditTopUpQuota(tx, userId, redemption.Quota, nil)
 	})
@@ -184,6 +268,83 @@ func Redeem(key string, userId int) (quota int, err error) {
 	syncCreditUserQuotaCache(userId, redemption.Quota, "redemption")
 	RecordLog(userId, LogTypeTopup, fmt.Sprintf("通过兑换码充值 %s，兑换码ID %d", logger.LogQuota(redemption.Quota), redemption.Id))
 	return redemption.Quota, nil
+}
+
+// RedemptionMaxUsesLimit caps how many accounts one shared code can serve.
+const RedemptionMaxUsesLimit = 100000
+
+// ErrRedemptionMaxUsesInvalid means an edit would let a shared code serve
+// fewer than 2 accounts, fewer than already redeemed it, or more than
+// RedemptionMaxUsesLimit.
+var ErrRedemptionMaxUsesInvalid = errors.New("redemption max uses out of range")
+
+// RedemptionEdit is an admin's edit of a code. A nil MaxUses or
+// BatchOnePerUser leaves that setting as it is, so an editor that does not
+// know a setting keeps it.
+type RedemptionEdit struct {
+	Name            string
+	Quota           int
+	ExpiredTime     int64
+	MaxUses         *int
+	BatchOnePerUser *bool
+}
+
+// UpdateRedemptionDetails saves an edit under the code's row lock, so the
+// status it derives from the use count cannot race a redeem. MaxUses changes
+// only shared codes, and a one-time code ignores it, so an edit that echoes
+// max_uses 1 back still works. BatchOnePerUser changes only batches of
+// one-time codes, and every code of the batch.
+func UpdateRedemptionDetails(id int, edit RedemptionEdit) (*Redemption, error) {
+	if edit.Quota <= 0 {
+		return nil, errors.New("redemption quota must be positive")
+	}
+	if err := common.ValidateWalletQuota(edit.Quota); err != nil {
+		return nil, err
+	}
+	redemption := &Redemption{}
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		if err := lockForUpdate(tx).First(redemption, "id = ?", id).Error; err != nil {
+			return err
+		}
+		shared := redemption.MaxUses > 1
+		updates := map[string]any{
+			"name":         edit.Name,
+			"quota":        edit.Quota,
+			"expired_time": edit.ExpiredTime,
+		}
+		if edit.MaxUses != nil && shared {
+			if *edit.MaxUses < max(2, redemption.UsedCount) || *edit.MaxUses > RedemptionMaxUsesLimit {
+				return ErrRedemptionMaxUsesInvalid
+			}
+			updates["max_uses"] = *edit.MaxUses
+			if redemption.Status != common.RedemptionCodeStatusDisabled {
+				updates["status"] = common.RedemptionCodeStatusEnabled
+				if redemption.UsedCount >= *edit.MaxUses {
+					updates["status"] = common.RedemptionCodeStatusUsed
+				}
+			}
+		}
+		if err := tx.Model(redemption).Updates(updates).Error; err != nil {
+			return err
+		}
+		if edit.BatchOnePerUser != nil && !shared && redemption.BatchId != "" {
+			err := tx.Unscoped().Model(&Redemption{}).
+				Where("batch_id = ?", redemption.BatchId).
+				Update("batch_one_per_user", *edit.BatchOnePerUser).Error
+			if err != nil {
+				return err
+			}
+		}
+		return tx.First(redemption, "id = ?", id).Error
+	})
+	return redemption, err
+}
+
+// CountRedemptionBatch counts the codes of a batch that are not deleted.
+func CountRedemptionBatch(batchId string) (int64, error) {
+	var count int64
+	err := DB.Model(&Redemption{}).Where("batch_id = ?", batchId).Count(&count).Error
+	return count, err
 }
 
 func (redemption *Redemption) Insert() error {

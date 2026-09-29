@@ -92,6 +92,9 @@ export const REDEMPTION_VALIDATION = {
   NAME_MAX_LENGTH: 20,
   COUNT_MIN: 1,
   COUNT_MAX: 100,
+  // A shared code serves this many accounts, each of them once
+  SHARED_MAX_USES_MIN: 2,
+  SHARED_MAX_USES_MAX: 100000,
 } as const
 
 // ============================================================================

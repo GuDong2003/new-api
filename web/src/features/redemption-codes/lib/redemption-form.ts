@@ -26,6 +26,7 @@ import {
   getRedemptionFormErrorMessages,
 } from '../constants'
 import type { RedemptionFormData, Redemption } from '../types'
+import { isSharedRedemption } from './utils'
 
 // ============================================================================
 // Form Schema (use getRedemptionFormSchema(t) in components for i18n messages)
@@ -33,26 +34,72 @@ import type { RedemptionFormData, Redemption } from '../types'
 
 export function getRedemptionFormSchema(t: TFunction) {
   const msg = getRedemptionFormErrorMessages(t)
-  return z.object({
-    name: z
-      .string()
-      .min(REDEMPTION_VALIDATION.NAME_MIN_LENGTH, msg.NAME_LENGTH_INVALID)
-      .max(REDEMPTION_VALIDATION.NAME_MAX_LENGTH, msg.NAME_LENGTH_INVALID),
-    quota_dollars: z.number().min(0, t('Quota must be a positive number')),
-    expired_time: z.date().optional(),
-    count: z
-      .number()
-      .min(REDEMPTION_VALIDATION.COUNT_MIN, msg.COUNT_INVALID)
-      .max(REDEMPTION_VALIDATION.COUNT_MAX, msg.COUNT_INVALID)
-      .optional(),
-  })
+  return z
+    .object({
+      name: z
+        .string()
+        .min(REDEMPTION_VALIDATION.NAME_MIN_LENGTH, msg.NAME_LENGTH_INVALID)
+        .max(REDEMPTION_VALIDATION.NAME_MAX_LENGTH, msg.NAME_LENGTH_INVALID),
+      quota_dollars: z.number().min(0, t('Quota must be a positive number')),
+      expired_time: z.date().optional(),
+      // Checked below only for one-time codes; a shared code is one code
+      count: z.number().optional(),
+      kind: z.enum(['one_time', 'shared']),
+      batch_one_per_user: z.boolean(),
+      max_uses: z.number().int(),
+      // Accounts that already redeemed the code; the limit cannot go lower
+      used_count: z.number(),
+    })
+    .superRefine((data, ctx) => {
+      if (data.kind === 'one_time') {
+        const count = data.count ?? 1
+        if (
+          count < REDEMPTION_VALIDATION.COUNT_MIN ||
+          count > REDEMPTION_VALIDATION.COUNT_MAX
+        ) {
+          ctx.addIssue({
+            code: 'custom',
+            path: ['count'],
+            message: msg.COUNT_INVALID,
+          })
+        }
+        return
+      }
+      const min = Math.max(
+        REDEMPTION_VALIDATION.SHARED_MAX_USES_MIN,
+        data.used_count
+      )
+      if (data.max_uses < min) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['max_uses'],
+          message: t('Enter at least {{min}}', { min }),
+        })
+      }
+      if (data.max_uses > REDEMPTION_VALIDATION.SHARED_MAX_USES_MAX) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['max_uses'],
+          message: t('Enter at most {{max}}', {
+            max: REDEMPTION_VALIDATION.SHARED_MAX_USES_MAX,
+          }),
+        })
+      }
+    })
 }
+
+// One-time codes work once each; a shared code serves several accounts
+export type RedemptionKind = 'one_time' | 'shared'
 
 export type RedemptionFormValues = {
   name: string
   quota_dollars: number
   expired_time?: Date
   count?: number
+  kind: RedemptionKind
+  batch_one_per_user: boolean
+  max_uses: number
+  used_count: number
 }
 
 // ============================================================================
@@ -64,6 +111,10 @@ export const REDEMPTION_FORM_DEFAULT_VALUES: RedemptionFormValues = {
   quota_dollars: 10,
   expired_time: undefined,
   count: 1,
+  kind: 'one_time',
+  batch_one_per_user: true,
+  max_uses: 100,
+  used_count: 0,
 }
 
 // ============================================================================
@@ -71,18 +122,23 @@ export const REDEMPTION_FORM_DEFAULT_VALUES: RedemptionFormValues = {
 // ============================================================================
 
 /**
- * Transform form data to API payload
+ * Transform form data to the payload that creates codes
  */
 export function transformFormDataToPayload(
   data: RedemptionFormValues
 ): RedemptionFormData {
+  const shared = data.kind === 'shared'
+  const count = shared ? 1 : data.count || 1
   return {
     name: data.name,
     quota: parseQuotaFromDollars(data.quota_dollars),
     expired_time: data.expired_time
       ? Math.floor(data.expired_time.getTime() / 1000)
       : 0,
-    count: data.count || 1,
+    count,
+    max_uses: shared ? data.max_uses : 1,
+    // The batch rule means nothing for a batch of one code
+    batch_one_per_user: !shared && count > 1 && data.batch_one_per_user,
   }
 }
 
@@ -100,5 +156,9 @@ export function transformRedemptionToFormDefaults(
         ? new Date(redemption.expired_time * 1000)
         : undefined,
     count: 1,
+    kind: isSharedRedemption(redemption) ? 'shared' : 'one_time',
+    batch_one_per_user: redemption.batch_one_per_user,
+    max_uses: redemption.max_uses,
+    used_count: redemption.used_count,
   }
 }

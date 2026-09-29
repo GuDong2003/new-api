@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { zodResolver } from '@hookform/resolvers/zod'
 import { type FormEvent, useEffect, useState } from 'react'
-import { useForm } from 'react-hook-form'
+import { useForm, useWatch } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
@@ -29,6 +29,7 @@ import {
   sideDrawerFooterClassName,
   sideDrawerFormClassName,
   sideDrawerHeaderClassName,
+  sideDrawerSwitchItemClassName,
 } from '@/components/drawer-layout'
 import { Button } from '@/components/ui/button'
 import {
@@ -41,6 +42,8 @@ import {
   FormMessage,
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import {
   Sheet,
   SheetClose,
@@ -50,12 +53,15 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet'
+import { Switch } from '@/components/ui/switch'
+import { toIntlLocale } from '@/i18n/languages'
 import {
   formatQuotaWithCurrency,
   getCurrencyDisplay,
   getCurrencyLabel,
 } from '@/lib/currency'
 import {
+  formatNumber,
   formatQuota,
   getEditableQuotaStep,
   parseQuotaFromDollars,
@@ -64,15 +70,16 @@ import { handleServerError } from '@/lib/handle-server-error'
 import { addTimeToDate } from '@/lib/time'
 
 import { createRedemption, updateRedemption, getRedemption } from '../api'
-import { SUCCESS_MESSAGES } from '../constants'
+import { REDEMPTION_VALIDATION, SUCCESS_MESSAGES } from '../constants'
 import {
   getRedemptionFormSchema,
   type RedemptionFormValues,
+  type RedemptionKind,
   REDEMPTION_FORM_DEFAULT_VALUES,
   transformFormDataToPayload,
   transformRedemptionToFormDefaults,
 } from '../lib'
-import type { Redemption } from '../types'
+import type { Redemption, RedemptionFormData } from '../types'
 import {
   RedemptionsExportDialog,
   type RedemptionExportData,
@@ -90,7 +97,8 @@ export function RedemptionsMutateDrawer({
   onOpenChange,
   currentRow,
 }: RedemptionsMutateDrawerProps) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
+  const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
   const isUpdate = !!currentRow
   const redemptionId = currentRow?.id
   const { triggerRefresh } = useRedemptions()
@@ -179,11 +187,24 @@ export function RedemptionsMutateDrawer({
         const quota = form.getFieldState('quota_dollars').isDirty
           ? basePayload.quota
           : loadedRedemption.quota
-        const result = await updateRedemption({
-          ...basePayload,
-          quota,
+        const payload: RedemptionFormData & { id: number } = {
           id: currentRow.id,
-        })
+          name: basePayload.name,
+          quota,
+          expired_time: basePayload.expired_time,
+        }
+        // Send a setting only when it changed, so saving another field
+        // never rewrites it for the whole batch.
+        if (data.kind === 'shared' && form.getFieldState('max_uses').isDirty) {
+          payload.max_uses = data.max_uses
+        }
+        if (
+          data.kind === 'one_time' &&
+          form.getFieldState('batch_one_per_user').isDirty
+        ) {
+          payload.batch_one_per_user = data.batch_one_per_user
+        }
+        const result = await updateRedemption(payload)
         if (result.success) {
           toast.success(t(SUCCESS_MESSAGES.REDEMPTION_UPDATED))
           onOpenChange(false)
@@ -246,6 +267,15 @@ export function RedemptionsMutateDrawer({
   const currencyLabel = getCurrencyLabel()
   const tokensOnly = currencyMeta.kind === 'tokens'
   const quotaStep = getEditableQuotaStep()
+  const [kind, quotaDollars, maxUses, usedCount, count] = useWatch({
+    control: form.control,
+    name: ['kind', 'quota_dollars', 'max_uses', 'used_count', 'count'],
+  })
+  const batchSize = isUpdate ? (loadedRedemption?.batch_size ?? 1) : count || 1
+  const sharedTotal = formatQuotaWithCurrency(
+    parseQuotaFromDollars(quotaDollars) * maxUses,
+    { abbreviate: false }
+  )
   const quotaLabel = t('Quota ({{currency}})', { currency: currencyLabel })
   const quotaPlaceholder = tokensOnly
     ? t('Enter quota in tokens')
@@ -298,6 +328,70 @@ export function RedemptionsMutateDrawer({
                 className='contents'
               >
                 <SideDrawerSection>
+                  {!isUpdate && (
+                    <FormField
+                      control={form.control}
+                      name='kind'
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>{t('Code type')}</FormLabel>
+                          <FormControl>
+                            <RadioGroup
+                              aria-label={t('Code type')}
+                              value={field.value}
+                              onValueChange={(value) =>
+                                field.onChange(value as RedemptionKind)
+                              }
+                              className='grid gap-2 sm:grid-cols-2'
+                            >
+                              <Label
+                                htmlFor='redemption-kind-one-time'
+                                className='has-data-[checked]:border-primary flex cursor-pointer items-start gap-3 rounded-lg border p-3 font-normal'
+                              >
+                                <RadioGroupItem
+                                  id='redemption-kind-one-time'
+                                  value='one_time'
+                                  className='mt-0.5'
+                                />
+                                <span className='flex flex-col gap-1'>
+                                  <span className='text-sm font-medium'>
+                                    {t('One-time codes')}
+                                  </span>
+                                  <span className='text-muted-foreground text-xs'>
+                                    {t(
+                                      'Each code works once. Hand them out one by one.'
+                                    )}
+                                  </span>
+                                </span>
+                              </Label>
+                              <Label
+                                htmlFor='redemption-kind-shared'
+                                className='has-data-[checked]:border-primary flex cursor-pointer items-start gap-3 rounded-lg border p-3 font-normal'
+                              >
+                                <RadioGroupItem
+                                  id='redemption-kind-shared'
+                                  value='shared'
+                                  className='mt-0.5'
+                                />
+                                <span className='flex flex-col gap-1'>
+                                  <span className='text-sm font-medium'>
+                                    {t('Shared code')}
+                                  </span>
+                                  <span className='text-muted-foreground text-xs'>
+                                    {t(
+                                      'One code that many accounts redeem once each.'
+                                    )}
+                                  </span>
+                                </span>
+                              </Label>
+                            </RadioGroup>
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  )}
+
                   <FormField
                     control={form.control}
                     name='name'
@@ -403,7 +497,7 @@ export function RedemptionsMutateDrawer({
                     )}
                   />
 
-                  {!isUpdate && (
+                  {!isUpdate && kind === 'one_time' && (
                     <FormField
                       control={form.control}
                       name='count'
@@ -428,6 +522,78 @@ export function RedemptionsMutateDrawer({
                             {t(
                               'Create multiple redemption codes at once (1-100)'
                             )}
+                          </FormDescription>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  )}
+
+                  {kind === 'one_time' && batchSize > 1 && (
+                    <FormField
+                      control={form.control}
+                      name='batch_one_per_user'
+                      render={({ field }) => (
+                        <FormItem className={sideDrawerSwitchItemClassName()}>
+                          <div className='flex flex-col gap-0.5'>
+                            <FormLabel className='text-base'>
+                              {t('One code per account in this batch')}
+                            </FormLabel>
+                            <FormDescription>
+                              {isUpdate
+                                ? t(
+                                    'Applies to all {{count}} codes in this batch',
+                                    { count: formatNumber(batchSize, locale) }
+                                  )
+                                : t(
+                                    'An account that redeems one code of this batch cannot redeem the others.'
+                                  )}
+                            </FormDescription>
+                          </div>
+                          <FormControl>
+                            <Switch
+                              checked={field.value}
+                              onCheckedChange={field.onChange}
+                            />
+                          </FormControl>
+                        </FormItem>
+                      )}
+                    />
+                  )}
+
+                  {kind === 'shared' && (
+                    <FormField
+                      control={form.control}
+                      name='max_uses'
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>{t('Accounts that can redeem')}</FormLabel>
+                          <FormControl>
+                            <Input
+                              {...field}
+                              type='number'
+                              min={Math.max(
+                                REDEMPTION_VALIDATION.SHARED_MAX_USES_MIN,
+                                usedCount
+                              )}
+                              max={REDEMPTION_VALIDATION.SHARED_MAX_USES_MAX}
+                              onChange={(e) =>
+                                field.onChange(
+                                  Number.parseInt(e.target.value, 10) || 0
+                                )
+                              }
+                            />
+                          </FormControl>
+                          <FormDescription>
+                            {usedCount > 0
+                              ? t(
+                                  '{{count}} accounts have redeemed it, so the limit cannot go lower.',
+                                  { count: formatNumber(usedCount, locale) }
+                                )
+                              : t('Each account redeems this code once.')}{' '}
+                            {t('Up to {{amount}} in total', {
+                              amount: sharedTotal,
+                            })}
                           </FormDescription>
                           <FormMessage />
                         </FormItem>

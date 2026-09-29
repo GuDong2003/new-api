@@ -66,6 +66,10 @@ redemption.expired: "该兑换码已过期"
 redemption.failed: "兑换失败，请稍后重试"
 redemption.not_provided: "未提供兑换码"
 redemption.expire_time_invalid: "过期时间不能早于当前时间"
+redemption.max_uses_invalid: "兑换码的可用次数必须在 1 到 100000 之间"
+redemption.shared_code_invalid: "共用码一次只能生成一个，也不能设置同一批每人限一个"
+redemption.shared_max_uses_invalid: "共用码的可领取人数必须在 2 到 100000 之间，且不能少于已领取的人数"
+redemption.used_up: "该兑换码已用完，不能重新启用"
 
 # Invitation code messages
 invite_code.required: "创建新账号需要填写邀请码"
@@ -280,7 +284,7 @@ oauth.user_info_empty: "{{.Provider}} 获取用户信息为空，请检查设置
 oauth.trust_level_low: "Linux DO 信任等级未达到管理员设置的最低信任等级"
 
 # Model layer error messages
-redeem.failed: "兑换失败，请稍后重试"
+redeem.failed: "兑换失败：兑换码无效、已用完或已过期，或你已领过这个码或同一批的码"
 user.create_default_token_error: "创建默认令牌失败"
 common.uuid_duplicate: "请重试，系统生成的 UUID 竟然重复了！"
 common.invalid_input: "输入不合法"

@@ -23,6 +23,7 @@ import type {
   ApiResponse,
   GetRedemptionsParams,
   GetRedemptionsResponse,
+  GetRedemptionRecordsResponse,
   SearchRedemptionsParams,
   RedemptionFormData,
 } from './types'
@@ -103,5 +104,17 @@ export async function batchDeleteRedemptions(
   ids: number[]
 ): Promise<ApiResponse<number>> {
   const res = await api.post('/api/redemption/batch', { ids })
+  return res.data
+}
+
+// Get the accounts that redeemed a code, newest first
+export async function getRedemptionRecords(params: {
+  redemptionId: number
+  page: number
+  pageSize: number
+}): Promise<GetRedemptionRecordsResponse> {
+  const res = await api.get(
+    `/api/redemption/${params.redemptionId}/records?p=${params.page}&page_size=${params.pageSize}`
+  )
   return res.data
 }

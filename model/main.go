@@ -350,6 +350,7 @@ func migrateDB() error {
 		&Option{},
 		&LoginEncryptionKey{},
 		&Redemption{},
+		&RedemptionRecord{},
 		&InviteCode{},
 		&InviteCodeUsage{},
 		&Ability{},
@@ -385,6 +386,9 @@ func migrateDB() error {
 		&AuthzRole{},
 	)
 	if err != nil {
+		return err
+	}
+	if err := migrateRedemptionBatches(DB); err != nil {
 		return err
 	}
 	if err := InitializeUserAuthVersions(); err != nil {
@@ -429,6 +433,7 @@ func migrateDBFast() error {
 		{&Option{}, "Option"},
 		{&LoginEncryptionKey{}, "LoginEncryptionKey"},
 		{&Redemption{}, "Redemption"},
+		{&RedemptionRecord{}, "RedemptionRecord"},
 		{&InviteCode{}, "InviteCode"},
 		{&InviteCodeUsage{}, "InviteCodeUsage"},
 		{&Ability{}, "Ability"},
@@ -483,6 +488,9 @@ func migrateDBFast() error {
 		if err != nil {
 			return err
 		}
+	}
+	if err := migrateRedemptionBatches(DB); err != nil {
+		return err
 	}
 	if err := InitializeUserAuthVersions(); err != nil {
 		return err

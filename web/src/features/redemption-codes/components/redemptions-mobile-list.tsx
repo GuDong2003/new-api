@@ -31,11 +31,12 @@ import {
   EmptyTitle,
 } from '@/components/ui/empty'
 import { Skeleton } from '@/components/ui/skeleton'
-import { formatQuota } from '@/lib/format'
+import { toIntlLocale } from '@/i18n/languages'
+import { formatNumber, formatQuota } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
 import { REDEMPTION_STATUS, REDEMPTION_STATUSES } from '../constants'
-import { isRedemptionExpired } from '../lib'
+import { isRedemptionExpired, isSharedRedemption } from '../lib'
 import type { Redemption } from '../types'
 import { DataTableRowActions } from './data-table-row-actions'
 
@@ -76,7 +77,8 @@ interface RedemptionsMobileListProps {
 }
 
 export function RedemptionsMobileList(props: RedemptionsMobileListProps) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
+  const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
   const rows = props.table.getRowModel().rows
 
   if (props.isLoading) return <RedemptionsMobileSkeleton />
@@ -127,8 +129,15 @@ export function RedemptionsMobileList(props: RedemptionsMobileListProps) {
                 <div className='truncate text-sm font-semibold'>
                   {redemption.name}
                 </div>
-                <div className='text-muted-foreground text-[11px]'>
+                <div className='text-muted-foreground flex items-center gap-1.5 text-[11px]'>
                   {t('Redemption Code')}
+                  {redemption.batch_one_per_user && (
+                    <StatusBadge
+                      label={t('One per account')}
+                      variant='info'
+                      copyable={false}
+                    />
+                  )}
                 </div>
               </div>
               {expired ? (
@@ -167,6 +176,32 @@ export function RedemptionsMobileList(props: RedemptionsMobileListProps) {
                 {formatQuota(redemption.quota)}
               </span>
             </div>
+
+            {!isSharedRedemption(redemption) && redemption.used_user_id > 0 && (
+              <div className='flex items-center justify-between gap-2 text-xs'>
+                <span className='text-muted-foreground'>
+                  {t('Redeemed By')}
+                </span>
+                <span className='truncate font-medium'>
+                  {redemption.used_username ||
+                    t('User {{id}}', { id: redemption.used_user_id })}
+                </span>
+              </div>
+            )}
+
+            {isSharedRedemption(redemption) && (
+              <div className='flex items-center justify-between gap-2 text-xs'>
+                <span className='text-muted-foreground'>
+                  {t('Redemptions')}
+                </span>
+                <span className='font-medium tabular-nums'>
+                  {t('Redeemed {{used}} / {{max}}', {
+                    used: formatNumber(redemption.used_count, locale),
+                    max: formatNumber(redemption.max_uses, locale),
+                  })}
+                </span>
+              </div>
+            )}
           </div>
         )
       })}

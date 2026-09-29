@@ -43,3 +43,10 @@ export function isRedemptionExpired(
 ): boolean {
   return status === 1 && isTimestampExpired(expired_time)
 }
+
+/**
+ * A shared code is one code that several accounts redeem once each.
+ */
+export function isSharedRedemption(redemption: { max_uses: number }): boolean {
+  return redemption.max_uses > 1
+}

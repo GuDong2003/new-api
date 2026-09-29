@@ -19,38 +19,37 @@ For commercial licensing, please contact support@quantumnous.com
 import { useTranslation } from 'react-i18next'
 
 import { PagedRecordsDialog } from '@/components/paged-records-dialog'
+import { toIntlLocale } from '@/i18n/languages'
 import dayjs from '@/lib/dayjs'
+import { formatNumber, formatQuota } from '@/lib/format'
 import { requireServerSuccess } from '@/lib/server-error-message'
 
-import { getInviteCodeUsages } from './api'
-import type { InviteCode, InviteCodeUsage } from './types'
+import { getRedemptionRecords } from '../api'
+import type { Redemption, RedemptionRecord } from '../types'
 
-type InviteCodeUsagesDialogProps = {
+type RedemptionRecordsDialogProps = {
   open: boolean
   onOpenChange: (open: boolean) => void
-  inviteCode?: InviteCode
+  redemption?: Redemption
 }
 
-export function InviteCodeUsagesDialog({
-  open,
-  onOpenChange,
-  inviteCode,
-}: InviteCodeUsagesDialogProps) {
-  const { t } = useTranslation()
-  const inviteCodeId = inviteCode?.id
+export function RedemptionRecordsDialog(props: RedemptionRecordsDialogProps) {
+  const { t, i18n } = useTranslation()
+  const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
+  const redemptionId = props.redemption?.id
 
   return (
-    <PagedRecordsDialog<InviteCodeUsage>
-      open={open}
-      onOpenChange={onOpenChange}
-      title={t('Invitation Code Usage Records')}
-      description={inviteCode?.code || inviteCode?.code_prefix}
-      queryKey={['invite-code-usages', inviteCodeId]}
-      enabled={inviteCodeId !== undefined}
+    <PagedRecordsDialog<RedemptionRecord>
+      open={props.open}
+      onOpenChange={props.onOpenChange}
+      title={t('Redemption records')}
+      description={props.redemption?.name}
+      queryKey={['redemption-records', redemptionId]}
+      enabled={redemptionId !== undefined}
       fetchPage={async (page, pageSize) => {
         const response = requireServerSuccess(
-          await getInviteCodeUsages({
-            inviteCodeId: inviteCodeId ?? 0,
+          await getRedemptionRecords({
+            redemptionId: redemptionId ?? 0,
             page,
             pageSize,
           })
@@ -64,35 +63,42 @@ export function InviteCodeUsagesDialog({
         {
           id: 'user',
           header: t('User'),
-          cell: (usage) => (
+          cell: (record) => (
             <>
               <div className='font-medium'>
-                {usage.username || t('Deleted user')}
+                {record.username || t('Deleted user')}
               </div>
-              {usage.display_name ? (
+              {record.display_name ? (
                 <div className='text-muted-foreground text-xs'>
-                  {usage.display_name}
+                  {record.display_name}
                 </div>
               ) : null}
             </>
           ),
         },
-        { id: 'user_id', header: t('User ID'), cell: (usage) => usage.user_id },
         {
-          id: 'registration_method',
-          header: t('Registration Method'),
-          cell: (usage) => usage.registration_method || '—',
+          id: 'user_id',
+          header: t('User ID'),
+          cell: (record) => record.user_id,
         },
         {
-          id: 'used_time',
-          header: t('Used Time'),
-          cell: (usage) =>
-            dayjs(usage.used_time * 1000).format('YYYY-MM-DD HH:mm'),
+          id: 'quota',
+          header: t('Quota'),
+          cell: (record) => formatQuota(record.quota),
+          className: 'tabular-nums',
+        },
+        {
+          id: 'redeemed_at',
+          header: t('Redeemed at'),
+          cell: (record) =>
+            dayjs(record.created_time * 1000).format('YYYY-MM-DD HH:mm'),
         },
       ]}
-      getRowKey={(usage) => usage.id}
-      emptyText={t('No usage records found')}
-      totalText={(total) => t('{{count}} usage record(s)', { count: total })}
+      getRowKey={(record) => record.id}
+      emptyText={t('No redemption records found')}
+      totalText={(total) =>
+        t('{{count}} record(s)', { count: formatNumber(total, locale) })
+      }
     />
   )
 }

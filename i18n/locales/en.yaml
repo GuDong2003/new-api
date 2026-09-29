@@ -65,6 +65,10 @@ redemption.expired: "This redemption code has expired"
 redemption.failed: "Redemption failed, please try again later"
 redemption.not_provided: "Redemption code not provided"
 redemption.expire_time_invalid: "Expiration time cannot be earlier than current time"
+redemption.max_uses_invalid: "A code can be redeemed 1 to 100000 times"
+redemption.shared_code_invalid: "A shared code is created on its own and has no one-per-account batch rule"
+redemption.shared_max_uses_invalid: "A shared code serves 2 to 100000 accounts, and no fewer than have already redeemed it"
+redemption.used_up: "This code is used up and cannot be enabled again"
 
 # Invitation code messages
 invite_code.required: "An invitation code is required to create a new account"
@@ -279,7 +283,7 @@ oauth.user_info_empty: "{{.Provider}} returned empty user info, please check set
 oauth.trust_level_low: "Linux DO trust level does not meet the minimum required by administrator"
 
 # Model layer error messages
-redeem.failed: "Redemption failed, please try again later"
+redeem.failed: "Redemption failed: the code is invalid, used up or expired, or you have already redeemed it or another code of its batch"
 user.create_default_token_error: "Failed to create default token"
 common.uuid_duplicate: "Please retry, the system generated a duplicate UUID!"
 common.invalid_input: "Invalid input"

@@ -32,7 +32,13 @@ export const redemptionSchema = z.object({
   created_time: z.number(),
   redeemed_time: z.number(),
   expired_time: z.number(), // 0 for never expires
-  used_user_id: z.number(),
+  used_user_id: z.number(), // the latest account to redeem it
+  used_username: z.string().optional(), // in lists, the name of that account
+  batch_id: z.string(),
+  batch_one_per_user: z.boolean(),
+  max_uses: z.number(), // above 1 for a shared code
+  used_count: z.number(),
+  batch_size: z.number().optional(), // only when one code is loaded
 })
 
 export type Redemption = z.infer<typeof redemptionSchema>
@@ -77,10 +83,39 @@ export interface RedemptionFormData {
   expired_time: number
   count?: number // Only for create
   status?: number // Only for status update
+  max_uses?: number
+  batch_one_per_user?: boolean
 }
 
 // ============================================================================
 // Dialog Types
 // ============================================================================
 
-export type RedemptionsDialogType = 'create' | 'update' | 'delete' | 'view'
+export type RedemptionsDialogType =
+  | 'create'
+  | 'update'
+  | 'delete'
+  | 'view'
+  | 'records'
+
+export interface RedemptionRecord {
+  id: number
+  redemption_id: number
+  user_id: number
+  batch_id: string
+  quota: number
+  created_time: number
+  username: string
+  display_name: string
+}
+
+export interface GetRedemptionRecordsResponse {
+  success: boolean
+  message?: string
+  data?: {
+    items: RedemptionRecord[]
+    total: number
+    page: number
+    page_size: number
+  }
+}

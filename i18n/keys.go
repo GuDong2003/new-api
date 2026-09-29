@@ -64,16 +64,20 @@ const (
 
 // Redemption related messages
 const (
-	MsgRedemptionNameLength        = "redemption.name_length"
-	MsgRedemptionCountPositive     = "redemption.count_positive"
-	MsgRedemptionCountMax          = "redemption.count_max"
-	MsgRedemptionCreateFailed      = "redemption.create_failed"
-	MsgRedemptionInvalid           = "redemption.invalid"
-	MsgRedemptionUsed              = "redemption.used"
-	MsgRedemptionExpired           = "redemption.expired"
-	MsgRedemptionFailed            = "redemption.failed"
-	MsgRedemptionNotProvided       = "redemption.not_provided"
-	MsgRedemptionExpireTimeInvalid = "redemption.expire_time_invalid"
+	MsgRedemptionNameLength           = "redemption.name_length"
+	MsgRedemptionCountPositive        = "redemption.count_positive"
+	MsgRedemptionCountMax             = "redemption.count_max"
+	MsgRedemptionCreateFailed         = "redemption.create_failed"
+	MsgRedemptionInvalid              = "redemption.invalid"
+	MsgRedemptionUsed                 = "redemption.used"
+	MsgRedemptionExpired              = "redemption.expired"
+	MsgRedemptionFailed               = "redemption.failed"
+	MsgRedemptionNotProvided          = "redemption.not_provided"
+	MsgRedemptionExpireTimeInvalid    = "redemption.expire_time_invalid"
+	MsgRedemptionMaxUsesInvalid       = "redemption.max_uses_invalid"
+	MsgRedemptionSharedCodeInvalid    = "redemption.shared_code_invalid"
+	MsgRedemptionSharedMaxUsesInvalid = "redemption.shared_max_uses_invalid"
+	MsgRedemptionUsedUp               = "redemption.used_up"
 )
 
 // Invitation code related messages

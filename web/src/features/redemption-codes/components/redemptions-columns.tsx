@@ -28,15 +28,21 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
-import { formatQuota, formatTimestampToDate } from '@/lib/format'
+import { toIntlLocale } from '@/i18n/languages'
+import { formatNumber, formatQuota, formatTimestampToDate } from '@/lib/format'
 
 import { REDEMPTION_FILTER_EXPIRED, REDEMPTION_STATUSES } from '../constants'
-import { isRedemptionExpired, isTimestampExpired } from '../lib'
+import {
+  isRedemptionExpired,
+  isSharedRedemption,
+  isTimestampExpired,
+} from '../lib'
 import type { Redemption } from '../types'
 import { DataTableRowActions } from './data-table-row-actions'
 
 export function useRedemptionsColumns(): ColumnDef<Redemption>[] {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
+  const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
   return [
     {
       id: 'select',
@@ -77,7 +83,16 @@ export function useRedemptionsColumns(): ColumnDef<Redemption>[] {
       header: t('Name'),
       meta: { mobileTitle: true },
       cell: ({ row }) => (
-        <span className='font-medium'>{row.getValue('name')}</span>
+        <div className='flex min-w-0 items-center gap-2'>
+          <span className='truncate font-medium'>{row.getValue('name')}</span>
+          {row.original.batch_one_per_user && (
+            <StatusBadge
+              label={t('One per account')}
+              variant='info'
+              copyable={false}
+            />
+          )}
+        </div>
       ),
       size: 180,
     },
@@ -212,11 +227,23 @@ export function useRedemptionsColumns(): ColumnDef<Redemption>[] {
     },
     {
       accessorKey: 'used_user_id',
-      header: t('Redeemed By'),
+      header: t('Redemptions'),
       meta: { mobileHidden: true },
       cell: ({ row }) => {
         const userId = row.getValue('used_user_id') as number
         const redemption = row.original
+
+        // A shared code has many redeemers; its records list them.
+        if (isSharedRedemption(redemption)) {
+          return (
+            <span className='text-sm tabular-nums'>
+              {t('Redeemed {{used}} / {{max}}', {
+                used: formatNumber(redemption.used_count, locale),
+                max: formatNumber(redemption.max_uses, locale),
+              })}
+            </span>
+          )
+        }
 
         if (userId === 0) {
           return <span className='text-muted-foreground text-sm'>-</span>
@@ -227,7 +254,9 @@ export function useRedemptionsColumns(): ColumnDef<Redemption>[] {
             <TooltipTrigger
               render={
                 <StatusBadge
-                  label={t('User {{id}}', { id: userId })}
+                  label={
+                    redemption.used_username || t('User {{id}}', { id: userId })
+                  }
                   variant='neutral'
                   copyable={false}
                   className='cursor-help'

@@ -31,6 +31,7 @@ const i18n = (await import('i18next')).default
 const { I18nextProvider, initReactI18next } = await import('react-i18next')
 const { Toaster, toast } = await import('sonner')
 const { api } = await import('@/lib/api')
+const { formatQuotaWithCurrency } = await import('@/lib/currency')
 const { useSystemConfigStore } = await import('@/stores/system-config-store')
 const { RedemptionsProvider } = await import('../redemptions-provider')
 const { RedemptionsMutateDrawer } = await import('../redemptions-mutate-drawer')
@@ -53,6 +54,7 @@ type ApiMethod = (url: string, data?: unknown) => Promise<{ data: unknown }>
 type MockableApi = {
   get: ApiMethod
   put: ApiMethod
+  post: ApiMethod
 }
 type RenderedDrawer = {
   result: RenderResult
@@ -65,6 +67,7 @@ type CurrencyFixture = {
 const apiClient = api as unknown as MockableApi
 const originalGet = apiClient.get
 const originalPut = apiClient.put
+const originalPost = apiClient.post
 const originalConsoleLog = Reflect.get(console, 'log')
 let renderedDrawer: RenderedDrawer | null = null
 
@@ -80,6 +83,10 @@ function redemption(id: number, quota = 500001): Redemption {
     redeemed_time: 0,
     expired_time: 0,
     used_user_id: 0,
+    batch_id: `batch-${id}`,
+    batch_one_per_user: false,
+    max_uses: 1,
+    used_count: 0,
   }
 }
 
@@ -93,7 +100,7 @@ function deferred<T>() {
   return { promise, reject, resolve }
 }
 
-function drawerTree(currentRow: Redemption) {
+function drawerTree(currentRow?: Redemption) {
   return (
     <I18nextProvider i18n={i18n}>
       <RedemptionsProvider>
@@ -109,7 +116,7 @@ function drawerTree(currentRow: Redemption) {
 }
 
 async function renderDrawer(
-  currentRow: Redemption,
+  currentRow?: Redemption,
   currency: CurrencyFixture = {
     quotaDisplayType: 'USD',
     usdExchangeRate: 1,
@@ -143,6 +150,10 @@ function getSaveButton(): HTMLButtonElement {
 function getControlByLabel(labelText: 'Name'): HTMLInputElement
 function getControlByLabel(labelText: 'Quota (CNY)'): HTMLInputElement
 function getControlByLabel(labelText: 'Quota (USD)'): HTMLInputElement
+function getControlByLabel(labelText: 'Quantity'): HTMLInputElement
+function getControlByLabel(
+  labelText: 'Accounts that can redeem'
+): HTMLInputElement
 function getControlByLabel(labelText: string): HTMLElement {
   const label = [...document.querySelectorAll<HTMLLabelElement>('label')].find(
     (candidate) => candidate.textContent?.trim() === labelText
@@ -180,6 +191,7 @@ async function waitForLoadedForm(): Promise<void> {
 afterEach(() => {
   apiClient.get = originalGet
   apiClient.put = originalPut
+  apiClient.post = originalPost
   Reflect.set(console, 'log', originalConsoleLog)
   toast.dismiss()
   localStorage.clear()
@@ -314,5 +326,231 @@ describe('redemption drawer', () => {
 
     expect(updates[0]?.id).toBe(2)
     expect(updates[0]?.quota).toBe(1000001)
+  })
+
+  test('creates one-time codes that give each account one code of the batch by default', async () => {
+    const creations: Array<Record<string, unknown>> = []
+    apiClient.post = async (_url, data) => {
+      creations.push(data as Record<string, unknown>)
+      return { data: { success: true, data: ['key-a', 'key-b', 'key-c'] } }
+    }
+
+    await renderDrawer()
+    changeInput(getControlByLabel('Name'), 'giveaway')
+    changeInput(getControlByLabel('Quantity'), '3')
+    expect(
+      screen.getByRole('switch', { name: 'One code per account in this batch' })
+    ).toBeChecked()
+    submitForm()
+    await waitFor(() => expect(creations).toHaveLength(1))
+
+    expect(creations[0]).toMatchObject({
+      name: 'giveaway',
+      count: 3,
+      max_uses: 1,
+      batch_one_per_user: true,
+    })
+  })
+
+  test('creates one-time codes an account may redeem several of when the batch rule is off', async () => {
+    const creations: Array<Record<string, unknown>> = []
+    apiClient.post = async (_url, data) => {
+      creations.push(data as Record<string, unknown>)
+      return { data: { success: true, data: ['key-a', 'key-b'] } }
+    }
+
+    await renderDrawer()
+    changeInput(getControlByLabel('Name'), 'for sale')
+    changeInput(getControlByLabel('Quantity'), '2')
+    fireEvent.click(
+      screen.getByRole('switch', { name: 'One code per account in this batch' })
+    )
+    submitForm()
+    await waitFor(() => expect(creations).toHaveLength(1))
+
+    expect(creations[0]).toMatchObject({
+      count: 2,
+      max_uses: 1,
+      batch_one_per_user: false,
+    })
+  })
+
+  test('creates a shared code and shows the most it can hand out', async () => {
+    const creations: Array<Record<string, unknown>> = []
+    apiClient.post = async (_url, data) => {
+      creations.push(data as Record<string, unknown>)
+      return { data: { success: true, data: ['key-shared'] } }
+    }
+
+    await renderDrawer()
+    expect(
+      screen.getByRole('radiogroup', { name: 'Code type' })
+    ).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('radio', { name: /Shared code/ }))
+    expect(screen.queryByText('Quantity')).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('switch', {
+        name: 'One code per account in this batch',
+      })
+    ).not.toBeInTheDocument()
+    changeInput(getControlByLabel('Name'), 'group gift')
+    changeInput(getControlByLabel('Quota (USD)'), '2')
+    changeInput(getControlByLabel('Accounts that can redeem'), '30')
+
+    const total = formatQuotaWithCurrency(2 * 500000 * 30, {
+      abbreviate: false,
+    })
+    expect(document.body).toHaveTextContent(`Up to ${total} in total`)
+    submitForm()
+    await waitFor(() => expect(creations).toHaveLength(1))
+
+    expect(creations[0]).toMatchObject({
+      name: 'group gift',
+      quota: 1000000,
+      count: 1,
+      max_uses: 30,
+      batch_one_per_user: false,
+    })
+  })
+
+  test('refuses a shared code limit below the accounts that already redeemed it', async () => {
+    const shared = {
+      ...redemption(3),
+      max_uses: 10,
+      used_count: 4,
+      batch_size: 1,
+    }
+    const updates: Array<Record<string, unknown>> = []
+    apiClient.get = async () => ({ data: { success: true, data: shared } })
+    apiClient.put = async (_url, data) => {
+      updates.push(data as Record<string, unknown>)
+      return { data: { success: true, data: shared } }
+    }
+
+    await renderDrawer(shared)
+    await waitForLoadedForm()
+    expect(
+      screen.queryByRole('radio', { name: /Shared code/ })
+    ).not.toBeInTheDocument()
+    expect(getControlByLabel('Accounts that can redeem').value).toBe('10')
+
+    changeInput(getControlByLabel('Accounts that can redeem'), '3')
+    submitForm()
+    await waitFor(() =>
+      expect(document.body).toHaveTextContent('Enter at least 4')
+    )
+    expect(updates).toEqual([])
+
+    changeInput(getControlByLabel('Accounts that can redeem'), '20')
+    submitForm()
+    await waitFor(() => expect(updates).toHaveLength(1))
+    expect(updates[0]?.max_uses).toBe(20)
+    expect(updates[0]).not.toHaveProperty('batch_one_per_user')
+  })
+
+  test('turns on the batch rule for every code of the batch', async () => {
+    const oneTime = { ...redemption(4), batch_size: 50 }
+    const updates: Array<Record<string, unknown>> = []
+    apiClient.get = async () => ({ data: { success: true, data: oneTime } })
+    apiClient.put = async (_url, data) => {
+      updates.push(data as Record<string, unknown>)
+      return { data: { success: true, data: oneTime } }
+    }
+
+    await renderDrawer(oneTime)
+    await waitForLoadedForm()
+    const rule = screen.getByRole('switch', {
+      name: 'One code per account in this batch',
+    })
+    expect(rule).not.toBeChecked()
+    expect(document.body).toHaveTextContent(
+      'Applies to all 50 codes in this batch'
+    )
+    expect(
+      screen.queryByText('Accounts that can redeem')
+    ).not.toBeInTheDocument()
+
+    fireEvent.click(rule)
+    submitForm()
+    await waitFor(() => expect(updates).toHaveLength(1))
+    expect(updates[0]?.batch_one_per_user).toBe(true)
+    expect(updates[0]).not.toHaveProperty('max_uses')
+  })
+
+  test('leaves the batch rule alone when only the name changes', async () => {
+    const oneTime = {
+      ...redemption(5),
+      batch_one_per_user: true,
+      batch_size: 2,
+    }
+    const updates: Array<Record<string, unknown>> = []
+    apiClient.get = async () => ({ data: { success: true, data: oneTime } })
+    apiClient.put = async (_url, data) => {
+      updates.push(data as Record<string, unknown>)
+      return { data: { success: true, data: oneTime } }
+    }
+
+    await renderDrawer(oneTime)
+    await waitForLoadedForm()
+    changeInput(getControlByLabel('Name'), 'renamed batch')
+    submitForm()
+    await waitFor(() => expect(updates).toHaveLength(1))
+
+    expect(updates[0]?.name).toBe('renamed batch')
+    expect(updates[0]).not.toHaveProperty('batch_one_per_user')
+    expect(updates[0]).not.toHaveProperty('max_uses')
+  })
+
+  test('a quantity left over from one-time codes does not block a shared code', async () => {
+    const creations: Array<Record<string, unknown>> = []
+    apiClient.post = async (_url, data) => {
+      creations.push(data as Record<string, unknown>)
+      return { data: { success: true, data: ['key-shared'] } }
+    }
+
+    await renderDrawer()
+    changeInput(getControlByLabel('Name'), 'big gift')
+    changeInput(getControlByLabel('Quantity'), '150')
+    fireEvent.click(screen.getByRole('radio', { name: /Shared code/ }))
+    changeInput(getControlByLabel('Accounts that can redeem'), '30')
+    submitForm()
+    await waitFor(() => expect(creations).toHaveLength(1))
+
+    expect(creations[0]).toMatchObject({ count: 1, max_uses: 30 })
+  })
+
+  test('a single one-time code needs no batch rule', async () => {
+    const creations: Array<Record<string, unknown>> = []
+    apiClient.post = async (_url, data) => {
+      creations.push(data as Record<string, unknown>)
+      return { data: { success: true, data: ['key-single'] } }
+    }
+
+    await renderDrawer()
+    changeInput(getControlByLabel('Name'), 'single')
+    expect(getControlByLabel('Quantity').value).toBe('1')
+    expect(
+      screen.queryByRole('switch', {
+        name: 'One code per account in this batch',
+      })
+    ).not.toBeInTheDocument()
+    submitForm()
+    await waitFor(() => expect(creations).toHaveLength(1))
+
+    expect(creations[0]).toMatchObject({ count: 1, batch_one_per_user: false })
+  })
+
+  test('editing the only code of a batch shows no batch rule', async () => {
+    const single = { ...redemption(6), batch_size: 1 }
+    apiClient.get = async () => ({ data: { success: true, data: single } })
+
+    await renderDrawer(single)
+    await waitForLoadedForm()
+
+    expect(
+      screen.queryByRole('switch', {
+        name: 'One code per account in this batch',
+      })
+    ).not.toBeInTheDocument()
   })
 })

@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import type { Row } from '@tanstack/react-table'
-import { Trash2, Edit, Power, PowerOff } from 'lucide-react'
+import { Trash2, Edit, History, Power, PowerOff } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
@@ -37,7 +37,7 @@ import { handleServerError } from '@/lib/handle-server-error'
 
 import { updateRedemptionStatus } from '../api'
 import { REDEMPTION_STATUS, SUCCESS_MESSAGES } from '../constants'
-import { isRedemptionExpired } from '../lib'
+import { isRedemptionExpired, isSharedRedemption } from '../lib'
 import { redemptionSchema } from '../types'
 import { useRedemptions } from './redemptions-provider'
 
@@ -79,7 +79,9 @@ export function DataTableRowActions<TData>({
     }
   }
 
-  const canEdit = isEnabled && !isExpired
+  // A used-up shared code stays editable, so it can serve more accounts.
+  const canEdit =
+    (isEnabled || (isUsed && isSharedRedemption(redemption))) && !isExpired
   const canToggle = !isUsed && !isExpired
 
   return (
@@ -124,7 +126,18 @@ export function DataTableRowActions<TData>({
             )}
           </DropdownMenuItem>
         )}
-        {canToggle && <DropdownMenuSeparator />}
+        <DropdownMenuItem
+          onClick={() => {
+            setCurrentRow(redemption)
+            setOpen('records')
+          }}
+        >
+          {t('Redemption records')}
+          <DropdownMenuShortcut>
+            <History size={16} />
+          </DropdownMenuShortcut>
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
         <DropdownMenuItem
           onClick={() => {
             setCurrentRow(redemption)
