@@ -1,10 +1,10 @@
 package service
 
 import (
-	"fmt"
 	"html"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/oauth"
 	"github.com/QuantumNous/new-api/setting/system_setting"
@@ -31,11 +31,13 @@ func UnbindAccountOAuth(identity AuthIdentity, providerID int) error {
 
 // NotifyAccountSecurityChange never includes credentials or tokens. The caller
 // records delivery failure independently from the already-committed change.
-func NotifyAccountSecurityChange(email, event string) error {
+// The event is the message key naming the change, written in the owner's lang.
+func NotifyAccountSecurityChange(lang, email, event string, eventArgs ...map[string]any) error {
 	if email == "" {
 		return nil
 	}
-	subject := common.SystemName + " — Account security notification"
-	content := fmt.Sprintf("<p>Your account security settings have changed: %s.</p><p>If you did not make this change, open your account security settings, revoke other login sessions, and contact your administrator.</p>", html.EscapeString(event))
+	subject := i18n.Translate(lang, i18n.MsgAccountSecuritySubject, map[string]any{"SystemName": common.SystemName})
+	change := i18n.Translate(lang, event, eventArgs...)
+	content := i18n.Translate(lang, i18n.MsgAccountSecurityBody, map[string]any{"Event": html.EscapeString(change)})
 	return common.SendEmail(subject, email, content)
 }

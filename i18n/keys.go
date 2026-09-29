@@ -362,3 +362,20 @@ const (
 	MsgCustomOAuthBindingNotFound   = "custom_oauth.binding_not_found"
 	MsgCustomOAuthProviderIdInvalid = "custom_oauth.provider_id_field_invalid"
 )
+
+// Account emails. The code and the change are filled in as .Code, .Event and
+// .Provider; the site name as .SystemName.
+const (
+	MsgEmailBindingSubject                 = "email.binding.subject"
+	MsgEmailBindingNewAddress              = "email.binding.new_address"
+	MsgEmailBindingCurrentAddress          = "email.binding.current_address"
+	MsgAccountSecuritySubject              = "email.account_security.subject"
+	MsgAccountSecurityBody                 = "email.account_security.body"
+	MsgAccountSecurityPasswordUpdated      = "email.account_security.password_updated"
+	MsgAccountSecurityEmailChangeRequested = "email.account_security.email_change_requested"
+	MsgAccountSecurityEmailChanged         = "email.account_security.email_changed"
+	MsgAccountSecurityEmailConfirmed       = "email.account_security.email_confirmed"
+	MsgAccountSecurityLoginLinked          = "email.account_security.login_linked"
+	MsgAccountSecurityLoginUnlinked        = "email.account_security.login_unlinked"
+	MsgAccountSecurityWeChatLinked         = "email.account_security.wechat_linked"
+)

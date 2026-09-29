@@ -11,6 +11,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"io"
+	"mime"
 	"net"
 	"net/http"
 	"net/textproto"
@@ -21,6 +22,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/oauth"
 	"github.com/QuantumNous/new-api/service"
@@ -641,11 +643,52 @@ func TestSecurityAccountEmailConfirmationAndAudit(t *testing.T) {
 	}
 }
 
+// The binding code and the notices after it reach the owner in the language
+// saved on their account, as the rest of the interface does.
+func TestSecurityAccountEmailsUseTheUsersLanguage(t *testing.T) {
+	for _, testCase := range []struct {
+		language, subject, code, confirmed string
+	}{
+		{"zhCN", "确认你的邮箱地址", "验证码：<strong>", "邮箱地址已确认"},
+		{"en", "Confirm your email address", "Verification code: <strong>", "Email address confirmed"},
+	} {
+		t.Run(testCase.language, func(t *testing.T) {
+			user, identity := setupSecurityEnrollmentTest(t)
+			mailbox := newSecurityMailbox(t)
+			require.NoError(t, model.DB.Model(user).Update("setting", `{"language":"`+testCase.language+`"}`).Error)
+			i18n.SetUserLangLoader(model.GetUserLanguage)
+			t.Cleanup(func() { i18n.SetUserLangLoader(nil) })
+
+			flow := startSecurityEmailBinding(t, identity, "new@example.com", service.VerificationMethodPassword)
+			code := mailbox.code(t, flow.Email)
+			request, err := common.Marshal(map[string]string{"flow_token": flow.FlowToken, "new_code": code})
+			require.NoError(t, err)
+			response := securityEnrollmentRequest("POST", "/api/oauth/email/bind", string(request), "", identity, EmailBind)
+			require.Contains(t, response.Body.String(), `"success":true`)
+
+			mailbox.mutex.Lock()
+			delivered := append([]string(nil), mailbox.mail[flow.Email]...)
+			mailbox.mutex.Unlock()
+			require.Len(t, delivered, 2)
+			subject := ""
+			for line := range strings.SplitSeq(delivered[0], "\n") {
+				if encoded, ok := strings.CutPrefix(strings.TrimRight(line, "\r"), "Subject: "); ok {
+					subject, err = new(mime.WordDecoder).DecodeHeader(encoded)
+					require.NoError(t, err)
+				}
+			}
+			assert.Contains(t, subject, testCase.subject)
+			assert.Contains(t, delivered[0], testCase.code+code+"</strong>")
+			assert.Contains(t, delivered[1], testCase.confirmed)
+		})
+	}
+}
+
 func TestSecurityAccountEmailResendAndAttemptLimit(t *testing.T) {
 	_, identity := setupSecurityEnrollmentTest(t)
 	mailbox := newSecurityMailbox(t)
 	flow := startSecurityEmailBinding(t, identity, "new@example.com", service.VerificationMethodPassword)
-	_, err := service.ResendAccountEmailBinding(identity, flow.FlowToken)
+	_, err := service.ResendAccountEmailBinding(identity, flow.FlowToken, i18n.LangEn)
 	assert.ErrorIs(t, err, model.ErrEmailBindingResendWait)
 	_, err = service.FinishEmailBinding(identity, flow.FlowToken, "invalid", "")
 	assert.ErrorIs(t, err, model.ErrEmailBindingCodeInvalid)
@@ -656,7 +699,7 @@ func TestSecurityAccountEmailResendAndAttemptLimit(t *testing.T) {
 	payload, err := common.Marshal(state)
 	require.NoError(t, err)
 	require.NoError(t, model.DB.Model(stored).Update("payload", string(payload)).Error)
-	replacement, err := service.ResendAccountEmailBinding(identity, flow.FlowToken)
+	replacement, err := service.ResendAccountEmailBinding(identity, flow.FlowToken, i18n.LangEn)
 	require.NoError(t, err)
 	assert.Equal(t, flow.ExpiresAt, replacement.ExpiresAt)
 	_, state, err = model.GetEmailBinding(identity, flow.FlowToken)
