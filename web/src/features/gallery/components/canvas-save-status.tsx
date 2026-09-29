@@ -33,14 +33,18 @@ type CanvasSaveStatusProps = {
 export function CanvasSaveStatus(props: CanvasSaveStatusProps) {
   const { t } = useTranslation()
   const full = props.cloudStatus === 'full' && props.localStatus === 'saved'
-  let text = props.localStatus === 'saved' ? props.statusText : null
+  let text =
+    props.localStatus === 'saved' && props.statusText
+      ? t(props.statusText)
+      : null
   if (!text && props.localStatus === 'saving') text = t('Saving…')
   if (!text && props.localStatus === 'error') {
     text = t(props.error || 'Canvas not saved')
   }
   if (!text && props.localStatus === 'saved') {
-    if (full) text = t('已保存到本地，云端空间不足，暂未上传。')
-    else if (props.cloudStatus === 'synced') text = t('Synced')
+    if (full) {
+      text = t('Saved locally. Cloud storage is full; upload is paused.')
+    } else if (props.cloudStatus === 'synced') text = t('Synced')
     else if (props.cloudStatus === 'conflict') {
       text = t(
         'Cloud conflict. Export your local canvas, replace the cloud version with it, or reload the cloud version.'

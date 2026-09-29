@@ -66,7 +66,8 @@ import {
 export const CANVAS_CLOUD_INTERVAL = 300_000
 // Coming back to a canvas looks at the cloud copy at most this often.
 const CANVAS_PULL_INTERVAL = 10_000
-export const CANVAS_FULL_MESSAGE = '已保存到本地，云端空间不足，暂未上传。'
+export const CANVAS_FULL_MESSAGE =
+  'Saved locally. Cloud storage is full; upload is paused.'
 type Session = {
   identity: GalleryIdentity
   controller: AbortController

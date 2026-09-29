@@ -408,9 +408,7 @@ export function ChannelClientIdentitySection(
                   </SelectContent>
                 </Select>
                 <FormDescription>
-                  {t(
-                    'Codex legacy and Codex compatibility remain separate profiles.'
-                  )}
+                  {t('Client identity is determined by channel type.')}
                 </FormDescription>
                 <FormMessage />
               </FormItem>

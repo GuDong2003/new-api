@@ -730,7 +730,7 @@ function GalleryContent(props: {
               <EmptyState
                 title={t('No saved images')}
                 description={t(
-                  'New final canvas images will appear here automatically.'
+                  'Images saved from the canvas or API will appear here.'
                 )}
               />
             )}

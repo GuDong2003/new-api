@@ -139,7 +139,7 @@ export function ProviderTable(props: ProviderTableProps) {
         onOpenChange={(open) => !open && setDeleteTarget(null)}
         title={t('Delete Provider')}
         desc={t(
-          'Are you sure you want to delete "{{name}}"? Users who authenticated with this provider will no longer be able to log in.',
+          'Are you sure you want to delete "{{name}}"? Users will no longer be able to sign in with this provider.',
           { name: deleteTarget?.name || '' }
         )}
         confirmText={t('Delete')}

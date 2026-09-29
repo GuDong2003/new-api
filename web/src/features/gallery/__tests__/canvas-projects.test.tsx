@@ -951,7 +951,9 @@ it('shows persisted full status on direct gallery reload without a binding or qu
   }))
   renderGallery()
   expect(
-    await screen.findByText('已保存到本地，云端空间不足，暂未上传。')
+    await screen.findByText(
+      'Saved locally. Cloud storage is full; upload is paused.'
+    )
   ).toBeVisible()
   await userEvent.click(screen.getByRole('button', { name: 'Refresh' }))
   expect(usageReads).toBe(0)
@@ -1331,6 +1333,28 @@ it('closes the editor deletion confirmation before a remote deletion finishes', 
 })
 
 describe('canvas project save status', () => {
+  it('updates the cloud-full status when the interface language changes', async () => {
+    i18next.addResourceBundle('zhCN', 'translation', zh.translation, true, true)
+    const message = 'Saved locally. Cloud storage is full; upload is paused.'
+    render(
+      <CanvasSaveStatus
+        localStatus='saved'
+        cloudStatus='full'
+        statusText={message}
+      />
+    )
+    expect(screen.getByRole('status')).toHaveTextContent(message)
+    try {
+      await act(() => i18next.changeLanguage('zhCN'))
+      expect(screen.getByRole('status')).toHaveTextContent(
+        '已保存到本地，云端空间不足，暂未上传。'
+      )
+      await act(() => i18next.changeLanguage('en'))
+      expect(screen.getByRole('status')).toHaveTextContent(message)
+    } finally {
+      await act(() => i18next.changeLanguage('en'))
+    }
+  })
   it('renders the durable full-quota status when local persistence succeeded', () => {
     render(
       <CanvasSaveStatus

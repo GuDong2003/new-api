@@ -108,7 +108,7 @@ export function GallerySettingsForm(props: {
       min: 1,
       max: 100000,
       placeholder: '100',
-      help: t('Drawing and NAI Canvas share this image count limit.'),
+      help: t('All images saved to a user’s gallery share this limit.'),
     },
     {
       name: 'user_max_mib',
