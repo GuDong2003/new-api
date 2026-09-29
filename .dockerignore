@@ -10,4 +10,6 @@ docs
 /web/node_modules
 /web/dist
 /backups
+/.tmp
+/.gomodcache
 !THIRD-PARTY-LICENSES.md
