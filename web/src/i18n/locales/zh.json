@@ -34,6 +34,7 @@
     "Default RPM": "默认 RPM",
     "Describe the image in a paragraph and let the model handle the details.": "用一段话描述画面，细节交给模型。",
     "Description mode": "描述生图",
+    "Drawing and your private gallery. Sign-in is required.": "绘图与个人图库，需登录后使用。",
     "Each account checks in on its own, and its credential is stored encrypted. Removing an account no other channel uses deletes it.": "每个账号各自签到，凭据加密保存。移除的账号如果没有被其他渠道使用，会被删除。",
     "Each account redeems this code once.": "每个账号只能兑换一次。",
     "Each code works once. Hand them out one by one.": "每个码只能用一次，适合逐个发给不同的人。",

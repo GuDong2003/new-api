@@ -172,9 +172,7 @@ export function HeaderNavigationSection({
     {
       key: 'canvas',
       title: t('Infinite Canvas'),
-      description: t(
-        'Drawing, NAI Canvas and your private gallery. Sign-in is always required.'
-      ),
+      description: t('Drawing and your private gallery. Sign-in is required.'),
     },
     {
       key: 'docs',
