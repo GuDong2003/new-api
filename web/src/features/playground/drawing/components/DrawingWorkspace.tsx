@@ -51,6 +51,7 @@ import {
   captureCanvasTarget,
   assertCanvasTarget,
 } from '@/features/gallery/components/canvas-node-deletion'
+import { useCanvasNodeImage } from '@/features/gallery/hooks/use-canvas-node-image'
 import {
   flushLocalEditors,
   getCanvasEditorState,
@@ -164,6 +165,9 @@ export function DrawingWorkspace(props: { userId: number }) {
   const maskState = useDrawingStore((state) => state.mask)
   const setMaskState = useDrawingStore((state) => state.setMask)
   const reference = nodes.find((node) => node.id === referenceId)?.data.asset
+  const referenceSource = useCanvasNodeImage(
+    maskEditorOpen ? reference : undefined
+  )
   const mask =
     maskState && maskState.referenceId === referenceId
       ? maskState.asset
@@ -678,7 +682,8 @@ export function DrawingWorkspace(props: { userId: number }) {
       </ConfirmDialog>
       {maskEditorOpen && reference && (
         <MaskEditor
-          image={reference}
+          image={{ ...reference, src: referenceSource }}
+          mask={mask}
           onClose={() => setMaskEditorOpen(false)}
           onSave={(asset) => {
             setMaskState({ referenceId, asset })

@@ -114,6 +114,78 @@ function renderWorkspace(userId: number) {
 }
 
 describe('Drawing workspace', () => {
+  it('loads the saved mask when reopening the editor from the drawing settings', async () => {
+    vi.stubGlobal('Image', function () {
+      return document.createElement('img')
+    })
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
+      globalCompositeOperation: 'source-over',
+      clearRect: vi.fn(),
+      fillRect: vi.fn(),
+    } as unknown as CanvasRenderingContext2D)
+    const { view } = renderWorkspace(801)
+    await screen.findByText('Saved in this browser')
+    const asset = {
+      id: 'reference-asset',
+      name: 'reference.png',
+      src: 'data:image/png;base64,YWJj',
+      width: 512,
+      height: 512,
+      mimeType: 'image/png',
+    }
+    act(() => {
+      const store = useDrawingStore.getState()
+      store.addNodes([
+        {
+          id: 'masked-reference',
+          type: 'image',
+          position: { x: 0, y: 0 },
+          data: {
+            asset,
+            prompt: 'A reference',
+            settings: { ...DEFAULT_IMAGE_SETTINGS, model: 'gpt-image-1' },
+            status: 'complete',
+            createdAt: 1,
+          },
+        },
+      ])
+      store.setReferences(['masked-reference'])
+      store.setMask({
+        referenceId: 'masked-reference',
+        asset: { ...asset, id: 'saved-mask', name: 'mask.png' },
+      })
+    })
+    await userEvent
+      .setup()
+      .click(screen.getByRole('button', { name: 'Paint mask' }))
+    expect(screen.getByRole('button', { name: 'Apply mask' })).toBeDisabled()
+    expect(screen.getByLabelText('Paint the area to edit')).toHaveAttribute(
+      'aria-busy',
+      'true'
+    )
+    view.unmount()
+  })
+
+  it('groups arrange with selection and panning before the separate undo and redo controls', async () => {
+    const { view } = renderWorkspace(801)
+    const toolbar = await screen.findByRole('toolbar', {
+      name: 'Canvas tools',
+    })
+    const controls = [...toolbar.querySelectorAll('button, [role="separator"]')]
+      .slice(0, 7)
+      .map((element) => element.getAttribute('aria-label') ?? 'separator')
+    expect(controls).toEqual([
+      'Select images',
+      'Pan canvas',
+      'Arrange images',
+      'separator',
+      'Undo',
+      'Redo',
+      'separator',
+    ])
+    view.unmount()
+  })
+
   // A node another device saved while it generates can arrive on the open
   // canvas. Its task is watched from then on, not only when the canvas opens.
   it('watches the task of a generating node that arrives on the open canvas', async () => {

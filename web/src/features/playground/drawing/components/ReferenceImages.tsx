@@ -30,6 +30,7 @@ import { Label } from '@/components/ui/label'
 import { useDrawingStore } from '@/stores/drawing-store'
 
 import type { ImageAsset } from '../types'
+import { MaskOverlay } from './MaskOverlay'
 
 type ReferenceImagesProps = {
   // How many references the selected model reads; 16 unless it says otherwise.
@@ -131,6 +132,9 @@ export function ReferenceImages(props: ReferenceImagesProps) {
               className='pointer-events-none size-full object-cover'
               draggable={false}
             />
+            {index === 0 && props.mask && props.maskable !== false && (
+              <MaskOverlay mask={props.mask} fit='cover' />
+            )}
             <span className='bg-background/90 absolute bottom-0 left-0 px-1 text-[10px]'>
               {index + 1}
             </span>

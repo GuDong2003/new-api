@@ -16,17 +16,16 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
+import { Dialog } from '@/components/dialog'
+import { Label } from '@/components/ui/label'
+import { Switch } from '@/components/ui/switch'
 import { useCanvasNodeImage } from '@/features/gallery/hooks/use-canvas-node-image'
 import { useDrawingStore } from '@/stores/drawing-store'
+
+import { MaskOverlay } from './MaskOverlay'
 
 export function ImagePreview() {
   const { t } = useTranslation()
@@ -36,26 +35,47 @@ export function ImagePreview() {
   )
   const setPreview = useDrawingStore((state) => state.setPreview)
   const source = useCanvasNodeImage(node?.data.asset)
+  const mask = useDrawingStore((state) =>
+    state.mask?.referenceId === state.previewId ? state.mask.asset : undefined
+  )
+  const [hiddenMaskId, setHiddenMaskId] = useState<string | null>(null)
+  const showMask = Boolean(mask && mask.id !== hiddenMaskId)
   if (!id || !node?.data.asset) return null
   return (
     <Dialog
       open
+      title={t('Image preview')}
+      description={node.data.prompt || node.data.asset.name}
+      descriptionClassName='break-words'
+      contentClassName='max-h-[95svh] sm:max-w-5xl'
       onOpenChange={(open) => {
         if (!open) setPreview(null)
       }}
     >
-      <DialogContent className='max-h-[95svh] overflow-y-auto sm:max-w-5xl'>
-        <DialogHeader>
-          <DialogTitle>{t('Image preview')}</DialogTitle>
-          <DialogDescription className='break-words'>
-            {node.data.prompt || node.data.asset.name}
-          </DialogDescription>
-        </DialogHeader>
-        <img
-          src={source}
-          alt={node.data.prompt || node.data.asset.name}
-          className='max-h-[70svh] w-full rounded-lg object-contain'
-        />
+      <div className='space-y-3'>
+        {mask && (
+          <div className='flex flex-wrap items-center gap-2 text-sm'>
+            <Switch
+              id='image-preview-mask'
+              checked={showMask}
+              onCheckedChange={(checked) =>
+                setHiddenMaskId(checked ? null : mask.id)
+              }
+            />
+            <Label htmlFor='image-preview-mask'>{t('Show mask')}</Label>
+            <span className='text-muted-foreground text-xs'>
+              {t('Red areas will be edited.')}
+            </span>
+          </div>
+        )}
+        <div className='relative overflow-hidden rounded-lg'>
+          <img
+            src={source}
+            alt={node.data.prompt || node.data.asset.name}
+            className='block max-h-[70svh] w-full object-contain'
+          />
+          {showMask && mask && <MaskOverlay mask={mask} />}
+        </div>
         {node.data.revisedPrompt && (
           <div className='space-y-1 text-sm'>
             <p className='font-medium'>{t('Revised prompt')}</p>
@@ -64,7 +84,7 @@ export function ImagePreview() {
             </p>
           </div>
         )}
-      </DialogContent>
+      </div>
     </Dialog>
   )
 }

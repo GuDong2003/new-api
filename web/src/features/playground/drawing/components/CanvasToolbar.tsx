@@ -96,6 +96,17 @@ export function CanvasToolbar(props: CanvasToolbarProps) {
           aria-hidden='true'
         />
       </Button>
+      <Button
+        type='button'
+        variant='ghost'
+        size='icon-sm'
+        aria-label={t('Arrange images')}
+        title={t('Arrange images')}
+        disabled={!props.count}
+        onClick={props.onArrange}
+      >
+        <HugeiconsIcon icon={ArrangeIcon} size={16} aria-hidden='true' />
+      </Button>
       <Separator orientation='vertical' className='mx-1 h-5' />
       <Button
         type='button'
@@ -118,17 +129,6 @@ export function CanvasToolbar(props: CanvasToolbarProps) {
         onClick={props.onRedo}
       >
         <HugeiconsIcon icon={RedoIcon} size={16} aria-hidden='true' />
-      </Button>
-      <Button
-        type='button'
-        variant='ghost'
-        size='icon-sm'
-        aria-label={t('Arrange images')}
-        title={t('Arrange images')}
-        disabled={!props.count}
-        onClick={props.onArrange}
-      >
-        <HugeiconsIcon icon={ArrangeIcon} size={16} aria-hidden='true' />
       </Button>
       <Separator orientation='vertical' className='mx-1 h-5' />
       {props.onUpload && (

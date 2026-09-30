@@ -14,7 +14,8 @@ GNU Affero General Public License for more details.
 You should have received a copy of the GNU Affero General Public License
 along with this program. If not, see <https://www.gnu.org/licenses/>.
 */
-import { fireEvent, render, screen } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { useDrawingStore } from '@/stores/drawing-store'
@@ -76,5 +77,105 @@ describe('ReferenceImages', () => {
     fireEvent.drop(target as HTMLElement, { dataTransfer })
 
     expect(useDrawingStore.getState().referenceIds).toEqual(['B', 'A'])
+  })
+
+  it('shows the saved mask on the first reference and removes it when the mask is cleared', () => {
+    const client = new QueryClient()
+    const props = {
+      onUpload: vi.fn(),
+      onMaskUpload: vi.fn(),
+      onClearMask: vi.fn(),
+      onDrawMask: vi.fn(),
+    }
+    const mask = {
+      id: 'mask',
+      name: 'mask.png',
+      src: 'data:image/png;base64,YWJj',
+      width: 64,
+      height: 64,
+      mimeType: 'image/png',
+    }
+    const view = render(
+      <QueryClientProvider client={client}>
+        <ReferenceImages {...props} mask={mask} />
+      </QueryClientProvider>
+    )
+    const references = screen.getAllByRole('listitem')
+    expect(
+      within(references[0]).getByRole('img', { name: 'Mask preview' })
+    ).toBeVisible()
+    expect(
+      within(references[1]).queryByRole('img', { name: 'Mask preview' })
+    ).toBeNull()
+
+    view.rerender(
+      <QueryClientProvider client={client}>
+        <ReferenceImages {...props} />
+      </QueryClientProvider>
+    )
+    expect(screen.queryByRole('img', { name: 'Mask preview' })).toBeNull()
+    client.clear()
+  })
+
+  it('does not show a saved mask when the selected model cannot use masks', () => {
+    render(
+      <ReferenceImages
+        mask={imageNode('mask').data.asset}
+        maskable={false}
+        onUpload={vi.fn()}
+        onMaskUpload={vi.fn()}
+        onClearMask={vi.fn()}
+        onDrawMask={vi.fn()}
+      />
+    )
+    expect(screen.queryByRole('img', { name: 'Mask preview' })).toBeNull()
+  })
+
+  it('reports a mask image loading failure and clears the error for a replacement', () => {
+    const client = new QueryClient()
+    const props = {
+      onUpload: vi.fn(),
+      onMaskUpload: vi.fn(),
+      onClearMask: vi.fn(),
+      onDrawMask: vi.fn(),
+    }
+    const mask = {
+      id: 'mask',
+      name: 'mask.png',
+      src: 'data:image/png;base64,YWJj',
+      width: 64,
+      height: 64,
+      mimeType: 'image/png',
+    }
+    const view = render(
+      <QueryClientProvider client={client}>
+        <ReferenceImages {...props} mask={mask} />
+      </QueryClientProvider>
+    )
+    const preview = screen.getByRole('img', { name: 'Mask preview' })
+    expect(preview).toHaveAttribute('aria-busy', 'true')
+    const source = preview.querySelector('image')
+    expect(source).not.toBeNull()
+    fireEvent.error(source as SVGImageElement)
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'The mask could not be loaded.'
+    )
+    expect(preview).toHaveAttribute('aria-busy', 'false')
+    view.rerender(
+      <QueryClientProvider client={client}>
+        <ReferenceImages
+          {...props}
+          mask={{
+            ...mask,
+            id: 'replacement',
+            src: 'data:image/png;base64,ZGVm',
+          }}
+        />
+      </QueryClientProvider>
+    )
+    fireEvent.load(preview.querySelector('image') as SVGImageElement)
+    expect(screen.queryByRole('status')).toBeNull()
+    expect(preview).toHaveAttribute('aria-busy', 'false')
+    client.clear()
   })
 })

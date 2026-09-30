@@ -16,13 +16,118 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { MaskEditor } from '../MaskEditor'
 
 describe('Image mask editor', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('restores the saved editable area before allowing the mask to be applied again', async () => {
+    const pendingImages: HTMLImageElement[] = []
+    vi.stubGlobal('Image', function () {
+      const image = document.createElement('img')
+      pendingImages.push(image)
+      return image
+    })
+    let alpha = [166, 166]
+    const written: number[][] = []
+    const context = {
+      globalAlpha: 1,
+      globalCompositeOperation: 'source-over',
+      fillStyle: '',
+      fillRect: () => {
+        alpha = [166, 166]
+      },
+      clearRect: () => {
+        alpha = [0, 0]
+      },
+      drawImage: () => {
+        alpha = [0, 166]
+      },
+      getImageData: () => ({
+        data: new Uint8ClampedArray([
+          20,
+          20,
+          20,
+          alpha[0],
+          20,
+          20,
+          20,
+          alpha[1],
+        ]),
+      }),
+      putImageData: (pixels: ImageData) => written.push([...pixels.data]),
+    }
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(
+      context as unknown as CanvasRenderingContext2D
+    )
+    vi.spyOn(HTMLCanvasElement.prototype, 'toDataURL').mockReturnValue(
+      'data:image/png;base64,YWJj'
+    )
+    const image = {
+      id: 'reference',
+      name: 'reference.png',
+      src: 'data:image/png;base64,YWJj',
+      width: 512,
+      height: 512,
+      mimeType: 'image/png',
+    }
+    render(
+      <MaskEditor
+        image={image}
+        {...{ mask: { ...image, id: 'saved-mask', name: 'mask.png' } }}
+        onClose={vi.fn()}
+        onSave={vi.fn()}
+      />
+    )
+    const apply = screen.getByRole('button', { name: 'Apply mask' })
+    expect(apply).toBeDisabled()
+    fireEvent.load(pendingImages[0])
+    await waitFor(() => expect(apply).not.toBeDisabled())
+    await userEvent.setup().click(apply)
+    await waitFor(() => expect(written).toHaveLength(1))
+    expect([written[0][3], written[0][7]]).toEqual([0, 255])
+  })
+
+  it('keeps apply disabled when the saved mask cannot load instead of overwriting it', async () => {
+    const pendingImages: HTMLImageElement[] = []
+    vi.stubGlobal('Image', function () {
+      const image = document.createElement('img')
+      pendingImages.push(image)
+      return image
+    })
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
+      fillStyle: '',
+      fillRect: vi.fn(),
+      clearRect: vi.fn(),
+    } as unknown as CanvasRenderingContext2D)
+    const image = {
+      id: 'reference',
+      name: 'reference.png',
+      src: 'data:image/png;base64,YWJj',
+      width: 512,
+      height: 512,
+      mimeType: 'image/png',
+    }
+    render(
+      <MaskEditor
+        image={image}
+        {...{ mask: { ...image, id: 'saved-mask', name: 'mask.png' } }}
+        onClose={vi.fn()}
+        onSave={vi.fn()}
+      />
+    )
+    expect(screen.getByRole('button', { name: 'Apply mask' })).toBeDisabled()
+    fireEvent.error(pendingImages[0])
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'The mask could not be loaded.'
+    )
+    expect(screen.getByRole('button', { name: 'Apply mask' })).toBeDisabled()
+  })
+
   // The provider reads the alpha channel: transparent is editable and opaque is
   // preserved. The dialog paints its unpainted area at 65% so the reference
   // stays visible underneath, so that preview alpha must not reach the request.
