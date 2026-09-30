@@ -203,6 +203,71 @@ describe('canvas originals and browser persistence', () => {
     await expect(encodeCanvas('drawing', drawing())).rejects.toThrow(/role/i)
   })
 
+  it.each(['stored asset', 'editor role'])(
+    'binds a historical mask to its result node when %s still names the former reference',
+    async (previousOwner) => {
+      const encoded = await encodedDrawing()
+      const document = drawing()
+      const mask = document.mask?.asset
+      if (!mask) throw new Error('Expected the composer mask')
+      document.nodes[1].data = {
+        ...document.nodes[1].data,
+        referenceIds: ['source'],
+        mask,
+      }
+      document.mask = null
+      document.referenceIds = []
+
+      const result = await encodeCanvas('drawing', document, {
+        existingAssets: encoded.assets,
+        roles: {
+          [originalId]: { role: 'generated', nodeId: 'source' },
+          ...(previousOwner === 'editor role'
+            ? { [maskId]: { role: 'mask' as const, nodeId: 'source' } }
+            : {}),
+        },
+      })
+
+      const binary = result.assets.find((item) => item.id === maskId)
+      expect(binary).toMatchObject({ role: 'mask', nodeId: 'duplicate' })
+      if (!binary) throw new Error('Expected the historical mask original')
+      expect(new Uint8Array(await binary.blob.arrayBuffer())).toEqual(pngBytes)
+      expect(result.document.mask).toBeNull()
+      const saved = await saveLocalCanvas(local(result.document), result.assets)
+      expect(
+        (await readCanvasAssets(41, saved.id)).find(
+          (item) => item.id === maskId
+        )
+      ).toMatchObject({ role: 'mask', nodeId: 'duplicate' })
+    }
+  )
+
+  it('keeps one shared mask original and its still-valid historical owner', async () => {
+    const encoded = await encodedDrawing()
+    const document = drawing()
+    const mask = document.mask?.asset
+    if (!mask) throw new Error('Expected the composer mask')
+    document.nodes[1].data = {
+      ...document.nodes[1].data,
+      referenceIds: ['source'],
+      mask,
+    }
+    document.nodes.push({ ...document.nodes[1], id: 'another-result' })
+
+    const result = await encodeCanvas('drawing', document, {
+      existingAssets: encoded.assets.map((item) =>
+        item.id === maskId ? { ...item, nodeId: 'duplicate' } : item
+      ),
+    })
+
+    expect(result.assets.filter((item) => item.role === 'mask')).toHaveLength(1)
+    const binary = result.assets.find((item) => item.id === maskId)
+    if (!binary) throw new Error('Expected the shared mask original')
+    expect(binary.nodeId).toBe('duplicate')
+    expect(new Uint8Array(await binary.blob.arrayBuffer())).toEqual(pngBytes)
+    expect(result.document.mask).toMatchObject({ referenceId: 'source' })
+  })
+
   it('keeps the link, never a stand-in original, when the captured original reader fails', async () => {
     const document = drawing()
     document.nodes[0].data.asset = {

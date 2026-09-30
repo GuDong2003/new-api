@@ -179,6 +179,28 @@ export function canvasDocumentAssetIds(
   return [...ids]
 }
 
+/** A mask's stored owner may no longer be one of its current references. */
+export function canvasMaskNodeId(
+  input: Record<string, unknown>,
+  maskId: string,
+  preferredNodeId?: string
+): string | undefined {
+  const document = input as unknown as StoredDocument
+  let firstNodeId: string | undefined
+  for (const node of document.nodes) {
+    if (!('mask' in node.data) || node.data.mask?.id !== maskId) continue
+    if (node.id === preferredNodeId) return node.id
+    firstNodeId ??= node.id
+  }
+  if ('mask' in document && document.mask?.asset.id === maskId) {
+    if (document.mask.referenceId === preferredNodeId) {
+      return document.mask.referenceId
+    }
+    firstNodeId ??= document.mask.referenceId
+  }
+  return firstNodeId
+}
+
 /**
  * A canvas nobody has put anything on yet. Creating one is how you start
  * drawing, so until it holds something it is not a thing worth listing next to
@@ -444,7 +466,10 @@ export async function encodeCanvas(
     }
     const id = ids.get(oldId)
     if (!id) throw new Error('Invalid canvas asset ID.')
-    const nodeId = relation?.nodeId ?? source.nodeId
+    let nodeId = relation?.nodeId ?? source.nodeId
+    if (source.mask) {
+      nodeId = canvasMaskNodeId(normalized, id, nodeId) ?? source.nodeId
+    }
     const src = source.asset.src
     let blob: Blob | undefined
     if (existing && !existing.previewOnly && !existing.remoteSource) {

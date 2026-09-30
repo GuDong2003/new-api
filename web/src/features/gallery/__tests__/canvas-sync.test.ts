@@ -1986,3 +1986,85 @@ it('uploads only referenced masks and retires old local masks only after success
     (await readCanvasAssets(813, canvas.id)).map((asset) => asset.id).sort()
   ).toEqual([sourceId, newMask].sort())
 })
+
+it.each(['closed', 'open'])(
+  'repairs a legacy historical mask binding before cloud upload when the editor is %s',
+  async (editor) => {
+    const canvas = await createCanvasProject(identity, 'drawing')
+    await startCanvasEditor(identity, 'drawing')
+    addOriginal()
+    const source = required(useDrawingStore.getState().nodes[0].data.asset)
+    const referenceId = `node-${sourceId}`
+    useDrawingStore.getState().setReferences([referenceId])
+    useDrawingStore.getState().setMask({
+      referenceId,
+      asset: { ...source, id: targetId },
+    })
+    await flushLocalEditors(identity)
+    const binaries = await readCanvasAssets(813, canvas.id)
+    expect(binaries.find((asset) => asset.id === targetId)?.nodeId).toBe(
+      referenceId
+    )
+    const stored = required(await loadLocalCanvas(813, canvas.id))
+    const nodes = stored.document.nodes as Array<{
+      data: Record<string, unknown>
+    }>
+    const mask = stored.document.mask as { asset: Record<string, unknown> }
+    // Before this fix, a cleared composer mask kept its old binary relation
+    // even though only the generated result still referenced the mask.
+    const historical = await saveLocalCanvas(
+      {
+        ...stored,
+        status: 'error',
+        document: {
+          ...stored.document,
+          mask: null,
+          referenceIds: [],
+          nodes: [
+            ...nodes,
+            {
+              id: 'edited-result',
+              type: 'image',
+              position: { x: 400, y: 0 },
+              data: {
+                prompt: 'masked edit',
+                status: 'complete',
+                createdAt: 2,
+                settings: stored.document.settings,
+                referenceIds: [referenceId],
+                mask: mask.asset,
+              },
+            },
+          ],
+        },
+      },
+      binaries
+    )
+    stopCanvasEditors(identity)
+    if (editor === 'open') {
+      await openCanvasProject(identity, canvas.id)
+      await flushLocalEditors(identity)
+    }
+
+    await syncCanvas(identity, canvas.id, 'manual')
+
+    const post = required(posts().at(-1))
+    const metadata = JSON.parse(
+      String((post.data as FormData).get('metadata'))
+    ) as CanvasSaveMetadata
+    expect(
+      metadata.assets.find((asset) => asset.id === targetId)
+    ).toMatchObject({ role: 'mask', node_id: 'edited-result' })
+    expect((post.data as FormData).get(`file:${targetId}`)).toBeTruthy()
+    const synced = required(await loadLocalCanvas(813, canvas.id))
+    expect(synced.status).toBe('synced')
+    expect(synced.revision).toBe(historical.revision)
+    expect(synced.cloudSavedRevision).toBe(historical.revision)
+    expect(synced.document.nodes).toHaveLength(2)
+    expect(
+      (await readCanvasAssets(813, canvas.id)).find(
+        (asset) => asset.id === targetId
+      )
+    ).toMatchObject({ role: 'mask', nodeId: 'edited-result' })
+  }
+)

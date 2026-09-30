@@ -34,6 +34,7 @@ import type {
 import {
   canvasContentKey,
   canvasDocumentAssetIds,
+  canvasMaskNodeId,
   mergeCanvasDocuments,
   normalizeCanvasDocument,
 } from './canvas-document'
@@ -482,18 +483,23 @@ async function upload(
     // The cloud leaves out an original whose file it lost. A preview cannot
     // replace it; a browser that holds the original uploads it again.
     if (newAssets.some((asset) => asset.previewOnly)) return
+    const document = canvas.document
     const metadata: CanvasSaveMetadata = {
       id,
       kind: canvas.kind,
       name: canvas.name,
       base_revision: canvas.cloudRevision,
       mutation_id: '',
-      document: canvas.document,
+      document,
       ...(canvas.needsExplicitSave ? { explicit_save: true } : {}),
       assets: assets.map((asset) => ({
         id: asset.id,
         role: asset.role,
-        node_id: asset.nodeId,
+        node_id:
+          asset.role === 'mask'
+            ? (canvasMaskNodeId(document, asset.id, asset.nodeId) ??
+              asset.nodeId)
+            : asset.nodeId,
         bytes: asset.blob.size,
         sha256: asset.sha256,
       })),
