@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useTranslation } from 'react-i18next'
+import { Trans, useTranslation } from 'react-i18next'
 
 import { cn } from '@/lib/utils'
 
@@ -28,67 +28,58 @@ interface TermsFooterProps {
   status?: SystemStatus | null
 }
 
-export function TermsFooter({
-  variant = 'sign-in',
-  className,
-  status,
-}: TermsFooterProps) {
+const termsMessages = {
+  'sign-in': {
+    both: 'By clicking sign in, you agree to our <agreement>User Agreement</agreement> and <privacy>Privacy Policy</privacy>.',
+    agreement:
+      'By clicking sign in, you agree to our <agreement>User Agreement</agreement>.',
+    privacy:
+      'By clicking sign in, you agree to our <privacy>Privacy Policy</privacy>.',
+  },
+  'sign-up': {
+    both: 'By creating an account, you agree to our <agreement>User Agreement</agreement> and <privacy>Privacy Policy</privacy>.',
+    agreement:
+      'By creating an account, you agree to our <agreement>User Agreement</agreement>.',
+    privacy:
+      'By creating an account, you agree to our <privacy>Privacy Policy</privacy>.',
+  },
+} as const
+
+export function TermsFooter(props: TermsFooterProps) {
   const { t } = useTranslation()
-  const text =
-    variant === 'sign-in'
-      ? 'By clicking sign in, you agree to our'
-      : 'By creating an account, you agree to our'
+  const hasUserAgreement = Boolean(props.status?.user_agreement_enabled)
+  const hasPrivacyPolicy = Boolean(props.status?.privacy_policy_enabled)
+  if (!hasUserAgreement && !hasPrivacyPolicy) return null
 
-  const hasUserAgreement = Boolean(status?.user_agreement_enabled)
-  const hasPrivacyPolicy = Boolean(status?.privacy_policy_enabled)
-
-  if (!hasUserAgreement && !hasPrivacyPolicy) {
-    return null
-  }
-
-  const agreementLink = {
-    label: 'User Agreement',
-    href: '/user-agreement',
-  }
-  const privacyLink = {
-    label: 'Privacy Policy',
-    href: '/privacy-policy',
-  }
-
-  const activeLinks =
-    hasUserAgreement || hasPrivacyPolicy
-      ? ([
-          hasUserAgreement ? agreementLink : null,
-          hasPrivacyPolicy ? privacyLink : null,
-        ].filter(Boolean) as Array<{ label: string; href: string }>)
-      : [agreementLink, privacyLink]
-
-  const [firstLink, secondLink] = activeLinks
+  let documents: 'both' | 'agreement' | 'privacy' = 'both'
+  if (!hasPrivacyPolicy) documents = 'agreement'
+  else if (!hasUserAgreement) documents = 'privacy'
 
   return (
-    <p className={cn('text-muted-foreground text-center text-xs', className)}>
-      {text}{' '}
-      {firstLink && (
-        <a
-          href={firstLink.href}
-          className='hover:text-primary underline underline-offset-4'
-        >
-          {firstLink.label}
-        </a>
+    <p
+      className={cn(
+        'text-muted-foreground text-center text-xs',
+        props.className
       )}
-      {secondLink && (
-        <>
-          {' '}
-          {t('and')}{' '}
-          <a
-            href={secondLink.href}
-            className='hover:text-primary underline underline-offset-4'
-          >
-            {secondLink.label}
-          </a>
-        </>
-      )}
-      .
+    >
+      <Trans
+        t={t}
+        i18nKey={termsMessages[props.variant ?? 'sign-in'][documents]}
+        components={{
+          agreement: (
+            <a
+              href='/user-agreement'
+              className='hover:text-primary underline underline-offset-4'
+            />
+          ),
+          privacy: (
+            <a
+              href='/privacy-policy'
+              className='hover:text-primary underline underline-offset-4'
+            />
+          ),
+        }}
+      />
     </p>
   )
 }

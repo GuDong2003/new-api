@@ -19,6 +19,16 @@ For commercial licensing, please contact support@quantumnous.com
 // Static translation keys that don't get picked up by the t('...') regex.
 // These cover dynamic labels (e.g. constants, configs) that are passed into t at runtime.
 export const STATIC_I18N_KEYS = [
+  'By clicking sign in, you agree to our <agreement>User Agreement</agreement> and <privacy>Privacy Policy</privacy>.',
+  'By clicking sign in, you agree to our <agreement>User Agreement</agreement>.',
+  'By clicking sign in, you agree to our <privacy>Privacy Policy</privacy>.',
+  'By creating an account, you agree to our <agreement>User Agreement</agreement> and <privacy>Privacy Policy</privacy>.',
+  'By creating an account, you agree to our <agreement>User Agreement</agreement>.',
+  'By creating an account, you agree to our <privacy>Privacy Policy</privacy>.',
+
+  'I have read and agree to the <agreement>User Agreement</agreement> and the <privacy>Privacy Policy</privacy>.',
+  'I have read and agree to the <agreement>User Agreement</agreement>.',
+  'I have read and agree to the <privacy>Privacy Policy</privacy>.',
   'References count as originals. Thumbnails, masks and canvas documents share the byte quota. Cloud expiry keeps local drafts.',
   'Canvas drafts save in this browser first. Full cloud storage pauses uploads without stopping generation or deleting unexpired originals.',
   'Cloud conflict. Export your local canvas, replace the cloud version with it, or reload the cloud version.',

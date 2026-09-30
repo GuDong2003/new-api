@@ -134,6 +134,7 @@ export function ForgotPasswordForm({
             <Turnstile
               siteKey={turnstileSiteKey}
               onVerify={setTurnstileToken}
+              onExpire={() => setTurnstileToken('')}
             />
           </div>
         )}
