@@ -1416,7 +1416,15 @@ func RefundSubscriptionPreConsume(requestId string) error {
 			record.Status = "refunded"
 			return tx.Save(&record).Error
 		}
-		if err := PostConsumeUserSubscriptionDelta(record.UserSubscriptionId, -record.PreConsumed); err != nil {
+		// Keep the funding adjustment and its idempotency marker in this
+		// transaction. A second DB.Transaction here can deadlock SQLite and
+		// would commit the refund separately from the marker on other engines.
+		var sub UserSubscription
+		if err := lockForUpdate(tx).Where("id = ?", record.UserSubscriptionId).First(&sub).Error; err != nil {
+			return err
+		}
+		sub.AmountUsed = max(sub.AmountUsed-record.PreConsumed, 0)
+		if err := tx.Save(&sub).Error; err != nil {
 			return err
 		}
 		record.Status = "refunded"

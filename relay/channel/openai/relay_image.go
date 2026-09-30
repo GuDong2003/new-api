@@ -1,10 +1,13 @@
 package openai
 
 import (
+	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -15,6 +18,7 @@ import (
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/system_setting"
 
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
@@ -39,6 +43,11 @@ func OpenaiImageHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.
 
 	if oaiError := usageResp.GetOpenAIError(); oaiError != nil && oaiError.Type != "" {
 		return nil, types.WithOpenAIError(*oaiError, resp.StatusCode)
+	}
+	var apiErr *types.NewAPIError
+	responseBody, apiErr = validateOpenAIImageResult(c.Request.Context(), responseBody, "data")
+	if apiErr != nil {
+		return nil, apiErr
 	}
 
 	info.UpdateImageCount(openaiImageResponseCount(responseBody))
@@ -87,7 +96,134 @@ func openaiImageResponseCount(responseBody []byte) int64 {
 // non-empty string value for field.
 func openaiImageDataHasField(item gjson.Result, field string) bool {
 	value := item.Get(field)
-	return value.Type == gjson.String && value.Raw != `""`
+	return value.Type == gjson.String && strings.TrimSpace(value.String()) != ""
+}
+
+// Validate the result before it reaches the client or the billing settlement.
+// A successful HTTP status and a nonempty URL can still describe a login page.
+// This is independent of optional gallery/audit storage and never forwards the
+// caller's credentials. One deadline bounds the whole batch, including redirects.
+func validateOpenAIImageResult(ctx context.Context, body []byte, dataPath string) ([]byte, *types.NewAPIError) {
+	data := gjson.ParseBytes(body)
+	if dataPath != "" {
+		data = data.Get(dataPath)
+	}
+	invalid := types.NewOpenAIError(fmt.Errorf("upstream returned no usable image"), types.ErrorCodeBadResponseBody, http.StatusBadGateway)
+	if !data.IsObject() && !data.IsArray() {
+		return nil, invalid
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 12*time.Second)
+	defer cancel()
+	hasImage := false
+	items := data.Array()
+	var inlineCount, urlCount int
+	for _, item := range items {
+		if openaiImageDataHasField(item, "b64_json") {
+			inlineCount++
+		}
+		if openaiImageDataHasField(item, "url") {
+			urlCount++
+		}
+	}
+	invalidURLs := make(map[int]bool)
+	verified := make(map[string]bool)
+	for index, item := range items {
+		if openaiImageDataHasField(item, "b64_json") {
+			hasImage = true
+			continue
+		}
+		if !openaiImageDataHasField(item, "url") {
+			continue
+		}
+		raw := strings.TrimSpace(item.Get("url").String())
+		if !verified[raw] && !openAIImageURLAvailable(ctx, raw) {
+			// Some providers split the URL and inline form of the same image into
+			// separate entries. Prefer those inline images if every URL has one.
+			if inlineCount > 0 && inlineCount >= urlCount {
+				invalidURLs[index] = true
+				continue
+			}
+			return nil, invalid
+		}
+		verified[raw] = true
+		hasImage = true
+	}
+
+	if !hasImage {
+		return nil, invalid
+	}
+	if len(invalidURLs) > 0 {
+		valid := make([]json.RawMessage, 0, len(items)-len(invalidURLs))
+		for index, item := range items {
+			if !invalidURLs[index] {
+				valid = append(valid, json.RawMessage(item.Raw))
+			}
+		}
+		encoded, err := common.Marshal(valid)
+		if err != nil {
+			return nil, invalid
+		}
+		body, err = sjson.SetRawBytes(body, dataPath, encoded)
+		if err != nil {
+			return nil, invalid
+		}
+	}
+	return body, nil
+}
+
+// openAIImageURLAvailable probes actual bytes rather than trusting a file
+// extension or Content-Type. Range and LimitReader bound the consumed body even
+// when the image host ignores Range. Download credentials are never inherited.
+func openAIImageURLAvailable(ctx context.Context, raw string) bool {
+	var reader io.Reader
+	if strings.HasPrefix(raw, "data:image/") {
+		header, encoded, ok := strings.Cut(raw, ",")
+		if !ok || !strings.HasSuffix(header, ";base64") {
+			return false
+		}
+		reader = base64.NewDecoder(base64.StdEncoding, strings.NewReader(encoded))
+	} else {
+		u, err := url.Parse(raw)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" || u.User != nil {
+			return false
+		}
+		path := strings.ToLower(strings.TrimRight(u.Path, "/"))
+		if path == "/login" || path == "/signin" || path == "/sign-in" || strings.HasSuffix(path, "/auth/login") {
+			return false
+		}
+		if service.ValidateSSRFProtectedFetchURL(raw) != nil {
+			return false
+		}
+		var response *http.Response
+		if system_setting.EnableWorker() {
+			response, err = service.DoWorkerRequestWithContext(ctx, &service.WorkerRequest{
+				URL: raw, Key: system_setting.WorkerValidKey, Method: http.MethodGet,
+				Headers: map[string]string{"Accept": "image/*", "Range": "bytes=0-511"},
+			})
+		} else {
+			request, requestErr := http.NewRequestWithContext(ctx, http.MethodGet, raw, nil)
+			if requestErr != nil {
+				return false
+			}
+			request.Header.Set("Accept", "image/*")
+			request.Header.Set("Range", "bytes=0-511")
+			client := service.GetSSRFProtectedHTTPClient()
+			if client == nil {
+				return false
+			}
+			response, err = client.Do(request)
+		}
+		if err != nil {
+			return false
+		}
+		defer response.Body.Close()
+		if response.StatusCode != http.StatusOK && response.StatusCode != http.StatusPartialContent {
+			return false
+		}
+		reader = response.Body
+	}
+	prefix, err := io.ReadAll(io.LimitReader(reader, 512))
+	return err == nil && strings.HasPrefix(http.DetectContentType(prefix), "image/")
 }
 
 // normalizeOpenAIUsage maps the OpenAI Images usage shape (input_tokens /
@@ -142,14 +278,18 @@ func OpenaiImageStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp 
 	usage := &dto.Usage{}
 	var lastStreamData []byte
 	var completedImages int64
+	var resultErr *types.NewAPIError
 
 	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
 		raw := common.StringToByteSlice(data)
 		lastStreamData = raw
 		if isOpenAIImageStreamErrorEvent(raw) {
-			// Record the error as a soft error; the scanner drives the final
-			// EndReason. HasErrors() flags the failure for logging/handling.
-			sr.Error(fmt.Errorf("%s", extractOpenAIImageStreamErrorMessage(raw)))
+			resultErr = types.NewOpenAIError(fmt.Errorf("upstream image generation failed"), types.ErrorCodeBadResponseBody, http.StatusBadGateway)
+			sr.Stop(fmt.Errorf("%s", extractOpenAIImageStreamErrorMessage(raw)))
+			if completedImages == 0 {
+				_ = writeOpenaiImageStreamChunk(c, raw)
+			}
+			return
 		}
 		var chunk struct {
 			Type  string    `json:"type"`
@@ -161,6 +301,11 @@ func OpenaiImageStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp 
 				usage = &chunk.Usage
 			}
 			if chunk.Type == "image_generation.completed" || chunk.Type == "image_edit.completed" {
+				raw, resultErr = validateOpenAIImageResult(c.Request.Context(), raw, "")
+				if resultErr != nil {
+					sr.Stop(resultErr)
+					return
+				}
 				completedImages++
 			}
 		}
@@ -168,6 +313,24 @@ func OpenaiImageStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp 
 			sr.Stop(err)
 		}
 	})
+
+	if resultErr == nil && completedImages == 0 && info.StreamStatus != nil &&
+		(info.StreamStatus.EndReason == relaycommon.StreamEndReasonDone || info.StreamStatus.EndReason == relaycommon.StreamEndReasonEOF) {
+		resultErr = types.NewOpenAIError(fmt.Errorf("upstream returned no completed image"), types.ErrorCodeBadResponseBody, http.StatusBadGateway)
+	}
+	if resultErr != nil {
+		if completedImages == 0 {
+			return nil, resultErr
+		}
+		// Earlier completed images were delivered and remain billable. Never
+		// refund them because a later image in the same stream failed.
+		info.UpdateImageCount(completedImages)
+		applyUsagePostProcessing(info, usage, lastStreamData)
+		// Close the usable partial result normally. Sending a terminal error
+		// would make clients discard the completed images we just charged for.
+		helper.Done(c)
+		return usage, nil
+	}
 
 	// StreamScannerHandler consumes the upstream [DONE]; re-emit it so the
 	// client still receives a terminal data: [DONE].
@@ -274,6 +437,11 @@ func openaiImageJSONAsStreamHandler(c *gin.Context, info *relaycommon.RelayInfo,
 	}
 	if oaiError := usageResp.GetOpenAIError(); oaiError != nil && oaiError.Type != "" {
 		return nil, types.WithOpenAIError(*oaiError, resp.StatusCode)
+	}
+	var apiErr *types.NewAPIError
+	responseBody, apiErr = validateOpenAIImageResult(c.Request.Context(), responseBody, "data")
+	if apiErr != nil {
+		return nil, apiErr
 	}
 	normalizeOpenAIUsage(&usageResp.Usage)
 	applyUsagePostProcessing(info, &usageResp.Usage, responseBody)

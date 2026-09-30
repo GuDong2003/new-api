@@ -2,6 +2,7 @@ package openai
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"net/http"
@@ -10,15 +11,106 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relaykit/dto"
+	"github.com/QuantumNous/new-api/relaykit/types"
+	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/system_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
+
+func TestImageResultsRejectNonImagesBeforeForwarding(t *testing.T) {
+	previousTimeout := constant.StreamingTimeout
+	constant.StreamingTimeout = 30
+	t.Cleanup(func() { constant.StreamingTimeout = previousTimeout })
+	service.InitHttpClient()
+	fetch := system_setting.GetFetchSetting()
+	previous := *fetch
+	fetch.AllowPrivateIp = true
+	fetch.AllowedPorts = []string{"1-65535"}
+	t.Cleanup(func() { *fetch = previous })
+	image, err := base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a6X8AAAAASUVORK5CYII=")
+	require.NoError(t, err)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Empty(t, r.Header.Get("Authorization"))
+		assert.Empty(t, r.Header.Get("Cookie"))
+		switch r.URL.Path {
+		case "/image":
+			w.Header().Set("Content-Type", "image/png")
+			_, _ = w.Write(image)
+		case "/redirect":
+			http.Redirect(w, r, "/html", http.StatusFound)
+		case "/pretend.png":
+			w.Header().Set("Content-Type", "image/png")
+			_, _ = io.WriteString(w, "<html>sign in</html>")
+		default:
+			w.Header().Set("Content-Type", "text/html")
+			_, _ = io.WriteString(w, "<html>sign in</html>")
+		}
+	}))
+	t.Cleanup(server.Close)
+	for _, tc := range []struct {
+		name, body string
+		valid      bool
+	}{
+		{"login page", `{"data":[{"url":"https://platform.openai.com/login?redirect=private"}],"status":"completed"}`, false},
+		{"HTML body", `{"data":[{"url":"` + server.URL + `/html"}]}`, false},
+		{"redirect to HTML", `{"data":[{"url":"` + server.URL + `/redirect"}]}`, false},
+		{"false image MIME", `{"data":[{"url":"` + server.URL + `/pretend.png"}]}`, false},
+		{"empty data", `{"data":[]}`, false},
+		{"no image payload", `{"data":[{"revised_prompt":"a fox"}]}`, false},
+		{"blank image URL", `{"data":[{"url":"  "}]}`, false},
+		{"image URL without extension", `{"data":[{"url":"` + server.URL + `/image?signature=opaque"}]}`, true},
+	} {
+		for _, mode := range []string{"json", "json-as-sse", "sse"} {
+			t.Run(tc.name+"/"+mode, func(t *testing.T) {
+				body, contentType := tc.body, "application/json"
+				if mode == "sse" {
+					item := gjson.Get(tc.body, "data.0").Raw
+					if item == "" {
+						item = `{}`
+					}
+					completed, err := sjson.Set(item, "type", "image_generation.completed")
+					require.NoError(t, err)
+					body, contentType = "data: "+completed+"\n\ndata: [DONE]\n\n", "text/event-stream"
+				}
+				c, recorder, response, info := newImageTestContext(t, body, contentType, mode != "json")
+				c.Request.Header.Set("Authorization", "Bearer must-not-leak")
+				c.Request.Header.Set("Cookie", "session=must-not-leak")
+				info.PriceData.UsePrice = true
+				info.PriceData.AddOtherRatio("n", 1)
+				var apiErr error
+				if mode != "json" {
+					_, failure := OpenaiImageStreamHandler(c, info, response)
+					if failure != nil {
+						apiErr = failure
+					}
+				} else {
+					_, failure := OpenaiImageHandler(c, info, response)
+					if failure != nil {
+						apiErr = failure
+					}
+				}
+				if tc.valid {
+					require.NoError(t, apiErr)
+					assert.Contains(t, recorder.Body.String(), "/image?signature=opaque")
+				} else {
+					require.Error(t, apiErr)
+					assert.Empty(t, recorder.Body.String(), "invalid results must not be sent as successful images")
+					assert.Nil(t, info.BillingImageCount)
+				}
+			})
+		}
+	}
+}
 
 func newImageTestContext(t *testing.T, body, contentType string, isStream bool) (*gin.Context, *httptest.ResponseRecorder, *http.Response, *relaycommon.RelayInfo) {
 	t.Helper()
@@ -50,8 +142,7 @@ func TestImageExpressionUsesCompletedCountAndProtectsAbortedStreams(t *testing.T
 	}{
 		{"JSON uses actual count", `{"data":[{"b64_json":"first"},{"b64_json":"second"}]}`, false, false, 3, 2},
 		{"JSON wrapped as SSE uses actual count", `{"data":[{"b64_json":"first"}]}`, true, false, 3, 1},
-		{"empty response retains request", `{"data":[]}`, false, false, 3, 3},
-		{"JSON object data counts one image", `{"data":{"url":"https://example.com/a.png","b64_json":"first"}}`, false, false, 3, 1},
+		{"JSON object data counts one image", `{"data":{"url":"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a6X8AAAAASUVORK5CYII=","b64_json":"first"}}`, false, false, 3, 1},
 		{"JSON wrapped as SSE counts object data once", `{"data":{"b64_json":"first"}}`, true, false, 3, 1},
 		{"completed stream refunds missing images", "data: {\"type\":\"image_generation.completed\",\"b64_json\":\"first\"}\n\ndata: [DONE]\n\n", true, false, 3, 1},
 		{"client abort cannot reduce count", "data: {\"type\":\"image_generation.completed\",\"b64_json\":\"first\"}\n\n", true, true, 3, 3},
@@ -83,6 +174,91 @@ func TestImageExpressionUsesCompletedCountAndProtectsAbortedStreams(t *testing.T
 	}
 }
 
+func TestImageStreamRejectsNoResultAndRetainsAlreadyDeliveredImages(t *testing.T) {
+	previous := constant.StreamingTimeout
+	constant.StreamingTimeout = 30
+	t.Cleanup(func() { constant.StreamingTimeout = previous })
+	for _, tc := range []struct {
+		name, body string
+		wantError  bool
+	}{
+		{"done without an image", "data: [DONE]\n\n", true},
+		{"error before completion stays failed", "data: {\"type\":\"error\",\"error\":{\"message\":\"failed\"}}\n\ndata: {\"type\":\"image_generation.completed\",\"b64_json\":\"late\"}\n\ndata: [DONE]\n\n", true},
+		{"preview is not a completed image", "data: {\"type\":\"image_generation.partial_image\",\"b64_json\":\"preview\"}\n\ndata: [DONE]\n\n", true},
+		{"a later invalid URL keeps the delivered image billed", "data: {\"type\":\"image_generation.completed\",\"b64_json\":\"first\"}\n\ndata: {\"type\":\"image_generation.completed\",\"url\":\"https://platform.openai.com/login\"}\n\ndata: [DONE]\n\n", false},
+		{"a later explicit error keeps the delivered image", "data: {\"type\":\"image_generation.completed\",\"b64_json\":\"first\"}\n\ndata: {\"type\":\"error\",\"error\":{\"message\":\"failed\"}}\n\n", false},
+		{"a later upstream error keeps the delivered image", "data: {\"type\":\"image_generation.completed\",\"b64_json\":\"first\"}\n\ndata: {\"type\":\"upstream_error\",\"error\":{\"message\":\"failed\"}}\n\n", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, recorder, response, info := newImageTestContext(t, tc.body, "text/event-stream", true)
+			info.PriceData.UsePrice = true
+			info.PriceData.AddOtherRatio("n", 2)
+			_, failure := OpenaiImageStreamHandler(c, info, response)
+			if tc.wantError {
+				require.NotNil(t, failure)
+				assert.NotContains(t, recorder.Body.String(), "image_generation.completed")
+			} else {
+				require.Nil(t, failure)
+				assert.Equal(t, 1.0, info.PriceData.OtherRatios()["n"])
+				assert.Equal(t, 1, strings.Count(recorder.Body.String(), "event: image_generation.completed"))
+				assert.NotContains(t, recorder.Body.String(), "platform.openai.com")
+				assert.NotContains(t, recorder.Body.String(), `"error"`)
+				assert.True(t, strings.HasSuffix(recorder.Body.String(), "data: [DONE]\n\n"))
+			}
+		})
+	}
+}
+
+func TestImageResultsKeepSplitInlineFallbackAndUseWorker(t *testing.T) {
+	service.InitHttpClient()
+	for _, stream := range []bool{false, true} {
+		t.Run(fmt.Sprintf("split inline fallback/stream=%t", stream), func(t *testing.T) {
+			body := `{"data":[{"url":"https://platform.openai.com/login"},{"b64_json":"inline-image"}]}`
+			c, recorder, response, info := newImageTestContext(t, body, "application/json", stream)
+			info.PriceData.UsePrice = true
+			var apiErr *types.NewAPIError
+			if stream {
+				_, apiErr = OpenaiImageStreamHandler(c, info, response)
+			} else {
+				_, apiErr = OpenaiImageHandler(c, info, response)
+			}
+			require.Nil(t, apiErr)
+			assert.NotContains(t, recorder.Body.String(), "platform.openai.com")
+			assert.Contains(t, recorder.Body.String(), `"b64_json":"inline-image"`)
+			assert.Equal(t, 1.0, info.PriceData.OtherRatios()["n"])
+		})
+	}
+	t.Run("configured worker fetches image", func(t *testing.T) {
+		picture, err := base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a6X8AAAAASUVORK5CYII=")
+		require.NoError(t, err)
+		calls := 0
+		worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			calls++
+			var payload service.WorkerRequest
+			require.NoError(t, common.DecodeJson(r.Body, &payload))
+			assert.Equal(t, "https://images.example/image", payload.URL)
+			assert.Equal(t, http.MethodGet, payload.Method)
+			assert.Equal(t, "bytes=0-511", payload.Headers["Range"])
+			assert.Equal(t, "worker-fixture", payload.Key)
+			assert.Empty(t, r.Header.Get("Authorization"))
+			w.Header().Set("Content-Type", "image/png")
+			_, _ = w.Write(picture)
+		}))
+		t.Cleanup(worker.Close)
+		oldURL, oldKey := system_setting.WorkerUrl, system_setting.WorkerValidKey
+		fetch := system_setting.GetFetchSetting()
+		oldFetch := *fetch
+		system_setting.WorkerUrl, system_setting.WorkerValidKey = worker.URL, "worker-fixture"
+		fetch.ApplyIPFilterForDomain = false
+		t.Cleanup(func() { system_setting.WorkerUrl, system_setting.WorkerValidKey = oldURL, oldKey; *fetch = oldFetch })
+		c, recorder, response, info := newImageTestContext(t, `{"data":[{"url":"https://images.example/image"}]}`, "application/json", false)
+		_, failure := OpenaiImageHandler(c, info, response)
+		require.Nil(t, failure)
+		assert.Equal(t, 1, calls)
+		assert.Contains(t, recorder.Body.String(), "https://images.example/image")
+	})
+}
+
 func TestImageCacheUsageAcrossResponseFormats(t *testing.T) {
 	previousTimeout := constant.StreamingTimeout
 	constant.StreamingTimeout = 30
@@ -96,7 +272,7 @@ func TestImageCacheUsageAcrossResponseFormats(t *testing.T) {
 				body := `{"data":[{"b64_json":"image"}],"usage":` + usageJSON + `}`
 				contentType := "application/json"
 				if stream {
-					body = "data: {\"type\":\"" + mode + ".completed\",\"usage\":" + usageJSON + "}\n\ndata: [DONE]\n\n"
+					body = "data: {\"type\":\"" + mode + ".completed\",\"b64_json\":\"image\",\"usage\":" + usageJSON + "}\n\ndata: [DONE]\n\n"
 					contentType = "text/event-stream"
 				}
 				ctx, recorder, response, info := newImageTestContext(t, body, contentType, stream)
@@ -129,7 +305,7 @@ func TestNormalizeOpenAIUsageMapsOutputImageTokens(t *testing.T) {
 			body := `{"data":[{"b64_json":"image"}],"usage":` + usageJSON + `}`
 			contentType := "application/json"
 			if stream {
-				body = "data: {\"type\":\"image_generation.completed\",\"usage\":" + usageJSON + "}\n\ndata: [DONE]\n\n"
+				body = "data: {\"type\":\"image_generation.completed\",\"b64_json\":\"image\",\"usage\":" + usageJSON + "}\n\ndata: [DONE]\n\n"
 				contentType = "text/event-stream"
 			}
 			ctx, _, response, info := newImageTestContext(t, body, contentType, stream)
@@ -193,7 +369,7 @@ func TestOpenaiImageStreamHandlerForwardsSSEAndUsage(t *testing.T) {
 		`event: image_generation.partial_image`,
 		`data: {"type":"image_generation.partial_image","b64_json":"partial"}`,
 		``,
-		`data: {"usage":{"input_tokens":3,"output_tokens":4,"total_tokens":7,"input_tokens_details":{"image_tokens":2,"text_tokens":1}}}`,
+		`data: {"type":"image_generation.completed","b64_json":"image","usage":{"input_tokens":3,"output_tokens":4,"total_tokens":7,"input_tokens_details":{"image_tokens":2,"text_tokens":1}}}`,
 		``,
 		`data: [DONE]`,
 		``,
@@ -212,10 +388,10 @@ func TestOpenaiImageStreamHandlerForwardsSSEAndUsage(t *testing.T) {
 	require.Equal(t, 1, usage.PromptTokensDetails.TextTokens)
 	require.Contains(t, recorder.Body.String(), `event: image_generation.partial_image`)
 	require.Contains(t, recorder.Body.String(), `data: {"type":"image_generation.partial_image","b64_json":"partial"}`)
-	require.Contains(t, recorder.Body.String(), `data: {"usage":{"input_tokens":3,"output_tokens":4,"total_tokens":7,"input_tokens_details":{"image_tokens":2,"text_tokens":1}}}`)
+	require.Contains(t, recorder.Body.String(), `"usage":{"input_tokens":3,"output_tokens":4,"total_tokens":7,"input_tokens_details":{"image_tokens":2,"text_tokens":1}}`)
 	require.Contains(t, recorder.Body.String(), `data: [DONE]`)
 	require.Equal(t, "text/event-stream", recorder.Header().Get("Content-Type"))
-	require.Equal(t, 3.0, info.PriceData.OtherRatios()["n"], "streams without completed events keep the requested count")
+	require.Equal(t, 1.0, info.PriceData.OtherRatios()["n"], "only completed images are billed after upstream finishes")
 }
 
 func TestOpenaiImageStreamHandlerUsesCompletedEventCount(t *testing.T) {
@@ -443,12 +619,6 @@ func TestOpenaiImageHandlerUsesPositiveActualCountForFixedPrice(t *testing.T) {
 			wantCount: 2,
 		},
 		{
-			name:      "empty data keeps requested count",
-			body:      `{"data":[]}`,
-			usePrice:  true,
-			wantCount: 3,
-		},
-		{
 			name:      "ratio billing ignores data length",
 			body:      `{"data":[{"b64_json":"first"},{"b64_json":"second"}]}`,
 			usePrice:  false,
@@ -456,21 +626,21 @@ func TestOpenaiImageHandlerUsesPositiveActualCountForFixedPrice(t *testing.T) {
 		},
 		{
 			name:      "object data with url and b64_json counts one image",
-			body:      `{"data":{"url":"https://example.com/a.png","b64_json":"` + longImage + `"}}`,
+			body:      `{"data":{"url":"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a6X8AAAAASUVORK5CYII=","b64_json":"` + longImage + `"}}`,
 			usePrice:  true,
 			wantCount: 1,
 		},
 		{
 			name:      "url and b64_json split across entries count one image",
-			body:      `{"data":[{"url":"https://example.com/a.png"},{"b64_json":"` + longImage + `"}]}`,
+			body:      `{"data":[{"url":"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a6X8AAAAASUVORK5CYII="},{"b64_json":"` + longImage + `"}]}`,
 			usePrice:  true,
 			wantCount: 1,
 		},
 		{
-			name:      "entries without image payload keep requested count",
-			body:      `{"data":[{"revised_prompt":"draw a cat"}]}`,
+			name:      "entries without image payload do not add to valid images",
+			body:      `{"data":[{"revised_prompt":"draw a cat"},{"b64_json":"first"}]}`,
 			usePrice:  true,
-			wantCount: 3,
+			wantCount: 1,
 		},
 	}
 
@@ -507,23 +677,23 @@ func TestOpenaiImageStreamHandlerWrapsNonStandardDataShapes(t *testing.T) {
 	}{
 		{
 			name:       "object data is forwarded as one completed event",
-			body:       `{"data":{"url":"https://example.com/a.png","b64_json":"first"}}`,
+			body:       `{"data":{"url":"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a6X8AAAAASUVORK5CYII=","b64_json":"first"}}`,
 			wantEvents: 1,
 			wantCount:  1,
-			wantBody:   []string{`"url":"https://example.com/a.png"`, `"b64_json":"first"`},
+			wantBody:   []string{`"url":"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a6X8AAAAASUVORK5CYII="`, `"b64_json":"first"`},
 		},
 		{
 			name:       "split url and b64_json entries bill one image",
-			body:       `{"data":[{"url":"https://example.com/a.png"},{"b64_json":"first"}]}`,
+			body:       `{"data":[{"url":"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a6X8AAAAASUVORK5CYII="},{"b64_json":"first"}]}`,
 			wantEvents: 2,
 			wantCount:  1,
-			wantBody:   []string{`"url":"https://example.com/a.png"`, `"b64_json":"first"`},
+			wantBody:   []string{`"url":"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a6X8AAAAASUVORK5CYII="`, `"b64_json":"first"`},
 		},
 		{
-			name:       "entries without image payload are dropped and keep requested count",
-			body:       `{"data":[{"revised_prompt":"draw a cat"}]}`,
-			wantEvents: 0,
-			wantCount:  3,
+			name:       "entries without image payload are dropped beside valid images",
+			body:       `{"data":[{"revised_prompt":"draw a cat"},{"b64_json":"first"}]}`,
+			wantEvents: 1,
+			wantCount:  1,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -618,10 +788,10 @@ func TestOpenaiImageStreamHandlerRecordsUpstreamErrorEvent(t *testing.T) {
 	c, recorder, resp, info := newImageTestContext(t, body, "text/event-stream", true)
 
 	usage, err := OpenaiImageStreamHandler(c, info, resp)
-	require.Nil(t, err)
-	require.NotNil(t, usage)
+	require.NotNil(t, err)
+	require.Nil(t, usage)
 	require.NotNil(t, info.StreamStatus)
-	require.Equal(t, relaycommon.StreamEndReasonEOF, info.StreamStatus.EndReason)
+	require.Contains(t, []relaycommon.StreamEndReason{relaycommon.StreamEndReasonHandlerStop, relaycommon.StreamEndReasonEOF}, info.StreamStatus.EndReason)
 	require.True(t, info.StreamStatus.HasErrors())
 	require.Equal(t, 1, info.StreamStatus.TotalErrorCount())
 	require.Contains(t, info.StreamStatus.Errors[0].Message, "INTERNAL_ERROR")

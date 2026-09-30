@@ -39,7 +39,26 @@ import (
 	"gorm.io/gorm"
 )
 
+func imageResultURLFixture(t *testing.T) string {
+	t.Helper()
+	var picture bytes.Buffer
+	require.NoError(t, png.Encode(&picture, image.NewRGBA(image.Rect(0, 0, 1, 1))))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		_, _ = w.Write(picture.Bytes())
+	}))
+	t.Cleanup(server.Close)
+	fetch := system_setting.GetFetchSetting()
+	previous := *fetch
+	fetch.AllowPrivateIp = true
+	fetch.AllowedPorts = []string{"1-65535"}
+	t.Cleanup(func() { *fetch = previous })
+	service.InitHttpClient()
+	return server.URL + "/generated.png"
+}
+
 func TestImageTaskSubmissionUsesAutomaticallySelectedChannel(t *testing.T) {
+	imageURL := imageResultURLFixture(t)
 	previousDB := model.DB
 	previousDatabase := common.MainDatabaseType()
 	previousRedisEnabled := common.RedisEnabled
@@ -120,7 +139,7 @@ func TestImageTaskSubmissionUsesAutomaticallySelectedChannel(t *testing.T) {
 				body, err := io.ReadAll(r.Body)
 				requests <- upstreamRequest{body, r.Header.Get("Content-Type"), r.URL.Path, err}
 				w.Header().Set("Content-Type", "application/json")
-				_, _ = io.WriteString(w, `{"created":1,"data":[{"url":"https://example.com/generated.png"}],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`)
+				_, _ = io.WriteString(w, `{"created":1,"data":[{"url":"`+imageURL+`"}],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`)
 			}))
 			t.Cleanup(upstream.Close)
 			channel := &model.Channel{
@@ -194,7 +213,7 @@ func TestImageTaskSubmissionUsesAutomaticallySelectedChannel(t *testing.T) {
 				assert.Equal(t, 73, task.ChannelId)
 				assert.Equal(t, "async-image-test", task.Properties.OriginModelName)
 				assert.Greater(t, task.Quota, 0)
-				assert.Equal(t, "https://example.com/generated.png", task.PrivateData.ResultURL)
+				assert.Equal(t, imageURL, task.PrivateData.ResultURL)
 				fetch := httptest.NewRecorder()
 				c, _ := gin.CreateTestContext(fetch)
 				c.Request = httptest.NewRequest(http.MethodGet, result.StatusURL, nil)
@@ -216,7 +235,7 @@ func TestImageTaskSubmissionUsesAutomaticallySelectedChannel(t *testing.T) {
 				}
 			}
 			require.Len(t, result.Data, 1)
-			assert.Equal(t, "https://example.com/generated.png", result.Data[0].Url)
+			assert.Equal(t, imageURL, result.Data[0].Url)
 			require.Len(t, requests, 1, "the selected upstream must receive exactly one generation")
 			received := <-requests
 			require.NoError(t, received.err)
@@ -1327,6 +1346,7 @@ func (f *imageRelayFixture) awaitFinish(t *testing.T) model.TaskStatus {
 // A caller that loses the reply to its submission, as behind a proxy error page,
 // can only find the task again if it chose the task's name before sending.
 func TestImageTaskSubmissionUsesTheTaskIDItsCallerProposed(t *testing.T) {
+	imageURL := imageResultURLFixture(t)
 	const proposed = "task_0123456789abcdefghijABCDEFGHIJ01"
 	for _, tc := range []struct {
 		name      string
@@ -1346,7 +1366,7 @@ func TestImageTaskSubmissionUsesTheTaskIDItsCallerProposed(t *testing.T) {
 			fixture := newImageRelayFixture(t, func(w http.ResponseWriter, r *http.Request) {
 				forwarded <- r.Header.Get(imageTaskIDHeader)
 				w.Header().Set("Content-Type", "application/json")
-				_, _ = io.WriteString(w, `{"created":1,"data":[{"url":"https://example.com/generated.png"}]}`)
+				_, _ = io.WriteString(w, `{"created":1,"data":[{"url":"`+imageURL+`"}]}`)
 			})
 			if tc.existing {
 				require.NoError(t, fixture.database.Create(&model.Task{TaskID: proposed, UserId: 8, Platform: constant.TaskPlatformImage, Status: model.TaskStatusSuccess}).Error)
@@ -1412,6 +1432,7 @@ func TestAsyncImageTaskReportsWhyTheProviderRefused(t *testing.T) {
 // says why its attempts failed while that retry runs, and stops once it
 // succeeds.
 func TestAsyncImageTaskReportsFailedAttemptsWhileItRetries(t *testing.T) {
+	imageURL := imageResultURLFixture(t)
 	const taskID = "task_0123456789abcdefghijABCDEFGHIJ02"
 	previousRetryTimes := common.RetryTimes
 	common.RetryTimes = 1
@@ -1430,7 +1451,7 @@ func TestAsyncImageTaskReportsFailedAttemptsWhileItRetries(t *testing.T) {
 		fetch := httptest.NewRecorder()
 		fixture.engine.ServeHTTP(fetch, httptest.NewRequest(http.MethodGet, "/pg/images/generations/"+taskID, nil))
 		whileRetrying <- fetch.Body.Bytes()
-		_, _ = io.WriteString(w, `{"created":1,"data":[{"url":"https://example.com/generated.png"}]}`)
+		_, _ = io.WriteString(w, `{"created":1,"data":[{"url":"`+imageURL+`"}]}`)
 	})
 	// The retry selects its channel from the abilities table, whose column
 	// names are set when the database is initialized.
