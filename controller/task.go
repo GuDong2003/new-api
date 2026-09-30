@@ -22,6 +22,7 @@ import (
 	relaychannel "github.com/QuantumNous/new-api/relay/channel"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/service/authz"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -390,10 +391,26 @@ func getTaskForArtifactRequest(c *gin.Context, taskID string) (*model.Task, bool
 		}
 		return task, true, nil
 	}
-	if c.GetInt("token_id") == 0 && c.GetInt("role") >= common.RoleAdminUser {
-		return model.GetByOnlyTaskId(taskID)
+	userID, role := c.GetInt("id"), c.GetInt("role")
+	task, exists, err := model.GetByTaskId(userID, taskID)
+	if err != nil || exists || c.GetInt("token_id") != 0 || role < common.RoleAdminUser || !authz.Can(userID, role, authz.TaskRead) {
+		return task, exists, err
 	}
-	return model.GetByTaskId(c.GetInt("id"), taskID)
+	task, exists, err = model.GetByOnlyTaskId(taskID)
+	if err != nil || !exists || task == nil {
+		return task, exists, err
+	}
+	if role >= common.RoleRootUser {
+		return task, true, nil
+	}
+	owner, err := model.GetUserCache(task.UserId)
+	if err != nil {
+		return nil, false, err
+	}
+	if owner == nil || owner.Role != common.RoleCommonUser && owner.Role != common.RoleAdminUser {
+		return nil, false, nil
+	}
+	return task, true, nil
 }
 
 func writeTaskArtifactProjectionError(c *gin.Context, err error) {
@@ -554,6 +571,9 @@ func GetAllTask(c *gin.Context) {
 	startTimestamp, _ := strconv.ParseInt(c.Query("start_timestamp"), 10, 64)
 	endTimestamp, _ := strconv.ParseInt(c.Query("end_timestamp"), 10, 64)
 	queryParams := model.SyncTaskQueryParams{Platform: constant.TaskPlatform(c.Query("platform")), TaskID: c.Query("task_id"), Status: c.Query("status"), Action: c.Query("action"), StartTimestamp: startTimestamp, EndTimestamp: endTimestamp, ChannelID: c.Query("channel_id")}
+	if c.GetInt("role") < common.RoleRootUser {
+		queryParams.OwnerRoles = []int{common.RoleCommonUser, common.RoleAdminUser}
+	}
 	items := model.TaskGetAllTasks(pageInfo.GetStartIdx(), pageInfo.GetPageSize(), queryParams)
 	pageInfo.SetTotal(int(model.TaskCountAllTasks(queryParams)))
 	pageInfo.SetItems(tasksToDto(items, true, c.GetInt("role")))

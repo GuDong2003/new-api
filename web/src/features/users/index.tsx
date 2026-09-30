@@ -43,9 +43,14 @@ function UsersContent() {
       </SectionPageLayout>
 
       <UsersMutateDrawer
-        open={open === 'create' || open === 'update'}
+        open={open === 'create' || open === 'update' || open === 'permissions'}
         onOpenChange={(isOpen) => !isOpen && setOpen(null)}
-        currentRow={open === 'update' ? currentRow || undefined : undefined}
+        currentRow={
+          open === 'update' || open === 'permissions'
+            ? currentRow || undefined
+            : undefined
+        }
+        permissionsOnly={open === 'permissions'}
       />
       <UsersDeleteDialog />
     </>

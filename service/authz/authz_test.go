@@ -167,6 +167,7 @@ func TestSetUserPermissionsStoresOnlyOverrides(t *testing.T) {
 			ActionBind: false,
 		},
 		ResourceAudit: {ActionRead: false},
+		ResourceTask:  {ActionRead: false},
 		ResourceUser: {
 			UserActionRead:            true,
 			UserActionCreate:          false,
@@ -210,6 +211,7 @@ func TestSetUserPermissionsStoresOnlyOverrides(t *testing.T) {
 			ActionBind: false,
 		},
 		ResourceAudit: {ActionRead: false},
+		ResourceTask:  {ActionRead: false},
 		ResourceUser: {
 			UserActionRead:            true,
 			UserActionCreate:          false,

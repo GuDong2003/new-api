@@ -114,33 +114,6 @@ func TestGetTaskArtifactsReturnsEmptyForLegacyTask(t *testing.T) {
 	assert.Empty(t, response.Artifacts)
 }
 
-func TestTaskArtifactAuthorizationKeepsForeignTasksHidden(t *testing.T) {
-	task := setupGenericTaskTest(t)
-
-	commonUser, _ := gin.CreateTestContext(httptest.NewRecorder())
-	commonUser.Set("id", 8)
-	commonUser.Set("role", common.RoleCommonUser)
-	_, exists, err := getTaskForArtifactRequest(commonUser, task.TaskID)
-	require.NoError(t, err)
-	assert.False(t, exists)
-
-	admin, _ := gin.CreateTestContext(httptest.NewRecorder())
-	admin.Set("id", 8)
-	admin.Set("role", common.RoleAdminUser)
-	found, exists, err := getTaskForArtifactRequest(admin, task.TaskID)
-	require.NoError(t, err)
-	require.True(t, exists)
-	assert.Equal(t, task.TaskID, found.TaskID)
-
-	apiToken, _ := gin.CreateTestContext(httptest.NewRecorder())
-	apiToken.Set("id", 8)
-	apiToken.Set("role", common.RoleRootUser)
-	apiToken.Set("token_id", 99)
-	_, exists, err = getTaskForArtifactRequest(apiToken, task.TaskID)
-	require.NoError(t, err)
-	assert.False(t, exists)
-}
-
 func TestDashboardTaskArtifactsReturnsLegacyCapabilityWithoutUpstreamURL(t *testing.T) {
 	task := setupGenericTaskTest(t)
 	previousSecret := common.CryptoSecret

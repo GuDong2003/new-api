@@ -1034,4 +1034,6 @@ export const STATIC_I18N_KEYS = [
   'Tool arguments must contain only message: "ping".',
   'The tool response exceeded the validation limit.',
   'The server did not return capability diagnostics.',
+  "View other accounts' task logs",
+  'View task records from user and admin roles. Root records are always excluded.',
 ] as const

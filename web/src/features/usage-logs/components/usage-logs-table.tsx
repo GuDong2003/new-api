@@ -19,7 +19,8 @@ For commercial licensing, please contact support@quantumnous.com
 import { useQuery } from '@tanstack/react-query'
 import { getRouteApi } from '@tanstack/react-router'
 import type { ColumnDef } from '@tanstack/react-table'
-import { useCallback } from 'react'
+import { isAxiosError } from 'axios'
+import { useCallback, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import {
@@ -94,6 +95,7 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
     isAdminView: isAdmin,
     isRootView: isRoot,
     viewAccess,
+    handleTaskAccessDenied,
   } = useLogsViewScope()
   const isMobile = useMediaQuery('(max-width: 640px)')
   const searchParams = route.useSearch()
@@ -160,11 +162,12 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
     ],
   })
 
-  const { data, isLoading, isFetching } = useQuery({
+  const { data, isLoading, isFetching, error } = useQuery({
     queryKey: [
       'logs',
       logCategory,
       viewAccess,
+      userId,
       pagination.pageIndex + 1,
       pagination.pageSize,
       columnFilters,
@@ -190,15 +193,30 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
     placeholderData: (previousData, previousQuery) => {
       if (
         previousQuery?.queryKey[1] === logCategory &&
-        previousQuery.queryKey[2] === viewAccess
+        previousQuery.queryKey[2] === viewAccess &&
+        previousQuery.queryKey[3] === userId
       ) {
         return previousData
       }
       return undefined
     },
+    retry: (failureCount, queryError) => {
+      if (isAxiosError(queryError) && queryError.response?.status === 403) {
+        return false
+      }
+      return failureCount < 3
+    },
   })
+  const taskAccessDenied =
+    logCategory === 'task' &&
+    isAdmin &&
+    isAxiosError(error) &&
+    error.response?.status === 403
+  useEffect(() => {
+    if (taskAccessDenied) void handleTaskAccessDenied()
+  }, [taskAccessDenied, handleTaskAccessDenied])
 
-  const logs = data?.items || []
+  const logs = taskAccessDenied ? [] : data?.items || []
   const columns = useColumnsByCategory(
     logCategory,
     isAdmin,

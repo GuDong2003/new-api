@@ -16,6 +16,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { Shield01Icon } from '@hugeicons/core-free-icons'
+import { HugeiconsIcon } from '@hugeicons/react'
 import type { Row } from '@tanstack/react-table'
 import {
   Pencil,
@@ -102,6 +104,11 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
     canManageTarget &&
     user.id !== currentUser?.id &&
     hasUserPermission(currentUser, USER_PERMISSION_ACTIONS.DELETE)
+  const canEditPermissions =
+    currentUser?.role === USER_ROLE.ROOT &&
+    user.role === USER_ROLE.ADMIN &&
+    canManageTarget &&
+    hasUserPermission(currentUser, USER_PERMISSION_ACTIONS.PERMISSION_WRITE)
 
   const handleEdit = () => {
     if (!canEditProfile && !canManageSecurity) return
@@ -191,6 +198,28 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
         </TooltipTrigger>
         <TooltipContent>{t('Edit')}</TooltipContent>
       </Tooltip>
+
+      {canEditPermissions && (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                variant='ghost'
+                size='icon-sm'
+                aria-label={t('Feature Permissions')}
+                aria-haspopup='dialog'
+                onClick={() => {
+                  setCurrentRow(user)
+                  setOpen('permissions')
+                }}
+              />
+            }
+          >
+            <HugeiconsIcon icon={Shield01Icon} aria-hidden='true' />
+          </TooltipTrigger>
+          <TooltipContent>{t('Feature Permissions')}</TooltipContent>
+        </Tooltip>
+      )}
 
       <DataTableRowActionMenu
         ariaLabel={t('Open menu')}

@@ -31,6 +31,8 @@ import {
   sideDrawerFormClassName,
   sideDrawerHeaderClassName,
 } from '@/components/drawer-layout'
+import { ErrorState } from '@/components/error-state'
+import { LoadingState } from '@/components/loading-state'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Combobox } from '@/components/ui/combobox'
@@ -106,12 +108,14 @@ type UsersMutateDrawerProps = {
   open: boolean
   onOpenChange: (open: boolean) => void
   currentRow?: User
+  permissionsOnly?: boolean
 }
 
 export function UsersMutateDrawer({
   open,
   onOpenChange,
   currentRow,
+  permissionsOnly = false,
 }: UsersMutateDrawerProps) {
   const { t } = useTranslation()
   const isUpdate = !!currentRow
@@ -120,22 +124,30 @@ export function UsersMutateDrawer({
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [quotaDialogOpen, setQuotaDialogOpen] = useState(false)
   const [avatarUrl, setAvatarUrl] = useState(currentRow?.avatar_url || '')
+  const [detailsStatus, setDetailsStatus] = useState<
+    'loading' | 'ready' | 'error'
+  >('loading')
 
   // Fetch groups
   const { data: groupsData } = useQuery({
     queryKey: ['groups'],
     queryFn: async () => requireServerSuccess(await getGroups()),
     staleTime: 5 * 60 * 1000,
+    enabled: open && !permissionsOnly,
   })
 
   const groups = groupsData?.data || []
 
   // Permission catalog is owned by the backend; fetched once and reused.
-  const { data: permissionCatalog = EMPTY_PERMISSION_CATALOG } = useQuery({
+  const {
+    data: permissionCatalog = EMPTY_PERMISSION_CATALOG,
+    isPending: catalogPending,
+    isError: catalogError,
+  } = useQuery({
     queryKey: ['admin-permission-catalog'],
     queryFn: async () => requireServerSuccess(await getPermissionCatalog()),
     staleTime: 5 * 60 * 1000,
-    enabled: currentUser?.role === ROLE.SUPER_ADMIN,
+    enabled: open && currentUser?.role === ROLE.SUPER_ADMIN,
   })
 
   const form = useForm<UserFormValues>({
@@ -148,6 +160,7 @@ export function UsersMutateDrawer({
     let cancelled = false
 
     if (open && isUpdate && currentRow) {
+      setDetailsStatus('loading')
       // Populate from the table row first so a failed or partial detail request
       // cannot leave required fields (especially username) empty.
       form.reset(transformUserToFormDefaults(currentRow))
@@ -161,11 +174,17 @@ export function UsersMutateDrawer({
             form.reset(
               transformUserToFormDefaults(result.data, currentRow.request_rpm)
             )
+            setDetailsStatus('ready')
           } else {
+            setDetailsStatus('error')
             handleServerError(result, t('Failed to load'))
           }
         })
-        .catch((error) => handleServerError(error, t('Failed to load')))
+        .catch((error) => {
+          if (cancelled) return
+          setDetailsStatus('error')
+          handleServerError(error, t('Failed to load'))
+        })
     } else if (open && !isUpdate) {
       // For create, reset to defaults
       form.reset(USER_FORM_DEFAULT_VALUES)
@@ -208,6 +227,26 @@ export function UsersMutateDrawer({
     hasUserPermission(currentUser, USER_PERMISSION_ACTIONS.PERMISSION_WRITE) &&
     targetIsAdmin &&
     targetIsManageable
+  const permissionsReady =
+    (!isUpdate || detailsStatus === 'ready') &&
+    !catalogPending &&
+    !catalogError &&
+    permissionCatalog.resources.length > 0
+  let drawerTitle = (
+    <>
+      {isUpdate ? t('Update') : t('Create')} {t('User')}
+    </>
+  )
+  let drawerDescription = isUpdate
+    ? t('Update the user by providing necessary info.')
+    : t('Add a new user by providing necessary info.')
+  if (permissionsOnly) {
+    drawerTitle = <>{t('Feature Permissions')}</>
+    drawerDescription = t(
+      'Configure the administrator features available to {{username}}.',
+      { username: currentRow?.username ?? '' }
+    )
+  }
   const permissionResources = [...permissionCatalog.resources].sort((a, b) => {
     if (a.resource === ADMIN_PERMISSION_RESOURCES.USER) return -1
     if (b.resource === ADMIN_PERMISSION_RESOURCES.USER) return 1
@@ -215,6 +254,9 @@ export function UsersMutateDrawer({
   })
 
   const onSubmit = async (data: UserFormValues) => {
+    if (permissionsOnly && (!canEditAdminPermissions || !permissionsReady)) {
+      return
+    }
     if (!isUpdate || data.password) {
       if (!accountPasswordSchema.safeParse(data.password ?? '').success) {
         form.setError('password', {
@@ -243,17 +285,17 @@ export function UsersMutateDrawer({
         currentRow?.id,
         permissionCatalog
       )
-      if (isUpdate && !canEditProfile) {
+      if (isUpdate && (!canEditProfile || permissionsOnly)) {
         delete (payload as Partial<typeof payload>).username
         delete (payload as Partial<typeof payload>).display_name
         delete (payload as Partial<typeof payload>).group
         delete (payload as Partial<typeof payload>).remark
         delete payload.rate_limit
       }
-      if (!canEditSecurity) {
+      if (!canEditSecurity || permissionsOnly) {
         delete payload.password
       }
-      if (!canEditAdminPermissions) {
+      if (!canEditAdminPermissions || !permissionsReady) {
         delete payload.admin_permissions
       }
       const result = isUpdate
@@ -317,14 +359,8 @@ export function UsersMutateDrawer({
           className={sideDrawerContentClassName('sm:max-w-[600px]')}
         >
           <SheetHeader className={sideDrawerHeaderClassName()}>
-            <SheetTitle>
-              {isUpdate ? t('Update') : t('Create')} {t('User')}
-            </SheetTitle>
-            <SheetDescription>
-              {isUpdate
-                ? t('Update the user by providing necessary info.')
-                : t('Add a new user by providing necessary info.')}
-            </SheetDescription>
+            <SheetTitle>{drawerTitle}</SheetTitle>
+            <SheetDescription>{drawerDescription}</SheetDescription>
           </SheetHeader>
           <Form {...form}>
             <form
@@ -333,141 +369,143 @@ export function UsersMutateDrawer({
               className={sideDrawerFormClassName()}
             >
               {/* Basic Information */}
-              <SideDrawerSection>
-                <h3 className='text-sm font-medium'>
-                  {t('Basic Information')}
-                </h3>
+              {!permissionsOnly && (
+                <SideDrawerSection>
+                  <h3 className='text-sm font-medium'>
+                    {t('Basic Information')}
+                  </h3>
 
-                {isUpdate && currentRow && (
-                  <UserAvatarEditor
-                    avatarUrl={avatarUrl}
-                    name={currentRow.username}
-                    userId={
-                      currentRow.id === currentUser?.id
-                        ? undefined
-                        : currentRow.id
-                    }
-                    disabled={!canEditProfile}
-                    onChanged={async (nextAvatarUrl) => {
-                      setAvatarUrl(nextAvatarUrl)
-                      await refreshUserData()
-                    }}
-                  />
-                )}
-
-                <FormField
-                  control={form.control}
-                  name='username'
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>{t('Username')}</FormLabel>
-                      <FormControl>
-                        <Input
-                          {...field}
-                          placeholder={t('Enter username')}
-                          disabled={isUpdate && !canEditProfile}
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
+                  {isUpdate && currentRow && (
+                    <UserAvatarEditor
+                      avatarUrl={avatarUrl}
+                      name={currentRow.username}
+                      userId={
+                        currentRow.id === currentUser?.id
+                          ? undefined
+                          : currentRow.id
+                      }
+                      disabled={!canEditProfile}
+                      onChanged={async (nextAvatarUrl) => {
+                        setAvatarUrl(nextAvatarUrl)
+                        await refreshUserData()
+                      }}
+                    />
                   )}
-                />
 
-                {!isUpdate && (
                   <FormField
                     control={form.control}
-                    name='role'
+                    name='username'
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>{t('Role')}</FormLabel>
-                        <Select
-                          items={[
-                            { value: '1', label: t('Common User') },
-                            { value: '10', label: t('Admin') },
-                          ]}
-                          onValueChange={(value) =>
-                            value !== null &&
-                            field.onChange(Number.parseInt(value))
-                          }
-                          value={String(field.value)}
-                        >
-                          <FormControl>
-                            <SelectTrigger>
-                              <SelectValue placeholder={t('Select a role')} />
-                            </SelectTrigger>
-                          </FormControl>
-                          <SelectContent alignItemWithTrigger={false}>
-                            <SelectGroup>
-                              <SelectItem value='1'>
-                                {t('Common User')}
-                              </SelectItem>
-                              <SelectItem
-                                value='10'
-                                disabled={
-                                  currentUser?.role !== ROLE.SUPER_ADMIN
-                                }
-                              >
-                                {t('Admin')}
-                              </SelectItem>
-                            </SelectGroup>
-                          </SelectContent>
-                        </Select>
+                        <FormLabel>{t('Username')}</FormLabel>
+                        <FormControl>
+                          <Input
+                            {...field}
+                            placeholder={t('Enter username')}
+                            disabled={isUpdate && !canEditProfile}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  {!isUpdate && (
+                    <FormField
+                      control={form.control}
+                      name='role'
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>{t('Role')}</FormLabel>
+                          <Select
+                            items={[
+                              { value: '1', label: t('Common User') },
+                              { value: '10', label: t('Admin') },
+                            ]}
+                            onValueChange={(value) =>
+                              value !== null &&
+                              field.onChange(Number.parseInt(value))
+                            }
+                            value={String(field.value)}
+                          >
+                            <FormControl>
+                              <SelectTrigger>
+                                <SelectValue placeholder={t('Select a role')} />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent alignItemWithTrigger={false}>
+                              <SelectGroup>
+                                <SelectItem value='1'>
+                                  {t('Common User')}
+                                </SelectItem>
+                                <SelectItem
+                                  value='10'
+                                  disabled={
+                                    currentUser?.role !== ROLE.SUPER_ADMIN
+                                  }
+                                >
+                                  {t('Admin')}
+                                </SelectItem>
+                              </SelectGroup>
+                            </SelectContent>
+                          </Select>
+                          <FormDescription>
+                            {t("Set the user's role (cannot be Root)")}
+                          </FormDescription>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  )}
+
+                  <FormField
+                    control={form.control}
+                    name='display_name'
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>{t('Display Name')}</FormLabel>
+                        <FormControl>
+                          <Input
+                            {...field}
+                            disabled={!canEditProfile}
+                            placeholder={t('Enter display name')}
+                          />
+                        </FormControl>
                         <FormDescription>
-                          {t("Set the user's role (cannot be Root)")}
+                          {t('Leave empty to use username')}
                         </FormDescription>
                         <FormMessage />
                       </FormItem>
                     )}
                   />
-                )}
 
-                <FormField
-                  control={form.control}
-                  name='display_name'
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>{t('Display Name')}</FormLabel>
-                      <FormControl>
-                        <Input
-                          {...field}
-                          disabled={!canEditProfile}
-                          placeholder={t('Enter display name')}
-                        />
-                      </FormControl>
-                      <FormDescription>
-                        {t('Leave empty to use username')}
-                      </FormDescription>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={form.control}
-                  name='password'
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>{t('Password')}</FormLabel>
-                      <FormControl>
-                        <Input
-                          {...field}
-                          type='password'
-                          disabled={!canEditSecurity}
-                          placeholder={
-                            isUpdate
-                              ? t('Leave empty to keep unchanged')
-                              : t('Enter password (8–128 characters)')
-                          }
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              </SideDrawerSection>
+                  <FormField
+                    control={form.control}
+                    name='password'
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>{t('Password')}</FormLabel>
+                        <FormControl>
+                          <Input
+                            {...field}
+                            type='password'
+                            disabled={!canEditSecurity}
+                            placeholder={
+                              isUpdate
+                                ? t('Leave empty to keep unchanged')
+                                : t('Enter password (8–128 characters)')
+                            }
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </SideDrawerSection>
+              )}
 
               {/* Group & Quota Settings (Update only) */}
-              {isUpdate && (
+              {isUpdate && !permissionsOnly && (
                 <SideDrawerSection>
                   <h3 className='text-sm font-medium'>{t('Group & Quota')}</h3>
 
@@ -558,13 +596,23 @@ export function UsersMutateDrawer({
                 </SideDrawerSection>
               )}
 
-              {isUpdate && (
+              {isUpdate && !permissionsOnly && (
                 <SideDrawerSection>
                   <h3 className='text-sm font-medium'>RPM</h3>
                   <UserRpmFields disabled={!canEditProfile} />
                 </SideDrawerSection>
               )}
 
+              {permissionsOnly &&
+                (detailsStatus === 'error' || catalogError) && (
+                  <ErrorState title={t('Failed to load')} />
+                )}
+              {permissionsOnly &&
+                detailsStatus !== 'error' &&
+                !catalogError &&
+                (detailsStatus === 'loading' || catalogPending) && (
+                  <LoadingState />
+                )}
               {canEditAdminPermissions &&
                 targetIsAdmin &&
                 permissionCatalog.resources.length > 0 && (
@@ -603,7 +651,10 @@ export function UsersMutateDrawer({
                                         className='flex items-start gap-3'
                                       >
                                         <Checkbox
-                                          disabled={!canEditAdminPermissions}
+                                          disabled={
+                                            !canEditAdminPermissions ||
+                                            !permissionsReady
+                                          }
                                           checked={
                                             selected[resource.resource]?.[
                                               option.action
@@ -658,7 +709,7 @@ export function UsersMutateDrawer({
                 )}
 
               {/* Binding Information (Read-only) */}
-              {isUpdate && (
+              {isUpdate && !permissionsOnly && (
                 <SideDrawerSection>
                   <h3 className='text-sm font-medium'>
                     {t('Binding Information')}
@@ -698,6 +749,8 @@ export function UsersMutateDrawer({
               type='submit'
               disabled={
                 isSubmitting ||
+                (permissionsOnly &&
+                  (!canEditAdminPermissions || !permissionsReady)) ||
                 (!isUpdate && !canCreateUsers) ||
                 (isUpdate &&
                   !canEditProfile &&

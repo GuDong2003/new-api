@@ -25,6 +25,7 @@ import type { NavGroup } from '@/components/layout/types'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { CacheStatsDialog } from '@/features/system-settings/general/channel-affinity/cache-stats-dialog'
 import { useSidebarConfig } from '@/hooks/use-sidebar-config'
+import { useAuthStore } from '@/stores/auth-store'
 
 import { UserInfoDialog } from './components/dialogs/user-info-dialog'
 import {
@@ -71,7 +72,9 @@ function UsageLogsContent() {
     affinityDialogOpen,
     setAffinityDialogOpen,
   } = useUsageLogsContext()
-  const { canManageScope, viewScope, setViewScope } = useLogsViewScope()
+  const { canManageScope, viewScope, setViewScope, taskAccessRevoked } =
+    useLogsViewScope()
+  const userId = useAuthStore((state) => state.auth.user?.id)
   const tabNavGroups = useMemo<NavGroup[]>(
     () => [
       {
@@ -131,7 +134,7 @@ function UsageLogsContent() {
         <SectionPageLayout.Actions>
           {canManageScope && (
             <Tabs value={viewScope} onValueChange={handleViewScopeChange}>
-              <TabsList>
+              <TabsList aria-label={t('View scope')}>
                 <TabsTrigger value='all'>{t('All')}</TabsTrigger>
                 <TabsTrigger value='self'>{t('Only Mine')}</TabsTrigger>
               </TabsList>
@@ -152,7 +155,15 @@ function UsageLogsContent() {
               </Tabs>
             )}
             <div className='min-h-0 flex-1'>
-              <UsageLogsTable logCategory={activeCategory} />
+              {activeCategory === 'task' && taskAccessRevoked && (
+                <p role='status' className='text-muted-foreground mb-3 text-xs'>
+                  {t('Task log access changed. Showing only your records.')}
+                </p>
+              )}
+              <UsageLogsTable
+                key={`${userId}:${activeCategory}:${viewScope}`}
+                logCategory={activeCategory}
+              />
             </div>
           </div>
         </SectionPageLayout.Content>
@@ -160,12 +171,16 @@ function UsageLogsContent() {
 
       <UserInfoDialog
         userId={selectedUserId}
-        open={userInfoDialogOpen}
+        open={
+          userInfoDialogOpen && (activeCategory !== 'task' || canManageScope)
+        }
         onOpenChange={setUserInfoDialogOpen}
       />
 
       <CacheStatsDialog
-        open={affinityDialogOpen}
+        open={
+          affinityDialogOpen && (activeCategory !== 'task' || canManageScope)
+        }
         onOpenChange={setAffinityDialogOpen}
         target={
           affinityTarget
@@ -186,8 +201,13 @@ function UsageLogsContent() {
 }
 
 export function UsageLogs() {
+  const params = route.useParams()
+  const userId = useAuthStore((state) => state.auth.user?.id)
+  const logCategory = isUsageLogsSectionId(params.section)
+    ? params.section
+    : USAGE_LOGS_DEFAULT_SECTION
   return (
-    <UsageLogsProvider>
+    <UsageLogsProvider key={userId} logCategory={logCategory}>
       <UsageLogsContent />
     </UsageLogsProvider>
   )

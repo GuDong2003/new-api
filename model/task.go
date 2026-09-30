@@ -244,6 +244,7 @@ type SyncTaskQueryParams struct {
 	StartTimestamp int64
 	EndTimestamp   int64
 	UserIDs        []int
+	OwnerRoles     []int
 }
 
 func InitTask(platform constant.TaskPlatform, relayInfo *commonRelay.RelayInfo) *Task {
@@ -292,6 +293,10 @@ func InitTask(platform constant.TaskPlatform, relayInfo *commonRelay.RelayInfo) 
 // task is the record users and administrators see. A lookup by task ID still
 // finds the task, since a consume log may name it.
 func visibleTasks(query *gorm.DB, queryParams SyncTaskQueryParams) *gorm.DB {
+	if len(queryParams.OwnerRoles) > 0 {
+		owners := DB.Model(&User{}).Select("id").Where("role IN ?", queryParams.OwnerRoles)
+		query = query.Where("user_id IN (?)", owners)
+	}
 	if queryParams.TaskID != "" {
 		return query
 	}
