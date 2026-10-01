@@ -17,6 +17,9 @@ func StartOAuthVerification(identity AuthIdentity, operation VerificationOperati
 	if err != nil {
 		return nil, err
 	}
+	if err := RequireAccessTokenVerificationOperation(identity, operation); err != nil {
+		return nil, err
+	}
 	providerUserID, err := GetOAuthVerificationBinding(identity, binding.Scope, provider)
 	if err != nil {
 		return nil, err

@@ -1169,7 +1169,7 @@ func renderTaskPluginQuery(
 	for _, task := range tasks {
 		tasksByID[task.TaskID] = task
 	}
-	views := make([]map[string]any, 0, len(taskIDs))
+	views := make([]dto.TaskView, 0, len(taskIDs))
 	for _, taskID := range taskIDs {
 		task := tasksByID[taskID]
 		if task == nil || !task.ResultRetrievable() {
@@ -1189,25 +1189,20 @@ func renderTaskPluginQuery(
 			abortTaskPluginRouteError(c, http.StatusInternalServerError)
 			return
 		}
-		var viewValue map[string]any
-		encoded, marshalErr := common.Marshal(view)
-		if marshalErr != nil {
-			abortTaskPluginRouteError(c, http.StatusInternalServerError)
-			return
-		}
-		if unmarshalErr := common.Unmarshal(encoded, &viewValue); unmarshalErr != nil {
-			abortTaskPluginRouteError(c, http.StatusInternalServerError)
-			return
-		}
-		views = append(views, viewValue)
+		views = append(views, view)
 	}
 
 	var rendererInput any = views
 	if !multiple {
 		rendererInput = views[0]
 	}
+	encoded, err := common.Marshal(rendererInput)
+	if err != nil {
+		abortTaskPluginRouteError(c, http.StatusInternalServerError)
+		return
+	}
 	renderStarted := time.Now()
-	result, err := pinned.Plugin.Engine.CallPath(c.Request.Context(), "native", []string{renderer}, requestContext.JSValue(), rendererInput)
+	result, err := pinned.Plugin.Engine.CallPath(c.Request.Context(), "native", []string{renderer}, requestContext.JSValue(), pluginruntime.RawJSON(encoded))
 	if err != nil {
 		logger.LogDebug(
 			c,

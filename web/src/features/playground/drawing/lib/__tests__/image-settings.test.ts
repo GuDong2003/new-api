@@ -305,6 +305,52 @@ describe('OpenAI image parameters', () => {
   })
 })
 
+describe('Seedream model sizes', () => {
+  it.each([
+    'doubao-seedream-4-5-251128',
+    'doubao-seedream-5-0-260128',
+    'doubao-seedream-5-0-lite-260128',
+  ])('restores old canvas settings to a supported size for %s', (model) => {
+    expect(getImageSizes(model)).toEqual([
+      '2048x2048',
+      '2560x1440',
+      '1440x2560',
+      '2304x1728',
+      '1728x2304',
+    ])
+    const restored = settingsForImageModel(
+      { ...settings, size: '1024x1024' },
+      model
+    )
+    expect(restored.size).toBe('2048x2048')
+    expect(validateImageSettings(restored, 0)).toBeNull()
+    expect(buildImagePayload(restored)).toMatchObject({
+      model,
+      size: '2048x2048',
+      n: 1,
+    })
+    expect(validateImageSettings({ ...restored, size: '1024x1024' }, 0)).toBe(
+      'Choose a size supported by this model.'
+    )
+    expect(
+      settingsForImageModel({ ...restored, size: '2560x1440' }, model).size
+    ).toBe('2560x1440')
+  })
+
+  it.each([
+    'doubao-seedream-4-0-250828',
+    'doubao-seedream-5-0-pro-260628',
+    'doubao-seedream-5-0-flash-260915',
+  ])('keeps existing one-megapixel canvas sizes for %s', (model) => {
+    const next = settingsForImageModel(
+      { ...settings, size: '1536x1024' },
+      model
+    )
+    expect(next.size).toBe('1536x1024')
+    expect(validateImageSettings(next, 0)).toBeNull()
+  })
+})
+
 describe('Grok NSFW switch', () => {
   const grok = { ...settings, model: 'grok-imagine-image-2.0' }
 

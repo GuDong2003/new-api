@@ -202,6 +202,23 @@ export function parseTaskResult() { return {}; }
 	unbound := `{"mode":"single","channel":{"type":60,"name":"plain-gateway","key":"sk","models":"gpt","group":"default","base_url":"https://gateway.example"}}`
 	adminDenied := postAddChannel(t, 2, common.RoleAdminUser, bound)
 	assert.Contains(t, adminDenied.Body.String(), "task plugin channels require the task_plugin.bind permission")
+	for _, scopes := range [][]string{{"channel:sensitive_write"}, {"channel:sensitive_write", "task_plugin:bind"}} {
+		recorder := httptest.NewRecorder()
+		context, _ := gin.CreateTestContext(recorder)
+		context.Set("id", 1)
+		context.Set("role", common.RoleRootUser)
+		context.Set("use_access_token", true)
+		context.Set("access_token_scopes", scopes)
+		context.Request = httptest.NewRequest(http.MethodPost, "/api/channel", strings.NewReader(bound))
+		context.Request.Header.Set("Content-Type", "application/json")
+		AddChannel(context)
+		if len(scopes) == 1 {
+			assert.Contains(t, recorder.Body.String(), `"success":false`, "channel creation scope must not widen into plugin binding")
+			assert.Contains(t, recorder.Body.String(), "task_plugin.bind")
+		} else {
+			assert.Contains(t, recorder.Body.String(), `"success":true`)
+		}
+	}
 	rootAllowed := postAddChannel(t, 1, common.RoleRootUser, bound)
 	assert.Contains(t, rootAllowed.Body.String(), `"success":true`)
 	adminUnbound := postAddChannel(t, 2, common.RoleAdminUser, unbound)
@@ -235,4 +252,39 @@ export function parseTaskResult() { return {}; }
 	}
 	assert.Contains(t, copyChannel(2, common.RoleAdminUser).Body.String(), "task plugin channels require the task_plugin.bind permission")
 	assert.Contains(t, copyChannel(1, common.RoleRootUser).Body.String(), `"success":true`)
+}
+
+func TestChannelPATRequiresSensitiveFieldPermission(t *testing.T) {
+	setupTaskPluginBindChannelTest(t)
+	channel := &model.Channel{Type: constant.ChannelTypeOpenAI, Status: common.ChannelStatusEnabled, Name: "scoped-channel", Models: "gpt", Group: "default", Key: "original-key"}
+	require.NoError(t, channel.Insert())
+	for _, test := range []struct {
+		scopes  []string
+		allowed bool
+	}{
+		{[]string{"channel:write"}, false},
+		{[]string{"channel:write", "channel:sensitive_write"}, true},
+	} {
+		recorder := httptest.NewRecorder()
+		context, _ := gin.CreateTestContext(recorder)
+		context.Set("id", 1)
+		context.Set("role", common.RoleRootUser)
+		context.Set("use_access_token", true)
+		context.Set("access_token_scopes", test.scopes)
+		context.Request = httptest.NewRequest(http.MethodPut, "/api/channel", strings.NewReader(fmt.Sprintf(`{"id":%d,"key":"replacement-key"}`, channel.Id)))
+		context.Request.Header.Set("Content-Type", "application/json")
+		UpdateChannel(context)
+		var response struct {
+			Success bool `json:"success"`
+		}
+		require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+		assert.Equal(t, test.allowed, response.Success)
+		stored, err := model.GetChannelById(channel.Id, true)
+		require.NoError(t, err)
+		if test.allowed {
+			assert.Equal(t, "replacement-key", stored.Key)
+		} else {
+			assert.Equal(t, "original-key", stored.Key, "an account's sensitive permission cannot widen the PAT")
+		}
+	}
 }

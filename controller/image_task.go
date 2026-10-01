@@ -325,6 +325,17 @@ type imageResponseCaptureWriter struct {
 	overflow bool
 }
 
+// growImageResultBudget lets a plugin presenter accommodate its delivered
+// images once their count is known, without lowering the request allowance or
+// exceeding the per-response cap. This capacity never changes billing usage.
+func (w *imageResponseCaptureWriter) growImageResultBudget(budget int) {
+	w.limit = min(max(w.limit, budget), imageResultMaxBudget)
+}
+
+func (r *asyncImageResponseRecorder) growImageResultBudget(budget int) {
+	r.limit = min(max(r.limit, budget), imageResultMaxBudget)
+}
+
 func (w *imageResponseCaptureWriter) Write(data []byte) (int, error) {
 	remaining := w.limit - w.body.Len()
 	if remaining <= 0 {

@@ -393,7 +393,7 @@ func getTaskForArtifactRequest(c *gin.Context, taskID string) (*model.Task, bool
 	}
 	userID, role := c.GetInt("id"), c.GetInt("role")
 	task, exists, err := model.GetByTaskId(userID, taskID)
-	if err != nil || exists || c.GetInt("token_id") != 0 || role < common.RoleAdminUser || !authz.Can(userID, role, authz.TaskRead) {
+	if err != nil || exists || c.GetInt("token_id") != 0 || role < common.RoleAdminUser || !middleware.CanPermission(c, authz.TaskRead) {
 		return task, exists, err
 	}
 	task, exists, err = model.GetByOnlyTaskId(taskID)

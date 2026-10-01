@@ -45,8 +45,13 @@ it.each([
 })
 
 it.each([
+  ['zhCN', 'zhCN'],
+  ['zhTW', 'zhCN'],
   ['zh-Hant', 'zhCN'],
   ['zh-TW', 'zhCN'],
+  ['zh-HK', 'zhCN'],
+  ['zh-MO', 'zhCN'],
+  ['zh-Hant-TW', 'zhCN'],
   ['zh-CN', 'zhCN'],
   ['fr-FR', 'fr-FR'],
 ])('maps detected browser language %s to %s', (value, expected) => {

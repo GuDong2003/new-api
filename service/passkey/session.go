@@ -20,11 +20,12 @@ type flowPayload struct {
 
 type FlowSecurity struct {
 	model.AuthSessionIdentity
-	Scope          string                       `json:"scope"`
-	ContextHash    string                       `json:"context_hash"`
-	Authorization  *model.AuthFlowAuthorization `json:"authorization,omitempty"`
-	LoginFlowID    int64                        `json:"login_flow_id,omitempty"`
-	LoginExpiresAt int64                        `json:"login_expires_at,omitempty"`
+	Scope                     string                       `json:"scope"`
+	ContextHash               string                       `json:"context_hash"`
+	RequiredAccessTokenScopes []string                     `json:"required_access_token_scopes,omitempty"`
+	Authorization             *model.AuthFlowAuthorization `json:"authorization,omitempty"`
+	LoginFlowID               int64                        `json:"login_flow_id,omitempty"`
+	LoginExpiresAt            int64                        `json:"login_expires_at,omitempty"`
 }
 
 func CreateSessionDataFlow(purpose string, security FlowSecurity, data *webauthn.SessionData) (string, int64, error) {

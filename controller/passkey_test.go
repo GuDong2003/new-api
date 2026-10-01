@@ -20,6 +20,7 @@ import (
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/service/authz"
 	passkeysvc "github.com/QuantumNous/new-api/service/passkey"
 	"github.com/QuantumNous/new-api/setting/system_setting"
 	"github.com/gin-gonic/gin"
@@ -84,6 +85,40 @@ func TestGetStatusDoesNotExposePasskeyOrigins(t *testing.T) {
 			assert.Equal(t, origins, settings.Origins)
 		})
 	}
+}
+
+func TestPasskeyPATVerificationRechecksTheManageAction(t *testing.T) {
+	user, _ := setupSecurityEnrollmentTest(t)
+	previousMaster := common.IsMasterNode
+	common.IsMasterNode = true
+	t.Cleanup(func() { common.IsMasterNode = previousMaster })
+	require.NoError(t, model.DB.AutoMigrate(&model.CasbinRule{}, &model.AuthzRole{}))
+	require.NoError(t, authz.Init(model.DB))
+	require.NoError(t, model.DB.Model(user).Update("role", common.RoleAdminUser).Error)
+	require.NoError(t, authz.SetUserPermissions(user.Id, authz.PermissionsMap{authz.ResourceUser: {authz.UserActionRoleWrite: true}}))
+	key := newSecurityLoginPasskey(t, user.Id)
+	status, _ := createScopedAccessToken(t, user.Id, 0, "user:status_write")
+	both, _ := createScopedAccessToken(t, user.Id, 0, "user:status_write", "user:role_write")
+	router := gin.New()
+	router.POST("/api/user/passkey/verify/begin", middleware.UserAuth(), PasskeyVerifyBegin)
+	router.POST("/api/user/passkey/verify/finish", middleware.UserAuth(), PasskeyVerifyFinish)
+	beginRequest := func(token, action string) *httptest.ResponseRecorder {
+		body := fmt.Sprintf(`{"scope":"admin.user.manage","context":{"user_id":123,"action":%q}}`, action)
+		return accessTokenRequest(router, http.MethodPost, "/api/user/passkey/verify/begin", token, "", body)
+	}
+	response := beginRequest(status, "promote")
+	assert.Equal(t, http.StatusForbidden, response.Code, response.Body.String())
+	assert.Contains(t, response.Body.String(), "SECURITY_ACTION_FORBIDDEN")
+	begin := decodePasskeyDomainBegin(t, beginRequest(both, "disable"))
+	require.NoError(t, authz.SetUserPermissions(user.Id, authz.PermissionsMap{authz.ResourceUser: {authz.UserActionStatusWrite: false, authz.UserActionRoleWrite: true}}))
+	finish, err := common.Marshal(map[string]any{
+		"flow_token": begin.FlowToken,
+		"credential": passkeyDomainAssertion(t, key, begin.Options.PublicKey.Challenge, "example.com", "https://example.com", user.Id, true),
+	})
+	require.NoError(t, err)
+	response = accessTokenRequest(router, http.MethodPost, "/api/user/passkey/verify/finish", both, "", string(finish))
+	assert.Equal(t, http.StatusForbidden, response.Code, response.Body.String())
+	assert.Contains(t, response.Body.String(), "SECURITY_ACTION_FORBIDDEN", "a different remaining manage permission cannot authorize the original action")
 }
 
 func passkeyDomainRequest(t *testing.T, path string, payload any, identity service.AuthIdentity, origin string, handler gin.HandlerFunc) *httptest.ResponseRecorder {
@@ -153,6 +188,7 @@ func TestPasskeyDomainsPreserveCredentialsAcrossVerificationFlows(t *testing.T) 
 				beginHandler, finishHandler = LoginPasskeyBegin, LoginPasskeyFinish
 			} else if kind == "sensitive action" {
 				request["scope"] = service.VerificationScopeAccessTokenGenerate
+				request["context"] = map[string]any{"scopes": []string{"profile:read"}, "expires_at": 0}
 				beginPath, finishPath = "/api/user/passkey/verify/begin", "/api/user/passkey/verify/finish"
 				beginHandler, finishHandler = PasskeyVerifyBegin, PasskeyVerifyFinish
 			}
@@ -293,6 +329,9 @@ func TestPasskeyDomainChoicesRespectOriginAndConfiguration(t *testing.T) {
 func setupPasskeyDomainOptions(t *testing.T) {
 	t.Helper()
 	require.NoError(t, model.DB.AutoMigrate(&model.Option{}))
+	// These tests assert on the whole options table. The server-managed legacy
+	// access token deadline written by the enrollment fixture is unrelated.
+	require.NoError(t, model.DB.Delete(&model.Option{Key: "LegacyAccessTokenRetireAt"}).Error)
 	common.OptionMapRWMutex.RLock()
 	previousOptions := maps.Clone(common.OptionMap)
 	previousAddress := system_setting.ServerAddress

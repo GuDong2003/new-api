@@ -18,6 +18,7 @@ import (
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relaykit/dto"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/service/authz"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/alicebob/miniredis/v2"
@@ -33,7 +34,7 @@ func setupManageUserTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	require.NoError(t, i18n.Init())
 	previousDB, previousLogDB := model.DB, model.LOG_DB
-	previousRedisEnabled := common.RedisEnabled
+	previousRedisEnabled, previousSecret := common.RedisEnabled, common.SessionSecret
 	previousMainDatabaseType, previousLogDatabaseType := common.MainDatabaseType(), common.LogDatabaseType()
 	dialect := os.Getenv("TEST_MANAGE_USER_DIALECT")
 	if dialect == "" {
@@ -51,11 +52,12 @@ func setupManageUserTestDB(t *testing.T) *gorm.DB {
 	}
 	model.DB, model.LOG_DB = db, logDB
 	common.RedisEnabled = false
+	common.SessionSecret = "manage-user-test-secret"
 	common.SetDatabaseTypes(databaseTypes[dialect], databaseTypes[dialect])
 
 	t.Cleanup(func() {
 		model.DB, model.LOG_DB = previousDB, previousLogDB
-		common.RedisEnabled = previousRedisEnabled
+		common.RedisEnabled, common.SessionSecret = previousRedisEnabled, previousSecret
 		common.SetDatabaseTypes(previousMainDatabaseType, previousLogDatabaseType)
 		sqlDB, err := db.DB()
 		if err == nil {
@@ -68,7 +70,7 @@ func setupManageUserTestDB(t *testing.T) *gorm.DB {
 			}
 		}
 	})
-	require.NoError(t, db.AutoMigrate(&model.User{}, &model.UserSession{}, &model.CasbinRule{}, &model.AuthzRole{}))
+	require.NoError(t, db.AutoMigrate(&model.User{}, &model.UserSession{}, &model.CasbinRule{}, &model.AuthzRole{}, &model.AuthFlow{}, &model.TwoFA{}, &model.PasskeyCredential{}, &model.UserAccessToken{}))
 	require.NoError(t, logDB.AutoMigrate(&model.Log{}, &model.AuditLog{}))
 	versionQuery := "SELECT version()"
 	if dialect == "sqlite" {
@@ -81,19 +83,40 @@ func setupManageUserTestDB(t *testing.T) *gorm.DB {
 }
 
 func performManageUserRequest(t *testing.T, body string) *httptest.ResponseRecorder {
-	return performManageUserAs(t, 9999, common.RoleRootUser, body)
+	t.Helper()
+	var operator model.User
+	require.NoError(t, model.DB.Where("username = ?", "root-operator").First(&operator).Error)
+	return performManageUserAs(t, operator.Id, operator.Role, body)
 }
 
 func performManageUserAs(t *testing.T, actorID int, actorRole int, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	return performVerifiedManageUserAs(t, body, service.AuthIdentity{UserID: actorID}, actorRole, "")
+}
+
+// performVerifiedManageUserRequest drives ManageUser as the root operator from
+// a dashboard login session, carrying the step-up proof status or role changes need.
+func performVerifiedManageUserRequest(t *testing.T, body string, identity service.AuthIdentity, proof string) *httptest.ResponseRecorder {
+	t.Helper()
+	return performVerifiedManageUserAs(t, body, identity, common.RoleRootUser, proof)
+}
+
+func performVerifiedManageUserAs(t *testing.T, body string, identity service.AuthIdentity, actorRole int, proof string) *httptest.ResponseRecorder {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodPost, "/api/user/manage", strings.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
-	c.Set("id", actorID)
+	if proof != "" {
+		c.Request.Header.Set("X-Security-Proof", proof)
+	}
+	c.Set("id", identity.UserID)
 	c.Set("role", actorRole)
 	c.Set("username", "root-operator")
+	c.Set("session_id", identity.SessionID)
+	c.Set("auth_version", identity.UserAuthVersion)
+	c.Set("session_version", identity.SessionVersion)
 	c.Set(common.RequestIdKey, "quota-test-request")
 	ManageUser(c)
 	return recorder
@@ -198,7 +221,13 @@ func TestManagedUserSelfStatusAndQuotaActionsAreAllowed(t *testing.T) {
 	}
 	require.NoError(t, db.Create(&user).Error)
 
-	recorder := performManageUserAs(t, user.Id, user.Role, fmt.Sprintf(`{"id":%d,"action":"disable"}`, user.Id))
+	require.NoError(t, model.PublishUserAuthCache(user.Id))
+	bundle, err := service.CreateLoginSession(user.Id, "password", "127.0.0.1", "self-actions-test")
+	require.NoError(t, err)
+	identity, err := service.ParseAccessToken(bundle.AccessToken)
+	require.NoError(t, err)
+	proof := issueSecurityEnrollmentProof(t, identity, service.VerificationOperation{Scope: service.VerificationScopeAdminUserManage, Context: []byte(fmt.Sprintf(`{"user_id":%d,"action":"disable"}`, user.Id))}, service.VerificationMethodPassword)
+	recorder := performVerifiedManageUserAs(t, fmt.Sprintf(`{"id":%d,"action":"disable"}`, user.Id), identity, user.Role, proof)
 	assert.Contains(t, recorder.Body.String(), `"success":true`)
 	recorder = performManageUserAs(t, user.Id, user.Role, fmt.Sprintf(`{"id":%d,"action":"add_quota","mode":"add","value":50}`, user.Id))
 	assert.Contains(t, recorder.Body.String(), `"success":true`)
@@ -242,6 +271,23 @@ func TestManagedAvatarTargetAllowsSelfButRejectsPeer(t *testing.T) {
 	assert.False(t, ok)
 }
 
+// manageUserProof signs the root operator in and issues a password-method proof
+// bound to one ManageUser operation.
+func manageUserProof(t *testing.T, db *gorm.DB, operation service.VerificationOperation) (service.AuthIdentity, string) {
+	t.Helper()
+	operator := createQuotaTestOperator(t, db, common.RoleRootUser)
+	require.NoError(t, model.PublishUserAuthCache(operator.Id))
+	bundle, err := service.CreateLoginSession(operator.Id, "password", "127.0.0.1", "manage-user-test")
+	require.NoError(t, err)
+	identity, err := service.ParseAccessToken(bundle.AccessToken)
+	require.NoError(t, err)
+	binding, err := service.BindVerificationOperation(operation)
+	require.NoError(t, err)
+	proof, _, err := service.IssueSecurityProof(identity, service.VerificationMethodPassword, binding)
+	require.NoError(t, err)
+	return identity, proof
+}
+
 func TestManageUserDisableAdvancesAuthVersionOnceAndRevokesSession(t *testing.T) {
 	db := setupManageUserTestDB(t)
 	now := time.Now().Unix()
@@ -256,7 +302,8 @@ func TestManageUserDisableAdvancesAuthVersionOnceAndRevokesSession(t *testing.T)
 		LastActiveAt: now, ExpiresAt: now + 3600,
 	}).Error)
 
-	recorder := performManageUserRequest(t, fmt.Sprintf(`{"id":%d,"action":"disable"}`, user.Id))
+	identity, proof := manageUserProof(t, db, service.VerificationOperation{Scope: service.VerificationScopeAdminUserManage, Context: []byte(fmt.Sprintf(`{"user_id":%d,"action":"disable"}`, user.Id))})
+	recorder := performVerifiedManageUserRequest(t, fmt.Sprintf(`{"id":%d,"action":"disable"}`, user.Id), identity, proof)
 	assert.Equal(t, http.StatusOK, recorder.Code)
 	assert.Contains(t, recorder.Body.String(), `"success":true`)
 
@@ -297,7 +344,8 @@ func TestManageUserDemoteAdvancesAuthVersionAndRevokesSessionsOnce(t *testing.T)
 		}
 	}))
 
-	recorder := performManageUserRequest(t, fmt.Sprintf(`{"id":%d,"action":"demote"}`, user.Id))
+	identity, proof := manageUserProof(t, db, service.VerificationOperation{Scope: service.VerificationScopeAdminUserManage, Context: []byte(fmt.Sprintf(`{"user_id":%d,"action":"demote"}`, user.Id))})
+	recorder := performVerifiedManageUserRequest(t, fmt.Sprintf(`{"id":%d,"action":"demote"}`, user.Id), identity, proof)
 	assert.Equal(t, http.StatusOK, recorder.Code)
 	assert.Contains(t, recorder.Body.String(), `"success":true`)
 
@@ -323,7 +371,8 @@ func TestManageUserDeleteReturnsImmediatelyAndUnknownActionFails(t *testing.T) {
 	}
 	require.NoError(t, db.Create(&deleted).Error)
 
-	recorder := performManageUserRequest(t, fmt.Sprintf(`{"id":%d,"action":"delete"}`, deleted.Id))
+	identity, proof := manageUserProof(t, db, service.VerificationOperation{Scope: service.VerificationScopeAdminUserDelete, Context: []byte(fmt.Sprintf(`{"user_id":%d}`, deleted.Id))})
+	recorder := performVerifiedManageUserRequest(t, fmt.Sprintf(`{"id":%d,"action":"delete"}`, deleted.Id), identity, proof)
 	assert.Contains(t, recorder.Body.String(), `"success":true`)
 	var deletedCount int64
 	require.NoError(t, db.Unscoped().Model(&model.User{}).Where("id = ? AND deleted_at IS NOT NULL", deleted.Id).Count(&deletedCount).Error)
@@ -346,7 +395,7 @@ func createQuotaTestOperator(t *testing.T, db *gorm.DB, role int) model.User {
 	if role == 0 {
 		role = common.RoleRootUser
 	}
-	operator := model.User{Id: 9999, Username: "root-operator", Role: role, Status: common.UserStatusEnabled, AuthVersion: 1, AffCode: "root-operator-aff"}
+	operator := model.User{Username: "root-operator", Password: "root-operator-hash", Role: role, Status: common.UserStatusEnabled, AuthVersion: 1, AffCode: "root-operator-aff"}
 	require.NoError(t, db.Create(&operator).Error)
 	return operator
 }
@@ -368,7 +417,7 @@ func TestManageUserQuotaRecordsTopupAndAudit(t *testing.T) {
 			db := setupManageUserTestDB(t)
 			user := model.User{Username: "quota-owner", Role: common.RoleCommonUser, Quota: 1000, AffCode: "quota-owner-aff"}
 			require.NoError(t, db.Create(&user).Error)
-			createQuotaTestOperator(t, db, common.RoleRootUser)
+			operator := createQuotaTestOperator(t, db, common.RoleRootUser)
 
 			recorder := performManageUserRequest(t, fmt.Sprintf(`{"id":%d,"action":"add_quota","mode":%q,"value":%d}`, user.Id, tc.mode, tc.value))
 			assert.Equal(t, http.StatusOK, recorder.Code)
@@ -386,7 +435,7 @@ func TestManageUserQuotaRecordsTopupAndAudit(t *testing.T) {
 			model.FormatAdminLogs(logs)
 			var other model.AuditOther
 			require.NoError(t, common.UnmarshalJsonStr(logs[0].Other, &other))
-			assert.Equal(t, &model.AuditAdminInfo{AdminID: 9999, AdminUsername: "root-operator", AdminRole: common.RoleRootUser, AuthMethod: "session"}, other.AdminInfo)
+			assert.Equal(t, &model.AuditAdminInfo{AdminID: operator.Id, AdminUsername: "root-operator", AdminRole: common.RoleRootUser, AuthMethod: "session"}, other.AdminInfo)
 
 			logs, total, err = model.GetUserLogs(user.Id, model.LogTypeTopup, 0, 0, "", "", 0, 20, "", "", "")
 			require.NoError(t, err)
@@ -409,14 +458,14 @@ func TestManageUserQuotaRecordsTopupAndAudit(t *testing.T) {
 			assert.Equal(t, "quota-test-request", logs[0].RequestId)
 			assert.Empty(t, logs[0].Ip, "recipient logs must not disclose the administrator IP")
 
-			logs, total, err = model.GetUserLogs(9999, model.LogTypeTopup, 0, 0, "", "", 0, 20, "", "", "")
+			logs, total, err = model.GetUserLogs(operator.Id, model.LogTypeTopup, 0, 0, "", "", 0, 20, "", "", "")
 			require.NoError(t, err)
 			assert.Zero(t, total)
 			assert.Empty(t, logs)
 			var audits []model.AuditLog
 			require.NoError(t, model.LOG_DB.Find(&audits).Error)
 			require.Len(t, audits, 1)
-			assert.Equal(t, 9999, audits[0].UserId)
+			assert.Equal(t, operator.Id, audits[0].UserId)
 			assert.Equal(t, "root-operator", audits[0].Username)
 			assert.Equal(t, tc.action, audits[0].Action)
 			assert.True(t, audits[0].Success)
@@ -532,9 +581,9 @@ func TestManageUserQuotaTargetsAndWalletBounds(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			db := setupManageUserTestDB(t)
-			createQuotaTestOperator(t, db, tc.operatorRole)
 			user := model.User{Id: 1, Username: "private-target-name", Role: tc.targetRole, Quota: tc.before}
 			require.NoError(t, db.Create(&user).Error)
+			operator := createQuotaTestOperator(t, db, tc.operatorRole)
 			if tc.deleted {
 				require.NoError(t, db.Delete(&user).Error)
 			}
@@ -552,7 +601,7 @@ func TestManageUserQuotaTargetsAndWalletBounds(t *testing.T) {
 			if role == 0 {
 				role = common.RoleRootUser
 			}
-			c.Set("id", 9999)
+			c.Set("id", operator.Id)
 			c.Set("role", role)
 			ManageUser(c)
 			require.Contains(t, recorder.Body.String(), `"success":false`)
@@ -581,7 +630,7 @@ func TestManageUserQuotaTargetsAndWalletBounds(t *testing.T) {
 func TestManageUserQuotaMiddlewareKeepsOneOperationPerRequest(t *testing.T) {
 	db := setupManageUserTestDB(t)
 	pat := "quota-middleware-test-token"
-	operator := model.User{Id: 9999, Username: "root-operator", Role: common.RoleRootUser, Status: common.UserStatusEnabled, AuthVersion: 1, AccessToken: &pat, Quota: 1000}
+	operator := model.User{Username: "root-operator", Role: common.RoleRootUser, Status: common.UserStatusEnabled, AuthVersion: 1, AccessToken: &pat, Quota: 1000}
 	require.NoError(t, db.Create(&operator).Error)
 	router := gin.New()
 	router.Use(middleware.RequestId(), middleware.AccessTokenAudit())
@@ -590,9 +639,9 @@ func TestManageUserQuotaMiddlewareKeepsOneOperationPerRequest(t *testing.T) {
 		body, action string
 		success      bool
 	}{
-		{`{"id":9999,"action":"add_quota","mode":"add","value":100}`, "user.quota_add", true},
-		{`{"id":9999,"action":"add_quota","mode":"subtract","value":0}`, "user.quota_subtract", false},
-		{`{"id":9999,"action":"add_quota","mode":"invalid","value":1}`, "generic", false},
+		{fmt.Sprintf(`{"id":%d,"action":"add_quota","mode":"add","value":100}`, operator.Id), "user.quota_add", true},
+		{fmt.Sprintf(`{"id":%d,"action":"add_quota","mode":"subtract","value":0}`, operator.Id), "user.quota_subtract", false},
+		{fmt.Sprintf(`{"id":%d,"action":"add_quota","mode":"invalid","value":1}`, operator.Id), "generic", false},
 		{`{"id":`, "generic", false},
 	} {
 		recorder := httptest.NewRecorder()
@@ -618,7 +667,7 @@ func TestManageUserQuotaMiddlewareKeepsOneOperationPerRequest(t *testing.T) {
 			if tc.success {
 				params, err := common.Marshal(audit.Other.Op.Params)
 				require.NoError(t, err)
-				assert.Contains(t, string(params), `"target_user_id":9999`)
+				assert.Contains(t, string(params), fmt.Sprintf(`"target_user_id":%d`, operator.Id))
 				assert.Contains(t, string(params), `"target_username":"root-operator"`)
 			}
 		}
@@ -803,8 +852,9 @@ func TestUpdateUserSetsAndClearsAPersonalRequestLimit(t *testing.T) {
 		Setting: `{"language":"en","sidebar_modules":"{\"chat\":true}"}`,
 	}
 	require.NoError(t, db.Create(&user).Error)
+	operator := createQuotaTestOperator(t, db, common.RoleRootUser)
 	update := func(rateLimit string) *httptest.ResponseRecorder {
-		return performUpdateManagedUserRequest(t, 9999, common.RoleRootUser, fmt.Sprintf(`{"id":%d,"rate_limit":%s}`, user.Id, rateLimit))
+		return performUpdateManagedUserRequest(t, operator.Id, operator.Role, fmt.Sprintf(`{"id":%d,"rate_limit":%s}`, user.Id, rateLimit))
 	}
 
 	recorder := update(`{"count":30,"success_count":20}`)
@@ -862,9 +912,10 @@ func TestUserListsAndProfileShowTheRPMEachUserIsHeldTo(t *testing.T) {
 		users[i].Role, users[i].Status = common.RoleCommonUser, common.UserStatusEnabled
 		require.NoError(t, db.Create(&users[i]).Error)
 	}
-	want := map[string]int{"personal-limit": 9, "group-limit": 20, "success-cap-only": 9999, "default-limit": 7}
+	operator := createQuotaTestOperator(t, db, common.RoleRootUser)
+	want := map[string]int{"personal-limit": 9, "group-limit": 20, "success-cap-only": 9999, "default-limit": 7, operator.Username: 7}
 
-	recorder := performUserEndpoint(t, GetAllUsers, http.MethodGet, "/api/user/?p=1&page_size=10", 9999, common.RoleRootUser, "")
+	recorder := performUserEndpoint(t, GetAllUsers, http.MethodGet, "/api/user/?p=1&page_size=10", operator.Id, operator.Role, "")
 	var listed struct {
 		Data struct {
 			Items []struct {
@@ -874,7 +925,7 @@ func TestUserListsAndProfileShowTheRPMEachUserIsHeldTo(t *testing.T) {
 		} `json:"data"`
 	}
 	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &listed))
-	require.Len(t, listed.Data.Items, len(users))
+	require.Len(t, listed.Data.Items, len(users)+1)
 	for _, item := range listed.Data.Items {
 		assert.Equal(t, want[item.Username], item.RequestRPM, item.Username)
 	}

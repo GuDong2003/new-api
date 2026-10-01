@@ -16,6 +16,7 @@ import (
 	pluginruntime "github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/QuantumNous/new-api/relay"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	relaykitdto "github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
@@ -148,9 +149,38 @@ func serveTaskPluginImageProtocol(c *gin.Context, pinned pluginruntime.PinnedEnd
 		}
 		response["created"] = createdAt
 	}
+	responseFormat := taskPluginImageResponseFormat(protocolRequest)
+	inlineImages := responseFormat == "b64_json"
+	if !inlineImages {
+		for _, entry := range data {
+			item, _ := entry.(map[string]any)
+			if encoded, _ := item["b64_json"].(string); encoded != "" {
+				inlineImages = true
+				break
+			}
+		}
+	}
+	if inlineImages && len(data) > 0 {
+		// Plugins may deliver several images without a normalized n. Size
+		// only the host's response copy from the bounded rendered entry count;
+		// usage and settlement remain entirely owned by the plugin.
+		count := uint(min(len(data), relaykitdto.MaxImageN))
+		budget := imageResultBudget(&relaykitdto.ImageRequest{N: &count, ResponseFormat: "b64_json"})
+		for writer := http.ResponseWriter(c.Writer); writer != nil; {
+			if bounded, ok := writer.(interface{ growImageResultBudget(int) }); ok {
+				bounded.growImageResultBudget(budget)
+				break
+			}
+			wrapped, ok := writer.(interface{ Unwrap() http.ResponseWriter })
+			if !ok {
+				break
+			}
+			writer = wrapped.Unwrap()
+		}
+	}
 	// response_format is host-owned: the plugin renders upstream URLs and the
 	// host inlines each image when the client asked for Base64.
-	if taskPluginImageResponseFormat(protocolRequest) == "b64_json" {
+	if responseFormat == "b64_json" {
 		for _, entry := range data {
 			item, isObject := entry.(map[string]any)
 			if !isObject {

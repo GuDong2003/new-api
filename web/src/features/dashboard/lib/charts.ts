@@ -45,7 +45,7 @@ export function getDashboardChartColors(domainLength: number): string[] {
   ) ??
     vchartDefaultDataScheme.at(-1) ?? { scheme: [] }
 
-  return scheme.scheme.filter(
+  return (scheme?.scheme ?? []).filter(
     (color): color is string => typeof color === 'string'
   )
 }
@@ -224,21 +224,26 @@ export function processChartData(
     string,
     { quota: number; count: number; tokens: number }
   >()
+  const timeTimestamps = new Map<string, number>()
 
   data.forEach((item) => {
     const timestamp = Number(item.created_at)
     const timeKey = formatChartTime(timestamp, timeGranularity)
+    timeTimestamps.set(
+      timeKey,
+      Math.min(timeTimestamps.get(timeKey) ?? timestamp, timestamp)
+    )
     const model = item.model_name || 'Unknown'
     const quota = Number(item.quota) || 0
     const count = Number(item.count) || 0
     const tokens = Number(item.token_used) || 0
 
     // Aggregate by time and model
-    if (!timeModelMap.has(timeKey)) {
-      timeModelMap.set(timeKey, new Map())
+    let modelMap = timeModelMap.get(timeKey)
+    if (!modelMap) {
+      modelMap = new Map()
+      timeModelMap.set(timeKey, modelMap)
     }
-    const modelMap = timeModelMap.get(timeKey)
-    if (!modelMap) return
     const existing = modelMap.get(model) || { quota: 0, count: 0, tokens: 0 }
     modelMap.set(model, {
       quota: existing.quota + quota,
@@ -260,7 +265,9 @@ export function processChartData(
   })
 
   const allModels = [...modelTotalsMap.keys()]
-  const sortedTimes = [...timeModelMap.keys()].sort()
+  const sortedTimes = [...timeTimestamps]
+    .sort((a, b) => a[1] - b[1])
+    .map(([time]) => time)
   const sortedModels = [...allModels].sort()
   const modelColorDomain = [...new Set([...sortedModels, otherLabel])]
   const modelColorRange = getDashboardChartColors(modelColorDomain.length)
@@ -343,7 +350,6 @@ export function processChartData(
     timeData = timeData.map((item) => ({ ...item, TimeSum: timeSum }))
     lineValues.push(...timeData)
   })
-  lineValues.sort((a, b) => a.Time.localeCompare(b.Time))
 
   // Area chart: top models by quota + "Other" bucket (too many series = unreadable)
   const MAX_AREA_MODELS = 15
@@ -385,7 +391,6 @@ export function processChartData(
       })
     }
   })
-  areaValues.sort((a, b) => a.Time.localeCompare(b.Time))
 
   // Line chart: model call trend (top models + "Other" bucket)
   const MAX_TREND_MODELS = 20
@@ -429,7 +434,6 @@ export function processChartData(
     }
     modelLineValues.push(...timeData)
   })
-  modelLineValues.sort((a, b) => a.Time.localeCompare(b.Time))
 
   // Rank bar: model call count ranking (top 20 + "Other" bucket)
   const MAX_RANK_MODELS = 20
@@ -778,21 +782,25 @@ export function processUserChartData(
   )
 
   const timeUserMap = new Map<string, Map<string, number>>()
-  const allTimePoints = new Set<string>()
+  const timeTimestamps = new Map<string, number>()
 
   data.forEach((item) => {
     const ts = Number(item.created_at)
     const timeKey = formatChartTime(ts, timeGranularity)
-    allTimePoints.add(timeKey)
+    timeTimestamps.set(timeKey, Math.min(timeTimestamps.get(timeKey) ?? ts, ts))
     const user = item.username || 'unknown'
     if (!topUserSet.has(user)) return
-    if (!timeUserMap.has(timeKey)) timeUserMap.set(timeKey, new Map())
-    const map = timeUserMap.get(timeKey)
-    if (!map) return
+    let map = timeUserMap.get(timeKey)
+    if (!map) {
+      map = new Map()
+      timeUserMap.set(timeKey, map)
+    }
     map.set(user, (map.get(user) || 0) + (Number(item.quota) || 0))
   })
 
-  const sortedTimePoints = [...allTimePoints].sort()
+  const sortedTimePoints = [...timeTimestamps]
+    .sort((a, b) => a[1] - b[1])
+    .map(([time]) => time)
   const trendValues: Array<{
     Time: string
     User: string

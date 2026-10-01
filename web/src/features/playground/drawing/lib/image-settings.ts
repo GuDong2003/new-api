@@ -162,6 +162,16 @@ export function getImageSizes(model: string): string[] {
   if (family === 'imagen') {
     return ['1024x1024', '1536x1024', '1024x1536', '1792x1024', '1024x1792']
   }
+  if (
+    family === 'seedream' &&
+    /(^|[/:-])seedream-(?:4-5|5-0(?:-lite)?)(?:-\d{6})?$/.test(
+      model.trim().toLowerCase().replaceAll(/[._]/g, '-')
+    )
+  ) {
+    // These models require at least 3,686,400 pixels. Keep saved canvases
+    // within the same per-model limits as the Doubao Images decoder.
+    return ['2048x2048', '2560x1440', '1440x2560', '2304x1728', '1728x2304']
+  }
   if (family === 'flux' || family === 'seedream') {
     return ['1024x1024', '1536x1024', '1024x1536', '1792x1024', '1024x1792']
   }
@@ -569,11 +579,9 @@ export function settingsForImageModel(
   if (qualities.length && !qualities.includes(next.quality)) {
     next.quality = qualities[0] as typeof next.quality
   }
-  if (
-    !getImageSizes(model).includes(next.size) &&
-    !supportsImageSizePresets(model)
-  ) {
-    next.size = '1024x1024'
+  const sizes = getImageSizes(model)
+  if (!sizes.includes(next.size) && !supportsImageSizePresets(model)) {
+    next.size = sizes.includes('1024x1024') ? '1024x1024' : sizes[0]
   }
   // Preset-only families have no free-form pixel entry, so a size carried over
   // from a custom-size model must land back on a preset the toggles can show.

@@ -26,7 +26,7 @@ func Setup2FA(c *gin.Context) {
 	if authorization == nil {
 		return
 	}
-	identity, _ := middleware.GetSessionAuthIdentity(c)
+	identity, _ := middleware.GetStepUpIdentity(c)
 	setup, err := service.StartTwoFASetup(identity, authorization)
 	if err != nil {
 		writeSecurityOperationError(c, err)
@@ -37,7 +37,7 @@ func Setup2FA(c *gin.Context) {
 }
 
 func Enable2FA(c *gin.Context) {
-	identity, ok := middleware.GetSessionAuthIdentity(c)
+	identity, ok := middleware.GetStepUpIdentity(c)
 	if !ok {
 		writeSecurityOperationError(c, service.ErrAuthTokenInvalid)
 		return
@@ -65,7 +65,7 @@ func Disable2FA(c *gin.Context) {
 	if middleware.RequireSecurityProof(c, service.VerificationOperation{Scope: service.VerificationScopeTwoFADisable}) == nil {
 		return
 	}
-	identity, _ := middleware.GetSessionAuthIdentity(c)
+	identity, _ := middleware.GetStepUpIdentity(c)
 	userId := identity.UserID
 	if err := model.DisableTwoFAForSession(identity); err != nil {
 		writeSecurityOperationError(c, err)
@@ -128,7 +128,7 @@ func RegenerateBackupCodes(c *gin.Context) {
 	if middleware.RequireSecurityProof(c, service.VerificationOperation{Scope: service.VerificationScopeTwoFABackupCodes}) == nil {
 		return
 	}
-	identity, _ := middleware.GetSessionAuthIdentity(c)
+	identity, _ := middleware.GetStepUpIdentity(c)
 	userId := identity.UserID
 	// 生成新的备用码
 	backupCodes, err := common.GenerateBackupCodes()
@@ -214,6 +214,10 @@ func AdminDisable2FA(c *gin.Context) {
 	if !requireUserTargetPermission(c, targetUser.Id, targetUser.Role, authz.UserSecurityWrite) {
 		return
 	}
+	authorization := requireAdminUserProof(c, service.VerificationScopeAdminUserTwoFADisable, service.AdminUserContext{UserID: userId})
+	if authorization == nil {
+		return
+	}
 
 	// 禁用2FA
 	if err := model.DisableTwoFAWithAuthVersion(userId); err != nil {
@@ -232,7 +236,10 @@ func AdminDisable2FA(c *gin.Context) {
 		return
 	}
 
-	recordManageAuditFor(c, userId, "user.2fa_disable", nil)
+	recordManageAuditFor(c, userId, "user.2fa_disable", map[string]any{
+		"username":            targetUser.Username,
+		"verification_method": authorization.Method,
+	})
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,

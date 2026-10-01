@@ -7,6 +7,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/service/authz"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )
@@ -44,6 +45,10 @@ func manageUserQuota(c *gin.Context, req ManageRequest) {
 		markAuditLogged(c)
 	}()
 
+	if !requireUserPermission(c, authz.UserQuotaWrite) {
+		params["failure_reason"] = "permission_denied"
+		return
+	}
 	adjustment, err := model.AdjustUserQuota(req.Id, c.GetInt("id"), c.GetInt("role"), req.Mode, req.Value)
 	if err != nil {
 		switch {

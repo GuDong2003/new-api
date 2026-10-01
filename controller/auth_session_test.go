@@ -221,7 +221,7 @@ func (w *contentAuditInterruptingWriter) Write(data []byte) (int, error) {
 
 func TestContentAuditOriginalRoutesRequireLiveRootSession(t *testing.T) {
 	user, identity, token, router := contentAuditManagementFixture(t)
-	require.NoError(t, model.UpdateUserAccessToken(user.Id, "root-pat-original-denied"))
+	require.NoError(t, model.DB.Model(user).Update("access_token", "root-pat-original-denied").Error)
 	for _, suffix := range []string{"/originals/0", "/images"} {
 		path := "/api/content-audit/records/0123456789abcdef0123456789abcdef" + suffix
 		for _, credential := range []string{"root-pat-original-denied", "sk-relay-denied", ""} {
@@ -259,7 +259,7 @@ func TestContentAuditManagementRequiresLiveRootSession(t *testing.T) {
 		assert.Equal(t, http.StatusOK, response.Code, response.Body.String())
 		assert.Contains(t, response.Header().Get("Cache-Control"), "no-store")
 	}
-	require.NoError(t, model.UpdateUserAccessToken(user.Id, "root-personal-access-token"))
+	require.NoError(t, model.DB.Model(user).Update("access_token", "root-personal-access-token").Error)
 	for _, opaque := range []string{"root-personal-access-token", "sk-relay-credential", ""} {
 		response := contentAuditManagementRequest(router, http.MethodGet, "/api/content-audit/status", opaque, "", nil)
 		assert.Contains(t, []int{http.StatusForbidden, http.StatusUnauthorized}, response.Code)

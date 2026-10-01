@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"image"
 	"image/png"
 	"io"
@@ -23,6 +24,8 @@ import (
 	taskdto "github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
+	pluginruntime "github.com/QuantumNous/new-api/pkg/jsplugin"
+	builtinplugins "github.com/QuantumNous/new-api/plugins"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relaykit/dto"
@@ -1009,6 +1012,119 @@ func TestServeTaskPluginImageTaskKeepsOneTaskPerRequest(t *testing.T) {
 			assert.Equal(t, "a cat", record.Properties.Input)
 			assert.Equal(t, "drawing", record.PrivateData.GallerySource)
 			assert.Len(t, record.PrivateData.GalleryImageIDs, 2)
+		})
+	}
+}
+
+// Seedream group generation has no normalized n. Its delivered images must
+// still fit the host's image response capture and remain available afterwards.
+func TestTaskPluginImageCaptureKeepsSequentialResults(t *testing.T) {
+	source, err := builtinplugins.Source("doubao")
+	require.NoError(t, err)
+	plugin, err := pluginruntime.CompilePlugin(source, pluginruntime.Options{Key: "doubao", Concurrency: 1})
+	require.NoError(t, err)
+	const modelName = "doubao-seedream-5-0-lite-260128"
+	pinned := imageProtocolTestEndpoint(t)
+	pinned.Plugin = plugin
+	pinned.Model = modelName
+	var picture bytes.Buffer
+	require.NoError(t, png.Encode(&picture, image.NewRGBA(image.Rect(0, 0, 8, 4))))
+	encoded := base64.StdEncoding.EncodeToString(picture.Bytes())
+
+	for _, async := range []bool{false, true} {
+		t.Run(fmt.Sprintf("async=%t", async), func(t *testing.T) {
+			database := useImageTaskGallery(t)
+			c, _ := newImageProtocolTestContext("b64_json")
+			protocolRequest := c.MustGet(pluginruntime.ContextKeyProtocolRequest).(pluginruntime.ProtocolRequestContext)
+			protocolRequest.Model = modelName
+			protocolRequest.Body = map[string]any{"kind": "json", "value": map[string]any{
+				"model": modelName, "prompt": "a seasonal collection", "response_format": "b64_json",
+				"sequential_image_generation": "auto", "sequential_image_generation_options": map[string]any{"max_images": 15},
+			}}
+			decoded, err := plugin.Engine.CallPath(t.Context(), "protocols", []string{"openai_image", "decodeRequest"}, protocolRequest.JSValue())
+			require.NoError(t, err)
+			intent, ok := decoded.(map[string]any)
+			require.True(t, ok)
+			c.Set(pluginruntime.ContextKeyProtocolRequest, protocolRequest)
+			c.Set("task_request", intent["requestBody"])
+			c.Set("task_action", intent["action"])
+			c.Set("resolved_task_model", modelName)
+			c.Set("channel_id", 3)
+			info, request := pluginImageTaskRequest(c, pinned)
+			require.Nil(t, request.N, "group generation is described by the plugin, without a host n")
+
+			// Keep the fixture small: lowering only the initial capture allowance
+			// reproduces the same overflow as fifteen full-sized inline images.
+			var asyncRecorder *asyncImageResponseRecorder
+			var capture *imageResponseCaptureWriter
+			var record func(bool)
+			if async {
+				asyncRecorder = &asyncImageResponseRecorder{header: make(http.Header), limit: 256}
+				writerContext, _ := gin.CreateTestContext(asyncRecorder)
+				c.Writer = writerContext.Writer
+			} else {
+				record = captureSynchronousImageTask(c, info, request)
+				require.NotNil(t, record)
+				capture = c.Writer.(*imageResponseCaptureWriter)
+				capture.limit = 256
+			}
+			deps := pluginProtocolTestDeps()
+			deps.downloadImage = func(string) (string, string, error) { return "image/png", encoded, nil }
+			deps.submit = func(_ *gin.Context, relayInfo *relaycommon.RelayInfo) (*taskSubmissionOutcome, *taskdto.TaskError) {
+				entries := make([]any, 15)
+				for index := range entries {
+					entries[index] = map[string]any{"url": fmt.Sprintf("https://cdn.example/%d.png", index)}
+				}
+				task := &model.Task{
+					TaskID: "task_sequence_plugin", Platform: "doubao", UserId: 71, ChannelId: 3,
+					Status: model.TaskStatusSuccess, Quota: 4321, CreatedAt: 1_710_000_000,
+				}
+				task.SetData(map[string]any{"data": entries})
+				require.NoError(t, task.Insert())
+				return &taskSubmissionOutcome{Task: task, RelayInfo: relayInfo}, nil
+			}
+
+			serveTaskPluginImageProtocol(c, pinned, deps)
+			var result json.RawMessage
+			if async {
+				result, err = asyncImageResult(asyncRecorder)
+			} else {
+				result, err = synchronousImageResult(capture)
+			}
+			require.NoError(t, err)
+			var response dto.ImageResponse
+			require.NoError(t, common.Unmarshal(result, &response))
+			require.Len(t, response.Data, 15)
+			for index, item := range response.Data {
+				assert.Equal(t, fmt.Sprintf("https://cdn.example/%d.png", index), item.Url)
+				assert.Equal(t, encoded, item.B64Json)
+			}
+			if async {
+				task := &model.Task{
+					TaskID: "task_sequence_parent", Platform: constant.TaskPlatformImage, UserId: 71, Status: model.TaskStatusInProgress,
+					Properties: model.Properties{OriginModelName: modelName, Input: request.Prompt},
+				}
+				require.NoError(t, task.Insert())
+				finishAsyncImageTask(t.Context(), task, &asyncImageRun{
+					keys: map[string]any{string(constant.ContextKeyAsyncImageQuota): 4321}, pluginTask: pluginImageTaskFromContext(c),
+				}, asyncRecorder)
+			} else {
+				record(true)
+			}
+
+			var stored model.Task
+			require.NoError(t, database.Where("platform = ?", constant.TaskPlatformImage).First(&stored).Error)
+			assert.Equal(t, model.TaskStatus(model.TaskStatusSuccess), stored.Status, stored.FailReason)
+			assert.Equal(t, 4321, stored.Quota)
+			require.Len(t, stored.PrivateData.GalleryImageIDs, 15)
+			for index := range 15 {
+				original, _, err := service.OpenGalleryImage(t.Context(), 71, stored.PrivateData.GalleryImageIDs[fmt.Sprintf("image-%d", index)], false)
+				require.NoError(t, err)
+				kept, err := io.ReadAll(original)
+				original.Close()
+				require.NoError(t, err)
+				assert.Equal(t, picture.Bytes(), kept)
+			}
 		})
 	}
 }

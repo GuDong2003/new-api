@@ -70,12 +70,18 @@ function renderPermissions(
     target?: User
     taskAllowed?: boolean
     detailsPending?: Promise<void>
+    userPermissions?: Record<string, boolean>
   } = {}
 ) {
-  useAuthStore
-    .getState()
-    .auth.setUser({ id: 1, username: 'operator', role: viewerRole })
-  vi.spyOn(api, 'get').mockImplementation(async (url) => {
+  useAuthStore.getState().auth.setUser({
+    id: 1,
+    username: 'operator',
+    role: viewerRole,
+    permissions: options.userPermissions
+      ? { admin_permissions: { user: options.userPermissions } }
+      : undefined,
+  })
+  const get = vi.spyOn(api, 'get').mockImplementation(async (url) => {
     if (url === '/api/authz/catalog') {
       if (options.failCatalog) throw new Error('Catalog unavailable')
       return {
@@ -120,13 +126,26 @@ function renderPermissions(
     if (url === '/api/group/') {
       return { data: { success: true, data: ['default'] } }
     }
+    if (url === '/api/verify/methods') {
+      return {
+        data: {
+          success: true,
+          data: {
+            scope: 'admin.user.update',
+            methods: [{ method: '2fa', available: true }],
+            oauth_providers: [],
+            password_encryption_enabled: false,
+          },
+        },
+      }
+    }
     if (options.detailsPending) await options.detailsPending
     if (options.failDetails) throw new Error('Details unavailable')
     return {
       data: {
         success: true,
         data: {
-          ...target,
+          ...(options.target ?? target),
           admin_permissions:
             allowed === undefined
               ? {}
@@ -141,7 +160,7 @@ function renderPermissions(
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
-  return render(
+  render(
     <QueryClientProvider client={client}>
       <UsersProvider>
         {options.entry ? (
@@ -150,12 +169,13 @@ function renderPermissions(
           <UsersMutateDrawer
             open
             onOpenChange={() => undefined}
-            currentRow={target}
+            currentRow={options.target ?? target}
           />
         )}
       </UsersProvider>
     </QueryClientProvider>
   )
+  return get
 }
 
 afterEach(() => {
@@ -165,22 +185,40 @@ afterEach(() => {
 })
 
 it.each([undefined, true])(
-  'root can save an audit grant or revocation from the existing editor (previous=%s)',
+  'root can save an audit grant or revocation after step-up verification (previous=%s)',
   async (allowed) => {
     const put = vi
       .spyOn(api, 'put')
       .mockResolvedValue({ data: { success: true } })
+    vi.spyOn(api, 'post').mockResolvedValue({
+      data: {
+        success: true,
+        data: {
+          proof_token: 'update-proof',
+          method: '2fa',
+          scope: 'admin.user.update',
+          expires_at: Math.floor(Date.now() / 1000) + 60,
+        },
+      },
+    })
     renderPermissions(100, allowed)
     await screen.findByDisplayValue('Managed admin')
-    const checkbox = await screen.findByRole('checkbox', {
+    const toggle = await screen.findByRole('checkbox', {
       name: new RegExp(label),
     })
     await waitFor(() =>
-      expect(checkbox).toHaveAttribute('aria-checked', String(!!allowed))
+      expect(toggle).toHaveAttribute('aria-checked', String(!!allowed))
     )
     expect(screen.getByText(description)).toBeVisible()
-    await userEvent.click(checkbox)
+    await userEvent.click(toggle)
     await userEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+    // The permission matrix changed, so the save waits for verification.
+    expect(put).not.toHaveBeenCalled()
+    await userEvent.type(
+      await screen.findByLabelText('Authenticator code or backup code'),
+      '123456'
+    )
+    await userEvent.click(screen.getByRole('button', { name: 'Verify' }))
     await waitFor(() =>
       expect(put).toHaveBeenCalledWith(
         '/api/user/',
@@ -190,11 +228,35 @@ it.each([undefined, true])(
             audit: { read: !allowed },
             task: { read: false },
           },
+        }),
+        expect.objectContaining({
+          headers: { 'X-Security-Proof': 'update-proof' },
+          singleUseAuthorization: true,
         })
       )
     )
   }
 )
+
+it('root saving an administrator without changing permissions or password does not verify', async () => {
+  const put = vi
+    .spyOn(api, 'put')
+    .mockResolvedValue({ data: { success: true } })
+  const get = renderPermissions(100, true)
+  const displayName = await screen.findByDisplayValue('Managed admin')
+  await userEvent.clear(displayName)
+  await userEvent.type(displayName, 'Renamed admin')
+  await userEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+  await waitFor(() =>
+    expect(put).toHaveBeenCalledWith(
+      '/api/user/',
+      expect.objectContaining({ id: 2, display_name: 'Renamed admin' }),
+      {}
+    )
+  )
+  expect(put.mock.calls[0][1]).not.toHaveProperty('admin_permissions')
+  expect(get).not.toHaveBeenCalledWith('/api/verify/methods', expect.anything())
+})
 
 it('admin cannot edit the audit permission even when the catalog is available', async () => {
   renderPermissions(10)
@@ -210,6 +272,17 @@ it.each([false, true])(
     const put = vi
       .spyOn(api, 'put')
       .mockResolvedValue({ data: { success: true } })
+    const post = vi.spyOn(api, 'post').mockResolvedValue({
+      data: {
+        success: true,
+        data: {
+          proof_token: 'permission-proof',
+          method: '2fa',
+          scope: 'admin.user.update',
+          expires_at: Math.floor(Date.now() / 1000) + 60,
+        },
+      },
+    })
     renderPermissions(100, true, { entry: true, taskAllowed })
     const button = screen.getByRole('button', { name: 'Feature Permissions' })
     button.focus()
@@ -228,14 +301,36 @@ it.each([false, true])(
     expect(checkbox).toHaveAttribute('aria-checked', String(taskAllowed))
     await userEvent.click(checkbox)
     await userEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+    expect(put).not.toHaveBeenCalled()
+    await userEvent.type(
+      await screen.findByLabelText('Authenticator code or backup code'),
+      '123456'
+    )
+    await userEvent.click(screen.getByRole('button', { name: 'Verify' }))
     await waitFor(() =>
-      expect(put).toHaveBeenCalledWith('/api/user/', {
-        id: 2,
-        admin_permissions: {
-          audit: { read: true },
-          task: { read: !taskAllowed },
+      expect(put).toHaveBeenCalledWith(
+        '/api/user/',
+        {
+          id: 2,
+          admin_permissions: {
+            audit: { read: true },
+            task: { read: !taskAllowed },
+          },
         },
-      })
+        {
+          headers: { 'X-Security-Proof': 'permission-proof' },
+          singleUseAuthorization: true,
+        }
+      )
+    )
+    expect(put).toHaveBeenCalledTimes(1)
+    expect(post).toHaveBeenCalledWith(
+      '/api/verify',
+      expect.objectContaining({
+        scope: 'admin.user.update',
+        context: { user_id: 2 },
+      }),
+      expect.anything()
     )
   }
 )
@@ -312,3 +407,105 @@ it.each(['failed', 'pending'] as const)(
     finishDetails()
   }
 )
+
+it('cancelling a changed permission grant keeps the checkbox selection and sends no update', async () => {
+  const put = vi.spyOn(api, 'put')
+  const post = vi.spyOn(api, 'post')
+  renderPermissions(100, false, { entry: true })
+  await userEvent.click(
+    screen.getByRole('button', { name: 'Feature Permissions' })
+  )
+  const checkbox = await screen.findByRole('checkbox', {
+    name: new RegExp(label),
+  })
+  await waitFor(() =>
+    expect(checkbox).not.toHaveAttribute('aria-disabled', 'true')
+  )
+  await userEvent.click(checkbox)
+  await userEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+  await screen.findByLabelText('Authenticator code or backup code')
+  await userEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+  expect(checkbox).toHaveAttribute('aria-checked', 'true')
+  await waitFor(() =>
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeEnabled()
+  )
+  expect(put).not.toHaveBeenCalled()
+  expect(post).not.toHaveBeenCalled()
+})
+
+it('a profile-only operator omits credentials and permissions without requesting verification', async () => {
+  const put = vi
+    .spyOn(api, 'put')
+    .mockResolvedValue({ data: { success: true } })
+  const get = renderPermissions(10, undefined, {
+    target: { ...target, role: 1 },
+    userPermissions: { profile_write: true },
+  })
+  const displayName = await screen.findByDisplayValue('Managed admin')
+  expect(screen.getByLabelText('Password')).toBeDisabled()
+  await userEvent.clear(displayName)
+  await userEvent.type(displayName, 'Renamed user')
+  await userEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+  await waitFor(() => expect(put).toHaveBeenCalledTimes(1))
+  expect(put.mock.calls[0][1]).toMatchObject({
+    id: 2,
+    display_name: 'Renamed user',
+  })
+  expect(put.mock.calls[0][1]).not.toHaveProperty('password')
+  expect(put.mock.calls[0][1]).not.toHaveProperty('admin_permissions')
+  expect(put.mock.calls[0][2]).toEqual({})
+  expect(get).not.toHaveBeenCalledWith('/api/verify/methods', expect.anything())
+})
+
+it('a security-only operator resets a password with proof and omits profile and RPM fields', async () => {
+  const put = vi
+    .spyOn(api, 'put')
+    .mockResolvedValue({ data: { success: true } })
+  const post = vi.spyOn(api, 'post').mockResolvedValue({
+    data: {
+      success: true,
+      data: {
+        proof_token: 'password-proof',
+        method: '2fa',
+        scope: 'admin.user.update',
+        expires_at: Math.floor(Date.now() / 1000) + 60,
+      },
+    },
+  })
+  renderPermissions(10, undefined, {
+    target: { ...target, role: 1 },
+    userPermissions: { security_write: true },
+  })
+  await screen.findByDisplayValue('Managed admin')
+  expect(screen.getByLabelText('Display Name')).toBeDisabled()
+  expect(
+    screen.getByRole('switch', { name: 'Set an RPM for this user' })
+  ).toHaveAttribute('aria-disabled', 'true')
+  await userEvent.type(screen.getByLabelText('Password'), 'new-password')
+  await userEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+  expect(put).not.toHaveBeenCalled()
+  await userEvent.type(
+    await screen.findByLabelText('Authenticator code or backup code'),
+    '123456'
+  )
+  await userEvent.click(screen.getByRole('button', { name: 'Verify' }))
+  await waitFor(() =>
+    expect(put).toHaveBeenCalledWith(
+      '/api/user/',
+      { id: 2, password: 'new-password' },
+      {
+        headers: { 'X-Security-Proof': 'password-proof' },
+        singleUseAuthorization: true,
+      }
+    )
+  )
+  expect(put).toHaveBeenCalledTimes(1)
+  expect(post).toHaveBeenCalledWith(
+    '/api/verify',
+    expect.objectContaining({
+      scope: 'admin.user.update',
+      context: { user_id: 2 },
+    }),
+    expect.anything()
+  )
+})

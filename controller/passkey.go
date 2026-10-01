@@ -93,7 +93,7 @@ func PasskeyRegisterBegin(c *gin.Context) {
 		return
 	}
 
-	identity, ok := middleware.GetSessionAuthIdentity(c)
+	identity, ok := middleware.GetStepUpIdentity(c)
 	if !ok {
 		common.ApiErrorMsg(c, "当前认证方式不支持安全验证")
 		return
@@ -153,7 +153,7 @@ func PasskeyRegisterFinish(c *gin.Context) {
 		credentialRecord = nil
 	}
 
-	identity, ok := middleware.GetSessionAuthIdentity(c)
+	identity, ok := middleware.GetStepUpIdentity(c)
 	if !ok {
 		common.ApiErrorMsg(c, "当前认证方式不支持安全验证")
 		return
@@ -225,7 +225,7 @@ func PasskeyDelete(c *gin.Context) {
 		return
 	}
 
-	identity, ok := middleware.GetSessionAuthIdentity(c)
+	identity, ok := middleware.GetStepUpIdentity(c)
 	if !ok {
 		common.ApiErrorMsg(c, "当前认证方式不支持安全验证")
 		return
@@ -456,6 +456,10 @@ func AdminResetPasskey(c *gin.Context) {
 	if !requireUserTargetPermission(c, user.Id, user.Role, authz.UserSecurityWrite) {
 		return
 	}
+	authorization := requireAdminUserProof(c, service.VerificationScopeAdminUserPasskeyReset, service.AdminUserContext{UserID: user.Id})
+	if authorization == nil {
+		return
+	}
 
 	if _, err := model.GetPasskeyByUserID(user.Id); err != nil {
 		if errors.Is(err, model.ErrPasskeyNotFound) {
@@ -479,8 +483,9 @@ func AdminResetPasskey(c *gin.Context) {
 	}
 
 	recordManageAuditFor(c, user.Id, "user.reset_passkey", map[string]any{
-		"username": user.Username,
-		"id":       user.Id,
+		"username":            user.Username,
+		"id":                  user.Id,
+		"verification_method": authorization.Method,
 	})
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
@@ -507,15 +512,28 @@ func PasskeyVerifyBegin(c *gin.Context) {
 		common.ApiErrorMsg(c, "无效的 Passkey 验证请求")
 		return
 	}
-	binding, err := service.BindVerificationOperation(service.VerificationOperation{Scope: request.Scope, Context: request.Context})
+	operation := service.VerificationOperation{Scope: request.Scope, Context: request.Context}
+	binding, err := service.BindVerificationOperation(operation)
 	if err != nil {
 		writeSecurityOperationError(c, err)
 		return
 	}
-	identity, ok := middleware.GetSessionAuthIdentity(c)
+	identity, ok := middleware.GetStepUpIdentity(c)
 	if !ok {
 		writeSecurityOperationError(c, service.ErrAuthTokenInvalid)
 		return
+	}
+	if err := service.RequireAccessTokenVerificationOperation(identity, operation); err != nil {
+		writeSecurityOperationError(c, err)
+		return
+	}
+	var requiredAccessTokenScopes []string
+	if c.GetBool("use_access_token") {
+		requiredAccessTokenScopes, err = service.AccessTokenVerificationOperationScopes(operation)
+		if err != nil {
+			writeSecurityOperationError(c, err)
+			return
+		}
 	}
 	if _, err := service.RequireVerificationMethod(identity, request.Scope, service.VerificationMethodPasskey); err != nil {
 		writeSecurityOperationError(c, err)
@@ -550,7 +568,7 @@ func PasskeyVerifyBegin(c *gin.Context) {
 
 	flowToken, expiresAt, err := passkeysvc.CreateSessionDataFlow(
 		model.AuthFlowPurposePasskeyStepUp,
-		passkeysvc.FlowSecurity{AuthSessionIdentity: identity, Scope: binding.Scope, ContextHash: binding.ContextHash},
+		passkeysvc.FlowSecurity{AuthSessionIdentity: identity, Scope: binding.Scope, ContextHash: binding.ContextHash, RequiredAccessTokenScopes: requiredAccessTokenScopes},
 		sessionData,
 	)
 	if err != nil {
@@ -605,7 +623,7 @@ func PasskeyVerifyFinish(c *gin.Context) {
 		return
 	}
 
-	identity, ok := middleware.GetSessionAuthIdentity(c)
+	identity, ok := middleware.GetStepUpIdentity(c)
 	if !ok {
 		common.ApiErrorMsg(c, "当前认证方式不支持安全验证")
 		return
@@ -644,6 +662,13 @@ func PasskeyVerifyFinish(c *gin.Context) {
 	if err := model.UpdatePasskeyAssertionState(user.Id, validatedCredential, time.Now(), sessionData.RelyingPartyID); err != nil {
 		writeSecurityOperationError(c, err)
 		return
+	}
+
+	if c.GetBool("use_access_token") {
+		if err := service.RequireAccessTokenScopes(identity, security.RequiredAccessTokenScopes); err != nil {
+			writeSecurityOperationError(c, err)
+			return
+		}
 	}
 
 	proof, err := service.CompleteSecurityVerification(identity, service.VerificationBinding{Scope: security.Scope, ContextHash: security.ContextHash}, service.VerificationMethodPasskey)

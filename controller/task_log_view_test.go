@@ -215,6 +215,7 @@ func TestTaskLogArtifactRequestsEnforcePermissionAndOwnerRole(t *testing.T) {
 			taskID := fmt.Sprintf("task_owner_%d", tc.owner)
 			c, recorder := taskLogRequest(tc.viewer, tc.role, "/api/task/"+taskID+"/artifacts")
 			c.Set("use_access_token", tc.accessToken)
+			c.Set("access_token_legacy", tc.accessToken)
 			c.Set("token_id", tc.tokenID)
 			c.Params = gin.Params{{Key: "task_id", Value: taskID}}
 			_, exists, err := getTaskForArtifactRequest(c, taskID)
@@ -240,6 +241,29 @@ func TestTaskLogArtifactRequestsEnforcePermissionAndOwnerRole(t *testing.T) {
 		require.True(t, exists)
 		assert.Equal(t, 2, task.UserId)
 	})
+}
+
+func TestScopedPATTaskArtifactsRequireTheOwnerOrTaskReadScope(t *testing.T) {
+	setupTaskLogPermissionTest(t)
+	require.NoError(t, authz.SetUserPermissions(2, authz.PermissionsMap{"task": {"read": true}}))
+	for _, test := range []struct {
+		viewer, role, owner int
+		scopes              []string
+		allowed             bool
+	}{
+		{2, common.RoleAdminUser, 2, []string{"usage:read"}, true},
+		{2, common.RoleAdminUser, 3, []string{"usage:read"}, false},
+		{4, common.RoleRootUser, 3, []string{"usage:read"}, false},
+		{2, common.RoleAdminUser, 3, []string{"usage:read", "task:read"}, true},
+	} {
+		taskID := fmt.Sprintf("task_owner_%d", test.owner)
+		c, _ := taskLogRequest(test.viewer, test.role, "/api/task/"+taskID+"/artifacts")
+		c.Set("use_access_token", true)
+		c.Set("access_token_scopes", test.scopes)
+		_, exists, err := getTaskForArtifactRequest(c, taskID)
+		require.NoError(t, err)
+		assert.Equal(t, test.allowed, exists, "owner=%d viewer=%d scopes=%v", test.owner, test.viewer, test.scopes)
+	}
 }
 
 func TestTaskLogDTODoesNotInventHistoricalPluginProvenance(t *testing.T) {
