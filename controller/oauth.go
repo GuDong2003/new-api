@@ -1,6 +1,11 @@
 package controller
 
 import (
+	"crypto/rand"
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -30,25 +35,85 @@ type oauthStateRequest struct {
 }
 
 type oauthFlowPayload struct {
-	AffiliateCode   string                         `json:"affiliate_code,omitempty"`
-	Verification    *service.OAuthVerificationFlow `json:"verification,omitempty"`
-	Telegram        *oauth.TelegramOAuthFlow       `json:"telegram,omitempty"`
-	SessionIdentity *service.AuthIdentity          `json:"session_identity,omitempty"`
-	Authorization   *model.AuthFlowAuthorization   `json:"authorization,omitempty"`
+	AffiliateCode      string                         `json:"affiliate_code,omitempty"`
+	BrowserBindingHash string                         `json:"browser_binding_hash,omitempty"`
+	Verification       *service.OAuthVerificationFlow `json:"verification,omitempty"`
+	Telegram           *oauth.TelegramOAuthFlow       `json:"telegram,omitempty"`
+	SessionIdentity    *service.AuthIdentity          `json:"session_identity,omitempty"`
+	Authorization      *model.AuthFlowAuthorization   `json:"authorization,omitempty"`
 }
 
 type oauthRegistrationPayload struct {
-	AffiliateCode  string `json:"affiliate_code,omitempty"`
-	ProviderUserID string `json:"provider_user_id"`
-	Username       string `json:"username,omitempty"`
-	DisplayName    string `json:"display_name,omitempty"`
-	Email          string `json:"email,omitempty"`
-	LegacyID       string `json:"legacy_id,omitempty"`
+	AffiliateCode      string `json:"affiliate_code,omitempty"`
+	BrowserBindingHash string `json:"browser_binding_hash,omitempty"`
+	ProviderUserID     string `json:"provider_user_id"`
+	Username           string `json:"username,omitempty"`
+	DisplayName        string `json:"display_name,omitempty"`
+	Email              string `json:"email,omitempty"`
+	LegacyID           string `json:"legacy_id,omitempty"`
 }
 
 type completeOAuthRegistrationRequest struct {
 	RegistrationToken string `json:"registration_token"`
 	InviteCode        string `json:"invite_code"`
+}
+
+// OAuth browser credentials are separate from state, which travels through the
+// provider and can be copied into another browser. Only hashes are persisted.
+func newOAuthBrowserBinding() (string, string, error) {
+	random := make([]byte, 32)
+	if _, err := rand.Read(random); err != nil {
+		return "", "", err
+	}
+	secret := base64.RawURLEncoding.EncodeToString(random)
+	digest := sha256.Sum256([]byte(secret))
+	return secret, hex.EncodeToString(digest[:]), nil
+}
+
+func oauthBrowserBindingCookieName(token string) string {
+	digest := sha256.Sum256([]byte(token))
+	prefix := "new_api_oauth_"
+	if common.SessionCookieSecure {
+		prefix = "__Host-" + prefix
+	}
+	return prefix + hex.EncodeToString(digest[:16])
+}
+
+// A cookie per flow permits simultaneous login attempts without overwriting
+// another tab's binding. An empty secret deletes a consumed flow's cookie.
+func writeOAuthBrowserBindingCookie(c *gin.Context, token, secret string, expiresAt time.Time) {
+	maxAge := -1
+	if secret != "" {
+		maxAge = max(int(time.Until(expiresAt)/time.Second), 1)
+	} else {
+		expiresAt = time.Unix(1, 0)
+	}
+	http.SetCookie(c.Writer, &http.Cookie{
+		Name: oauthBrowserBindingCookieName(token), Value: secret,
+		Path: "/", MaxAge: maxAge, Expires: expiresAt, HttpOnly: true,
+		Secure: common.SessionCookieSecure, SameSite: http.SameSiteLaxMode,
+	})
+}
+
+func validOAuthBrowserBinding(c *gin.Context, token, expectedHash string) bool {
+	// Pre-upgrade flows lack a binding and must be restarted, never trusted.
+	if len(expectedHash) != sha256.Size*2 || c.Request == nil {
+		return false
+	}
+	name := oauthBrowserBindingCookieName(token)
+	secret := ""
+	count := 0
+	for _, cookie := range c.Request.Cookies() {
+		if cookie.Name == name {
+			secret = cookie.Value
+			count++
+		}
+	}
+	if count != 1 || len(secret) != base64.RawURLEncoding.EncodedLen(32) {
+		return false
+	}
+	digest := sha256.Sum256([]byte(secret))
+	return subtle.ConstantTimeCompare([]byte(expectedHash), []byte(hex.EncodeToString(digest[:]))) == 1
 }
 
 // providerParams returns the params of messages that name the OAuth provider.
@@ -77,6 +142,15 @@ func GenerateOAuthCode(c *gin.Context) {
 	userID := 0
 	sessionID := ""
 	flowPayload := oauthFlowPayload{AffiliateCode: request.Aff}
+	browserSecret := ""
+	if request.Intent == model.AuthFlowIntentLogin {
+		var err error
+		browserSecret, flowPayload.BrowserBindingHash, err = newOAuthBrowserBinding()
+		if err != nil {
+			writeSecurityOperationError(c, err)
+			return
+		}
+	}
 	bindingStarted := false
 	if request.Provider == "telegram" {
 		telegramFlow, err := oauth.NewTelegramOAuthFlow()
@@ -143,6 +217,9 @@ func GenerateOAuthCode(c *gin.Context) {
 	if err != nil {
 		writeSecurityOperationError(c, err)
 		return
+	}
+	if request.Intent == model.AuthFlowIntentLogin {
+		writeOAuthBrowserBindingCookie(c, state, browserSecret, expiresAt)
 	}
 	bindingStarted = request.Intent == model.AuthFlowIntentBind
 	data := gin.H{"flow_token": state, "expires_at": expiresAt.Unix()}
@@ -212,7 +289,13 @@ func HandleOAuth(c *gin.Context) {
 				return
 			}
 		}
-	} else if pendingFlow.Intent != model.AuthFlowIntentLogin {
+	} else if pendingFlow.Intent == model.AuthFlowIntentLogin {
+		var payload oauthFlowPayload
+		if err := common.UnmarshalJsonStr(pendingFlow.Payload, &payload); err != nil || !validOAuthBrowserBinding(c, state, payload.BrowserBindingHash) {
+			writeAccountStatusError(c, http.StatusForbidden, "State parameter is empty or mismatched")
+			return
+		}
+	} else {
 		common.ApiErrorT(c, "Invalid parameters")
 		return
 	}
@@ -252,6 +335,9 @@ func HandleOAuth(c *gin.Context) {
 		if _, err := model.ConsumeAuthFlow(state, consumeMatch); err != nil {
 			writeAccountStatusError(c, http.StatusForbidden, "State parameter is empty or mismatched")
 			return
+		}
+		if pendingFlow.Intent == model.AuthFlowIntentLogin {
+			writeOAuthBrowserBindingCookie(c, state, "", time.Time{})
 		}
 		errorDescription := c.Query("error_description")
 		if errorDescription == "" {
@@ -297,6 +383,7 @@ func HandleOAuth(c *gin.Context) {
 
 	switch flow.Intent {
 	case model.AuthFlowIntentLogin:
+		writeOAuthBrowserBindingCookie(c, state, "", time.Time{})
 		handleOAuthLogin(c, provider, oauthUser, token, flow)
 	case model.AuthFlowIntentVerify:
 		handleOAuthVerification(c, providerName, oauthUser, flow)
@@ -328,7 +415,7 @@ func handleOAuthLogin(c *gin.Context, provider oauth.Provider, oauthUser *oauth.
 	}
 	user, migration, err := findOrCreateOAuthUser(c, provider, oauthUser, token, payload.AffiliateCode, "")
 	if errors.Is(err, model.ErrInviteCodeRequired) {
-		registrationToken, expiresAt, flowErr := createPendingOAuthRegistration(provider.GetName(), oauthUser, payload.AffiliateCode)
+		registrationToken, expiresAt, flowErr := createPendingOAuthRegistration(c, flow.Provider, oauthUser, payload.AffiliateCode)
 		if flowErr != nil {
 			common.ApiError(c, flowErr)
 			return
@@ -373,18 +460,23 @@ func handleOAuthLogin(c *gin.Context, provider oauth.Provider, oauthUser *oauth.
 	setupLogin(user, migration, c)
 }
 
-func createPendingOAuthRegistration(providerName string, oauthUser *oauth.OAuthUser, affiliateCode string) (string, time.Time, error) {
+func createPendingOAuthRegistration(c *gin.Context, providerName string, oauthUser *oauth.OAuthUser, affiliateCode string) (string, time.Time, error) {
 	if oauthUser == nil || strings.TrimSpace(oauthUser.ProviderUserID) == "" {
 		return "", time.Time{}, model.ErrAuthFlowInvalid
 	}
+	secret, bindingHash, err := newOAuthBrowserBinding()
+	if err != nil {
+		return "", time.Time{}, err
+	}
 	legacyID, _ := oauthUser.Extra["legacy_id"].(string)
 	payload, err := common.Marshal(oauthRegistrationPayload{
-		AffiliateCode:  strings.TrimSpace(affiliateCode),
-		ProviderUserID: strings.TrimSpace(oauthUser.ProviderUserID),
-		Username:       strings.TrimSpace(oauthUser.Username),
-		DisplayName:    strings.TrimSpace(oauthUser.DisplayName),
-		Email:          model.NormalizeEmail(oauthUser.Email),
-		LegacyID:       strings.TrimSpace(legacyID),
+		BrowserBindingHash: bindingHash,
+		AffiliateCode:      strings.TrimSpace(affiliateCode),
+		ProviderUserID:     strings.TrimSpace(oauthUser.ProviderUserID),
+		Username:           strings.TrimSpace(oauthUser.Username),
+		DisplayName:        strings.TrimSpace(oauthUser.DisplayName),
+		Email:              model.NormalizeEmail(oauthUser.Email),
+		LegacyID:           strings.TrimSpace(legacyID),
 	})
 	if err != nil {
 		return "", time.Time{}, err
@@ -397,6 +489,9 @@ func createPendingOAuthRegistration(providerName string, oauthUser *oauth.OAuthU
 		Payload:   string(payload),
 		ExpiresAt: expiresAt,
 	})
+	if err == nil {
+		writeOAuthBrowserBindingCookie(c, registrationToken, secret, expiresAt)
+	}
 	return registrationToken, expiresAt, err
 }
 
@@ -433,6 +528,7 @@ func CompleteOAuthRegistration(c *gin.Context) {
 		}
 		return
 	}
+	writeOAuthBrowserBindingCookie(c, request.RegistrationToken, "", time.Time{})
 	c.Set("oauth_registration_provider", providerName)
 	setupLogin(user, migration, c)
 }
@@ -444,6 +540,10 @@ func completePendingOAuthRegistration(c *gin.Context, registrationToken string, 
 	})
 	if err != nil {
 		return nil, nil, "", err
+	}
+	var payload oauthRegistrationPayload
+	if err := common.UnmarshalJsonStr(pendingFlow.Payload, &payload); err != nil || !validOAuthBrowserBinding(c, registrationToken, payload.BrowserBindingHash) {
+		return nil, nil, "", model.ErrAuthFlowInvalid
 	}
 	if !common.RegisterEnabled {
 		return nil, nil, "", &OAuthRegistrationDisabledError{}
@@ -459,10 +559,6 @@ func completePendingOAuthRegistration(c *gin.Context, registrationToken string, 
 	}
 	provider := oauth.GetProvider(pendingFlow.Provider)
 	if provider == nil || !provider.IsEnabled() {
-		return nil, nil, "", model.ErrAuthFlowInvalid
-	}
-	var payload oauthRegistrationPayload
-	if err := common.UnmarshalJsonStr(pendingFlow.Payload, &payload); err != nil {
 		return nil, nil, "", model.ErrAuthFlowInvalid
 	}
 	oauthUser := &oauth.OAuthUser{

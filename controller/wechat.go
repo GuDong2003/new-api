@@ -13,6 +13,7 @@ import (
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/oauth"
 	"github.com/QuantumNous/new-api/service"
 
 	"github.com/gin-gonic/gin"
@@ -86,7 +87,7 @@ func WeChatAuth(c *gin.Context) {
 			return
 		}
 		if common.InviteRegistrationEnabled {
-			registrationToken, expiresAt, flowErr := createPendingWeChatRegistration(wechatId)
+			registrationToken, expiresAt, flowErr := createPendingWeChatRegistration(c, wechatId)
 			if flowErr != nil {
 				common.ApiError(c, flowErr)
 				return
@@ -125,24 +126,8 @@ func newWeChatUser(wechatId string) model.User {
 	}
 }
 
-func createPendingWeChatRegistration(wechatId string) (string, time.Time, error) {
-	wechatId = strings.TrimSpace(wechatId)
-	if wechatId == "" {
-		return "", time.Time{}, model.ErrAuthFlowInvalid
-	}
-	payload, err := common.Marshal(oauthRegistrationPayload{ProviderUserID: wechatId})
-	if err != nil {
-		return "", time.Time{}, err
-	}
-	expiresAt := time.Now().Add(oauthAuthFlowTTL)
-	registrationToken, _, err := model.CreateAuthFlow(model.AuthFlowCreate{
-		Purpose:   model.AuthFlowPurposeOAuthRegistration,
-		Provider:  "wechat",
-		Intent:    model.AuthFlowIntentLogin,
-		Payload:   string(payload),
-		ExpiresAt: expiresAt,
-	})
-	return registrationToken, expiresAt, err
+func createPendingWeChatRegistration(c *gin.Context, wechatId string) (string, time.Time, error) {
+	return createPendingOAuthRegistration(c, "wechat", &oauth.OAuthUser{ProviderUserID: strings.TrimSpace(wechatId)}, "")
 }
 
 func completePendingWeChatRegistration(registrationToken string, pendingFlow *model.AuthFlow, inviteCodeHash string) (*model.User, string, error) {
