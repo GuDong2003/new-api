@@ -58,7 +58,10 @@ import {
 import { api, applyAuthBundle, isAuthBundle } from '@/lib/api'
 import { handleServerError } from '@/lib/handle-server-error'
 import { AuthOperationError } from '@/lib/secure-verification'
-import { getServerErrorMessageKey } from '@/lib/server-error-message'
+import {
+  getServerErrorMessageKey,
+  getServerMessage,
+} from '@/lib/server-error-message'
 
 type OAuthRequestConfig = AxiosRequestConfig & {
   skipBusinessError?: boolean
@@ -153,17 +156,11 @@ function OAuthCallback() {
       toast.error(
         messageKey
           ? i18next.t(messageKey)
-          : response?.message || i18next.t('OAuth failed')
+          : getServerMessage(response) || i18next.t('OAuth failed')
       )
     } catch (error: unknown) {
-      const messageKey = getServerErrorMessageKey(error)
-      const responseMessage = (
-        error as { response?: { data?: { message?: string } } }
-      ).response?.data?.message
-      toast.error(
-        messageKey
-          ? i18next.t(messageKey)
-          : responseMessage || i18next.t('OAuth failed')
+      handleServerError(
+        AuthOperationError.from(error, i18next.t('OAuth failed'))
       )
     } finally {
       setIsCompletingRegistration(false)
@@ -297,6 +294,11 @@ function OAuthCallback() {
         if (!active) return
         if (response.data?.success) {
           completedLogin.current = loginKey
+          if (isPendingOAuthRegistration(response.data.data)) {
+            setInviteCode(callbackInvitationCode)
+            setRegistrationToken(response.data.data.registration_token)
+            return
+          }
           if (
             await handleLoginResult(
               response.data.data,
@@ -307,20 +309,12 @@ function OAuthCallback() {
           }
           return
         }
-        if (
-          response.data?.success &&
-          isPendingOAuthRegistration(response.data?.data)
-        ) {
-          setInviteCode(callbackInvitationCode)
-          setRegistrationToken(response.data.data.registration_token)
-          return
-        }
         const messageKey = getServerErrorMessageKey(response.data)
         handleServerError(
           response.data,
           messageKey
             ? i18next.t(messageKey)
-            : response.data?.message || i18next.t('OAuth failed')
+            : getServerMessage(response.data) || i18next.t('OAuth failed')
         )
       } catch (error: unknown) {
         if (!active) return

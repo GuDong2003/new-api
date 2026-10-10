@@ -73,8 +73,9 @@ var auditContentTemplates = map[string]string{
 	"invite_code.create":      "Created ${count} invitation codes (${max_uses} uses each)",
 	"invite_code.update":      "Updated invitation code ${id} (status ${status}, max uses ${max_uses})",
 
-	"subscription.plan_reset":      "Reset active subscriptions for plan ${plan_id}",
-	"subscription.user_plan_reset": "Reset active plan ${plan_id} subscriptions for user ${target_user_id}",
+	"subscription.plan_reset":       "Reset active subscriptions for plan ${plan_id}",
+	"subscription.user_plan_reset":  "Reset active plan ${plan_id} subscriptions for user ${target_user_id}",
+	"subscription.user_quota_reset": "Administrator reset the quota of subscription plan ${plan_title} (ID: ${plan_id})",
 }
 
 func recordPasskeyDomainAudit(c *gin.Context, change *model.PasskeyDomainChange, confirmed bool, err error) {

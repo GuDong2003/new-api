@@ -47,7 +47,7 @@ func EmailBindStart(c *gin.Context) {
 	if authorization == nil {
 		return
 	}
-	data, err := service.StartEmailBinding(identity, authorization, email, i18n.GetLangFromContext(c))
+	data, err := service.StartEmailBinding(identity, authorization, email, i18n.StatedLang(c))
 	if err != nil {
 		writeSecurityOperationError(c, err)
 		return
@@ -71,7 +71,7 @@ func EmailBindResend(c *gin.Context) {
 		writeSecurityOperationError(c, model.ErrAuthFlowInvalid)
 		return
 	}
-	data, err := service.ResendAccountEmailBinding(identity, request.FlowToken, i18n.GetLangFromContext(c))
+	data, err := service.ResendAccountEmailBinding(identity, request.FlowToken, i18n.StatedLang(c))
 	if err != nil {
 		writeSecurityOperationError(c, err)
 		return
@@ -101,8 +101,8 @@ func EmailBind(c *gin.Context) {
 		return
 	}
 	succeeded = true
-	notificationFailed = service.NotifyAccountSecurityChange(i18n.GetLangFromContext(c), state.CurrentEmail, i18n.MsgAccountSecurityEmailChanged) != nil
-	if err := service.NotifyAccountSecurityChange(i18n.GetLangFromContext(c), state.Email, i18n.MsgAccountSecurityEmailConfirmed); err != nil {
+	notificationFailed = service.NotifyAccountSecurityChange(i18n.StatedLang(c), state.CurrentEmail, i18n.MsgAccountSecurityEmailChanged) != nil
+	if err := service.NotifyAccountSecurityChange(i18n.StatedLang(c), state.Email, i18n.MsgAccountSecurityEmailConfirmed); err != nil {
 		notificationFailed = true
 	}
 	if err := model.PublishUserAuthCache(identity.UserID); err != nil {

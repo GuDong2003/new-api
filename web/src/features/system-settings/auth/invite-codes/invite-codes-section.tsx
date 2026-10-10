@@ -54,6 +54,7 @@ import {
 } from '@/components/ui/table'
 import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
 import dayjs from '@/lib/dayjs'
+import { getServerMessage } from '@/lib/server-error-message'
 
 import { deleteInviteCode, getInviteCodes } from './api'
 import { InviteCodeDialog } from './invite-code-dialog'
@@ -191,7 +192,9 @@ export function InviteCodesSection() {
     mutationFn: deleteInviteCode,
     onSuccess: (response) => {
       if (!response.success) {
-        toast.error(response.message || t('Failed to delete invitation code'))
+        toast.error(
+          getServerMessage(response) || t('Failed to delete invitation code')
+        )
         return
       }
       toast.success(t('Invitation code deleted'))

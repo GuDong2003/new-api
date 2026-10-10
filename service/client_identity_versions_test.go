@@ -52,6 +52,48 @@ func TestClientIdentityVersionServiceLoadsNPMVersionsAndFallsBackToCache(t *test
 	assert.Equal(t, "1.2.3", stale.Latest)
 }
 
+func TestCodexModelDiscoveryPreservesPinnedIdentityWithChannelTLS(t *testing.T) {
+	initDefaultHTTPClientFixture(t)
+	latestCodexClientVersion.Lock()
+	previousVersion, previousExpiry := latestCodexClientVersion.version, latestCodexClientVersion.expiresAt
+	latestCodexClientVersion.version = "0.199.0"
+	latestCodexClientVersion.expiresAt = time.Now().Add(time.Hour)
+	latestCodexClientVersion.Unlock()
+	t.Cleanup(func() {
+		latestCodexClientVersion.Lock()
+		latestCodexClientVersion.version, latestCodexClientVersion.expiresAt = previousVersion, previousExpiry
+		latestCodexClientVersion.Unlock()
+	})
+	upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/backend-api/codex/models", r.URL.Path)
+		assert.Equal(t, "0.147.0", r.URL.Query().Get("client_version"))
+		assert.Equal(t, "codex-cli/0.147.0", r.Header.Get("User-Agent"))
+		assert.Equal(t, "Bearer test-access-token", r.Header.Get("Authorization"))
+		assert.Equal(t, "test-account", r.Header.Get("ChatGPT-Account-Id"))
+		fmt.Fprint(w, `{"models":[{"slug":"gpt-test"}]}`)
+	}))
+	t.Cleanup(upstream.Close)
+	channel := &model.Channel{
+		Type:    constant.ChannelTypeCodex,
+		BaseURL: &upstream.URL,
+		Key:     `{"access_token":"test-access-token","account_id":"test-account"}`,
+	}
+	channel.SetOtherSettings(dto.ChannelOtherSettings{
+		ClientIdentity: &dto.ClientIdentityConfig{Version: "0.147.0"},
+	})
+	for _, skipVerify := range []bool{false, true, false} {
+		channel.SetSetting(dto.ChannelSettings{TLSInsecureSkipVerify: skipVerify})
+		models, err := FetchCodexChannelModels(channel)
+		if !skipVerify {
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "certificate")
+			continue
+		}
+		require.NoError(t, err)
+		assert.Equal(t, []string{"gpt-test"}, models)
+	}
+}
+
 func TestClientIdentityVersionServiceRefreshesCachedEntriesOnly(t *testing.T) {
 	requestCount := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

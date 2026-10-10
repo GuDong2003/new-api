@@ -7,7 +7,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/QuantumNous/new-api/common"
-	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
@@ -71,7 +70,7 @@ func GetRedemption(c *gin.Context) {
 
 func AddRedemption(c *gin.Context) {
 	if !operation_setting.IsPaymentComplianceConfirmed() {
-		common.ApiErrorI18n(c, i18n.MsgPaymentComplianceRequired)
+		common.ApiErrorT(c, "Payment, redemption, subscription, and invitation reward features are disabled. The administrator must confirm compliance terms before enabling them.")
 		return
 	}
 
@@ -82,27 +81,27 @@ func AddRedemption(c *gin.Context) {
 		return
 	}
 	if utf8.RuneCountInString(redemption.Name) == 0 || utf8.RuneCountInString(redemption.Name) > 20 {
-		common.ApiErrorI18n(c, i18n.MsgRedemptionNameLength)
+		common.ApiErrorT(c, "Redemption code name length must be between 1-20")
 		return
 	}
 	if redemption.Count <= 0 {
-		common.ApiErrorI18n(c, i18n.MsgRedemptionCountPositive)
+		common.ApiErrorT(c, "Redemption code count must be greater than 0")
 		return
 	}
 	if redemption.Count > 100 {
-		common.ApiErrorI18n(c, i18n.MsgRedemptionCountMax)
+		common.ApiErrorT(c, "Maximum 100 redemption codes can be generated at once")
 		return
 	}
 	if redemption.Quota <= 0 {
-		common.ApiError(c, errors.New("redemption quota must be positive"))
+		common.ApiErrorT(c, "Redemption quota must be positive")
 		return
 	}
 	if err := common.ValidateWalletQuota(redemption.Quota); err != nil {
 		common.ApiError(c, err)
 		return
 	}
-	if valid, msg := validateExpiredTime(c, redemption.ExpiredTime); !valid {
-		c.JSON(http.StatusOK, gin.H{"success": false, "message": msg})
+	if err := validateExpiredTime(redemption.ExpiredTime); err != nil {
+		common.ApiError(c, err)
 		return
 	}
 	// A request without max_uses makes one-time codes, as before shared codes.
@@ -110,18 +109,18 @@ func AddRedemption(c *gin.Context) {
 		redemption.MaxUses = 1
 	}
 	if redemption.MaxUses < 1 || redemption.MaxUses > model.RedemptionMaxUsesLimit {
-		common.ApiErrorI18n(c, i18n.MsgRedemptionMaxUsesInvalid)
+		common.ApiErrorT(c, "A code can be redeemed 1 to 100000 times")
 		return
 	}
 	// A shared code is one code that many accounts redeem once each; the
 	// one-code-per-account rule is for batches of one-time codes.
 	if redemption.MaxUses > 1 && (redemption.Count != 1 || redemption.BatchOnePerUser) {
-		common.ApiErrorI18n(c, i18n.MsgRedemptionSharedCodeInvalid)
+		common.ApiErrorT(c, "A shared code is created on its own and has no one-per-account batch rule")
 		return
 	}
 	batchId := common.GetUUID()
 	var keys []string
-	for i := 0; i < redemption.Count; i++ {
+	for range redemption.Count {
 		key := common.GetUUID()
 		cleanRedemption := model.Redemption{
 			UserId:          c.GetInt("id"),
@@ -136,12 +135,8 @@ func AddRedemption(c *gin.Context) {
 		}
 		err = cleanRedemption.Insert()
 		if err != nil {
-			common.SysError("failed to insert redemption: " + err.Error())
-			c.JSON(http.StatusOK, gin.H{
-				"success": false,
-				"message": i18n.T(c, i18n.MsgRedemptionCreateFailed),
-				"data":    keys,
-			})
+			common.SysError(common.LogText("failed to insert redemption: %s", err.Error()))
+			common.ApiErrorStatus(c, http.StatusOK, common.NewMessage("Failed to create redemption code, please try again later"), gin.H{"data": keys})
 			return
 		}
 		keys = append(keys, key)
@@ -149,7 +144,7 @@ func AddRedemption(c *gin.Context) {
 	recordManageAudit(c, "redemption.create", map[string]any{
 		"name":               redemption.Name,
 		"count":              redemption.Count,
-		"quota":              logger.LogQuota(redemption.Quota),
+		"quota":              logger.FormatQuota(redemption.Quota),
 		"max_uses":           redemption.MaxUses,
 		"batch_one_per_user": redemption.BatchOnePerUser,
 		"batch_id":           batchId,
@@ -203,7 +198,7 @@ func UpdateRedemption(c *gin.Context) {
 		}
 		// Enabling a used-up code would let it be redeemed once more.
 		if request.Status == common.RedemptionCodeStatusEnabled && cleanRedemption.UsedCount >= max(cleanRedemption.MaxUses, 1) {
-			common.ApiErrorI18n(c, i18n.MsgRedemptionUsedUp)
+			common.ApiErrorT(c, "This code is used up and cannot be enabled again")
 			return
 		}
 		cleanRedemption.Status = request.Status
@@ -220,15 +215,15 @@ func UpdateRedemption(c *gin.Context) {
 		return
 	}
 	if request.Quota <= 0 {
-		common.ApiError(c, errors.New("redemption quota must be positive"))
+		common.ApiErrorT(c, "Redemption quota must be positive")
 		return
 	}
 	if err := common.ValidateWalletQuota(request.Quota); err != nil {
 		common.ApiError(c, err)
 		return
 	}
-	if valid, msg := validateExpiredTime(c, request.ExpiredTime); !valid {
-		c.JSON(http.StatusOK, gin.H{"success": false, "message": msg})
+	if err := validateExpiredTime(request.ExpiredTime); err != nil {
+		common.ApiError(c, err)
 		return
 	}
 	cleanRedemption, err := model.UpdateRedemptionDetails(request.Id, model.RedemptionEdit{
@@ -239,7 +234,7 @@ func UpdateRedemption(c *gin.Context) {
 		BatchOnePerUser: request.BatchOnePerUser,
 	})
 	if errors.Is(err, model.ErrRedemptionMaxUsesInvalid) {
-		common.ApiErrorI18n(c, i18n.MsgRedemptionSharedMaxUsesInvalid)
+		common.ApiErrorT(c, "A shared code serves 2 to 100000 accounts, and no fewer than have already redeemed it")
 		return
 	}
 	if err != nil {
@@ -250,7 +245,7 @@ func UpdateRedemption(c *gin.Context) {
 		"id":       cleanRedemption.Id,
 		"batch_id": cleanRedemption.BatchId,
 		"name":     cleanRedemption.Name,
-		"quota":    logger.LogQuota(cleanRedemption.Quota),
+		"quota":    logger.FormatQuota(cleanRedemption.Quota),
 	}
 	if request.MaxUses != nil {
 		audit["max_uses"] = cleanRedemption.MaxUses
@@ -276,11 +271,11 @@ func DeleteInvalidRedemption(c *gin.Context) {
 	return
 }
 
-func validateExpiredTime(c *gin.Context, expired int64) (bool, string) {
+func validateExpiredTime(expired int64) error {
 	if expired != 0 && expired < common.GetTimestamp() {
-		return false, i18n.T(c, i18n.MsgRedemptionExpireTimeInvalid)
+		return common.NewMessage("Expiration time cannot be earlier than current time")
 	}
-	return true, ""
+	return nil
 }
 
 func DeleteRedemptionBatch(c *gin.Context) {
@@ -288,7 +283,7 @@ func DeleteRedemptionBatch(c *gin.Context) {
 		Ids []int `json:"ids" binding:"required,min=1,max=1000,dive,gt=0"`
 	}
 	if err := c.ShouldBindJSON(&request); err != nil {
-		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+		common.ApiErrorT(c, "Invalid parameters")
 		return
 	}
 	count, err := model.BatchDeleteRedemptions(request.Ids)
@@ -307,7 +302,7 @@ func DeleteRedemptionBatch(c *gin.Context) {
 func GetRedemptionRecords(c *gin.Context) {
 	redemptionId, err := strconv.Atoi(c.Param("id"))
 	if err != nil || redemptionId <= 0 {
-		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+		common.ApiErrorT(c, "Invalid parameters")
 		return
 	}
 	pageInfo := common.GetPageQuery(c)

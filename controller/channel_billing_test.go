@@ -14,6 +14,8 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/relaykit/dto"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -284,6 +286,52 @@ func TestSingleKeyChannelBalanceIsSaved(t *testing.T) {
 	require.NoError(t, model.DB.First(&stored, channel.Id).Error)
 	assert.InDelta(t, 10, stored.Balance, 1e-9)
 	assert.Positive(t, stored.BalanceUpdatedTime)
+}
+
+func TestChannelBalanceUsesChannelTLSSettings(t *testing.T) {
+	service.ResetProxyClientCache()
+	t.Cleanup(service.ResetProxyClientCache)
+	upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "Bearer key-a", r.Header.Get("Authorization"))
+		switch r.URL.Path {
+		case "/v1/dashboard/billing/subscription":
+			fmt.Fprint(w, `{"has_payment_method":true,"hard_limit_usd":12}`)
+		case "/v1/dashboard/billing/usage":
+			fmt.Fprint(w, `{"total_usage":200}`)
+		case "/balance":
+			fmt.Fprint(w, `{"object":"credit_summary","total_available":10}`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(upstream.Close)
+
+	for _, channelType := range []int{constant.ChannelTypeOpenAI, constant.ChannelTypeAdvancedCustom} {
+		t.Run(strconv.Itoa(channelType), func(t *testing.T) {
+			channel := &model.Channel{Type: channelType, BaseURL: &upstream.URL}
+			if channelType == constant.ChannelTypeAdvancedCustom {
+				channel.SetOtherSettings(dto.ChannelOtherSettings{
+					AdvancedCustom: &dto.AdvancedCustomConfig{Routes: []dto.AdvancedCustomRoute{{
+						IncomingPath: dto.AdvancedCustomBalancePath,
+						UpstreamPath: "/balance",
+						Converter:    "none",
+					}}},
+				})
+			}
+			for _, skipVerify := range []bool{false, true, false} {
+				channel.SetSetting(dto.ChannelSettings{TLSInsecureSkipVerify: skipVerify})
+				result, err := fetchChannelBalance(t.Context(), channel, "key-a", readChannelBalanceSettings(channel))
+				if !skipVerify {
+					require.Error(t, err)
+					assert.Contains(t, err.Error(), "certificate")
+					continue
+				}
+				require.NoError(t, err)
+				assert.Equal(t, 10.0, result.Balance)
+				assert.Empty(t, result.RawResponse)
+			}
+		})
+	}
 }
 
 // A channel with thousands of keys saves the balance of every key, beyond

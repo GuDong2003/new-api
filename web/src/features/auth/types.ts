@@ -69,7 +69,7 @@ export interface BindEmailPayload {
 export interface LoginResponse {
   success: boolean
   message: string
-  data?: LoginResult
+  data?: LoginResult | PendingOAuthRegistration
 }
 
 export interface Login2FAResponse {

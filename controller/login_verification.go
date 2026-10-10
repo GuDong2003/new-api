@@ -21,7 +21,7 @@ func VerifyLogin(c *gin.Context) {
 		Code      string `json:"code"`
 	}
 	if common.DecodeJson(c.Request.Body, &request) != nil || request.FlowToken == "" || request.Code == "" {
-		common.ApiErrorMsg(c, "参数错误")
+		common.ApiErrorT(c, "Invalid parameters")
 		return
 	}
 	if request.Method == "" {
@@ -45,7 +45,7 @@ func LoginPasskeyBegin(c *gin.Context) {
 		RPID      string `json:"rp_id"`
 	}
 	if common.DecodeJson(c.Request.Body, &request) != nil || request.FlowToken == "" {
-		common.ApiErrorMsg(c, "参数错误")
+		common.ApiErrorT(c, "Invalid parameters")
 		return
 	}
 	verification, err := service.RequireLoginVerification(request.FlowToken, service.VerificationMethodPasskey)
@@ -91,7 +91,7 @@ func LoginPasskeyFinish(c *gin.Context) {
 		Credential       json.RawMessage `json:"credential"`
 	}
 	if common.DecodeJson(c.Request.Body, &request) != nil || request.FlowToken == "" || request.PasskeyFlowToken == "" || len(request.Credential) == 0 {
-		common.ApiErrorMsg(c, "参数错误")
+		common.ApiErrorT(c, "Invalid parameters")
 		return
 	}
 	verification, err := service.RequireLoginVerification(request.FlowToken, service.VerificationMethodPasskey)
@@ -160,7 +160,7 @@ func completeVerifiedLoginResponse(c *gin.Context, bundle *service.AuthBundle, m
 	c.Set("login_verification_method", method)
 	if migration != nil {
 		// The legacy GitHub binding was rewritten together with this session.
-		notificationFailed := service.NotifyAccountSecurityChange(i18n.GetLangFromContext(c), user.Email, i18n.MsgAccountSecurityLoginLinked, map[string]any{"Provider": "GitHub"}) != nil
+		notificationFailed := service.NotifyAccountSecurityChange(i18n.StatedLang(c), user.Email, i18n.MsgAccountSecurityLoginLinked, map[string]any{"Provider": "GitHub"}) != nil
 		recordLegacyGitHubBindingAudit(c, user, true, map[string]any{
 			"legacy_id": migration.LegacyID, "provider_user_id": migration.GitHubID,
 			"verification_method": method, "notification_failed": notificationFailed,

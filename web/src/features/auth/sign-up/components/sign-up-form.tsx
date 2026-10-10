@@ -62,6 +62,7 @@ import { AuthOperationError } from '@/lib/secure-verification'
 import {
   createServerError,
   getServerErrorMessageKey,
+  getServerMessage,
 } from '@/lib/server-error-message'
 import { cn } from '@/lib/utils'
 
@@ -199,7 +200,9 @@ export function SignUpForm({
     try {
       const result = await validateInvitationCode(inviteCode)
       if (!result?.success) {
-        toast.error(result?.message || t('Invitation code is unavailable'))
+        toast.error(
+          getServerMessage(result) || t('Invitation code is unavailable')
+        )
         return
       }
       form.setValue('inviteCode', inviteCode)

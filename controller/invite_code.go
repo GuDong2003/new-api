@@ -7,7 +7,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/QuantumNous/new-api/common"
-	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/gin-gonic/gin"
 )
@@ -41,7 +40,7 @@ type validateInviteCodeRequest struct {
 func ValidateInviteCode(c *gin.Context) {
 	var request validateInviteCodeRequest
 	if err := common.DecodeJson(c.Request.Body, &request); err != nil {
-		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+		common.ApiErrorT(c, "Invalid parameters")
 		return
 	}
 	codeHash, err := model.HashInviteCode(request.InviteCode)
@@ -68,7 +67,7 @@ func GetInviteCodes(c *gin.Context) {
 	}, pageInfo.GetStartIdx(), pageInfo.GetPageSize())
 	if err != nil {
 		if errors.Is(err, model.ErrInviteCodeInvalid) {
-			common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+			common.ApiErrorT(c, "Invalid parameters")
 			return
 		}
 		common.ApiError(c, err)
@@ -82,7 +81,7 @@ func GetInviteCodes(c *gin.Context) {
 func GetInviteCodeUsages(c *gin.Context) {
 	inviteCodeId, err := strconv.Atoi(c.Param("id"))
 	if err != nil || inviteCodeId <= 0 {
-		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+		common.ApiErrorT(c, "Invalid parameters")
 		return
 	}
 	pageInfo := common.GetPageQuery(c)
@@ -99,7 +98,7 @@ func GetInviteCodeUsages(c *gin.Context) {
 func CreateInviteCodes(c *gin.Context) {
 	var request createInviteCodesRequest
 	if err := common.DecodeJson(c.Request.Body, &request); err != nil {
-		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+		common.ApiErrorT(c, "Invalid parameters")
 		return
 	}
 	request.Name = strings.TrimSpace(request.Name)
@@ -111,40 +110,40 @@ func CreateInviteCodes(c *gin.Context) {
 		request.MaxUses = 1
 	}
 	if utf8.RuneCountInString(request.Name) > maxInviteCodeNameRunes {
-		common.ApiErrorI18n(c, i18n.MsgInviteCodeNameTooLong)
+		common.ApiErrorT(c, "Invitation code name must not exceed 64 characters")
 		return
 	}
 	if request.Count < 1 || request.Count > maxInviteCodeBatchSize {
-		common.ApiErrorI18n(c, i18n.MsgInviteCodeCountInvalid)
+		common.ApiErrorT(c, "Invitation code quantity must be between 1 and 100")
 		return
 	}
 	if request.Code != "" && request.Count != 1 {
-		common.ApiErrorI18n(c, i18n.MsgInviteCodeCustomCountInvalid)
+		common.ApiErrorT(c, "A custom invitation code can only create one code at a time")
 		return
 	}
 	if request.MaxUses < 1 || request.MaxUses > maxInviteCodeUses {
-		common.ApiErrorI18n(c, i18n.MsgInviteCodeMaxUsesInvalid)
+		common.ApiErrorT(c, "Maximum uses must be between 1 and 100000")
 		return
 	}
 	if request.ExpiredTime != 0 && request.ExpiredTime <= common.GetTimestamp() {
-		common.ApiErrorI18n(c, i18n.MsgInviteCodeExpireTimeInvalid)
+		common.ApiErrorT(c, "Expiration time must be in the future")
 		return
 	}
 	generated, err := model.CreateInviteCodesWithCustomCode(c.GetInt("id"), request.Name, request.Count, request.MaxUses, request.ExpiredTime, request.Code)
 	if err != nil {
 		if errors.Is(err, model.ErrInviteCodeInvalid) {
-			common.ApiErrorI18n(c, i18n.MsgInviteCodeFormatInvalid)
+			common.ApiErrorT(c, "Invitation code must be 8-64 characters using letters, numbers, hyphens, or underscores")
 			return
 		}
 		if errors.Is(err, model.ErrInviteCodeExists) {
-			common.ApiErrorI18n(c, i18n.MsgInviteCodeExists)
+			common.ApiErrorT(c, "This invitation code already exists")
 			return
 		}
-		common.SysError("failed to create invitation codes: " + err.Error())
-		common.ApiErrorI18n(c, i18n.MsgInviteCodeCreateFailed)
+		common.SysError(common.LogText("failed to create invitation codes: %v", err))
+		common.ApiErrorT(c, "Failed to create invitation code, please try again later")
 		return
 	}
-	recordManageAudit(c, "invite_code.create", map[string]interface{}{
+	recordManageAudit(c, "invite_code.create", map[string]any{
 		"count":    request.Count,
 		"max_uses": request.MaxUses,
 	})
@@ -154,28 +153,28 @@ func CreateInviteCodes(c *gin.Context) {
 func UpdateInviteCode(c *gin.Context) {
 	var request updateInviteCodeRequest
 	if err := common.DecodeJson(c.Request.Body, &request); err != nil {
-		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+		common.ApiErrorT(c, "Invalid parameters")
 		return
 	}
 	request.Name = strings.TrimSpace(request.Name)
 	if utf8.RuneCountInString(request.Name) > maxInviteCodeNameRunes {
-		common.ApiErrorI18n(c, i18n.MsgInviteCodeNameTooLong)
+		common.ApiErrorT(c, "Invitation code name must not exceed 64 characters")
 		return
 	}
 	if request.MaxUses < 1 || request.MaxUses > maxInviteCodeUses {
-		common.ApiErrorI18n(c, i18n.MsgInviteCodeMaxUsesInvalid)
+		common.ApiErrorT(c, "Maximum uses must be between 1 and 100000")
 		return
 	}
 	inviteCode, err := model.UpdateInviteCode(request.Id, request.Name, request.Status, request.MaxUses, request.ExpiredTime)
 	if err != nil {
 		if errors.Is(err, model.ErrInviteCodeInvalid) {
-			common.ApiErrorI18n(c, i18n.MsgInviteCodeUpdateInvalid)
+			common.ApiErrorT(c, "Invalid invitation code settings; maximum uses cannot be lower than the used count")
 			return
 		}
 		common.ApiError(c, err)
 		return
 	}
-	recordManageAudit(c, "invite_code.update", map[string]interface{}{
+	recordManageAudit(c, "invite_code.update", map[string]any{
 		"id":       inviteCode.Id,
 		"status":   inviteCode.Status,
 		"max_uses": inviteCode.MaxUses,
@@ -186,19 +185,19 @@ func UpdateInviteCode(c *gin.Context) {
 func DeleteInviteCode(c *gin.Context) {
 	inviteCodeId, err := strconv.Atoi(c.Param("id"))
 	if err != nil || inviteCodeId <= 0 {
-		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+		common.ApiErrorT(c, "Invalid parameters")
 		return
 	}
 	if err := model.DeleteUnusedInviteCode(inviteCodeId); err != nil {
 		if errors.Is(err, model.ErrInviteCodeUsed) {
-			common.ApiErrorI18n(c, i18n.MsgInviteCodeDeleteUsed)
+			common.ApiErrorT(c, "Invitation codes with usage records cannot be deleted; disable them instead")
 			return
 		}
-		common.SysError("failed to delete invitation code: " + err.Error())
-		common.ApiErrorI18n(c, i18n.MsgInviteCodeDeleteFailed)
+		common.SysError(common.LogText("failed to delete invitation code: %v", err))
+		common.ApiErrorT(c, "Failed to delete invitation code, please try again later")
 		return
 	}
-	recordManageAudit(c, "invite_code.delete", map[string]interface{}{
+	recordManageAudit(c, "invite_code.delete", map[string]any{
 		"id": inviteCodeId,
 	})
 	common.ApiSuccess(c, nil)
@@ -207,10 +206,10 @@ func DeleteInviteCode(c *gin.Context) {
 func respondInviteCodeError(c *gin.Context, err error) bool {
 	switch {
 	case errors.Is(err, model.ErrInviteCodeRequired):
-		common.ApiErrorI18n(c, i18n.MsgInviteCodeRequired)
+		common.ApiErrorT(c, "An invitation code is required to create a new account")
 		return true
 	case errors.Is(err, model.ErrInviteCodeInvalid), errors.Is(err, model.ErrInviteCodeUnavailable):
-		common.ApiErrorI18n(c, i18n.MsgInviteCodeUnavailable)
+		common.ApiErrorT(c, "The invitation code is invalid, expired, disabled, or has no remaining uses")
 		return true
 	default:
 		return false

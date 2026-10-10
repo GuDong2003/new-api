@@ -22,6 +22,7 @@ import { toast } from 'sonner'
 
 import { formatCurrencyFromUSD } from '@/lib/currency'
 import { handleServerError } from '@/lib/handle-server-error'
+import { getServerMessage } from '@/lib/server-error-message'
 
 import {
   copyChannel,
@@ -338,7 +339,8 @@ export async function handleTestChannel(
       }
       onTestComplete?.(true, responseTime)
     } else {
-      const errorMsg = response.message || i18next.t(ERROR_MESSAGES.TEST_FAILED)
+      const errorMsg =
+        getServerMessage(response) || i18next.t(ERROR_MESSAGES.TEST_FAILED)
       if (!options?.silent) {
         handleServerError(response, undefined, {
           title: i18next.t('{{target}} test failed', { target }),
@@ -350,9 +352,10 @@ export async function handleTestChannel(
       onTestComplete?.(false, responseTime, errorMsg, response.error_code)
     }
   } catch (_error: unknown) {
-    const err = _error as { response?: { data?: { message?: string } } }
+    const err = _error as { response?: { data?: unknown } }
     const errorMsg =
-      err?.response?.data?.message || i18next.t(ERROR_MESSAGES.TEST_FAILED)
+      getServerMessage(err?.response?.data) ||
+      i18next.t(ERROR_MESSAGES.TEST_FAILED)
     const target = getChannelTestLabel(options)
     if (!options?.silent) {
       handleServerError(_error, undefined, {
@@ -535,7 +538,9 @@ export async function handleUpdateChannelBalance(
       queryClient?.invalidateQueries({ queryKey: channelsQueryKeys.lists() })
       onSuccess?.(balance)
     } else {
-      toast.error(response.message || i18next.t('Failed to update balance'))
+      toast.error(
+        getServerMessage(response) || i18next.t('Failed to update balance')
+      )
     }
   } catch (_error: unknown) {
     toast.error(
