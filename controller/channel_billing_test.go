@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"net/http"
@@ -9,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -46,6 +48,24 @@ func TestGetDeepSeekBalanceUSD(t *testing.T) {
 			responseJSON:    `{"balance_infos":[{"currency":"CNY","total_balance":"73.00"}]}`,
 			usdExchangeRate: 7.3,
 			want:            10,
+		},
+		{
+			name:            "converts CNY when USD balance is zero",
+			responseJSON:    `{"balance_infos":[{"currency":"USD","total_balance":"0.00"},{"currency":"CNY","total_balance":"73.00"}]}`,
+			usdExchangeRate: 7.3,
+			want:            10,
+		},
+		{
+			name:            "converts CNY when zero USD follows CNY",
+			responseJSON:    `{"balance_infos":[{"currency":"CNY","total_balance":"73.00"},{"currency":"USD","total_balance":"0.00"}]}`,
+			usdExchangeRate: 7.3,
+			want:            10,
+		},
+		{
+			name:            "returns zero when USD balance is zero and CNY is absent",
+			responseJSON:    `{"balance_infos":[{"currency":"USD","total_balance":"0.00"}]}`,
+			usdExchangeRate: 7.3,
+			want:            0,
 		},
 		{
 			name:            "returns error when USD and CNY are absent",
@@ -292,7 +312,11 @@ func TestChannelBalanceUsesChannelTLSSettings(t *testing.T) {
 	service.ResetProxyClientCache()
 	t.Cleanup(service.ResetProxyClientCache)
 	upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, "Bearer key-a", r.Header.Get("Authorization"))
+		if r.URL.Path == "/api/status" {
+			assert.Empty(t, r.Header.Get("Authorization"))
+		} else {
+			assert.Equal(t, "Bearer key-a", r.Header.Get("Authorization"))
+		}
 		switch r.URL.Path {
 		case "/v1/dashboard/billing/subscription":
 			fmt.Fprint(w, `{"has_payment_method":true,"hard_limit_usd":12}`)
@@ -300,13 +324,19 @@ func TestChannelBalanceUsesChannelTLSSettings(t *testing.T) {
 			fmt.Fprint(w, `{"total_usage":200}`)
 		case "/balance":
 			fmt.Fprint(w, `{"object":"credit_summary","total_available":10}`)
+		case "/v1/usage":
+			fmt.Fprint(w, `{"remaining":10,"isValid":true}`)
+		case "/api/usage/token/":
+			fmt.Fprint(w, `{"code":true,"data":{"total_available":1000}}`)
+		case "/api/status":
+			fmt.Fprint(w, `{"success":true,"data":{"quota_per_unit":100}}`)
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
 	}))
 	t.Cleanup(upstream.Close)
 
-	for _, channelType := range []int{constant.ChannelTypeOpenAI, constant.ChannelTypeAdvancedCustom} {
+	for _, channelType := range []int{constant.ChannelTypeOpenAI, constant.ChannelTypeAdvancedCustom, constant.ChannelTypeSub2API, constant.ChannelTypeNewAPI} {
 		t.Run(strconv.Itoa(channelType), func(t *testing.T) {
 			channel := &model.Channel{Type: channelType, BaseURL: &upstream.URL}
 			if channelType == constant.ChannelTypeAdvancedCustom {
@@ -329,6 +359,12 @@ func TestChannelBalanceUsesChannelTLSSettings(t *testing.T) {
 				require.NoError(t, err)
 				assert.Equal(t, 10.0, result.Balance)
 				assert.Empty(t, result.RawResponse)
+			}
+			if channelType == constant.ChannelTypeSub2API || channelType == constant.ChannelTypeNewAPI {
+				ctx, cancel := context.WithCancel(t.Context())
+				cancel()
+				_, err := fetchChannelBalance(ctx, channel, "key-a", readChannelBalanceSettings(channel))
+				require.ErrorIs(t, err, context.Canceled)
 			}
 		})
 	}
@@ -379,4 +415,114 @@ func TestChannelKeysAreReadStalestFirst(t *testing.T) {
 	}
 
 	assert.Equal(t, []int{3, 1, 2, 0}, model.ChannelKeyReadOrder(channel.Id, keys))
+}
+
+func TestUpdateChannelNewAPIBalanceUsesTheSmallerRemainingQuota(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		usage   string
+		want    float64
+		wantErr string
+	}{
+		{name: "user quota below the key quota", usage: `{"code":true,"data":{"total_available":2000000,"unlimited_quota":false,"user_quota":{"total_available":500000}}}`, want: 0.5},
+		{name: "key quota below the user quota", usage: `{"code":true,"data":{"total_available":500000,"unlimited_quota":false,"user_quota":{"total_available":2000000}}}`, want: 0.5},
+		{name: "unlimited key uses the user quota", usage: `{"code":true,"data":{"total_available":0,"unlimited_quota":true,"user_quota":{"total_available":3000000}}}`, want: 3},
+		{name: "key quota alone without user quota", usage: `{"code":true,"data":{"total_available":1500000,"unlimited_quota":false}}`, want: 1.5},
+		{name: "negative owner balance is preserved", usage: `{"code":true,"data":{"total_available":1500000,"user_quota":{"total_available":-1000000}}}`, want: -1},
+		{name: "unlimited key without user quota", usage: `{"code":true,"data":{"total_available":0,"unlimited_quota":true}}`, wantErr: "Allow querying user quota"},
+		{name: "upstream rejects the key", usage: `{"success":false,"message":"invalid token"}`, wantErr: "invalid token"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			setupSub2APIBalanceTest(t)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/api/usage/token/":
+					assert.Equal(t, "Bearer sk-upstream", r.Header.Get("Authorization"))
+					_, _ = w.Write([]byte(tc.usage))
+				case "/api/status":
+					assert.Empty(t, r.Header.Get("Authorization"), "the key is not sent to the public status endpoint")
+					_, _ = w.Write([]byte(`{"success":true,"data":{"quota_per_unit":1000000}}`))
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			defer server.Close()
+			baseURL := server.URL + "/"
+			channel := &model.Channel{Type: constant.ChannelTypeNewAPI, BaseURL: &baseURL, Key: "sk-upstream", Name: "new-api-upstream"}
+			require.NoError(t, model.DB.Create(channel).Error)
+
+			result, err := updateChannelBalance(channel)
+			if tc.wantErr != "" {
+				require.ErrorContains(t, err, tc.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			assert.InDelta(t, tc.want, result.Balance, 1e-9)
+			assert.InDelta(t, tc.want, channel.Balance, 1e-9)
+		})
+	}
+}
+
+func TestSharedWalletMultiKeyBalanceRequiresUpstreamAccounts(t *testing.T) {
+	for _, dialect := range []struct{ kind, env string }{{"sqlite", ""}, {"mysql", "TEST_MYSQL_DSN"}, {"postgres", "TEST_POSTGRES_DSN"}} {
+		t.Run(dialect.kind, func(t *testing.T) {
+			if dialect.env != "" && os.Getenv(dialect.env) == "" {
+				t.Skip("set " + dialect.env + " to run this database")
+			}
+			database := modelManagementDB(t, dialect.kind, os.Getenv(dialect.env))
+			require.NoError(t, database.AutoMigrate(&model.ChannelKeyBalance{}, &model.UpstreamAccount{}, &model.UpstreamAccountChannel{}, &model.UpstreamAccountLog{}))
+			for _, channelType := range []int{constant.ChannelTypeNewAPI, constant.ChannelTypeSub2API} {
+				t.Run(strconv.Itoa(channelType), func(t *testing.T) {
+					var keyQueries atomic.Int32
+					server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+						switch r.URL.Path {
+						case "/api/usage/token/":
+							keyQueries.Add(1)
+							fmt.Fprint(w, `{"code":true,"data":{"unlimited_quota":true,"user_quota":{"total_available":1000}}}`)
+						case "/v1/usage":
+							keyQueries.Add(1)
+							fmt.Fprint(w, `{"remaining":10,"isValid":true}`)
+						case "/api/status":
+							fmt.Fprint(w, `{"success":true,"data":{"quota_per_unit":100}}`)
+						case "/api/user/self":
+							assert.Equal(t, "Bearer account-token", r.Header.Get("Authorization"))
+							fmt.Fprint(w, `{"success":true,"data":{"quota":1000}}`)
+						default:
+							http.NotFound(w, r)
+						}
+					}))
+					t.Cleanup(server.Close)
+					channel := &model.Channel{Type: channelType, Name: "shared wallet", Key: "key-a\nkey-b", BaseURL: &server.URL, Status: common.ChannelStatusEnabled, Balance: 7,
+						ChannelInfo: model.ChannelInfo{IsMultiKey: true, MultiKeySize: 2}}
+					require.NoError(t, database.Create(channel).Error)
+					refresh := func() channelKeyBalanceResponse {
+						recorder := httptest.NewRecorder()
+						ctx, _ := gin.CreateTestContext(recorder)
+						ctx.Request = httptest.NewRequest(http.MethodGet, "/api/channel/update_balance/"+strconv.Itoa(channel.Id), nil)
+						ctx.Params = gin.Params{{Key: "id", Value: strconv.Itoa(channel.Id)}}
+						UpdateChannelBalance(ctx)
+						var response channelKeyBalanceResponse
+						require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+						return response
+					}
+					response := refresh()
+					assert.False(t, response.Success)
+					assert.Contains(t, response.Message, "Bind upstream accounts")
+					assert.Zero(t, keyQueries.Load())
+					var stored model.Channel
+					require.NoError(t, database.First(&stored, channel.Id).Error)
+					assert.Equal(t, 7.0, stored.Balance, "rejecting an ambiguous sum preserves the previous balance")
+
+					account := &model.UpstreamAccount{Name: "shared account", BaseURL: server.URL, SiteType: model.UpstreamSiteTypeNewAPI, AuthType: model.UpstreamAuthTypeToken, Credential: "account-token"}
+					require.NoError(t, model.CreateUpstreamAccount(account))
+					require.NoError(t, model.BindUpstreamAccountChannel(account.Id, channel.Id))
+					require.NoError(t, database.Model(channel).Update("balance_source", model.ChannelBalanceSourceUpstream).Error)
+					response = refresh()
+					require.True(t, response.Success, response.Message)
+					assert.Equal(t, 10.0, response.Balance, "one bound wallet is counted once for both keys")
+					assert.Zero(t, keyQueries.Load(), "account bindings take precedence over querying individual keys")
+				})
+			}
+		})
+	}
 }

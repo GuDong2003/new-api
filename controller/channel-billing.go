@@ -295,9 +295,16 @@ func getDeepSeekBalanceUSD(response DeepSeekUsageResponse, usdExchangeRate float
 		if balance < 0 {
 			return 0, errors.New("USD balance must be non-negative")
 		}
-		return balance, nil
+		if balance > 0 {
+			return balance, nil
+		}
 	}
 	if cnyBalance == nil {
+		// An empty USD wallet is a valid balance. Only report a missing
+		// currency when the response carried neither USD nor CNY.
+		if usdBalance != nil {
+			return 0, nil
+		}
 		return 0, errors.New("currency USD or CNY not found")
 	}
 	if math.IsNaN(usdExchangeRate) || math.IsInf(usdExchangeRate, 0) {
@@ -405,6 +412,110 @@ func fetchChannelMoonshotBalance(ctx context.Context, key string, settings dto.C
 	availableBalanceCny := response.Data.AvailableBalance
 	availableBalanceUsd := decimal.NewFromFloat(availableBalanceCny).Div(decimal.NewFromFloat(operation_setting.Price)).InexactFloat64()
 	return availableBalanceUsd, nil
+}
+
+func fetchChannelSub2APIBalance(ctx context.Context, baseURL, key string, settings dto.ChannelSettings) (float64, error) {
+	if baseURL == "" {
+		return 0, errors.New("Sub2API channel is missing base_url")
+	}
+	url := fmt.Sprintf("%s/v1/usage", strings.TrimRight(baseURL, "/"))
+	body, err := GetResponseBody(ctx, "GET", url, settings, GetAuthHeader(key))
+	if err != nil {
+		return 0, err
+	}
+
+	type sub2apiUsageResponse struct {
+		Balance      *float64 `json:"balance"`
+		Remaining    *float64 `json:"remaining"`
+		IsValid      *bool    `json:"isValid"`
+		Subscription *struct {
+			DailyLimitUSD   *float64 `json:"daily_limit_usd"`
+			WeeklyLimitUSD  *float64 `json:"weekly_limit_usd"`
+			MonthlyLimitUSD *float64 `json:"monthly_limit_usd"`
+		} `json:"subscription"`
+	}
+	usage := sub2apiUsageResponse{}
+	if err := common.Unmarshal(body, &usage); err != nil {
+		return 0, err
+	}
+	if usage.IsValid != nil && !*usage.IsValid {
+		return 0, errors.New("Sub2API key is invalid (isValid=false)")
+	}
+
+	balance := usage.Remaining
+	if balance == nil {
+		balance = usage.Balance
+	}
+	if balance == nil {
+		return 0, errors.New("Sub2API /v1/usage response is missing remaining and balance fields (the key may belong to a subscription group without an available balance)")
+	}
+	// Sub2API reports remaining=-1 for a subscription group with no daily, weekly,
+	// or monthly limit. A wallet balance can legitimately be negative, so detect
+	// the unlimited case from the subscription limits rather than the value.
+	subscription := usage.Subscription
+	if subscription != nil && subscription.DailyLimitUSD == nil && subscription.WeeklyLimitUSD == nil && subscription.MonthlyLimitUSD == nil {
+		return 0, errors.New("Sub2API /v1/usage reports an unlimited subscription without a finite balance")
+	}
+	return *balance, nil
+}
+
+// fetchChannelNewAPIBalance reads the upstream key's remaining quota. When the
+// upstream also returns its owner's quota, the smaller of the two is what the
+// key can still spend. Quota converts to USD with the upstream's quota_per_unit.
+func fetchChannelNewAPIBalance(ctx context.Context, baseURL, key string, settings dto.ChannelSettings) (float64, error) {
+	baseURL = strings.TrimRight(baseURL, "/")
+	if baseURL == "" {
+		return 0, errors.New("New API channel is missing base_url")
+	}
+	body, err := GetResponseBody(ctx, "GET", baseURL+"/api/usage/token/", settings, GetAuthHeader(key))
+	if err != nil {
+		return 0, err
+	}
+	var usage struct {
+		Code    bool   `json:"code"`
+		Message string `json:"message"`
+		Data    struct {
+			TotalAvailable float64 `json:"total_available"`
+			UnlimitedQuota bool    `json:"unlimited_quota"`
+			UserQuota      *struct {
+				TotalAvailable float64 `json:"total_available"`
+			} `json:"user_quota"`
+		} `json:"data"`
+	}
+	if err := common.Unmarshal(body, &usage); err != nil {
+		return 0, err
+	}
+	if !usage.Code {
+		return 0, fmt.Errorf("New API usage query failed: %s", usage.Message)
+	}
+	remaining := usage.Data.TotalAvailable
+	if usage.Data.UnlimitedQuota {
+		remaining = math.Inf(1)
+	}
+	if userQuota := usage.Data.UserQuota; userQuota != nil {
+		remaining = min(remaining, userQuota.TotalAvailable)
+	}
+	if math.IsInf(remaining, 1) {
+		return 0, common.NewMessage(`The upstream key has unlimited quota. Turn on "Allow querying user quota" for this key on the upstream to see the real balance.`)
+	}
+
+	body, err = GetResponseBody(ctx, "GET", baseURL+"/api/status", settings, nil)
+	if err != nil {
+		return 0, err
+	}
+	var status struct {
+		Data struct {
+			QuotaPerUnit float64 `json:"quota_per_unit"`
+		} `json:"data"`
+	}
+	if err := common.Unmarshal(body, &status); err != nil {
+		return 0, err
+	}
+	if status.Data.QuotaPerUnit <= 0 {
+		return 0, errors.New("New API /api/status response is missing quota_per_unit")
+	}
+	balance := remaining / status.Data.QuotaPerUnit
+	return balance, nil
 }
 
 func fetchAdvancedCustomBalance(ctx context.Context, channel *model.Channel, key string, settings channelBalanceSettings) (channelBalanceResult, error) {
@@ -574,6 +685,11 @@ const (
 // channel and saves them with their total. The channel must be loaded with
 // its keys.
 func refreshChannelKeyBalances(channel *model.Channel) (*channelKeyBalanceRefresh, error) {
+	// Different keys can report the same wallet, so their balances cannot be summed.
+	// The caller handles explicitly bound upstream accounts before reaching this path.
+	if channel.Type == constant.ChannelTypeNewAPI || channel.Type == constant.ChannelTypeSub2API {
+		return nil, common.NewMessage("Multi-key channels may share an upstream balance. Bind upstream accounts to query their balance.")
+	}
 	keys := channel.GetKeys()
 	if len(keys) == 0 {
 		return nil, common.NewMessage("The channel has no keys available for balance queries")
@@ -684,6 +800,10 @@ func fetchStandardChannelBalance(ctx context.Context, channel *model.Channel, ke
 		return fetchChannelOpenRouterBalance(ctx, key, settings)
 	case constant.ChannelTypeMoonshot:
 		return fetchChannelMoonshotBalance(ctx, key, settings)
+	case constant.ChannelTypeSub2API:
+		return fetchChannelSub2APIBalance(ctx, baseURL, key, settings)
+	case constant.ChannelTypeNewAPI:
+		return fetchChannelNewAPIBalance(ctx, baseURL, key, settings)
 	default:
 		return 0, errChannelBalanceUnsupported
 	}

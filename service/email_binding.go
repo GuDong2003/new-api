@@ -54,7 +54,7 @@ func ValidateAccountEmail(email string) (string, error) {
 	return email, nil
 }
 
-func StartEmailBinding(identity AuthIdentity, authorization *model.AuthFlowAuthorization, email, lang string) (*EmailBindingData, error) {
+func StartEmailBinding(identity AuthIdentity, authorization *model.AuthFlowAuthorization, email string, lang string) (*EmailBindingData, error) {
 	email, err := ValidateAccountEmail(email)
 	if err != nil {
 		return nil, err
@@ -88,12 +88,12 @@ func StartEmailBinding(identity AuthIdentity, authorization *model.AuthFlowAutho
 	}
 	data := emailBindingData(token, flow, &state)
 	if state.CurrentEmail != "" && !requireOld {
-		data.NotificationWarning = NotifyAccountSecurityChange(lang, state.CurrentEmail, i18n.MsgAccountSecurityEmailChangeRequested) != nil
+		data.NotificationWarning = NotifyAccountSecurityChange(lang, state.CurrentEmail, i18n.MsgSecurityEventEmailChangeRequested) != nil
 	}
 	return data, nil
 }
 
-func ResendAccountEmailBinding(identity AuthIdentity, token, lang string) (*EmailBindingData, error) {
+func ResendAccountEmailBinding(identity AuthIdentity, token string, lang string) (*EmailBindingData, error) {
 	_, state, err := model.GetEmailBinding(identity, token)
 	if err != nil {
 		return nil, err
@@ -180,12 +180,19 @@ func generateEmailBindingCodes(requireOld bool) (emailBindingCodes, error) {
 
 func sendEmailBindingCodes(lang string, state model.EmailBindingState, codes emailBindingCodes) error {
 	subject := i18n.Translate(lang, i18n.MsgEmailBindingSubject, map[string]any{"SystemName": common.SystemName})
-	content := i18n.Translate(lang, i18n.MsgEmailBindingNewAddress, map[string]any{"Code": html.EscapeString(codes.New)})
+	minutes := map[string]any{"Minutes": int(model.EmailBindingTTL / time.Minute)}
+	content := fmt.Sprintf("<p>%s</p><p>%s</p><p>%s</p>",
+		i18n.Translate(lang, i18n.MsgEmailBindingNewIntro),
+		i18n.Translate(lang, i18n.MsgEmailBindingCode, map[string]any{"Code": html.EscapeString(codes.New)}),
+		i18n.Translate(lang, i18n.MsgEmailBindingNewValidity, minutes))
 	if err := common.SendEmail(subject, state.Email, content); err != nil {
 		return err
 	}
 	if codes.Old != "" {
-		content = i18n.Translate(lang, i18n.MsgEmailBindingCurrentAddress, map[string]any{"Code": html.EscapeString(codes.Old)})
+		content = fmt.Sprintf("<p>%s</p><p>%s</p><p>%s</p>",
+			i18n.Translate(lang, i18n.MsgEmailBindingOldIntro),
+			i18n.Translate(lang, i18n.MsgEmailBindingCode, map[string]any{"Code": html.EscapeString(codes.Old)}),
+			i18n.Translate(lang, i18n.MsgEmailBindingOldValidity, minutes))
 		return common.SendEmail(subject, state.CurrentEmail, content)
 	}
 	return nil

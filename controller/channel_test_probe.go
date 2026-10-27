@@ -177,11 +177,15 @@ func configureChannelProbeRequest(request dto.Request, testType string, stream b
 		"properties": map[string]any{"message": map[string]any{"type": "string", "enum": []string{"ping"}}},
 		"required":   []string{"message"}, "additionalProperties": false,
 	}
+	parametersJSON, err := common.Marshal(parameters)
+	if err != nil {
+		return err
+	}
 	switch req := request.(type) {
 	case *dto.GeneralOpenAIRequest:
 		req.Messages = []dto.Message{{Role: "user", Content: channelTestToolMessage}}
 		req.Tools = []dto.ToolCallRequest{{Type: "function", Function: dto.FunctionRequest{
-			Name: channelTestToolName, Description: "Echo the probe message to verify tool calling.", Parameters: parameters,
+			Name: channelTestToolName, Description: "Echo the probe message to verify tool calling.", Parameters: parametersJSON,
 		}}}
 		req.ToolChoice = "auto"
 		if req.MaxCompletionTokens != nil {
@@ -214,7 +218,7 @@ func configureChannelProbeRequest(request dto.Request, testType string, stream b
 		// the tool is declared with Claude's own schema field.
 		req.Messages = []dto.ClaudeMessage{{Role: "user", Content: channelTestToolMessage}}
 		req.Tools = []dto.Tool{{
-			Name: channelTestToolName, Description: "Echo the probe message to verify tool calling.", InputSchema: parameters,
+			Name: channelTestToolName, Description: "Echo the probe message to verify tool calling.", InputSchema: parametersJSON,
 		}}
 		req.ToolChoice = map[string]any{"type": "auto"}
 		limit := uint(1024)

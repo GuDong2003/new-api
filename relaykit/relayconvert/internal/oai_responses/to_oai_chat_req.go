@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 
@@ -382,13 +383,17 @@ func responsesRequestToolsToChat(raw json.RawMessage) ([]dto.ToolCallRequest, er
 		return nil, nil
 	}
 
-	var tools []map[string]any
+	var tools []json.RawMessage
 	if err := kitutil.Unmarshal(raw, &tools); err != nil {
 		return nil, fmt.Errorf("invalid tools: %w", err)
 	}
 
 	out := make([]dto.ToolCallRequest, 0, len(tools))
-	for _, tool := range tools {
+	for _, rawTool := range tools {
+		var tool map[string]any
+		if err := kitutil.Unmarshal(rawTool, &tool); err != nil {
+			return nil, fmt.Errorf("invalid tools: %w", err)
+		}
 		toolType := strings.TrimSpace(kitutil.Interface2String(tool["type"]))
 		if toolType == "function" {
 			out = append(out, dto.ToolCallRequest{
@@ -396,16 +401,12 @@ func responsesRequestToolsToChat(raw json.RawMessage) ([]dto.ToolCallRequest, er
 				Function: dto.FunctionRequest{
 					Name:        strings.TrimSpace(kitutil.Interface2String(tool["name"])),
 					Description: kitutil.Interface2String(tool["description"]),
-					Parameters:  tool["parameters"],
+					Parameters:  kitutil.ObjectMember(rawTool, "parameters"),
 				},
 			})
 			continue
 		}
 
-		rawTool, err := kitutil.Marshal(tool)
-		if err != nil {
-			return nil, err
-		}
 		out = append(out, dto.ToolCallRequest{
 			Type:   toolType,
 			Custom: rawTool,
@@ -469,11 +470,8 @@ func responsesRequestTextToChatResponseFormat(raw json.RawMessage) (*dto.Respons
 
 	out := &dto.ResponseFormat{Type: formatType}
 	if formatType == "json_schema" {
-		schemaRaw, err := kitutil.Marshal(format)
-		if err != nil {
-			return nil, err
-		}
-		out.JsonSchema = schemaRaw
+		// The client's bytes keep the schema's property order.
+		out.JsonSchema = kitutil.ObjectMember(raw, "format")
 	}
 	return out, nil
 }
@@ -483,33 +481,32 @@ func RequestTextToChatResponseFormat(raw json.RawMessage) (*dto.ResponseFormat, 
 }
 
 func responsesImagePartToChatImageURL(part map[string]any) any {
-	detail, hasDetail := part["detail"]
-	if imageURL, ok := part["image_url"]; ok {
-		if imageURLMap, ok := imageURL.(map[string]any); ok {
-			imageURLCopy := make(map[string]any, len(imageURLMap)+1)
-			for key, value := range imageURLMap {
-				imageURLCopy[key] = value
-			}
-			if _, hasImageURLDetail := imageURLCopy["detail"]; !hasImageURLDetail && hasDetail {
-				imageURLCopy["detail"] = detail
-			}
-			return imageURLCopy
-		}
-
-		imageURLPayload := map[string]any{"url": imageURL}
-		if hasDetail {
-			imageURLPayload["detail"] = detail
-		}
-		return imageURLPayload
-	}
 	imageURL := map[string]any{}
-	for _, key := range []string{"url", "file_id", "detail"} {
-		if value, ok := part[key]; ok {
-			imageURL[key] = value
+	if value, ok := part["image_url"]; ok {
+		if fields, ok := value.(map[string]any); ok {
+			maps.Copy(imageURL, fields)
+		} else {
+			imageURL["url"] = value
+		}
+	} else {
+		for _, key := range []string{"url", "file_id"} {
+			if value, ok := part[key]; ok {
+				imageURL[key] = value
+			}
 		}
 	}
 	if len(imageURL) == 0 {
 		return part
+	}
+	if _, hasDetail := imageURL["detail"]; !hasDetail {
+		imageURL["detail"] = part["detail"]
+	}
+	// Preserve Chat's supported detail values while omitting Responses-only
+	// values such as "original", which strict Chat upstreams reject.
+	switch imageURL["detail"] {
+	case "auto", "low", "high":
+	default:
+		delete(imageURL, "detail")
 	}
 	return imageURL
 }

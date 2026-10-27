@@ -41,7 +41,7 @@ export function getRedemptionFormSchema(t: TFunction) {
         .min(REDEMPTION_VALIDATION.NAME_MIN_LENGTH, msg.NAME_LENGTH_INVALID)
         .max(REDEMPTION_VALIDATION.NAME_MAX_LENGTH, msg.NAME_LENGTH_INVALID),
       quota_dollars: z.number().min(0, t('Quota must be a positive number')),
-      expired_time: z.date().optional(),
+      expired_time: z.date().nullable(),
       // Checked below only for one-time codes; a shared code is one code
       count: z.number().optional(),
       kind: z.enum(['one_time', 'shared']),
@@ -94,7 +94,7 @@ export type RedemptionKind = 'one_time' | 'shared'
 export type RedemptionFormValues = {
   name: string
   quota_dollars: number
-  expired_time?: Date
+  expired_time: Date | null
   count?: number
   kind: RedemptionKind
   batch_one_per_user: boolean
@@ -109,7 +109,7 @@ export type RedemptionFormValues = {
 export const REDEMPTION_FORM_DEFAULT_VALUES: RedemptionFormValues = {
   name: '',
   quota_dollars: 10,
-  expired_time: undefined,
+  expired_time: null,
   count: 1,
   kind: 'one_time',
   batch_one_per_user: true,
@@ -154,7 +154,7 @@ export function transformRedemptionToFormDefaults(
     expired_time:
       redemption.expired_time > 0
         ? new Date(redemption.expired_time * 1000)
-        : undefined,
+        : null,
     count: 1,
     kind: isSharedRedemption(redemption) ? 'shared' : 'one_time',
     batch_one_per_user: redemption.batch_one_per_user,

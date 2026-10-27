@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
@@ -108,4 +109,24 @@ func TestSmokeTestExprRejectsTaskUsageWithoutSchema(t *testing.T) {
 	assert.ErrorContains(t, err, "no task plugin usage schema")
 
 	require.NoError(t, SmokeTestExpr(`tier("base", p * 2 + c * 8)`))
+}
+
+func TestSmokeTestOpenAI12HourCachePreset(t *testing.T) {
+	expression := `len <= 272000 ? tier("0_272k", p * 1 + cr * 0.05 + cc * 1.25 + cc12h * 2.5 + c * 5) : tier("272k_plus", p * 2 + cr * 0.1 + cc * 2.5 + cc12h * 5 + c * 7.5)`
+	require.NoError(t, SmokeTestExpr(expression))
+	for _, tc := range []struct {
+		name   string
+		tokens billingexpr.TokenParams
+		want   float64
+	}{
+		{"zero usage preview", billingexpr.TokenParams{}, 0},
+		{"context boundary", billingexpr.TokenParams{P: 1000, C: 100, Len: 272000, CC12h: 200}, 2000},
+		{"long context", billingexpr.TokenParams{P: 1000, C: 100, Len: 272001, CC12h: 200}, 3750},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cost, _, err := billingexpr.RunExpr(expression, tc.tokens)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, cost)
+		})
+	}
 }

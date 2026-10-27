@@ -446,7 +446,12 @@ export type OperationsSettings = {
   DefaultCollapseSidebar: boolean
   DemoSiteEnabled: boolean
   SelfUseModeEnabled: boolean
+  QuotaRemindEnabled: boolean
   QuotaRemindThreshold: string
+  EmailProvider: 'smtp' | 'resend'
+  ResendApiKey: string
+  ResendKeyConfigured: boolean
+  ResendFrom: string
   SMTPServer: string
   SMTPPort: string
   SMTPAccount: string
@@ -460,6 +465,8 @@ export type OperationsSettings = {
   WorkerValidKey: string
   WorkerAllowHttpImageRequestEnabled: boolean
   LogConsumeEnabled: boolean
+  'log_setting.user_export_enabled': boolean
+  'log_setting.max_range_days': number
   'performance_setting.disk_cache_enabled': boolean
   'performance_setting.disk_cache_threshold_mb': number
   'performance_setting.disk_cache_max_size_mb': number
@@ -549,6 +556,7 @@ export type UpstreamConfig = {
 }
 
 export type FetchUpstreamRatiosRequest = {
+  include_unchanged?: boolean
   upstreams: UpstreamConfig[]
   timeout: number
 }

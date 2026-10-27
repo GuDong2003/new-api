@@ -242,7 +242,16 @@ func ModelRequestRateLimit() func(c *gin.Context) {
 		userSetting, _ := common.GetContextKeyType[dto.UserSetting](c, constant.ContextKeyUserSetting)
 		limit := service.RequestRateLimitFor(userSetting, tokenGroup, userGroup)
 
-		scopes := []requestRateLimitScope{userRequestRateLimitScope(userId, limit)}
+		userScope := userRequestRateLimitScope(userId, limit)
+		if userSetting.RateLimit == nil {
+			for _, group := range []string{tokenGroup, userGroup} {
+				if _, _, found := setting.GetGroupRateLimit(group); found {
+					userScope.key += ":" + group
+					break
+				}
+			}
+		}
+		scopes := []requestRateLimitScope{userScope}
 		if setting.ModelRequestRateLimitEnabled {
 			scopes = append(scopes, globalRequestRateLimitScope())
 		}

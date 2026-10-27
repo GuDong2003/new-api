@@ -5,7 +5,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
+	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/gin-gonic/gin"
@@ -39,4 +41,16 @@ func TestDecideRelayRetryAfterResponseWritten(t *testing.T) {
 	unwrittenContext, _ := gin.CreateTestContext(httptest.NewRecorder())
 	require.False(t, unwrittenContext.Writer.Written())
 	require.Equal(t, "retry", decideRelayRetry(unwrittenContext, retryableError, 1).Action)
+
+	heartbeatContext, _ := gin.CreateTestContext(httptest.NewRecorder())
+	heartbeatContext.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	_, err = heartbeatContext.Writer.WriteString(": PING\n\n")
+	require.NoError(t, err)
+	stopKeepAlive := helper.StartStreamKeepAlive(heartbeatContext, time.Hour)
+	defer stopKeepAlive()
+	require.True(t, heartbeatContext.Writer.Written())
+	require.Equal(t, "retry", decideRelayRetry(heartbeatContext, retryableError, 1).Action)
+	_, err = heartbeatContext.Writer.WriteString("data: partial response\n\n")
+	require.NoError(t, err)
+	require.Equal(t, "stop", decideRelayRetry(heartbeatContext, retryableError, 1).Action)
 }

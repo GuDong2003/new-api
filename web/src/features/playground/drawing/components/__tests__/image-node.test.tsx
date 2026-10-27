@@ -97,11 +97,11 @@ describe('Canvas image result', () => {
   // saved under.
   async function downloadedName(node: DrawingNode) {
     const saved: string[] = []
-    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(
-      function (this: HTMLAnchorElement) {
-        saved.push(this.download)
-      }
-    )
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (
+      this: HTMLAnchorElement
+    ) {
+      saved.push(this.download)
+    })
     vi.stubGlobal(
       'URL',
       class extends URL {

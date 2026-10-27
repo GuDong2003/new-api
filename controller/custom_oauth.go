@@ -547,7 +547,7 @@ func UnbindCustomOAuth(c *gin.Context) {
 		writeSecurityOperationError(c, err)
 		return
 	}
-	notificationFailed = service.NotifyAccountSecurityChange(i18n.StatedLang(c), user.Email, i18n.MsgAccountSecurityLoginUnlinked) != nil
+	notificationFailed = service.NotifyAccountSecurityChange(service.AccountMailLanguage(c, user.Id), user.Email, i18n.MsgSecurityEventLoginUnlinked) != nil
 
 	common.ApiSuccessT(c, "Unbound successfully", gin.H{"notification_warning": notificationFailed})
 }

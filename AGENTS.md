@@ -173,6 +173,8 @@ Tasks that touch none of these (for example unrelated frontend work, authenticat
 
 ### Project Governance
 
+**Upstream synchronization:** When merging updates from `QuantumNous/new-api`, synchronize both `GuDong2003/new-api-private` and the public fork `GuDong2003/new-api` to the same upstream commit. Merge and verify each repository against its own history and retain its own customizations. Keep private-only changes in the private repository. Report the resulting commit and verification status for both repositories.
+
 **Protected project information:** The following project-related information is strictly protected and MUST NOT be modified, deleted, replaced, or removed under any circumstances:
 
 - Any references, mentions, branding, metadata, or attributions related to **nеw-аρi** (the project name/identity)
