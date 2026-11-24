@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"bytes"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/Calcium-Ion/go-epay/epay"
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
@@ -273,7 +275,19 @@ func assertEpayCallbacksVerifyBeforeSettlement(t *testing.T, cases []epayCallbac
 			pendingLocation:  "https://dashboard.example.com/wallet?pay=pending",
 		},
 	}
+	var logs bytes.Buffer
+	common.LogWriterMu.Lock()
+	previousLogWriter, previousInfoWriter, previousErrorWriter := common.LogWriter, gin.DefaultWriter, gin.DefaultErrorWriter
+	common.LogWriter, gin.DefaultWriter, gin.DefaultErrorWriter = &logs, &logs, &logs
+	common.LogWriterMu.Unlock()
+	t.Cleanup(func() {
+		common.LogWriterMu.Lock()
+		common.LogWriter, gin.DefaultWriter, gin.DefaultErrorWriter = previousLogWriter, previousInfoWriter, previousErrorWriter
+		common.LogWriterMu.Unlock()
+	})
+
 	router := gin.New()
+	middleware.SetUpLogger(router)
 	for _, endpoint := range endpoints {
 		router.Any(endpoint.path, endpoint.handler)
 	}
@@ -305,6 +319,10 @@ func assertEpayCallbacksVerifyBeforeSettlement(t *testing.T, cases []epayCallbac
 			}
 		}
 	}
+	assert.Contains(t, logs.String(), "method=GET")
+	assert.NotContains(t, logs.String(), "sign=")
+	assert.NotContains(t, logs.String(), "out_trade_no=")
+	assert.NotContains(t, logs.String(), "params=")
 }
 
 // newEpayRSAKeyPairForTest returns a throwaway key pair as single-line Base64
@@ -405,6 +423,12 @@ func TestEpayRSAModeSignsOrdersAndVerifiesCallbacks(t *testing.T) {
 	}
 	paid, err := platform.SignParams(paidFields)
 	require.NoError(t, err)
+	otherPartnerConfig := *platform.Config
+	otherPartnerConfig.PartnerID = "other-merchant"
+	otherPartner, err := epay.NewClient(&otherPartnerConfig, "https://pay.example.com")
+	require.NoError(t, err)
+	wrongPartner, err := otherPartner.SignParams(paidFields)
+	require.NoError(t, err)
 	tampered := maps.Clone(paid)
 	tampered["money"] = "100.00"
 	merchantSigned, err := client.SignParams(paidFields)
@@ -418,6 +442,7 @@ func TestEpayRSAModeSignsOrdersAndVerifiesCallbacks(t *testing.T) {
 
 	assertEpayCallbacksVerifyBeforeSettlement(t, []epayCallbackCase{
 		{name: "valid pending signed by platform", params: pending, validPending: true},
+		{name: "callback for another merchant", params: wrongPartner},
 		{name: "tampered amount", params: tampered},
 		{name: "signed with merchant key", params: merchantSigned},
 		{name: "MD5 signature in RSA mode", params: md5Signed},

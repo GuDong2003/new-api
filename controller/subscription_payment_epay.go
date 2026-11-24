@@ -153,7 +153,7 @@ func SubscriptionEpayNotify(c *gin.Context) {
 		return
 	}
 	if !epayCallbackPartnerMatches(client, params) {
-		logger.LogWarn(c.Request.Context(), common.LogText("Epay webhook partner id mismatch path=%q client_ip=%s callback_pid=%q", c.Request.RequestURI, c.ClientIP(), params["pid"]))
+		logger.LogWarn(c.Request.Context(), common.LogText("Epay webhook partner id mismatch path=%q client_ip=%s callback_pid=%q", c.Request.URL.Path, c.ClientIP(), params["pid"]))
 		_, _ = c.Writer.Write([]byte("fail"))
 		return
 	}
@@ -213,7 +213,7 @@ func SubscriptionEpayReturn(c *gin.Context) {
 		return
 	}
 	if !epayCallbackPartnerMatches(client, params) {
-		logger.LogWarn(c.Request.Context(), common.LogText("Epay webhook partner id mismatch path=%q client_ip=%s callback_pid=%q", c.Request.RequestURI, c.ClientIP(), params["pid"]))
+		logger.LogWarn(c.Request.Context(), common.LogText("Epay webhook partner id mismatch path=%q client_ip=%s callback_pid=%q", c.Request.URL.Path, c.ClientIP(), params["pid"]))
 		c.Redirect(http.StatusFound, paymentReturnPath("/wallet?pay=fail"))
 		return
 	}
