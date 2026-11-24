@@ -48,17 +48,22 @@ const MIN_PREFIX_COLLAPSE_LENGTH = 2000
 const MIN_REPEATED_SECTION_COUNT = 3
 const SECTION_HEADING_LINE_PATTERN = /^#{2,6}\s+\d+\.\s+.+$/gm
 
-function getUserStorageKey(key: string): string | null {
+function getUserStorageKey(
+  key: string,
+  userId = useAuthStore.getState().auth.user?.id ?? null
+): string | null {
   // Legacy data has no owner; never assign it to the next signed-in account.
   for (const legacyKey of Object.values(STORAGE_KEYS)) {
     localStorage.removeItem(legacyKey)
   }
-  const userId = useAuthStore.getState().auth.user?.id
   return userId == null ? null : `${key}:${userId}`
 }
 
-function readStoredValue(baseKey: string): unknown | null {
-  const key = getUserStorageKey(baseKey)
+function readStoredValue(
+  baseKey: string,
+  userId?: number | null
+): unknown | null {
+  const key = getUserStorageKey(baseKey, userId)
   if (!key) return null
   const saved = localStorage.getItem(key)
   if (!saved) return null
@@ -66,8 +71,8 @@ function readStoredValue(baseKey: string): unknown | null {
   return JSON.parse(saved) as unknown
 }
 
-function readStoredMessagesValue(): unknown | null {
-  const key = getUserStorageKey(STORAGE_KEYS.MESSAGES)
+function readStoredMessagesValue(userId?: number | null): unknown | null {
+  const key = getUserStorageKey(STORAGE_KEYS.MESSAGES, userId)
   if (!key) return null
   const saved = localStorage.getItem(key)
   if (!saved) return null
@@ -92,8 +97,12 @@ function unwrapStoredValue(value: unknown): unknown {
   return value
 }
 
-function writeStoredValue<T>(baseKey: string, data: T): void {
-  const key = getUserStorageKey(baseKey)
+function writeStoredValue<T>(
+  baseKey: string,
+  data: T,
+  userId?: number | null
+): void {
+  const key = getUserStorageKey(baseKey, userId)
   if (!key) return
   const payload: StoredEnvelope<T> = {
     version: STORAGE_VERSION,
@@ -295,9 +304,9 @@ function trimMessagesByContentSize(messages: Message[]): Message[] {
 /**
  * Load playground config from localStorage
  */
-export function loadConfig(): Partial<PlaygroundConfig> {
+export function loadConfig(userId?: number | null): Partial<PlaygroundConfig> {
   try {
-    const saved = readStoredValue(STORAGE_KEYS.CONFIG)
+    const saved = readStoredValue(STORAGE_KEYS.CONFIG, userId)
     if (!saved) return {}
 
     return playgroundConfigSchema.parse(unwrapStoredValue(saved))
@@ -311,10 +320,13 @@ export function loadConfig(): Partial<PlaygroundConfig> {
 /**
  * Save playground config to localStorage
  */
-export function saveConfig(config: Partial<PlaygroundConfig>): void {
+export function saveConfig(
+  config: Partial<PlaygroundConfig>,
+  userId?: number | null
+): void {
   try {
     const parsed = playgroundConfigSchema.parse(config)
-    writeStoredValue(STORAGE_KEYS.CONFIG, parsed)
+    writeStoredValue(STORAGE_KEYS.CONFIG, parsed, userId)
   } catch (error) {
     // eslint-disable-next-line no-console
     console.error('Failed to save config:', error)
@@ -324,9 +336,11 @@ export function saveConfig(config: Partial<PlaygroundConfig>): void {
 /**
  * Load parameter enabled state from localStorage
  */
-export function loadParameterEnabled(): Partial<ParameterEnabled> {
+export function loadParameterEnabled(
+  userId?: number | null
+): Partial<ParameterEnabled> {
   try {
-    const saved = readStoredValue(STORAGE_KEYS.PARAMETER_ENABLED)
+    const saved = readStoredValue(STORAGE_KEYS.PARAMETER_ENABLED, userId)
     if (!saved) return {}
 
     return parameterEnabledSchema.parse(unwrapStoredValue(saved))
@@ -341,11 +355,12 @@ export function loadParameterEnabled(): Partial<ParameterEnabled> {
  * Save parameter enabled state to localStorage
  */
 export function saveParameterEnabled(
-  parameterEnabled: Partial<ParameterEnabled>
+  parameterEnabled: Partial<ParameterEnabled>,
+  userId?: number | null
 ): void {
   try {
     const parsed = parameterEnabledSchema.parse(parameterEnabled)
-    writeStoredValue(STORAGE_KEYS.PARAMETER_ENABLED, parsed)
+    writeStoredValue(STORAGE_KEYS.PARAMETER_ENABLED, parsed, userId)
   } catch (error) {
     // eslint-disable-next-line no-console
     console.error('Failed to save parameter enabled:', error)
@@ -355,9 +370,9 @@ export function saveParameterEnabled(
 /**
  * Load messages from localStorage
  */
-export function loadMessages(): Message[] | null {
+export function loadMessages(userId?: number | null): Message[] | null {
   try {
-    const saved = readStoredMessagesValue()
+    const saved = readStoredMessagesValue(userId)
     if (!saved) return null
 
     const parsed = messagesSchema.parse(unwrapStoredValue(saved)) as Message[]
@@ -375,7 +390,7 @@ export function loadMessages(): Message[] | null {
       sizeTrimmed !== trimmed ||
       sanitized !== sizeTrimmed
     ) {
-      saveMessages(sanitized)
+      saveMessages(sanitized, userId)
     }
 
     return sanitized
@@ -389,11 +404,14 @@ export function loadMessages(): Message[] | null {
 /**
  * Save messages to localStorage
  */
-export function saveMessages(messages: Message[]): void {
+export function saveMessages(
+  messages: Message[],
+  userId?: number | null
+): void {
   try {
     const trimmed = trimMessages(messages)
     const parsed = messagesSchema.parse(trimmed) as Message[]
-    writeStoredValue(STORAGE_KEYS.MESSAGES, parsed)
+    writeStoredValue(STORAGE_KEYS.MESSAGES, parsed, userId)
   } catch (error) {
     // eslint-disable-next-line no-console
     console.error('Failed to save messages:', error)

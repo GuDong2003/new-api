@@ -270,11 +270,11 @@ export function ContentAuditRecords() {
       setSelection({})
       navigate({
         to: '/content-audit',
-        search: (previous) => ({
-          ...previous,
+        search: {
+          ...search,
           page: next.pageSize === filters.page_size ? next.pageIndex + 1 : 1,
           page_size: next.pageSize,
-        }),
+        },
       })
     },
   })

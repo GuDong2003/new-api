@@ -16,6 +16,7 @@ func useLimiterMiniRedis(t *testing.T) (*miniredis.Miniredis, *redis.Client) {
 
 	redisServer := miniredis.RunT(t)
 	redisServer.SetTime(time.Unix(1700000000, 0))
+	redisServer.SetTime(time.Unix(1700000000, 0))
 	redisClient := redis.NewClient(&redis.Options{Addr: redisServer.Addr()})
 	require.NoError(t, redisClient.Ping(context.Background()).Err())
 

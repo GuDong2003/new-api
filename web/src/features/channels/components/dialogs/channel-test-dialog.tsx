@@ -54,10 +54,12 @@ import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
 import { handleServerError } from '@/lib/handle-server-error'
 
 import { updateChannel } from '../../api'
+import { CHANNEL_TYPE_TASK_PLUGIN } from '../../constants'
 import {
   type ChannelProbeRunPatch,
   useChannelProbes,
 } from '../../hooks/use-channel-probes'
+import { useTaskPluginOption } from '../../hooks/use-task-plugin-option'
 import { channelsQueryKeys } from '../../lib/channel-actions'
 import {
   CHANNEL_PROBES,
@@ -68,6 +70,7 @@ import {
   type ChannelProbeId,
   type ChannelProbeJob,
 } from '../../lib/channel-test'
+import { parseChannelSettings } from '../../lib/channel-utils'
 import type {
   Channel,
   GetChannelsResponse,
@@ -104,6 +107,11 @@ function ChannelTestDialogContent(props: {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const { copyToClipboard } = useCopyToClipboard()
+  const plugin = useTaskPluginOption(
+    props.channel.type === CHANNEL_TYPE_TASK_PLUGIN
+      ? parseChannelSettings(props.channel.setting)?.task_plugin_key
+      : undefined
+  )
   const [selectedProbes, setSelectedProbes] = useState<ChannelProbeId[]>(() =>
     CHANNEL_PROBES.map((probe) => probe.id)
   )
@@ -405,6 +413,7 @@ function ChannelTestDialogContent(props: {
             </DialogClose>
           </DialogHeader>
           <ChannelTestControls
+            allowedPaths={plugin?.relayPaths ?? undefined}
             selected={selectedProbes}
             onSelectedChange={setSelectedProbes}
             endpoint={endpoint}

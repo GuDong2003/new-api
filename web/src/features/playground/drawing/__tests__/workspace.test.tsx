@@ -26,6 +26,7 @@ import {
 import {
   act,
   cleanup,
+  fireEvent,
   render,
   screen,
   waitFor,
@@ -183,7 +184,105 @@ describe('Drawing workspace', () => {
       'Redo',
       'separator',
     ])
+    expect(
+      within(toolbar).queryByRole('button', { name: /Add images/ })
+    ).not.toBeInTheDocument()
     view.unmount()
+  })
+
+  describe('canvas image uploads', () => {
+    const imageBytes = Uint8Array.from(
+      atob(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aKn0AAAAASUVORK5CYII='
+      ),
+      (character) => character.charCodeAt(0)
+    )
+
+    beforeEach(() => {
+      // jsdom cannot decode images. Keep file reading and canvas imports real.
+      vi.stubGlobal('Image', function () {
+        const image = document.createElement('img')
+        Object.defineProperties(image, {
+          naturalWidth: { value: 1 },
+          naturalHeight: { value: 1 },
+          src: {
+            set(value: string) {
+              image.setAttribute('src', value)
+              queueMicrotask(() => image.dispatchEvent(new Event('load')))
+            },
+          },
+        })
+        return image
+      })
+    })
+
+    it('imports files picked in the empty canvas without selecting references', async () => {
+      const { view } = renderWorkspace(801)
+      await screen.findByText('Room for every idea')
+      const canvas = screen.getByLabelText('Image canvas')
+      const upload = within(canvas).getByRole('button', {
+        name: 'Upload images',
+      })
+      expect(upload).toBeEnabled()
+      const input = within(canvas).getByLabelText('Upload images', {
+        selector: 'input',
+      })
+      const file = new File([imageBytes], 'canvas.png', { type: 'image/png' })
+
+      await userEvent.click(upload)
+      await userEvent.upload(input as HTMLInputElement, file)
+
+      await waitFor(() =>
+        expect(useDrawingStore.getState().nodes).toHaveLength(1)
+      )
+      expect(useDrawingStore.getState().nodes[0].data.asset).toMatchObject({
+        name: 'canvas.png',
+        width: 1,
+        height: 1,
+        mimeType: 'image/png',
+      })
+      expect(useDrawingStore.getState().referenceIds).toEqual([])
+      expect(screen.getByLabelText('Mode')).toHaveValue('generate')
+      expect(
+        within(canvas).queryByRole('button', { name: 'Upload images' })
+      ).not.toBeInTheDocument()
+      expect(screen.queryByText('Room for every idea')).not.toBeInTheDocument()
+      view.unmount()
+    })
+
+    it('imports an empty placeholder drop once and keeps canvas drops available after it disappears', async () => {
+      const { view } = renderWorkspace(801)
+      await screen.findByText('Room for every idea')
+      const canvas = screen.getByLabelText('Image canvas')
+      const upload = within(canvas).getByRole('button', {
+        name: 'Upload images',
+      })
+      fireEvent.drop(upload, {
+        dataTransfer: {
+          files: [new File([imageBytes], 'first.png', { type: 'image/png' })],
+          types: ['Files'],
+        },
+      })
+
+      await waitFor(() =>
+        expect(useDrawingStore.getState().nodes).toHaveLength(1)
+      )
+      expect(screen.queryByText('Room for every idea')).not.toBeInTheDocument()
+      fireEvent.drop(canvas, {
+        dataTransfer: {
+          files: [new File([imageBytes], 'second.png', { type: 'image/png' })],
+          types: ['Files'],
+        },
+      })
+
+      await waitFor(() =>
+        expect(
+          useDrawingStore.getState().nodes.map((node) => node.data.asset?.name)
+        ).toEqual(['first.png', 'second.png'])
+      )
+      expect(useDrawingStore.getState().referenceIds).toEqual([])
+      view.unmount()
+    })
   })
 
   // A node another device saved while it generates can arrive on the open
@@ -261,7 +360,11 @@ describe('Drawing workspace', () => {
     })
     expect(generate).not.toBeDisabled()
     expect(screen.queryByRole('alert')).toBeNull()
-    expect(screen.getByText('Reference images', { exact: false })).toBeVisible()
+    expect(
+      screen.getByRole('button', { name: 'Upload reference images' })
+    ).toHaveAccessibleDescription(
+      'Drop images here or click to upload PNG, JPEG or WebP'
+    )
 
     view.unmount()
     client.clear()

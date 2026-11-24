@@ -17,8 +17,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import {
-  FileAddIcon,
-  FolderOpenIcon,
+  AddSquareIcon,
+  Folder01Icon,
   SaveIcon,
 } from '@hugeicons/core-free-icons'
 import { HugeiconsIcon } from '@hugeicons/react'
@@ -167,7 +167,7 @@ export function CanvasEditorHeader(props: {
             aria-label={t('New canvas')}
             title={t('New canvas')}
           >
-            <HugeiconsIcon icon={FileAddIcon} size={16} aria-hidden='true' />
+            <HugeiconsIcon icon={AddSquareIcon} size={16} aria-hidden='true' />
           </Button>
           {editingTitle ? (
             <Input
@@ -212,7 +212,7 @@ export function CanvasEditorHeader(props: {
             aria-label={t('Open canvas')}
             title={t('Open canvas')}
           >
-            <HugeiconsIcon icon={FolderOpenIcon} size={16} aria-hidden='true' />
+            <HugeiconsIcon icon={Folder01Icon} size={16} aria-hidden='true' />
           </Button>
         </div>
 

@@ -90,6 +90,20 @@ describe('Image mask preview', () => {
     expect(screen.getByRole('img', { name: 'result' })).toBeVisible()
   })
 
+  it('previews a generated GIF using its original animation source', () => {
+    const src =
+      'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw=='
+    useDrawingStore.getState().updateNodeData('result', {
+      asset: { ...reference, name: 'fox.gif', mimeType: 'image/gif', src },
+    })
+    useDrawingStore.getState().setPreview('result')
+    renderPreview()
+    expect(screen.getByRole('img', { name: 'result' })).toHaveAttribute(
+      'src',
+      src
+    )
+  })
+
   it('removes the preview overlay when the mask is removed', () => {
     renderPreview()
     expect(screen.getByRole('img', { name: 'Mask preview' })).toBeVisible()

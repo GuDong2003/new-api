@@ -35,6 +35,7 @@ import {
   within,
 } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { AuthenticatedLayout } from '@/components/layout/components/authenticated-layout'
@@ -384,7 +385,13 @@ describe('Canvas workspace navigation', () => {
           finish = resolve
         })
     )
-    const hook = renderHook(useImageGeneration)
+    const hook = renderHook(useImageGeneration, {
+      wrapper: (props: { children: ReactNode }) => (
+        <QueryClientProvider client={client}>
+          {props.children}
+        </QueryClientProvider>
+      ),
+    })
     act(() => {
       hook.result.current.generate(
         {

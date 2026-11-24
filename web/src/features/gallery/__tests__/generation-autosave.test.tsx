@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 import { Blob as NodeBlob } from 'node:buffer'
 import { webcrypto } from 'node:crypto'
 
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import {
   AxiosError,
@@ -24,6 +25,7 @@ import {
   type InternalAxiosRequestConfig,
 } from 'axios'
 import { IDBFactory } from 'fake-indexeddb'
+import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { useImageGeneration } from '@/features/playground/drawing/hooks/use-image-generation'
@@ -69,8 +71,10 @@ const imageResponse = () => ({
   data: new Response(JSON.stringify({ data: [{ b64_json: png }] })).body,
 })
 const adapter = api.defaults.adapter
+let client: QueryClient
 let posts: string[]
 beforeEach(() => {
+  client = new QueryClient()
   vi.stubGlobal('indexedDB', new IDBFactory())
   vi.stubGlobal('Blob', NodeBlob)
   vi.stubGlobal('crypto', webcrypto)
@@ -100,9 +104,20 @@ beforeEach(() => {
 afterEach(() => {
   stopCanvasEditors(identity)
   useAuthStore.getState().auth.reset()
+  client.clear()
   api.defaults.adapter = adapter
   vi.unstubAllGlobals()
 })
+
+function renderGeneration() {
+  return renderHook(useImageGeneration, {
+    wrapper: (props: { children: ReactNode }) => (
+      <QueryClientProvider client={client}>
+        {props.children}
+      </QueryClientProvider>
+    ),
+  })
+}
 
 it('preserves generated originals in the shared local path while full without an immediate cloud queue', async () => {
   const canvas = await createCanvasProject(identity, 'drawing')
@@ -121,7 +136,7 @@ it('preserves generated originals in the shared local path while full without an
     headers: { 'content-type': 'application/json' },
     data: new Response(JSON.stringify({ data: [{ b64_json: png }] })).body,
   })
-  const hook = renderHook(useImageGeneration)
+  const hook = renderGeneration()
   act(() => {
     hook.result.current.generate(
       { ...DEFAULT_IMAGE_SETTINGS, model: 'gpt-image-1', prompt: 'A forest' },
@@ -154,7 +169,7 @@ it('finishes URL generation before private original acquisition, and keeps savin
   api.defaults.adapter = async () => {
     throw new Error('storage unavailable')
   }
-  const hook = renderHook(useImageGeneration)
+  const hook = renderGeneration()
   act(() => {
     hook.result.current.generate(
       { ...DEFAULT_IMAGE_SETTINGS, model: 'gpt-image-1', prompt: 'A forest' },
@@ -208,7 +223,7 @@ describe('a returned link this browser cannot display', () => {
     }
   }
   const generate = () => {
-    const hook = renderHook(useImageGeneration)
+    const hook = renderGeneration()
     act(() => {
       hook.result.current.generate(
         { ...DEFAULT_IMAGE_SETTINGS, model: 'gpt-image-1', prompt: 'A forest' },
@@ -304,7 +319,7 @@ it('keeps an in-flight generation alive when the current canvas is reopened', as
       finish = resolve
     })
   })
-  const hook = renderHook(useImageGeneration)
+  const hook = renderGeneration()
   act(() => {
     hook.result.current.generate(
       { ...DEFAULT_IMAGE_SETTINGS, model: 'gpt-image-1', prompt: 'A forest' },
@@ -344,7 +359,7 @@ it('does not cloud-sync a canvas while its image generation is in flight', async
       finish = resolve
     })
   })
-  const hook = renderHook(useImageGeneration)
+  const hook = renderGeneration()
   act(() => {
     hook.result.current.generate(
       { ...DEFAULT_IMAGE_SETTINGS, model: 'gpt-image-1', prompt: 'A forest' },
@@ -380,7 +395,7 @@ it('keeps a pending tag generation alive while arranging the canvas', async () =
       finish = resolve
     })
   })
-  const hook = renderHook(useImageGeneration)
+  const hook = renderGeneration()
   act(() => {
     hook.result.current.generate(tagSettings, { x: 0, y: 0 })
   })
@@ -413,7 +428,7 @@ it('keeps a pending drawing generation alive while deleting its node', async () 
       finish = resolve
     })
   })
-  const hook = renderHook(useImageGeneration)
+  const hook = renderGeneration()
   act(() =>
     hook.result.current.generate(
       { ...DEFAULT_IMAGE_SETTINGS, model: 'gpt-image-1', prompt: 'A forest' },
@@ -447,7 +462,7 @@ it('stores a drawing result on its original canvas while another canvas is open'
       finish = resolve
     })
   })
-  const hook = renderHook(useImageGeneration)
+  const hook = renderGeneration()
   act(() =>
     hook.result.current.generate(
       { ...DEFAULT_IMAGE_SETTINGS, model: 'gpt-image-1', prompt: 'A forest' },
@@ -515,7 +530,7 @@ it('stores a task result on its original canvas without the finished task', asyn
     data: new Response(JSON.stringify({ task_id: taskId, status: 'queued' }))
       .body,
   })
-  const hook = renderHook(useImageGeneration)
+  const hook = renderGeneration()
   act(() =>
     hook.result.current.generate(
       { ...DEFAULT_IMAGE_SETTINGS, model: 'gpt-image-1', prompt: 'A forest' },
@@ -553,7 +568,7 @@ it('does not resurrect a generation result after explicit canvas deletion', asyn
       finish = resolve
     })
   })
-  const hook = renderHook(useImageGeneration)
+  const hook = renderGeneration()
   act(() => {
     hook.result.current.generate(
       { ...DEFAULT_IMAGE_SETTINGS, model: 'gpt-image-1', prompt: 'A forest' },
@@ -641,7 +656,7 @@ it('saves tag generated originals and settings locally without an independent im
   const canvas = await createCanvasProject(identity, 'drawing')
   await startCanvasEditor(identity, 'drawing')
   vi.spyOn(api, 'post').mockImplementation(async () => imageResponse())
-  const hook = renderHook(useImageGeneration)
+  const hook = renderGeneration()
   act(() => {
     hook.result.current.generate(
       { ...tagSettings, prompt: '狐狸', negativePrompt: 'noise', seed: 42 },
@@ -685,7 +700,7 @@ it('discards generation results after the captured session changes', async () =>
         finish = resolve
       })
   )
-  const hook = renderHook(useImageGeneration)
+  const hook = renderGeneration()
   act(() => {
     hook.result.current.generate(tagSettings, { x: 0, y: 0 })
   })

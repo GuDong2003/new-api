@@ -2,7 +2,9 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -11,6 +13,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
@@ -22,6 +25,106 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
+
+type interruptedLogExportWriter struct {
+	*httptest.ResponseRecorder
+	failAt int
+	writes int
+	cancel context.CancelFunc
+}
+
+func (w *interruptedLogExportWriter) Write(body []byte) (int, error) {
+	w.writes++
+	if w.writes == w.failAt {
+		return 0, errors.New("export connection interrupted")
+	}
+	n, err := w.ResponseRecorder.Write(body)
+	if w.cancel != nil {
+		w.cancel()
+	}
+	return n, err
+}
+
+func TestLogExportAccessTokenAuditRecordsStreamOutcome(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		failAt  int
+		success bool
+		cancel  bool
+	}{
+		{name: "completed export", success: true},
+		{name: "failure after a log was sent", failAt: 2},
+		{name: "failure sending the final result", failAt: 3},
+		{name: "client cancellation after a log was sent", cancel: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			user, _ := setupAccessTokenAudit(t)
+			pat, _ := createScopedAccessToken(t, user.Id, time.Now().Unix()+3600, "usage:read")
+			now := time.Now().Unix()
+			require.NoError(t, model.LOG_DB.Create(&[]model.Log{
+				{UserId: user.Id, CreatedAt: now, Type: model.LogTypeConsume, RequestId: "export-first"},
+				{UserId: user.Id, CreatedAt: now, Type: model.LogTypeConsume, RequestId: "export-second"},
+			}).Error)
+			router := gin.New()
+			router.Use(middleware.RequestId(), middleware.AccessTokenAudit())
+			router.GET("/api/log/self/export", middleware.UserAuth(), ExportUserLogs)
+			request := httptest.NewRequest(http.MethodGet, "/api/log/self/export", nil)
+			ctx, cancel := context.WithCancel(request.Context())
+			defer cancel()
+			request = request.WithContext(ctx)
+			request.Header.Set("Authorization", "Bearer "+pat)
+			writer := &interruptedLogExportWriter{ResponseRecorder: httptest.NewRecorder(), failAt: tc.failAt}
+			if tc.cancel {
+				writer.cancel = cancel
+			}
+			router.ServeHTTP(writer, request)
+
+			require.Equal(t, http.StatusOK, writer.Code)
+			require.Contains(t, writer.Body.String(), "export-second", "a log must have been sent before the failure")
+			var entry model.AuditLog
+			require.NoError(t, model.LOG_DB.Where("request_id = ? AND category = ?", writer.Header().Get(common.RequestIdKey), model.AuditCategoryAccessToken).First(&entry).Error)
+			assert.Equal(t, tc.success, entry.Success)
+			assert.Equal(t, http.StatusOK, entry.Status)
+			encoded, err := common.Marshal(entry)
+			require.NoError(t, err)
+			assert.NotContains(t, string(encoded), pat)
+			assert.NotContains(t, string(encoded), "export-second")
+		})
+	}
+}
+
+func TestLogExportAccessTokenAuthorization(t *testing.T) {
+	for _, tc := range []struct {
+		name, path, scope, code string
+		role                    int
+	}{
+		{name: "own export requires usage scope", path: "/api/log/self/export", scope: "profile:read", role: common.RoleAdminUser, code: "ACCESS_TOKEN_SCOPE_DENIED"},
+		{name: "log scope does not elevate a regular user", path: "/api/log/export", scope: "log:read", role: common.RoleCommonUser, code: "AUTH_INSUFFICIENT_PRIVILEGE"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			user, _ := setupAccessTokenAudit(t)
+			pat, _ := createScopedAccessToken(t, user.Id, time.Now().Unix()+3600, tc.scope)
+			// The fixture disables Redis, so authentication reads the current role.
+			require.NoError(t, model.DB.Model(user).Update("role", tc.role).Error)
+			require.NoError(t, model.LOG_DB.Create(&model.Log{UserId: user.Id, CreatedAt: time.Now().Unix(), Type: model.LogTypeConsume, RequestId: "private-export-log", Content: "private export payload"}).Error)
+			router := gin.New()
+			router.Use(middleware.RequestId(), middleware.AccessTokenAudit())
+			router.GET("/api/log/self/export", middleware.UserAuth(), ExportUserLogs)
+			router.GET("/api/log/export", middleware.AdminAuth(), ExportAllLogs)
+			response := accessTokenRequest(router, http.MethodGet, tc.path, pat, "", "")
+			require.Equal(t, http.StatusForbidden, response.Code, response.Body.String())
+			var result struct {
+				Success bool   `json:"success"`
+				Code    string `json:"code"`
+			}
+			require.NoError(t, common.Unmarshal(response.Body.Bytes(), &result))
+			assert.False(t, result.Success)
+			assert.Equal(t, tc.code, result.Code)
+			assert.NotContains(t, response.Body.String(), "private-export-log")
+			assert.NotContains(t, response.Body.String(), "private export payload")
+		})
+	}
+}
 
 // callLogHandler runs a log handler as the given user and returns the JSON
 // lines of the response.
@@ -212,6 +315,95 @@ func TestLogExportRules(t *testing.T) {
 		release()
 		assert.Len(t, callLogHandler(t, ExportUserLogs, 1, common.RoleCommonUser, recent), 3)
 	})
+}
+
+func TestLogExportTimeRangeBounds(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db, _ := newAuditTestDatabase(t, "sqlite", "")
+	useLogExportDatabases(t, db, db, common.DatabaseTypeSQLite, common.DatabaseTypeSQLite)
+	require.NoError(t, db.AutoMigrate(&model.Channel{}, &model.Log{}))
+	now := time.Now().Unix()
+	seedExportLogs(t, db, db, now)
+	setting := operation_setting.GetLogSetting()
+	previous := *setting
+	t.Cleanup(func() { *setting = previous })
+	const day = 24 * 60 * 60
+	for _, tc := range []struct {
+		name       string
+		start, end int64
+		maxDays    int
+		allowed    bool
+		ids        []any
+	}{
+		{name: "negative start", start: -1, end: now},
+		{name: "negative end", end: -1},
+		{name: "minimum start cannot overflow the range check", start: math.MinInt64, end: now},
+		{name: "minimum end cannot overflow the default start", end: math.MinInt64},
+		{name: "opposite integer extremes", start: math.MinInt64, end: math.MaxInt64},
+		{name: "inverted range", start: now, end: now - 1},
+		{name: "maximum start with an earlier end", start: math.MaxInt64, end: now},
+		{name: "maximum start with implicit end remains empty", start: math.MaxInt64, allowed: true, ids: []any{}},
+		{name: "one second beyond the configured range", start: now - 365*day - 1, end: now},
+		{name: "normal range", start: now - 2*day, end: now, allowed: true, ids: []any{"a-2", "a-1"}},
+		{name: "exact configured boundary", start: now - 365*day, end: now, allowed: true, ids: []any{"a-2", "a-1"}},
+		{name: "future end does not extend the counted span", start: now - 2*day, end: math.MaxInt64, allowed: true, ids: []any{"a-2", "a-1"}},
+		{name: "ordered future range remains empty", start: now + day, end: math.MaxInt64, allowed: true, ids: []any{}},
+		{name: "huge configured range with an omitted start", end: now, maxDays: int(^uint(0) >> 1), allowed: true, ids: []any{"a-old", "a-2", "a-1"}},
+		{name: "huge configured range with an explicit start", start: now - 401*day, end: now, maxDays: int(^uint(0) >> 1), allowed: true, ids: []any{"a-old", "a-2", "a-1"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			setting.MaxRangeDays = 365
+			setting.UserExportEnabled = true
+			if tc.maxDays != 0 {
+				setting.MaxRangeDays = tc.maxDays
+			}
+			query := fmt.Sprintf("start_timestamp=%d&end_timestamp=%d", tc.start, tc.end)
+			lines := callLogHandler(t, ExportUserLogs, 1, common.RoleCommonUser, query)
+			if !tc.allowed {
+				require.Len(t, lines, 1, "invalid ranges must be rejected before any log is exported")
+				assert.Equal(t, false, lines[0]["success"])
+				return
+			}
+			require.Equal(t, true, lines[len(lines)-1]["success"])
+			assert.Equal(t, tc.ids, exportedRequestIds(lines))
+		})
+	}
+}
+
+func TestLogExportWithSingleDatabaseConnection(t *testing.T) {
+	for _, tc := range []struct {
+		kind, env string
+		typ       common.DatabaseType
+	}{
+		{"sqlite", "", common.DatabaseTypeSQLite},
+		{"mysql", "AUDIT_MYSQL_DSN", common.DatabaseTypeMySQL},
+		{"postgres", "AUDIT_POSTGRES_DSN", common.DatabaseTypePostgreSQL},
+	} {
+		t.Run(tc.kind, func(t *testing.T) {
+			dsn := os.Getenv(tc.env)
+			if tc.env != "" && dsn == "" {
+				t.Skip(tc.env + " is not configured")
+			}
+			db, _ := newAuditTestDatabase(t, tc.kind, dsn)
+			useLogExportDatabases(t, db, db, tc.typ, tc.typ)
+			require.NoError(t, db.AutoMigrate(&model.Channel{}, &model.Log{}))
+			seedExportLogs(t, db, db, time.Now().Unix())
+			connection, err := db.DB()
+			require.NoError(t, err)
+			connection.SetMaxOpenConns(1)
+			ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+			defer cancel()
+			var logs []*model.Log
+			err = model.StreamAllLogs(ctx, model.LogFilter{}, common.RoleAdminUser, func(log *model.Log) error {
+				logs = append(logs, log)
+				return nil
+			})
+			require.NoError(t, err, "looking up channel names must not wait for the connection held by the log cursor")
+			require.Len(t, logs, 4)
+			assert.Equal(t, "primary", logs[1].ChannelName)
+			assert.Equal(t, "primary", logs[2].ChannelName)
+		})
+	}
 }
 
 func TestAcquireLogExportLock(t *testing.T) {

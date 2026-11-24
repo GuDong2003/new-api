@@ -129,7 +129,9 @@ func RecordAuditLogDurable(c *gin.Context, entry AuditLog) error {
 	if LOG_DB == nil {
 		return errors.New("audit log database unavailable")
 	}
-	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	// Client cancellation must not erase the audit of a completed or interrupted
+	// operation. Keep request values while bounding the independent write.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 	defer cancel()
 	var row any = &entry
 	if common.UsingLogDatabase(common.DatabaseTypeClickHouse) {

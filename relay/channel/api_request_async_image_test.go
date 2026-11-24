@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"sync/atomic"
 	"testing"
 
 	"github.com/QuantumNous/new-api/constant"
@@ -93,90 +94,161 @@ func TestUpstreamImagePollAsksEachHostByItsOwnName(t *testing.T) {
 func TestDoUpstreamImageRequestPollsAndPreservesFinalResponse(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	service.InitHttpClient()
-	polls := 0
-	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if request.Method == http.MethodPost {
-			assert.Equal(t, "1", request.URL.Query().Get("async"))
-			assert.Equal(t, "respond-async", request.Header.Get("Prefer"))
-			assert.Equal(t, "true", request.Header.Get("X-Image-Async"))
-			writer.Header().Set("Content-Type", "application/json")
-			writer.WriteHeader(http.StatusAccepted)
-			_, _ = io.WriteString(writer, `{"task_id":"upstream-task","status":"processing"}`)
-			return
-		}
-		assert.Equal(t, "/v1/images/generations/upstream-task", request.URL.Path)
-		assert.Equal(t, "Bearer upstream-key", request.Header.Get("Authorization"))
-		polls++
-		writer.Header().Set("Content-Type", "application/json")
-		if polls == 1 {
-			_, _ = io.WriteString(writer, `{"task_id":"upstream-task","status":"processing","data":[]}`)
-			return
-		}
-		_, _ = io.WriteString(writer, `{"task_id":"upstream-task","status":"completed","data":[{"url":"https://cdn.example/image.png"}]}`)
-	}))
-	defer server.Close()
+	for _, tt := range []struct {
+		name   string
+		query  string
+		prefer string
+		async  string
+	}{
+		{name: "a provider returns a task without async being requested"},
+		{name: "explicit upstream async settings are preserved", query: "async=1", prefer: "respond-async", async: "true"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			polls := 0
+			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				if request.Method == http.MethodPost {
+					assert.Equal(t, tt.query, request.URL.RawQuery)
+					assert.Equal(t, tt.prefer, request.Header.Get("Prefer"))
+					assert.Equal(t, tt.async, request.Header.Get("X-Image-Async"))
+					writer.Header().Set("Content-Type", "application/json")
+					writer.WriteHeader(http.StatusAccepted)
+					_, _ = io.WriteString(writer, `{"task_id":"upstream-task","status":"processing"}`)
+					return
+				}
+				assert.Equal(t, "/v1/images/generations/upstream-task", request.URL.Path)
+				assert.Equal(t, "Bearer upstream-key", request.Header.Get("Authorization"))
+				assert.Empty(t, request.Header.Get("Prefer"))
+				assert.Empty(t, request.Header.Get("X-Image-Async"))
+				polls++
+				writer.Header().Set("Content-Type", "application/json")
+				if polls == 1 {
+					_, _ = io.WriteString(writer, `{"task_id":"upstream-task","status":"processing","data":[]}`)
+					return
+				}
+				_, _ = io.WriteString(writer, `{"task_id":"upstream-task","status":"completed","data":[{"url":"https://cdn.example/image.png"}]}`)
+			}))
+			defer server.Close()
 
-	request, err := http.NewRequest(http.MethodPost, server.URL+"/v1/images/generations", bytes.NewBufferString(`{"model":"gpt-image-2.5"}`))
-	require.NoError(t, err)
-	request.Header.Set("Authorization", "Bearer upstream-key")
-	context, _ := gin.CreateTestContext(httptest.NewRecorder())
-	context.Request = request
-	context.Set(string(constant.ContextKeyAsyncImageTaskID), "task-local")
-	info := &relaycommon.RelayInfo{
-		RelayMode:   relayconstant.RelayModeImagesGenerations,
-		ChannelMeta: &relaycommon.ChannelMeta{},
+			request, err := http.NewRequest(http.MethodPost, server.URL+"/v1/images/generations", bytes.NewBufferString(`{"model":"gpt-image-2.5"}`))
+			require.NoError(t, err)
+			request.URL.RawQuery = tt.query
+			request.Header.Set("Authorization", "Bearer upstream-key")
+			if tt.prefer != "" {
+				request.Header.Set("Prefer", tt.prefer)
+			}
+			if tt.async != "" {
+				request.Header.Set("X-Image-Async", tt.async)
+			}
+			context, _ := gin.CreateTestContext(httptest.NewRecorder())
+			context.Request = request
+			context.Set(string(constant.ContextKeyAsyncImageTaskID), "task-local")
+			info := &relaycommon.RelayInfo{
+				RelayMode:   relayconstant.RelayModeImagesGenerations,
+				ChannelMeta: &relaycommon.ChannelMeta{},
+			}
+			response, err := doRequest(context, request, info)
+			require.NoError(t, err)
+			defer response.Body.Close()
+			body, err := io.ReadAll(response.Body)
+			require.NoError(t, err)
+			assert.Equal(t, http.StatusOK, response.StatusCode)
+			assert.JSONEq(t, `{"task_id":"upstream-task","status":"completed","data":[{"url":"https://cdn.example/image.png"}]}`, string(body))
+			assert.Equal(t, 2, polls)
+		})
 	}
-	response, err := doRequest(context, request, info)
-	require.NoError(t, err)
-	defer response.Body.Close()
-	body, err := io.ReadAll(response.Body)
-	require.NoError(t, err)
-	assert.Equal(t, http.StatusOK, response.StatusCode)
-	assert.JSONEq(t, `{"task_id":"upstream-task","status":"completed","data":[{"url":"https://cdn.example/image.png"}]}`, string(body))
-	assert.Equal(t, 2, polls)
 }
 
-func TestDoUpstreamImageRequestFallsBackWhenAsyncIsUnsupported(t *testing.T) {
+func TestDoUpstreamImageRequestSubmitsSynchronouslyOnce(t *testing.T) {
+	gin.SetMode(gin.TestMode)
 	service.InitHttpClient()
-	posts := 0
-	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if request.Method != http.MethodPost {
-			writer.WriteHeader(http.StatusNotFound)
-			return
-		}
-		posts++
-		writer.Header().Set("Content-Type", "application/json")
-		if request.URL.Query().Get("async") == "1" {
-			writer.WriteHeader(http.StatusBadRequest)
-			_, _ = io.WriteString(writer, `{"error":{"message":"async is not supported"}}`)
-			return
-		}
-		_, _ = io.WriteString(writer, `{"created":1,"data":[{"url":"https://cdn.example/image.png"}]}`)
-	}))
-	defer server.Close()
-
-	request, err := http.NewRequest(http.MethodPost, server.URL+"/v1/images/generations", bytes.NewBufferString(`{"model":"gpt-image-2.5"}`))
-	require.NoError(t, err)
-	request.Header.Set("Authorization", "Bearer upstream-key")
-	context, _ := gin.CreateTestContext(httptest.NewRecorder())
-	context.Request = request
-	context.Set(string(constant.ContextKeyAsyncImageTaskID), "task-local")
-	info := &relaycommon.RelayInfo{
-		RelayMode:   relayconstant.RelayModeImagesGenerations,
-		ChannelMeta: &relaycommon.ChannelMeta{},
+	tests := []struct {
+		name         string
+		mode         int
+		path         string
+		contentType  string
+		requestBody  string
+		status       int
+		responseBody string
+	}{
+		{
+			name:         "generation waits for the image",
+			mode:         relayconstant.RelayModeImagesGenerations,
+			path:         "/v1/images/generations",
+			contentType:  "application/json",
+			requestBody:  `{"model":"gpt-image-2.5","prompt":"a cat"}`,
+			status:       http.StatusOK,
+			responseBody: `{"created":1,"data":[{"url":"https://cdn.example/image.png"}]}`,
+		},
+		{
+			name:         "multipart edit preserves the upload",
+			mode:         relayconstant.RelayModeImagesEdits,
+			path:         "/v1/images/edits",
+			contentType:  "multipart/form-data; boundary=image-edit",
+			requestBody:  "--image-edit\r\nContent-Disposition: form-data; name=\"image\"; filename=\"image.png\"\r\nContent-Type: image/png\r\n\r\nimage-bytes\r\n--image-edit--\r\n",
+			status:       http.StatusOK,
+			responseBody: `{"created":1,"data":[{"b64_json":"aW1hZ2U="}]}`,
+		},
+		{
+			name:         "an ordinary image error is not resubmitted",
+			mode:         relayconstant.RelayModeImagesGenerations,
+			path:         "/v1/images/generations",
+			contentType:  "application/json",
+			requestBody:  `{"model":"gpt-image-2.5","prompt":"a cat"}`,
+			status:       http.StatusBadRequest,
+			responseBody: `{"error":{"message":"unknown parameter: async"}}`,
+		},
+		{
+			name:         "an unrecognized accepted response is not resubmitted",
+			mode:         relayconstant.RelayModeImagesGenerations,
+			path:         "/v1/images/generations",
+			contentType:  "application/json",
+			requestBody:  `{"model":"gpt-image-2.5","prompt":"a cat"}`,
+			status:       http.StatusAccepted,
+			responseBody: `{"id":"provider-task","status":"pending"}`,
+		},
 	}
-	response, err := doRequest(context, request, info)
-	require.NoError(t, err)
-	defer response.Body.Close()
-	body, err := io.ReadAll(response.Body)
-	require.NoError(t, err)
-	assert.Equal(t, http.StatusOK, response.StatusCode)
-	assert.JSONEq(t, `{"created":1,"data":[{"url":"https://cdn.example/image.png"}]}`, string(body))
-	assert.Equal(t, 2, posts)
-}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var submissions atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				submissions.Add(1)
+				assert.Equal(t, http.MethodPost, request.Method)
+				assert.Equal(t, tt.path, request.URL.Path)
+				assert.False(t, request.URL.Query().Has("async"))
+				assert.Equal(t, "test-version", request.URL.Query().Get("api-version"))
+				assert.Equal(t, "wait=60", request.Header.Get("Prefer"))
+				assert.Empty(t, request.Header.Get("X-Image-Async"))
+				assert.Equal(t, "Bearer upstream-key", request.Header.Get("Authorization"))
+				assert.Equal(t, tt.contentType, request.Header.Get("Content-Type"))
+				body, err := io.ReadAll(request.Body)
+				assert.NoError(t, err)
+				assert.Equal(t, tt.requestBody, string(body))
+				writer.Header().Set("Content-Type", "application/json")
+				writer.WriteHeader(tt.status)
+				_, _ = io.WriteString(writer, tt.responseBody)
+			}))
+			defer server.Close()
 
-func TestUnsupportedAsyncDetectionDoesNotRetryOrdinaryImageErrors(t *testing.T) {
-	assert.True(t, isUnsupportedUpstreamImageAsync(http.StatusBadRequest, []byte(`{"error":{"message":"unknown parameter: async"}}`)))
-	assert.True(t, isUnsupportedUpstreamImageAsync(http.StatusNotImplemented, nil))
-	assert.False(t, isUnsupportedUpstreamImageAsync(http.StatusBadRequest, []byte(`{"error":{"message":"invalid prompt"}}`)))
+			request, err := http.NewRequest(http.MethodPost, server.URL+tt.path+"?api-version=test-version", bytes.NewBufferString(tt.requestBody))
+			require.NoError(t, err)
+			request.Header.Set("Authorization", "Bearer upstream-key")
+			request.Header.Set("Content-Type", tt.contentType)
+			request.Header.Set("Prefer", "wait=60")
+			context, _ := gin.CreateTestContext(httptest.NewRecorder())
+			context.Request = request
+			context.Set(string(constant.ContextKeyAsyncImageTaskID), "task-local")
+			info := &relaycommon.RelayInfo{
+				RelayMode:   tt.mode,
+				ChannelMeta: &relaycommon.ChannelMeta{},
+			}
+			response, err := doRequest(context, request, info)
+			require.NoError(t, err)
+			defer response.Body.Close()
+			body, err := io.ReadAll(response.Body)
+			require.NoError(t, err)
+			assert.Equal(t, tt.status, response.StatusCode)
+			assert.Equal(t, tt.responseBody, string(body))
+			assert.EqualValues(t, 1, submissions.Load())
+		})
+	}
 }

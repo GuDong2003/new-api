@@ -37,8 +37,10 @@ import { createServerError } from '@/lib/server-error-message'
 import { getCodexUsage, updateChannelBalance } from '../../api'
 import { channelsQueryKeys, reportChannelBalanceRefresh } from '../../lib'
 import { getBalanceBreakdown } from '../../lib/balance-breakdown'
+import { formatChannelBalanceSummary } from '../../lib/channel-balance'
 import { formatUpstreamBalance } from '../../lib/upstream-account-display'
 import { BalanceBreakdown } from '../balance-breakdown'
+import { ChannelBalanceDetails } from '../channel-balance-details'
 import { useChannels } from '../channels-provider'
 import {
   CodexUsageDialog,
@@ -125,6 +127,8 @@ export function BalanceQueryDialog(props: BalanceQueryDialogProps) {
                 upstream_balance: newBalance,
                 upstream_balance_unit: response.currency || 'QUOTA',
                 upstream_balance_updated_time: now,
+                balance_detail:
+                  response.balance_detail ?? currentRow.balance_detail,
                 upstream_account_count:
                   response.account_count ?? currentRow.upstream_account_count,
                 upstream_balance_details:
@@ -141,6 +145,8 @@ export function BalanceQueryDialog(props: BalanceQueryDialogProps) {
                 ...currentRow,
                 balance: newBalance,
                 balance_updated_time: now,
+                balance_detail:
+                  response.balance_detail ?? currentRow.balance_detail,
                 key_balance_details:
                   response.key_balances ?? currentRow.key_balance_details,
               }
@@ -172,17 +178,28 @@ export function BalanceQueryDialog(props: BalanceQueryDialogProps) {
     props.onOpenChange(false)
   }
 
+  // The detail is the upstream's own currency and limits, kept on the row.
+  const formatBalance = (bal: number) =>
+    formatChannelBalanceSummary(currentRow.balance_detail, bal, {
+      digitsLarge: 2,
+      digitsSmall: 4,
+      abbreviate: false,
+      locale: toIntlLocale(i18n.resolvedLanguage || i18n.language),
+    })
+
   const formatDate = (timestamp: number) => {
     if (!timestamp) return 'Never'
     return formatTimestampToDate(timestamp)
   }
 
-  let displayedBalance = formatUpstreamBalance(
-    currentRow.balance,
-    'USD',
-    locale
-  )
-  if (balance !== null) {
+  let displayedBalance = formatBalance(currentRow.balance)
+  if (
+    balance !== null &&
+    currentRow.balance_source !== 'upstream' &&
+    !balanceCurrency
+  ) {
+    displayedBalance = formatBalance(balance)
+  } else if (balance !== null) {
     displayedBalance = formatUpstreamBalance(
       balance,
       balanceCurrency || 'USD',
@@ -278,6 +295,12 @@ export function BalanceQueryDialog(props: BalanceQueryDialogProps) {
                 <span>{t('Current Balance')}</span>
               </div>
               <div className='text-2xl font-bold'>{displayedBalance}</div>
+              {currentRow.balance_source !== 'upstream' && (
+                <ChannelBalanceDetails
+                  result={currentRow.balance_detail}
+                  className='mt-2'
+                />
+              )}
               <div className='text-muted-foreground mt-2 text-xs'>
                 {t('Last updated:')} {formatDate(displayedUpdatedTime)}
               </div>

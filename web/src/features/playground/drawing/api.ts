@@ -31,7 +31,6 @@ import {
   getImageModelFamily,
   supportsImageMask,
   supportsImageSizePresets,
-  usesImageTask,
   validateImageSettings,
   type ImagePayload,
 } from './lib/image-settings'
@@ -64,8 +63,7 @@ export type GenerateImagesOptions = {
   onRetry?: (failures: ImageTaskFailureReason[]) => void
   // Resumes an already accepted task instead of submitting a new request.
   taskId?: string
-  // Answers on this request even without streaming, for images a task could
-  // not keep.
+  // Answers on this request when the gallery cannot keep task results.
   direct?: boolean
 }
 
@@ -117,7 +115,10 @@ export async function generateImages(
   let body: ImagePayload | FormData = payload
   if (options.settings.mode === 'edit') {
     // Among Alibaba's models only the Wanx image editor reads a mask.
-    const mask = supportsImageMask(options.settings.model)
+    const mask = supportsImageMask(
+      options.settings.model,
+      options.settings.outputFormat
+    )
       ? options.mask
       : undefined
     if (
@@ -182,10 +183,8 @@ export async function generateImages(
   options.signal.throwIfAborted()
   const endpoint =
     options.settings.mode === 'edit' ? '/pg/images/edits' : IMAGE_TASK_ENDPOINT
-  if (usesImageTask(options.settings) && !options.direct) {
-    // Without live previews there is nothing to watch on the connection, so the
-    // request becomes a durable task: it survives reloads, proxy idle timeouts
-    // and long provider queues.
+  if (!options.direct) {
+    // A durable task survives reloads, proxy idle timeouts and long provider queues.
     return await runImageTask(endpoint, body, outputFormat, options)
   }
   try {

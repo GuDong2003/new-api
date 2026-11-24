@@ -64,13 +64,20 @@ export function ChannelProbeEndpointSelect(props: {
   disabled?: boolean
   inherited?: boolean
   compact?: boolean
+  allowedPaths?: readonly string[]
 }) {
   const { t } = useTranslation()
+  const endpoints = CHANNEL_TEST_ENDPOINTS.filter(
+    (endpoint) =>
+      !props.allowedPaths ||
+      !endpoint.path ||
+      props.allowedPaths.includes(endpoint.path)
+  )
   const items = [
     ...(props.inherited
       ? [{ value: 'inherit', label: t('Use default endpoint') }]
       : []),
-    ...CHANNEL_TEST_ENDPOINTS.map((endpoint) => ({
+    ...endpoints.map((endpoint) => ({
       value: endpoint.value,
       label: t(endpoint.labelKey),
     })),
@@ -105,7 +112,7 @@ export function ChannelProbeEndpointSelect(props: {
           {props.inherited && (
             <SelectItem value='inherit'>{t('Use default endpoint')}</SelectItem>
           )}
-          {CHANNEL_TEST_ENDPOINTS.map((endpoint) => (
+          {endpoints.map((endpoint) => (
             <SelectItem key={endpoint.value} value={endpoint.value}>
               <span className='flex min-w-0 flex-col gap-0.5'>
                 <span>{t(endpoint.labelKey)}</span>
@@ -124,6 +131,7 @@ export function ChannelProbeEndpointSelect(props: {
 }
 
 export function ChannelTestControls(props: {
+  allowedPaths?: readonly string[]
   selected: ChannelProbeId[]
   onSelectedChange: (value: ChannelProbeId[]) => void
   endpoint: string
@@ -228,6 +236,7 @@ export function ChannelTestControls(props: {
           </span>
           <ChannelProbeEndpointSelect
             value={props.endpoint}
+            allowedPaths={props.allowedPaths}
             onChange={props.onEndpointChange}
             label={t('Default endpoint')}
             disabled={props.disabled}

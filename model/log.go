@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/types"
 
@@ -337,6 +338,9 @@ type RecordConsumeLogParams struct {
 }
 
 func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams) {
+	// Request plugin report hooks read what the request settled, whether or
+	// not consume logs are kept.
+	common.SetContextKey(c, constant.ContextKeyConsumeLog, &params)
 	if !common.LogConsumeEnabled {
 		return
 	}
@@ -598,22 +602,25 @@ func StreamAllLogs(ctx context.Context, filter LogFilter, role int, fn func(*Log
 	if err != nil {
 		return err
 	}
+	// The main and log databases may share a connection pool. Read names before
+	// opening the log cursor so an export never needs a second connection.
+	var channels []struct {
+		Id   int
+		Name string
+	}
+	if err := DB.WithContext(ctx).Table("channels").Select("id, name").Find(&channels).Error; err != nil {
+		return err
+	}
+	channelNames := make(map[int]string, len(channels))
+	for _, channel := range channels {
+		channelNames[channel.Id] = channel.Name
+	}
 	visibility := logOtherVisibilityAdmin
 	if role >= common.RoleRootUser {
 		visibility = logOtherVisibilityRoot
 	}
-	channelNames := make(map[int]string)
 	return streamLogs(tx, "logs.created_at desc, logs.id desc", func(log *Log) error {
-		if log.ChannelId != 0 {
-			name, ok := channelNames[log.ChannelId]
-			if !ok {
-				if channel, err := CacheGetChannel(log.ChannelId); err == nil {
-					name = channel.Name
-				}
-				channelNames[log.ChannelId] = name
-			}
-			log.ChannelName = name
-		}
+		log.ChannelName = channelNames[log.ChannelId]
 		log.Other = formatLogOtherJSON(log.Other, visibility)
 		return fn(log)
 	})

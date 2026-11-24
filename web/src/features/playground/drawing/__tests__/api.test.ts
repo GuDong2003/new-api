@@ -34,7 +34,6 @@ function streamed(payload: unknown) {
   }
 }
 
-// dall-e-3 never streams, so these settings exercise the async task transport.
 const DALL_E_SETTINGS = {
   ...DEFAULT_IMAGE_SETTINGS,
   model: 'dall-e-3',
@@ -74,6 +73,69 @@ afterEach(() => {
 })
 
 describe('Image request transport', () => {
+  it.each(['generate', 'edit'] as const)(
+    'submits legacy %s settings as a task without retired request fields',
+    async (mode) => {
+      const request = vi
+        .spyOn(api, 'post')
+        .mockResolvedValue(
+          streamed({ task_id: 'task_legacy', status: 'queued' })
+        )
+      const poll = vi.spyOn(api, 'get').mockResolvedValue({
+        data: {
+          task_id: 'task_legacy',
+          status: 'completed',
+          data: [{ b64_json: 'YWJj' }],
+        },
+      })
+      const settings = {
+        ...DEFAULT_IMAGE_SETTINGS,
+        model: 'gpt-image-1',
+        mode,
+        prompt: 'A cup',
+        stream: true,
+        partialImages: 3,
+        user: 'legacy-canvas-user',
+      }
+
+      const result = await generateImages({
+        settings,
+        references:
+          mode === 'edit'
+            ? [
+                {
+                  id: 'reference',
+                  name: 'cup.png',
+                  src: 'data:image/png;base64,YWJj',
+                  width: 512,
+                  height: 512,
+                  mimeType: 'image/png',
+                },
+              ]
+            : [],
+        signal: new AbortController().signal,
+        onPartial: vi.fn(),
+      })
+
+      expect(request).toHaveBeenCalledWith(
+        mode === 'edit' ? '/pg/images/edits' : '/pg/images/generations',
+        expect.anything(),
+        expect.objectContaining({ params: { async: 'true' } })
+      )
+      const body = request.mock.calls[0][1]
+      if (mode === 'edit') expect(body).toBeInstanceOf(FormData)
+      const payload = body instanceof FormData ? Object.fromEntries(body) : body
+      expect(payload).not.toHaveProperty('stream')
+      expect(payload).not.toHaveProperty('partial_images')
+      expect(payload).not.toHaveProperty('user')
+      expect(poll).toHaveBeenCalledWith(
+        '/pg/images/generations/task_legacy',
+        expect.anything()
+      )
+      expect(result.images[0].src).toBe('data:image/png;base64,YWJj')
+    }
+  )
+
   it('decodes DALL·E base64 as PNG after switching from GPT WebP output', async () => {
     const request = vi.spyOn(api, 'post').mockResolvedValue({
       headers: { 'content-type': 'application/json' },
@@ -209,7 +271,7 @@ describe('Image request transport', () => {
     expect(request).not.toHaveBeenCalled()
   })
 
-  it('submits a non-streaming request as a task and polls it to completion', async () => {
+  it('submits an image request as a task and polls it to completion', async () => {
     const request = vi
       .spyOn(api, 'post')
       .mockResolvedValue(streamed({ task_id: 'task_abc', status: 'queued' }))
@@ -533,7 +595,7 @@ describe('Image request transport', () => {
     ).rejects.toMatchObject({ name: 'AbortError' })
   })
 
-  it('keeps the streaming transport when partial previews are requested', async () => {
+  it('decodes an SSE response when gallery capacity requires a direct fallback', async () => {
     const request = vi.spyOn(api, 'post').mockResolvedValue({
       headers: { 'content-type': 'text/event-stream' },
       data: new Response(
@@ -547,12 +609,12 @@ describe('Image request transport', () => {
         ...DEFAULT_IMAGE_SETTINGS,
         model: 'gpt-image-1',
         prompt: 'A cup',
-        stream: true,
         outputFormat: 'png',
       },
       references: [],
       signal: new AbortController().signal,
       onPartial: vi.fn(),
+      direct: true,
     })
 
     expect(request).toHaveBeenCalledWith(

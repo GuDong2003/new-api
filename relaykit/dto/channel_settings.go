@@ -1,13 +1,14 @@
 package dto
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/url"
-	"regexp"
 	"slices"
 	"strings"
 	"sync"
 
+	"github.com/MoeForge/moego/regexp"
 	"github.com/QuantumNous/new-api/relaykit/types"
 )
 
@@ -35,6 +36,10 @@ type ChannelSettings struct {
 	// TLSInsecureSkipVerify accepts upstream certificates that fail
 	// verification, such as self-signed ones, for this channel only.
 	TLSInsecureSkipVerify bool `json:"tls_insecure_skip_verify,omitempty"`
+	// RequestPlugins lists the request plugin instances the channel binds,
+	// by instance id, in run order.
+	RequestPlugins []string `json:"request_plugins,omitempty"`
+
 	// Queue configures the optional background upstream queue warmer for this
 	// channel. The host module owns validation and execution; keeping this DTO
 	// here lets the channel setting travel through relaykit without a root-module
@@ -698,8 +703,9 @@ const (
 type ChannelOtherSettings struct {
 	ClientIdentity                        *ClientIdentityConfig `json:"client_identity,omitempty"`
 	AzureResponsesVersion                 string                `json:"azure_responses_version,omitempty"`
-	VertexKeyType                         VertexKeyType         `json:"vertex_key_type,omitempty"`   // "json" or "api_key"
-	VertexProjectID                       string                `json:"vertex_project_id,omitempty"` // 仅当 vertex_key_type=api_key 时使用；JSON 模式下从 service account 解析
+	VertexKeyType                         VertexKeyType         `json:"vertex_key_type,omitempty"`    // "json" or "api_key"
+	VertexProjectID                       string                `json:"vertex_project_id,omitempty"`  // 仅当 vertex_key_type=api_key 时使用；JSON 模式下从 service account 解析
+	VertexAPIVersion                      string                `json:"vertex_api_version,omitempty"` // Google 模型（Gemini、Imagen）请求路径版本："v1"（默认）或 "v1beta1"
 	OpenRouterEnterprise                  *bool                 `json:"openrouter_enterprise,omitempty"`
 	ClaudeBetaQuery                       bool                  `json:"claude_beta_query,omitempty"`          // Claude 渠道是否强制追加 ?beta=true
 	AllowServiceTier                      bool                  `json:"allow_service_tier,omitempty"`         // 是否允许 service_tier 透传（默认过滤以避免额外计费）
@@ -733,6 +739,9 @@ type ChannelOtherSettings struct {
 	ExternalCheckinURL    string `json:"external_checkin_url,omitempty"`
 	RedeemURL             string `json:"redeem_url,omitempty"`
 	OpenRedeemWithCheckin bool   `json:"open_redeem_with_checkin,omitempty"`
+	// PluginConfig is the config a type-61 channel gives its plugin, checked
+	// against the plugin's meta.channelConfig when the channel is saved.
+	PluginConfig json.RawMessage `json:"plugin_config,omitempty"`
 }
 
 func (s *ChannelOtherSettings) IsOpenRouterEnterprise() bool {
@@ -831,6 +840,12 @@ const (
 	// AdvancedCustomBalancePath identifies the optional balance lookup route used by channel management.
 	AdvancedCustomBalancePath = "/v1/dashboard/billing/credit_grants"
 )
+
+// AcceptsModel reports whether the route's Models list admits model, as
+// MatchPathForModel matches it; an empty list admits every model.
+func (r AdvancedCustomRoute) AcceptsModel(model string) bool {
+	return matchAdvancedCustomRouteModel(r.Models, strings.TrimSpace(model))
+}
 
 // IsNative reports whether the route forwards requests without protocol
 // conversion. Validate normalizes an empty converter to none, but callers may

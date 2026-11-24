@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"reflect"
+	"strings"
 
 	kitutil "github.com/QuantumNous/new-api/relaykit/relayconvert/kitutil"
 	"github.com/QuantumNous/new-api/relaykit/types"
@@ -35,11 +36,16 @@ type ImageRequest struct {
 	Moderation        json.RawMessage `json:"moderation,omitempty"`
 	OutputFormat      json.RawMessage `json:"output_format,omitempty"`
 	OutputCompression json.RawMessage `json:"output_compression,omitempty"`
+	FrameCount        *int            `json:"frame_count,omitempty"`
+	FrameDurationMS   *int            `json:"frame_duration_ms,omitempty"`
 	PartialImages     json.RawMessage `json:"partial_images,omitempty"`
 	Stream            *bool           `json:"stream,omitempty"`
 	Images            json.RawMessage `json:"images,omitempty"`
 	Mask              json.RawMessage `json:"mask,omitempty"`
 	InputFidelity     json.RawMessage `json:"input_fidelity,omitempty"`
+	Complexity        json.RawMessage `json:"complexity,omitempty"`
+	Markup            json.RawMessage `json:"markup,omitempty"`
+	Svg               json.RawMessage `json:"svg,omitempty"`
 	Watermark         *bool           `json:"watermark,omitempty"`
 	// Nsfw relaxes Grok image moderation. Unknown JSON fields land in Extra,
 	// which MarshalJSON drops, so this must stay a declared field to reach the
@@ -199,4 +205,40 @@ type ImageData struct {
 	Url           string `json:"url"`
 	B64Json       string `json:"b64_json"`
 	RevisedPrompt string `json:"revised_prompt"`
+	MIMEType      string `json:"mime_type,omitempty"`
+}
+
+// ValidateAnimation keeps animation controls within the Images API contract.
+// Frames belong to one image payload and never change the billable image count.
+func (i *ImageRequest) ValidateAnimation() error {
+	if i.FrameCount != nil && (*i.FrameCount < 2 || *i.FrameCount > 16) {
+		return fmt.Errorf("frame_count must be an integer between 2 and 16")
+	}
+	if i.FrameDurationMS != nil && (*i.FrameDurationMS < 20 || *i.FrameDurationMS > 2000) {
+		return fmt.Errorf("frame_duration_ms must be an integer between 20 and 2000")
+	}
+	var format string
+	_ = kitutil.Unmarshal(i.OutputFormat, &format)
+	if format != "gif" {
+		if i.FrameCount != nil || i.FrameDurationMS != nil {
+			return fmt.Errorf("frame_count and frame_duration_ms require GIF output")
+		}
+		return nil
+	}
+	if i.Stream != nil && *i.Stream {
+		return fmt.Errorf("GIF output does not support streaming")
+	}
+	if len(i.PartialImages) > 0 && string(i.PartialImages) != "null" {
+		var partials int
+		if kitutil.Unmarshal(i.PartialImages, &partials) != nil || partials != 0 {
+			return fmt.Errorf("GIF output does not support partial images")
+		}
+	}
+	if len(i.OutputCompression) > 0 && strings.TrimSpace(string(i.OutputCompression)) != "null" {
+		return fmt.Errorf("GIF output does not support output_compression")
+	}
+	if len(i.Mask) > 0 && strings.TrimSpace(string(i.Mask)) != "null" {
+		return fmt.Errorf("GIF output does not support masks")
+	}
+	return nil
 }

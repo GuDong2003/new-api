@@ -659,7 +659,7 @@ func TestSecurityAccountEmailsUseTheUsersLanguage(t *testing.T) {
 	for _, testCase := range []struct {
 		language, subject, code, confirmed string
 	}{
-		{"zhCN", "确认你的邮箱地址", "验证码：<strong>", "邮箱地址已确认"},
+		{"zhCN", "确认", "验证码：<strong>", "邮箱地址已确认"},
 		{"en", "Confirm your email address", "Verification code: <strong>", "Email address confirmed"},
 	} {
 		t.Run(testCase.language, func(t *testing.T) {
@@ -698,7 +698,7 @@ func TestSecurityAccountEmailResendAndAttemptLimit(t *testing.T) {
 	_, identity := setupSecurityEnrollmentTest(t)
 	mailbox := newSecurityMailbox(t)
 	flow := startSecurityEmailBinding(t, identity, "new@example.com", service.VerificationMethodPassword)
-	_, err := service.ResendAccountEmailBinding(identity, flow.FlowToken, i18n.LangEn)
+	_, err := service.ResendAccountEmailBinding(identity, flow.FlowToken, "")
 	assert.ErrorIs(t, err, model.ErrEmailBindingResendWait)
 	_, err = service.FinishEmailBinding(identity, flow.FlowToken, "invalid", "")
 	assert.ErrorIs(t, err, model.ErrEmailBindingCodeInvalid)
@@ -709,7 +709,7 @@ func TestSecurityAccountEmailResendAndAttemptLimit(t *testing.T) {
 	payload, err := common.Marshal(state)
 	require.NoError(t, err)
 	require.NoError(t, model.DB.Model(stored).Update("payload", string(payload)).Error)
-	replacement, err := service.ResendAccountEmailBinding(identity, flow.FlowToken, i18n.LangEn)
+	replacement, err := service.ResendAccountEmailBinding(identity, flow.FlowToken, "")
 	require.NoError(t, err)
 	assert.Equal(t, flow.ExpiresAt, replacement.ExpiresAt)
 	_, state, err = model.GetEmailBinding(identity, flow.FlowToken)

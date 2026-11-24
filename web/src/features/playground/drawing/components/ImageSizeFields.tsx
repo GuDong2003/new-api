@@ -16,11 +16,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { MagicWand01Icon } from '@hugeicons/core-free-icons'
-import { HugeiconsIcon } from '@hugeicons/react'
 import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
 
-import { AspectRatio } from '@/components/ui/aspect-ratio'
 import {
   Field,
   FieldGroup,
@@ -32,18 +30,22 @@ import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { cn } from '@/lib/utils'
 
 import {
+  getAllowedImageSize,
+  getAutomaticImageAspectRatio,
+  getImageModelFamily,
   getImagePresetSize,
   getImageResolutionTier,
+  IMAGE_RESOLUTION_MAX_DIMENSIONS,
   getImageSizePreset,
   getImageSizes,
   getImageAspectRatios,
   IMAGE_RESOLUTIONS,
-  nearestOfferedResolution,
   supportsAutomaticImageSize,
   supportsImageSizePresets,
-  type ImageAspectRatio,
+  supportsImageSizePresetTable,
   type ImageResolution,
 } from '../lib/image-settings'
+import { ImageDimensionFields } from './ImageDimensionFields'
 
 type ImageSizeFieldsProps = {
   model: string
@@ -51,42 +53,60 @@ type ImageSizeFieldsProps = {
   size: string
   /** Tiers the canvas withholds from the user's group. */
   disabledResolutions?: readonly string[]
+  /** Wait until the group's settings are known before offering automatic size. */
+  automaticSizeEnabled?: boolean
   onChange: (size: string) => void
 }
 
-// The offered tiers always fill the row, however many the group keeps.
-const TIER_COLUMNS = ['grid-cols-1', 'grid-cols-2', 'grid-cols-3']
+const TIER_COLUMNS = [
+  'grid-cols-1',
+  'grid-cols-2',
+  'grid-cols-3',
+  'grid-cols-4',
+]
 
 export function ImageSizeFields(props: ImageSizeFieldsProps) {
   const { t } = useTranslation()
-  const automatic = props.size === 'auto'
-  // `auto` takes its ratio from the reference image, so it only means
-  // something while editing; text-to-image is rejected outright.
-  const offersAutomatic =
-    supportsAutomaticImageSize(props.model) && props.mode === 'edit'
-  const preset = getImageSizePreset(props.size, props.model)
   const withheld = props.disabledResolutions ?? []
-  const resolution = nearestOfferedResolution(
-    preset?.resolution ?? '1K',
-    withheld
-  )
-  const [width = '', height = ''] = props.size.split('x')
+  const size = getAllowedImageSize(props.size, props.model, withheld)
+  const automatic = size === 'auto'
+  const automaticRatio = getAutomaticImageAspectRatio(size, props.model)
+  const preset = getImageSizePreset(size, props.model)
+  const resolution =
+    automatic || automaticRatio
+      ? 'auto'
+      : (preset?.resolution ?? getImageResolutionTier(size, props.model))
+  const ratios = [...getImageAspectRatios(props.model)]
+  // Keep a saved legacy ratio selectable without adding it to new canvases.
+  if (preset && !ratios.includes(preset.aspectRatio)) {
+    ratios.push(preset.aspectRatio)
+  }
+  if (automaticRatio && !ratios.includes(automaticRatio)) {
+    ratios.push(automaticRatio)
+  }
+  const [width = '', height = ''] = size.split('x')
   const aspectRatio =
+    automaticRatio ??
     preset?.aspectRatio ??
-    getImageAspectRatios(props.model).find((ratio) => {
+    ratios.reduce((nearest, ratio) => {
       const [ratioWidth, ratioHeight] = ratio.split(':').map(Number)
-      return (
-        Number(width) > 0 &&
-        Number(height) > 0 &&
-        Number(width) * ratioHeight === Number(height) * ratioWidth
-      )
-    })
+      const [nearestWidth, nearestHeight] = nearest.split(':').map(Number)
+      const target = Number(width) / Number(height)
+      return Math.abs(ratioWidth / ratioHeight - target) <
+        Math.abs(nearestWidth / nearestHeight - target)
+        ? ratio
+        : nearest
+    }, ratios[0])
+  const automaticEnabled =
+    props.automaticSizeEnabled !== false && withheld.length === 0
+  const automaticHint = automaticEnabled
+    ? undefined
+    : t('Automatic size requires all resolution tiers to be enabled.')
+  const offersAutomaticRatio =
+    getImageModelFamily(props.model) === 'gpt-image' ||
+    (supportsAutomaticImageSize(props.model) && props.mode === 'edit')
 
-  const changeSize = props.onChange
-
-  // Retain the model's exact supported sizes, including legacy landscape sizes.
-  // The tier row still renders, locked, so the controls do not come and go as
-  // the model changes; it reports which tier the chosen size falls into.
+  // Fixed-size models retain their own supported dimensions.
   if (!supportsImageSizePresets(props.model)) {
     const sizes = getImageSizes(props.model)
     return (
@@ -96,16 +116,16 @@ export function ImageSizeFields(props: ImageSizeFieldsProps) {
           <NativeSelect
             id='drawing-size'
             value={props.size}
-            onChange={(event) => changeSize(event.target.value)}
+            onChange={(event) => props.onChange(event.target.value)}
           >
             {!sizes.includes(props.size) && (
               <NativeSelectOption value={props.size}>
                 {automatic ? t('Auto') : props.size.replace('x', ' × ')}
               </NativeSelectOption>
             )}
-            {sizes.map((size) => (
-              <NativeSelectOption key={size} value={size}>
-                {size === 'auto' ? t('Auto') : size.replace('x', ' × ')}
+            {sizes.map((item) => (
+              <NativeSelectOption key={item} value={item}>
+                {item === 'auto' ? t('Auto') : item.replace('x', ' × ')}
               </NativeSelectOption>
             ))}
           </NativeSelect>
@@ -116,103 +136,88 @@ export function ImageSizeFields(props: ImageSizeFieldsProps) {
           </FieldTitle>
           <ToggleGroup
             aria-labelledby='drawing-resolution-label'
-            value={automatic ? [] : [getImageResolutionTier(props.size)]}
+            value={[
+              automatic
+                ? 'auto'
+                : getImageResolutionTier(props.size, props.model),
+            ]}
             variant='outline'
             size='sm'
             spacing={1}
-            className='grid w-full grid-cols-3 gap-1.5'
+            className='grid w-full grid-cols-4 gap-1.5'
           >
             {IMAGE_RESOLUTIONS.map((step) => (
               <ToggleGroupItem key={step} value={step} disabled>
                 {step}
               </ToggleGroupItem>
             ))}
+            <ToggleGroupItem value='auto' disabled>
+              {t('Auto')}
+            </ToggleGroupItem>
           </ToggleGroup>
         </Field>
       </FieldGroup>
     )
   }
 
-  const selectedResolution = automatic ? [] : [resolution]
   const offeredResolutions = IMAGE_RESOLUTIONS.filter(
     (step) => !withheld.includes(step)
   )
+  const displaySize =
+    automatic || automaticRatio
+      ? getImagePresetSize(aspectRatio ?? '1:1', '1K', props.model)
+      : size
+  const [displayWidth, displayHeight] = displaySize.split('x').map(Number)
 
   return (
     <FieldGroup className='gap-3'>
-      <Field>
-        <FieldTitle id='drawing-aspect-ratio-label'>
-          {t('Image aspect ratio')}
-        </FieldTitle>
-        <ToggleGroup
-          aria-labelledby='drawing-aspect-ratio-label'
-          value={automatic ? ['auto'] : [aspectRatio ?? '']}
-          onValueChange={(values) => {
-            const ratio = values[0]
-            if (!ratio) return
-            changeSize(
-              ratio === 'auto'
-                ? 'auto'
-                : getImagePresetSize(
-                    ratio as ImageAspectRatio,
-                    resolution,
-                    props.model
-                  )
+      <ImageDimensionFields
+        width={displayWidth}
+        height={displayHeight}
+        maxDimension={Math.max(
+          ...offeredResolutions.map(
+            (tier) => IMAGE_RESOLUTION_MAX_DIMENSIONS[tier]
+          )
+        )}
+        disabled={automatic || !supportsImageSizePresetTable(props.model)}
+        onChange={(nextSize) => {
+          if (
+            getAllowedImageSize(nextSize, props.model, withheld) !== nextSize
+          ) {
+            toast.error(
+              t(
+                'This image resolution is disabled for your group. Choose an available resolution.'
+              )
             )
-          }}
-          variant='outline'
-          size='sm'
-          spacing={1}
-          className='grid w-full grid-cols-4 gap-1.5'
-        >
-          {offersAutomatic && (
-            <ToggleGroupItem
-              value='auto'
-              className='h-auto min-h-12 min-w-0 flex-col gap-1 px-1 py-2'
-            >
-              <HugeiconsIcon icon={MagicWand01Icon} aria-hidden='true' />
-              {t('Auto')}
-            </ToggleGroupItem>
-          )}
-          {getImageAspectRatios(props.model).map((ratio) => {
-            const [ratioWidth, ratioHeight] = ratio.split(':').map(Number)
-            return (
-              <ToggleGroupItem
-                key={ratio}
-                value={ratio}
-                className='h-auto min-h-12 min-w-0 flex-col gap-1 px-1 py-2'
-              >
-                <span
-                  aria-hidden='true'
-                  className='flex size-4 items-center justify-center'
-                >
-                  <AspectRatio
-                    ratio={ratioWidth / ratioHeight}
-                    className={cn(
-                      'rounded-xs border border-current',
-                      ratioWidth >= ratioHeight ? 'w-4' : 'h-4'
-                    )}
-                  />
-                </span>
-                {ratio}
-              </ToggleGroupItem>
-            )
-          })}
-        </ToggleGroup>
-      </Field>
+            return false
+          }
+          props.onChange(nextSize)
+          return true
+        }}
+      />
       <Field>
         <FieldTitle id='drawing-resolution-label'>
           {t('Image resolution')}
         </FieldTitle>
         <ToggleGroup
           aria-labelledby='drawing-resolution-label'
-          value={selectedResolution}
+          value={[resolution]}
           onValueChange={(values) => {
             const selected = values[0]
-            if (!selected) return
-            const next = selected as ImageResolution
-            changeSize(
-              getImagePresetSize(aspectRatio ?? '1:1', next, props.model)
+            if (!selected || selected === resolution) return
+            if (selected === 'auto') {
+              if (automaticEnabled) props.onChange(aspectRatio ?? '1:1')
+              return
+            }
+            if (!offeredResolutions.includes(selected as ImageResolution)) {
+              return
+            }
+            props.onChange(
+              getImagePresetSize(
+                aspectRatio ?? '1:1',
+                selected as ImageResolution,
+                props.model
+              )
             )
           }}
           variant='outline'
@@ -220,21 +225,89 @@ export function ImageSizeFields(props: ImageSizeFieldsProps) {
           spacing={1}
           className={cn(
             'grid w-full gap-1.5',
-            TIER_COLUMNS[offeredResolutions.length - 1]
+            TIER_COLUMNS[offeredResolutions.length]
           )}
         >
           {offeredResolutions.map((step) => (
-            <ToggleGroupItem key={step} value={step} disabled={automatic}>
+            <ToggleGroupItem key={step} value={step}>
               {step}
             </ToggleGroupItem>
           ))}
+          <ToggleGroupItem
+            value='auto'
+            disabled={!automaticEnabled}
+            title={automaticHint}
+          >
+            {t('Auto')}
+          </ToggleGroupItem>
         </ToggleGroup>
       </Field>
-      <p role='status' className='text-muted-foreground text-xs'>
-        {automatic
-          ? t('Size is chosen automatically by the model.')
-          : props.size.replace('x', ' × ')}
-      </p>
+      <Field>
+        <FieldTitle id='drawing-aspect-ratio-label'>
+          {t('Image aspect ratio')}
+        </FieldTitle>
+        <ToggleGroup
+          aria-labelledby='drawing-aspect-ratio-label'
+          value={[automatic ? 'auto' : (aspectRatio ?? '')]}
+          onValueChange={(values) => {
+            const ratio = values[0]
+            if (!ratio) return
+            if (ratio === 'auto') {
+              if (offersAutomaticRatio && automaticEnabled) {
+                props.onChange('auto')
+              }
+              return
+            }
+            const selected = ratios.find((item) => item === ratio)
+            if (!selected) return
+            props.onChange(
+              resolution === 'auto'
+                ? selected
+                : getImagePresetSize(selected, resolution, props.model)
+            )
+          }}
+          variant='outline'
+          size='sm'
+          spacing={1}
+          className='grid w-full grid-cols-4 gap-1.5'
+        >
+          {ratios.map((ratio) => {
+            const [ratioWidth, ratioHeight] = ratio.split(':').map(Number)
+            const longest = Math.max(ratioWidth, ratioHeight)
+            return (
+              <ToggleGroupItem
+                key={ratio}
+                value={ratio}
+                className='h-18 min-w-0 flex-col gap-1 px-1 py-2'
+              >
+                <span
+                  aria-hidden='true'
+                  className='flex h-6 items-center justify-center'
+                >
+                  <span
+                    className='rounded-xs border border-current'
+                    style={{
+                      width: Math.max(10, (24 * ratioWidth) / longest),
+                      height: Math.max(10, (24 * ratioHeight) / longest),
+                    }}
+                  />
+                </span>
+                {ratio}
+              </ToggleGroupItem>
+            )
+          })}
+          {offersAutomaticRatio && (
+            <ToggleGroupItem
+              value='auto'
+              disabled={!automaticEnabled}
+              title={automaticHint}
+              className='h-18 min-w-0 flex-col gap-1 px-1 py-2'
+            >
+              {t('Auto')}
+            </ToggleGroupItem>
+          )}
+        </ToggleGroup>
+      </Field>
     </FieldGroup>
   )
 }

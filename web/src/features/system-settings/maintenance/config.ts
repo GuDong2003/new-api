@@ -94,6 +94,7 @@ export const SIDEBAR_MODULES_DEFAULT: SidebarModulesAdminConfig = {
       'contentAudit',
       'systemInfo',
       'taskPlugins',
+      'requestProcessing',
       'setting',
     ],
     channel: true,
@@ -108,6 +109,7 @@ export const SIDEBAR_MODULES_DEFAULT: SidebarModulesAdminConfig = {
     contentAudit: true,
     systemInfo: true,
     taskPlugins: true,
+    requestProcessing: true,
   },
 }
 

@@ -247,6 +247,28 @@ export async function reconcileCanvasRecord(
       canvasContentKey(cloud.document) === canvasContentKey(local.document) &&
       remote.name === local.name
     ) {
+      const complete = canvasDocumentAssetIds(cloud.document).every((id) =>
+        remote.assets.some((asset) => asset.id === id)
+      )
+      if (!complete) {
+        const pending = await updateCanvasCloudState(
+          galleryOwner(identity),
+          local.id,
+          (current) => {
+            if (remote.revision <= current.cloudRevision) return current
+            return {
+              ...current,
+              cloudRevision: remote.revision,
+              cloudSavedRevision: 0,
+              expiresAt: remote.expires_at,
+              status: 'pending',
+              cloudBase: cloud,
+            }
+          }
+        )
+        if (pending) await emitCanvasEvent({ identity, canvas: pending })
+        return pending
+      }
       // The map names what an upload from here was given. Another device's
       // upload renamed images this browser never held.
       const assetIdMap = Object.fromEntries(
@@ -417,6 +439,100 @@ async function adoptCloudCanvas(
   return adopted
 }
 
+type CanvasUploadPlan = {
+  canvas: LocalCanvas
+  ids: Set<string>
+  metadata: CanvasSaveMetadata
+  newAssets: CanvasBinary[]
+  requiredBytes: number
+  requiredImages: number
+}
+
+async function prepareCanvasUpload(
+  identity: GalleryIdentity,
+  local: LocalCanvas,
+  reason: 'timer' | 'leave' | 'manual',
+  signal: AbortSignal
+): Promise<CanvasUploadPlan | null> {
+  const activeEditor = [...canvasEditors.values()].find(
+    (editor) =>
+      editor.canvasId === local.id && key(editor.identity) === key(identity)
+  )
+  if (activeEditor && !activeEditor.isLocallySaved()) return null
+  let remote: CanvasRecord | null = null
+  try {
+    remote = await getCanvasRecord(identity, local.id, signal)
+  } catch (error) {
+    if (canvasResponseStatus(error) !== 404) throw error
+  }
+  signal.throwIfAborted()
+  const canvas = remote
+    ? await reconcileCanvasRecord(identity, local, remote)
+    : local
+  if (!canvas || canvas.deleted || canvas.status === 'conflict') return null
+  if (canvas.needsExplicitSave && reason !== 'manual') return null
+  if (canvas.revision === canvas.cloudSavedRevision) return null
+  const ids = new Set(canvasDocumentAssetIds(canvas.document))
+  const assets = (
+    await readCanvasAssets(galleryOwner(identity), canvas.id)
+  ).filter((asset) => ids.has(asset.id))
+  if (assets.length !== ids.size) {
+    throw new Error('Canvas original is unavailable.')
+  }
+  // The cloud needs the bytes; a canvas still holding an original only as a
+  // link uploads once a local save has downloaded it.
+  if (assets.some((asset) => asset.remoteSource)) return null
+  const newAssets = assets.filter(
+    (asset) =>
+      !remote?.assets.some(
+        (existing) =>
+          existing.id === asset.id && existing.sha256 === asset.sha256
+      )
+  )
+  // The cloud leaves out an original whose file it lost. A preview cannot
+  // replace it; a browser that holds the original uploads it again.
+  if (newAssets.some((asset) => asset.previewOnly)) return null
+  const document = canvas.document
+  const metadata: CanvasSaveMetadata = {
+    id: canvas.id,
+    kind: canvas.kind,
+    name: canvas.name,
+    base_revision: canvas.cloudRevision,
+    mutation_id: '',
+    document,
+    ...(canvas.needsExplicitSave ? { explicit_save: true } : {}),
+    assets: assets.map((asset) => ({
+      id: asset.id,
+      role: asset.role,
+      node_id:
+        asset.role === 'mask'
+          ? (canvasMaskNodeId(document, asset.id, asset.nodeId) ?? asset.nodeId)
+          : asset.nodeId,
+      bytes: asset.blob.size,
+      sha256: asset.sha256,
+    })),
+  }
+  const digest = await crypto.subtle.digest(
+    'SHA-256',
+    new TextEncoder().encode(JSON.stringify(metadata))
+  )
+  metadata.mutation_id = Array.from(
+    new Uint8Array(digest).slice(0, 16),
+    (byte) => byte.toString(16).padStart(2, '0')
+  ).join('')
+  return {
+    canvas,
+    ids,
+    metadata,
+    newAssets,
+    requiredBytes:
+      new TextEncoder().encode(JSON.stringify(metadata)).length +
+      4096 +
+      newAssets.reduce((sum, asset) => sum + asset.blob.size, 0),
+    requiredImages: newAssets.filter((asset) => asset.role !== 'mask').length,
+  }
+}
+
 async function upload(
   session: Session,
   id: string,
@@ -431,13 +547,8 @@ async function upload(
   let requiredBytes = 0
   let requiredImages = 0
   try {
-    let canvas = await loadLocalCanvas(userId, id)
-    if (!canvas || canvas.deleted || canvas.status === 'conflict') return
-    const activeEditor = [...canvasEditors.values()].find(
-      (editor) =>
-        editor.canvasId === id && key(editor.identity) === key(identity)
-    )
-    if (activeEditor && !activeEditor.isLocallySaved()) return
+    const local = await loadLocalCanvas(userId, id)
+    if (!local || local.deleted || local.status === 'conflict') return
     const userState = await readCanvasUserState(userId)
     if (
       userState.cloudPause ||
@@ -452,71 +563,11 @@ async function upload(
     ) {
       return
     }
-    let remote: CanvasRecord | null = null
-    try {
-      remote = await getCanvasRecord(identity, id, signal)
-    } catch (error) {
-      if (canvasResponseStatus(error) !== 404) throw error
-    }
-    signal.throwIfAborted()
-    if (remote) canvas = await reconcileCanvasRecord(identity, canvas, remote)
-    if (!canvas || canvas.deleted || canvas.status === 'conflict') return
-    if (canvas.needsExplicitSave && reason !== 'manual') return
-    if (canvas.revision === canvas.cloudSavedRevision) return
-    const ids = new Set(canvasDocumentAssetIds(canvas.document))
-    const assets = (await readCanvasAssets(userId, id)).filter((asset) =>
-      ids.has(asset.id)
-    )
-    if (assets.length !== ids.size) {
-      throw new Error('Canvas original is unavailable.')
-    }
-    // The cloud needs the bytes; a canvas still holding an original only as a
-    // link uploads once a local save has downloaded it.
-    if (assets.some((asset) => asset.remoteSource)) return
-    const newAssets = assets.filter(
-      (asset) =>
-        !remote?.assets.some(
-          (existing) =>
-            existing.id === asset.id && existing.sha256 === asset.sha256
-        )
-    )
-    // The cloud leaves out an original whose file it lost. A preview cannot
-    // replace it; a browser that holds the original uploads it again.
-    if (newAssets.some((asset) => asset.previewOnly)) return
-    const document = canvas.document
-    const metadata: CanvasSaveMetadata = {
-      id,
-      kind: canvas.kind,
-      name: canvas.name,
-      base_revision: canvas.cloudRevision,
-      mutation_id: '',
-      document,
-      ...(canvas.needsExplicitSave ? { explicit_save: true } : {}),
-      assets: assets.map((asset) => ({
-        id: asset.id,
-        role: asset.role,
-        node_id:
-          asset.role === 'mask'
-            ? (canvasMaskNodeId(document, asset.id, asset.nodeId) ??
-              asset.nodeId)
-            : asset.nodeId,
-        bytes: asset.blob.size,
-        sha256: asset.sha256,
-      })),
-    }
-    const digest = await crypto.subtle.digest(
-      'SHA-256',
-      new TextEncoder().encode(JSON.stringify(metadata))
-    )
-    metadata.mutation_id = Array.from(
-      new Uint8Array(digest).slice(0, 16),
-      (byte) => byte.toString(16).padStart(2, '0')
-    ).join('')
-    requiredBytes =
-      new TextEncoder().encode(JSON.stringify(metadata)).length +
-      4096 +
-      newAssets.reduce((sum, asset) => sum + asset.blob.size, 0)
-    requiredImages = newAssets.filter((asset) => asset.role !== 'mask').length
+    const plan = await prepareCanvasUpload(identity, local, reason, signal)
+    if (!plan) return
+    const { canvas, ids, metadata, newAssets } = plan
+    requiredBytes = plan.requiredBytes
+    requiredImages = plan.requiredImages
     const budget = await getGalleryUsage(identity, signal, {
       required_bytes: requiredBytes,
       required_images: requiredImages,
@@ -751,11 +802,47 @@ export async function checkCanvasCapacity(
     }
   })
   if (!allowed) return
+  const userId = galleryOwner(identity)
+  const userState = await readCanvasUserState(userId)
+  let requiredBytes = 0
+  let requiredImages = 0
+  for (const canvas of await listLocalCanvases(userId)) {
+    if (
+      canvas.deleted ||
+      canvas.status === 'conflict' ||
+      canvas.needsExplicitSave ||
+      canvas.revision === canvas.cloudSavedRevision ||
+      userState.pendingCanvasRemovals.some(
+        (item) => item.canvasId === canvas.id
+      ) ||
+      userState.pendingAssetRemovals.some((item) => item.canvasId === canvas.id)
+    ) {
+      continue
+    }
+    const plan = await prepareCanvasUpload(
+      identity,
+      canvas,
+      'leave',
+      session.controller.signal
+    )
+    if (!plan) continue
+    requiredBytes = Math.max(requiredBytes, plan.requiredBytes)
+    requiredImages = Math.max(requiredImages, plan.requiredImages)
+  }
   const budget = await getGalleryUsage(identity, session.controller.signal, {
-    required_bytes: pauseState.requiredBytes,
-    required_images: pauseState.requiredImages,
+    required_bytes: requiredBytes,
+    required_images: requiredImages,
   })
-  if (!budget.can_save) return budget
+  session.controller.signal.throwIfAborted()
+  if (!budget.can_save) {
+    await updateCanvasUserState(userId, (current) => ({
+      ...current,
+      cloudPause: current.cloudPause
+        ? { ...current.cloudPause, requiredBytes, requiredImages }
+        : null,
+    }))
+    return budget
+  }
   await updateCanvasUserState(galleryOwner(identity), (current) => ({
     ...current,
     cloudPause: null,

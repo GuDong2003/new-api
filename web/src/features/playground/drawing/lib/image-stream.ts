@@ -19,20 +19,46 @@ For commercial licensing, please contact support@quantumnous.com
 import { CANVAS_ASSET_ID } from '@/features/gallery/lib/canvas-document'
 
 import type { ImageResponse, ImageResult } from '../types'
-import { isSafeImageSource } from './image-assets'
+import { IMAGE_MIME_TYPES, isSafeImageSource } from './image-assets'
 
 export function parseImageResult(
   item: {
     b64_json?: string
     url?: string
     revised_prompt?: string
+    mime_type?: string
     gallery_image_id?: string
   },
   format = 'png'
 ): ImageResult {
-  const mimeType = ['jpeg', 'webp'].includes(format)
+  let mimeType = ['jpeg', 'webp', 'gif'].includes(format)
     ? `image/${format}`
     : 'image/png'
+  if (item.mime_type && IMAGE_MIME_TYPES.includes(item.mime_type)) {
+    mimeType = item.mime_type
+  }
+  if (item.b64_json) {
+    // Probe only the signature; decoding the full image would duplicate a
+    // potentially large animation in memory. Actual bytes win over a requested
+    // GIF when an upstream falls back to a still image.
+    let prefix: string
+    try {
+      prefix = atob(
+        item.b64_json.slice(0, 64).replaceAll(/\s/g, '').slice(0, 32)
+      )
+    } catch {
+      throw new Error('The image response is invalid.')
+    }
+    if (prefix.startsWith('GIF87a') || prefix.startsWith('GIF89a')) {
+      mimeType = 'image/gif'
+    } else if (prefix.startsWith('\x89PNG\r\n\x1a\n')) {
+      mimeType = 'image/png'
+    } else if (prefix.startsWith('\xff\xd8\xff')) {
+      mimeType = 'image/jpeg'
+    } else if (prefix.startsWith('RIFF') && prefix.slice(8, 12) === 'WEBP') {
+      mimeType = 'image/webp'
+    }
+  }
   const src = item.b64_json
     ? `data:${mimeType};base64,${item.b64_json}`
     : item.url

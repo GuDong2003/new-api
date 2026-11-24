@@ -16,6 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { useQueryClient } from '@tanstack/react-query'
 import { useCallback, useSyncExternalStore } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -28,14 +29,16 @@ import { syncCanvasNow } from '@/features/gallery/lib/canvas-sync'
 import { useAuthStore } from '@/stores/auth-store'
 import { useDrawingStore } from '@/stores/drawing-store'
 
+import type { CanvasSetting } from '../../types'
 import { generateImages } from '../api'
 import { positionGeneratedImageNodes } from '../lib/canvas-document'
 import { CANVAS_NODE_HEIGHT, CANVAS_NODE_WIDTH } from '../lib/canvas-geometry'
 import { imageSourceToAsset } from '../lib/image-assets'
 import {
+  getAllowedImageSize,
   getMaxImageGalleryBytes,
+  normalizeGptImagePanoramaSize,
   returnsInlineImages,
-  usesImageTask,
   validateImageSettings,
 } from '../lib/image-settings'
 import { getAvailableReferenceNodes } from '../lib/reference-connections'
@@ -118,8 +121,7 @@ async function galleryKeepsTaskImages(
       other !== input &&
       other.userId === input.userId &&
       other.sessionId === input.sessionId &&
-      !other.direct &&
-      usesImageTask(other.settings)
+      !other.direct
     ) {
       images += other.job.nodeIds.length
       bytes +=
@@ -149,11 +151,7 @@ async function executeImageJob(
   translate: Translate
 ): Promise<void> {
   try {
-    if (
-      input.taskId === undefined &&
-      usesImageTask(input.settings) &&
-      returnsInlineImages(input.settings)
-    ) {
+    if (input.taskId === undefined && returnsInlineImages(input.settings)) {
       // The images are paid for either way, so a batch the gallery cannot
       // keep is answered on the request rather than lost with the task.
       input.direct = !(await galleryKeepsTaskImages(input))
@@ -471,6 +469,7 @@ function abortImageJob(
 
 export function useImageGeneration() {
   const { t } = useTranslation()
+  const queryClient = useQueryClient()
   const currentUserId = useDrawingStore((state) => state.userId)
   const currentSessionId = useAuthStore(
     (state) => state.auth.session?.sid ?? null
@@ -487,6 +486,16 @@ export function useImageGeneration() {
     mask?: ImageAsset
   ) => {
     const state = useDrawingStore.getState()
+    const canvasSetting = queryClient.getQueryData<CanvasSetting>([
+      'canvas-setting',
+      state.userId,
+    ])
+    const size = normalizeGptImagePanoramaSize(
+      settings.size,
+      settings.model,
+      canvasSetting?.disabled_resolutions ?? []
+    )
+    if (size !== settings.size) settings = { ...settings, size }
     const referenceNodes = getAvailableReferenceNodes(
       state.nodes,
       state.referenceIds
@@ -497,6 +506,21 @@ export function useImageGeneration() {
     const error = validateImageSettings(settings, references.length)
     if (error) {
       toast.error(t(error))
+      return false
+    }
+    if (
+      canvasSetting &&
+      getAllowedImageSize(
+        settings.size,
+        settings.model,
+        canvasSetting.disabled_resolutions
+      ) !== settings.size
+    ) {
+      toast.error(
+        t(
+          'This image resolution is disabled for your group. Choose an available resolution.'
+        )
+      )
       return false
     }
     if (state.nodes.length + settings.n > 500) {
@@ -574,8 +598,17 @@ export function useImageGeneration() {
       const node = state.nodes.find((item) => item.id === nodeId)
       if (!node || node.data.status !== 'error') return false
 
+      const canvasSetting = queryClient.getQueryData<CanvasSetting>([
+        'canvas-setting',
+        state.userId,
+      ])
       const settings = {
         ...node.data.settings,
+        size: normalizeGptImagePanoramaSize(
+          node.data.settings.size,
+          node.data.settings.model,
+          canvasSetting?.disabled_resolutions ?? []
+        ),
         prompt: node.data.prompt,
         n: 1,
       }
@@ -598,6 +631,21 @@ export function useImageGeneration() {
       const error = validateImageSettings(settings, references.length)
       if (error) {
         toast.error(t(error))
+        return false
+      }
+      if (
+        canvasSetting &&
+        getAllowedImageSize(
+          settings.size,
+          settings.model,
+          canvasSetting.disabled_resolutions
+        ) !== settings.size
+      ) {
+        toast.error(
+          t(
+            'This image resolution is disabled for your group. Choose an available resolution.'
+          )
+        )
         return false
       }
 
@@ -635,7 +683,7 @@ export function useImageGeneration() {
       )
       return true
     },
-    [t]
+    [queryClient, t]
   )
 
   // A cancelled generation was still billed, so its image stays collectable

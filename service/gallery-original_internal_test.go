@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"image"
+	"image/color"
+	"image/gif"
 	"image/png"
 	"io"
 	"net/http"
@@ -23,12 +25,20 @@ func TestGalleryTransientOriginalCompletion(t *testing.T) {
 	for _, test := range []struct {
 		name     string
 		truncate bool
-	}{{"complete", false}, {"truncated", true}} {
+		gif      bool
+	}{{"complete", false, false}, {"truncated", true, false}, {"animated-gif", false, true}, {"truncated-gif", true, true}} {
 		t.Run(test.name, func(t *testing.T) {
 			root := t.TempDir()
 			t.Setenv("GALLERY_STORAGE_DIR", root)
 			var encoded bytes.Buffer
-			require.NoError(t, png.Encode(&encoded, image.NewNRGBA(image.Rect(0, 0, 2, 2))))
+			expectedMIME := "image/png"
+			if test.gif {
+				frame := image.NewPaletted(image.Rect(0, 0, 2, 2), color.Palette{color.Black, color.White})
+				require.NoError(t, gif.EncodeAll(&encoded, &gif.GIF{Image: []*image.Paletted{frame, frame}, Delay: []int{12, 20}, LoopCount: 0}))
+				expectedMIME = "image/gif"
+			} else {
+				require.NoError(t, png.Encode(&encoded, image.NewNRGBA(image.Rect(0, 0, 2, 2))))
+			}
 			data := encoded.Bytes()
 			client := &http.Client{Transport: galleryOriginalTransport(func(request *http.Request) (*http.Response, error) {
 				require.Empty(t, request.Header.Get("Authorization"))
@@ -38,7 +48,7 @@ func TestGalleryTransientOriginalCompletion(t *testing.T) {
 				if test.truncate {
 					body = data[:len(data)-3]
 				}
-				return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"image/png"}}, ContentLength: int64(len(data)), Body: io.NopCloser(bytes.NewReader(body))}, nil
+				return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{expectedMIME}}, ContentLength: int64(len(data)), Body: io.NopCloser(bytes.NewReader(body))}, nil
 			})}
 			file, mime, cleanup, err := downloadGalleryOriginal(context.Background(), 41, "https://images.example/a.png", client)
 			if test.truncate {
@@ -46,7 +56,7 @@ func TestGalleryTransientOriginalCompletion(t *testing.T) {
 				require.Nil(t, file)
 			} else {
 				require.NoError(t, err)
-				require.Equal(t, "image/png", mime)
+				require.Equal(t, expectedMIME, mime)
 				actual, err := io.ReadAll(file)
 				require.NoError(t, err)
 				require.Equal(t, data, actual)

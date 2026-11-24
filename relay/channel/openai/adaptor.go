@@ -669,10 +669,11 @@ func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInf
 				}
 			}
 
-			// Handle mask file if present
-			if maskFiles, exists := mf.File["mask"]; exists && len(maskFiles) > 0 {
-				if err := writeImageFormFile(writer, "mask", maskFiles[0]); err != nil {
-					return nil, fmt.Errorf("failed to forward mask file: %w", err)
+			for _, name := range []string{"mask", "markup"} {
+				if files := mf.File[name]; len(files) > 0 {
+					if err := writeImageFormFile(writer, name, files[0]); err != nil {
+						return nil, fmt.Errorf("failed to forward %s file: %w", name, err)
+					}
 				}
 			}
 		} else {

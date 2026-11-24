@@ -24,9 +24,11 @@ import {
   type RenderHookResult,
 } from '@testing-library/react'
 import type { ReactNode } from 'react'
+import { toast } from 'sonner'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { login } from '@/features/gallery/__tests__/fixtures'
+import type { CanvasSetting } from '@/features/playground/types'
 import { api } from '@/lib/api'
 import { useAuthStore } from '@/stores/auth-store'
 import { useDrawingStore } from '@/stores/drawing-store'
@@ -123,6 +125,105 @@ afterEach(() => {
 })
 
 describe('Retrying saved image generations', () => {
+  describe.each(['generate', 'retry'] as const)(
+    '%s with cached resolution restrictions',
+    (action) => {
+      it.each<[string, string[]]>([
+        ['2880x2880', ['4K']],
+        ['3024x1296', ['4K']],
+        ['auto', ['4K']],
+        ['16:9', ['4K']],
+        ['2032x1024', ['2K', '4K']],
+        ['1024x2032', ['2K', '4K']],
+        ['2816x1024', ['4K']],
+        ['1024x2816', ['4K']],
+        ['1552x1536', ['2K', '4K']],
+      ])(
+        'rejects %s with %j withheld without changing the canvas',
+        (size, disabled) => {
+          const error = vi.spyOn(toast, 'error')
+          const settings = {
+            ...failed.data.settings,
+            model: 'gpt-image-2',
+            size,
+          }
+          const node = { ...failed, data: { ...failed.data, settings } }
+          act(() => useDrawingStore.getState().addNodes([node]))
+          client.setQueryData<CanvasSetting>(['canvas-setting', 816], {
+            default_model: '',
+            disabled_resolutions: disabled,
+          })
+
+          act(() => {
+            const started =
+              action === 'generate'
+                ? hook.result.current.generate(settings, failed.position)
+                : hook.result.current.retry(node.id)
+            expect(started).toBe(false)
+          })
+
+          expect(api.post).not.toHaveBeenCalled()
+          expect(hook.result.current.pendingCount).toBe(0)
+          expect(useDrawingStore.getState().nodes).toEqual([node])
+          expect(error).toHaveBeenCalledWith(
+            'This image resolution is disabled for your group. Choose an available resolution.'
+          )
+        }
+      )
+
+      it.each<[string, string[], string]>([
+        ['2048x2048', ['4K'], '2048x2048'],
+        ['1536x1024', ['2K', '4K'], '1536x1024'],
+        ['1024x1536', ['2K', '4K'], '1024x1536'],
+        ['1536x1536', ['2K', '4K'], '1536x1536'],
+        ['2016x864', ['4K'], '2016x864'],
+        ['864x2016', ['4K'], '864x2016'],
+        ['2016x864', ['2K', '4K'], '1456x624'],
+        ['864x2016', ['2K', '4K'], '624x1456'],
+        ['1904x816', ['2K', '4K'], '1456x624'],
+        ['816x1904', ['2K', '4K'], '624x1456'],
+      ])(
+        'submits %s with %j withheld as %s',
+        async (size, disabled, expected) => {
+          vi.mocked(api.post).mockRejectedValue(
+            new Error('Provider is unavailable')
+          )
+          const settings = {
+            ...failed.data.settings,
+            model: 'gpt-image-2',
+            size,
+          }
+          act(() =>
+            useDrawingStore
+              .getState()
+              .addNodes([{ ...failed, data: { ...failed.data, settings } }])
+          )
+          client.setQueryData<CanvasSetting>(['canvas-setting', 816], {
+            default_model: '',
+            disabled_resolutions: disabled,
+          })
+
+          act(() => {
+            const started =
+              action === 'generate'
+                ? hook.result.current.generate(settings, failed.position)
+                : hook.result.current.retry(failed.id)
+            expect(started).toBe(true)
+          })
+
+          await waitFor(() => expect(api.post).toHaveBeenCalledOnce())
+          await waitFor(() => expect(hook.result.current.pendingCount).toBe(0))
+          const nodes = useDrawingStore.getState().nodes
+          expect(nodes).toHaveLength(action === 'generate' ? 2 : 1)
+          expect(nodes.at(-1)?.data.settings.size).toBe(expected)
+          expect(vi.mocked(api.post).mock.calls[0][1]).toMatchObject({
+            size: expected,
+          })
+        }
+      )
+    }
+  )
+
   it('restores text-to-image settings when undoing a reference connection after a retry fails', async () => {
     vi.mocked(api.post).mockRejectedValue(new Error('Provider is unavailable'))
     act(() => {

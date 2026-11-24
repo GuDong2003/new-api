@@ -81,6 +81,7 @@ const GENERATION_MODES: {
 type DrawingSettingsProps = {
   userId: number
   pendingCount: number
+  uploading?: boolean
   onGenerate: (settings: ImageSettings) => void
   onCancel: () => void
   onUploadReferences: (files: File[]) => void
@@ -99,9 +100,13 @@ export function DrawingSettings(props: DrawingSettingsProps) {
   const switchGenerationMode = useDrawingStore(
     (state) => state.switchGenerationMode
   )
-  const { groups, models, imageModels, disabledResolutions } = useImageOptions(
-    props.userId
-  )
+  const {
+    groups,
+    models,
+    imageModels,
+    disabledResolutions,
+    automaticSizeEnabled,
+  } = useImageOptions(props.userId)
   const references = getAvailableReferenceNodes(nodes, referenceIds).flatMap(
     (node) => (node.data.asset ? [{ id: node.id, asset: node.data.asset }] : [])
   )
@@ -459,7 +464,11 @@ export function DrawingSettings(props: DrawingSettingsProps) {
           {(!tagMode || maxReferences > 0) && (
             <ReferenceImages
               limit={tagMode ? maxReferences : undefined}
-              maskable={supportsImageMask(settings.model)}
+              maskable={supportsImageMask(
+                settings.model,
+                settings.outputFormat
+              )}
+              uploading={props.uploading}
               onUpload={props.onUploadReferences}
               mask={props.mask}
               onMaskUpload={props.onMaskUpload}
@@ -473,7 +482,13 @@ export function DrawingSettings(props: DrawingSettingsProps) {
           ) : (
             <ImageParameterFields
               disabledResolutions={disabledResolutions}
+              automaticSizeEnabled={automaticSizeEnabled}
               onSizeChange={(size) => updateSettings({ size })}
+              onQualityChange={(quality) => updateSettings({ quality })}
+              onOutputChange={updateSettings}
+              onModerationChange={(moderation) =>
+                updateSettings({ moderation })
+              }
             />
           )}
           {Object.keys(form.formState.errors).length > 0 && (

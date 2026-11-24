@@ -244,11 +244,12 @@ func ModelRequestRateLimit() func(c *gin.Context) {
 
 		userScope := userRequestRateLimitScope(userId, limit)
 		if userSetting.RateLimit == nil {
-			for _, group := range []string{tokenGroup, userGroup} {
-				if _, _, found := setting.GetGroupRateLimit(group); found {
-					userScope.key += ":" + group
-					break
-				}
+			group := tokenGroup
+			if _, _, found := setting.GetGroupRateLimit(group); !found {
+				group = userGroup
+			}
+			if _, _, found := setting.GetGroupRateLimit(group); found {
+				userScope.key += ":" + group
 			}
 		}
 		scopes := []requestRateLimitScope{userScope}

@@ -68,7 +68,7 @@ func TestProcessHeaderOverride_ChannelTestSkipsPassthroughRules(t *testing.T) {
 	require.Empty(t, headers)
 }
 
-func TestProcessHeaderOverride_ChannelTestAppliesClientHeaderPlaceholder(t *testing.T) {
+func TestProcessHeaderOverride_ChannelTestDoesNotBorrowDashboardHeaders(t *testing.T) {
 	t.Parallel()
 
 	gin.SetMode(gin.TestMode)
@@ -88,7 +88,7 @@ func TestProcessHeaderOverride_ChannelTestAppliesClientHeaderPlaceholder(t *test
 
 	headers, err := processHeaderOverride(info, ctx)
 	require.NoError(t, err)
-	require.Equal(t, "trace-123", headers["x-upstream-trace"])
+	require.NotContains(t, headers, "x-upstream-trace")
 }
 
 func TestProcessHeaderOverride_NonTestKeepsClientHeaderPlaceholder(t *testing.T) {
@@ -359,7 +359,7 @@ func TestProcessHeaderOverride_ClaudeCodeChannelTestAllowsAllExplicitHeaders(t *
 			headers, err := processHeaderOverride(info, ctx)
 			require.NoError(t, err)
 			if test.name == "client header placeholder" {
-				assert.Equal(t, "trace-123", headers["x-safe"])
+				assert.NotContains(t, headers, "x-safe")
 				return
 			}
 			if test.name == "reserved header" {

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"hash/crc32"
 	"image"
+	_ "image/gif"
 	"image/jpeg"
 	"image/png"
 	"io"
@@ -242,7 +243,7 @@ func validateGalleryOriginal(root, id string, size int64) (string, int, int, err
 	}
 	defer f.Close()
 	config, format, err := image.DecodeConfig(f)
-	if err != nil || config.Width < 1 || config.Height < 1 || (format != "png" && format != "jpeg" && format != "webp") {
+	if err != nil || config.Width < 1 || config.Height < 1 || (format != "png" && format != "jpeg" && format != "webp" && format != "gif") {
 		return "", 0, 0, model.ErrGalleryInvalid
 	}
 	if _, err = f.Seek(0, io.SeekStart); err != nil {
@@ -252,6 +253,10 @@ func validateGalleryOriginal(root, id string, size int64) (string, int, int, err
 	buffer := make([]byte, 32<<10)
 	invalid := func() (string, int, int, error) { return "", 0, 0, model.ErrGalleryInvalid }
 	switch format {
+	case "gif":
+		if validateGIFContainer(r) != nil {
+			return invalid()
+		}
 	case "png":
 		if _, err = r.Discard(8); err != nil {
 			return invalid()

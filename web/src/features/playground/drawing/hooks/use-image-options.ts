@@ -24,12 +24,8 @@ import { useDrawingStore } from '@/stores/drawing-store'
 import { getCanvasSetting, getUserGroups, getUserModels } from '../../api'
 import { filterImageModels } from '../lib/image-models'
 import {
-  getImagePresetSize,
-  getImageResolutionTier,
-  getImageSizePreset,
-  nearestOfferedResolution,
+  getAllowedImageSize,
   settingsForImageModel,
-  supportsImageSizePresets,
 } from '../lib/image-settings'
 
 const NO_WITHHELD_RESOLUTIONS: readonly string[] = []
@@ -109,22 +105,20 @@ export function useImageOptions(userId: number) {
     // Read the store rather than this render: the pick above may have just
     // replaced the model and its size.
     const current = useDrawingStore.getState().settings
-    // Only preset models pick their size by tier. A fixed-size model's size is
-    // its own, even when it happens to match a preset.
-    if (!current.model || !supportsImageSizePresets(current.model)) return
-    if (current.size === 'auto') return
-    // A size carried over from another model is billed by its longest side.
-    const preset = getImageSizePreset(current.size, current.model)
-    const tier = preset?.resolution ?? getImageResolutionTier(current.size)
-    const offered = nearestOfferedResolution(tier, disabledResolutions)
-    if (offered === tier) return
-    useDrawingStore.getState().updateSettings({
-      size: getImagePresetSize(
-        preset?.aspectRatio ?? '1:1',
-        offered,
-        current.model
-      ),
-    })
+    const allowedSize = getAllowedImageSize(
+      current.size,
+      current.model,
+      disabledResolutions
+    )
+    if (allowedSize === current.size) return
+    useDrawingStore.getState().updateSettings({ size: allowedSize })
   }, [size, model, disabledResolutions])
-  return { groups, models, imageModels, disabledResolutions }
+  return {
+    groups,
+    models,
+    imageModels,
+    disabledResolutions,
+    automaticSizeEnabled:
+      canvasSetting.isSuccess && disabledResolutions.length === 0,
+  }
 }

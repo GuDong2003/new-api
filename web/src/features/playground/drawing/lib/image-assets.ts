@@ -21,14 +21,21 @@ import type { ImageAsset } from '../types'
 export const MAX_IMAGE_BYTES = 50 * 1024 * 1024
 /** A whole request may reach MAX_IMAGE_BYTES, but one reference may not. */
 export const MAX_REFERENCE_IMAGE_BYTES = 20 * 1024 * 1024
-export const IMAGE_MIME_TYPES = ['image/png', 'image/jpeg', 'image/webp']
+export const IMAGE_MIME_TYPES = [
+  'image/png',
+  'image/jpeg',
+  'image/webp',
+  'image/gif',
+]
 
 /**
  * Safe to keep: a picture that will still resolve after this tab is gone, which
  * is what a saved or exported canvas needs. An object URL would not.
  */
 export function isSafeImageSource(source: string): boolean {
-  if (/^data:image\/(?:png|jpeg|webp);base64,[a-zA-Z0-9+/=\s]+$/.test(source)) {
+  if (
+    /^data:image\/(?:png|jpeg|webp|gif);base64,[a-zA-Z0-9+/=\s]+$/.test(source)
+  ) {
     return true
   }
   try {
@@ -118,7 +125,7 @@ export async function imageSourceToAsset(
 
 export async function imageFileToAsset(file: File): Promise<ImageAsset> {
   if (!IMAGE_MIME_TYPES.includes(file.type)) {
-    throw new Error('Choose a PNG, JPEG or WebP image.')
+    throw new Error('Choose a PNG, JPEG, WebP or GIF image.')
   }
   if (file.size > MAX_IMAGE_BYTES) {
     throw new Error('Each reference image must be smaller than 50 MB.')
@@ -151,7 +158,7 @@ export async function imageAssetToFile(
   }
   const blob = await response.blob()
   if (!IMAGE_MIME_TYPES.includes(blob.type)) {
-    throw new Error('Choose a PNG, JPEG or WebP image.')
+    throw new Error('Choose a PNG, JPEG, WebP or GIF image.')
   }
   if (blob.size > MAX_IMAGE_BYTES) {
     throw new Error('Each reference image must be smaller than 50 MB.')

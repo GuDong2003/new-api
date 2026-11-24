@@ -738,7 +738,7 @@ func persistImageTaskArtifacts(ctx context.Context, task *model.Task, result jso
 		if urlErr != nil {
 			return nil, nil, urlErr
 		}
-		sanitized[index] = dto.ImageData{Url: contentURL, RevisedPrompt: gjson.GetBytes(result, item+".revised_prompt").String()}
+		sanitized[index] = dto.ImageData{Url: contentURL, RevisedPrompt: gjson.GetBytes(result, item+".revised_prompt").String(), MIMEType: galleryImage.MIMEType}
 	}
 
 	encodedData, err := common.Marshal(sanitized)

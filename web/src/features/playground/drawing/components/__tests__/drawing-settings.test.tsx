@@ -185,6 +185,33 @@ describe('DrawingSettings generation modes', () => {
     expect(screen.getByLabelText('Negative prompt')).toBeInTheDocument()
     expect(screen.getByLabelText('Width')).toHaveValue(832)
     expect(screen.getByLabelText('Sampler')).toHaveValue('k_euler_ancestral')
+    const qualityTags = screen.getByRole('switch', { name: 'Quality tags' })
+    const smea = screen.getByRole('switch', { name: 'SMEA' })
+    expect(qualityTags).toBeVisible()
+    expect(qualityTags).not.toBeChecked()
+    expect(smea).toBeVisible()
+    expect(screen.getByLabelText('Undesired content preset')).toBeVisible()
+    expect(screen.getByLabelText('Undesired content preset')).toHaveValue(
+      'none'
+    )
+    expect(
+      screen.queryByLabelText('Quality tag preset')
+    ).not.toBeInTheDocument()
+
+    await user.click(qualityTags)
+    expect(screen.getByLabelText('Quality tag preset')).toBeVisible()
+    await user.selectOptions(
+      screen.getByLabelText('Quality tag preset'),
+      'light'
+    )
+    expect(useDrawingStore.getState().settings.qualityTier).toBe('light')
+    await user.click(qualityTags)
+    expect(
+      screen.queryByLabelText('Quality tag preset')
+    ).not.toBeInTheDocument()
+    await user.click(smea)
+    expect(smea).toBeChecked()
+    expect(useDrawingStore.getState().settings.smea).toBe(true)
 
     await user.click(description)
     expect(useDrawingStore.getState().settings.model).toBe('gpt-image-1')

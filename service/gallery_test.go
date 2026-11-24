@@ -10,6 +10,7 @@ import (
 	"hash/crc32"
 	"image"
 	"image/color"
+	"image/gif"
 	"image/jpeg"
 	"image/png"
 	"io"
@@ -465,6 +466,72 @@ func TestSaveTaskGalleryImageStoresOriginalAndThumbnail(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "png", format)
 	assert.Equal(t, image.Rect(0, 0, 512, 341), picture.Bounds())
+}
+
+func TestGalleryAnimatedGIFRoundTrip(t *testing.T) {
+	palette := color.Palette{color.Black, color.White}
+	first := image.NewPaletted(image.Rect(0, 0, 16, 8), palette)
+	second := image.NewPaletted(first.Rect, palette)
+	second.SetColorIndex(4, 2, 1)
+	animation := &gif.GIF{Image: []*image.Paletted{first, second}, Delay: []int{12, 20}, LoopCount: 0, Disposal: []byte{gif.DisposalNone, gif.DisposalBackground}}
+	var encoded bytes.Buffer
+	require.NoError(t, gif.EncodeAll(&encoded, animation))
+	original := encoded.Bytes()
+	dialects := map[string]gorm.Dialector{"sqlite": sqlite.Open(filepath.Join(t.TempDir(), "gallery.db"))}
+	if dsn := os.Getenv("GALLERY_TEST_MYSQL_DSN"); dsn != "" {
+		dialects["mysql"] = mysql.Open(dsn)
+	}
+	if dsn := os.Getenv("GALLERY_TEST_POSTGRES_DSN"); dsn != "" {
+		dialects["postgres"] = postgres.Open(dsn)
+	}
+	for name, dialect := range dialects {
+		t.Run(name, func(t *testing.T) {
+			galleryFixture(t, dialect)
+			var version string
+			versionQuery := "SELECT version()"
+			if name == "sqlite" {
+				versionQuery = "SELECT sqlite_version()"
+			}
+			require.NoError(t, model.DB.Raw(versionQuery).Scan(&version).Error)
+			t.Logf("%s: %s", name, version)
+			ctx := context.Background()
+			saved, err := service.SaveTaskGalleryImage(ctx, 41, "task_gif", "image-0", "gpt-image-2.6", "a looping fox", "image/gif", bytes.NewReader(original))
+			require.NoError(t, err)
+			assert.Equal(t, "image/gif", saved.MIMEType)
+			actual, _ := readGalleryImage(t, 41, saved.ID, false)
+			assert.Equal(t, original, actual)
+			reopened, err := gif.DecodeAll(bytes.NewReader(actual))
+			require.NoError(t, err)
+			assert.Len(t, reopened.Image, 2)
+			assert.Equal(t, animation.Delay, reopened.Delay)
+			assert.Equal(t, animation.LoopCount, reopened.LoopCount)
+			assert.Equal(t, animation.Disposal, reopened.Disposal)
+
+			metadata := canvasSaveMetadata(t)
+			doc := metadata["document"].(map[string]any)
+			doc["settings"].(map[string]any)["model"] = "gpt-image-2.6"
+			doc["settings"].(map[string]any)["outputFormat"] = "gif"
+			doc["settings"].(map[string]any)["frameCount"] = float64(12)
+			doc["settings"].(map[string]any)["frameDurationMs"] = float64(120)
+			asset := doc["nodes"].([]any)[0].(map[string]any)["data"].(map[string]any)["asset"].(map[string]any)
+			asset["name"], asset["mimeType"] = "fox.gif", "image/gif"
+			manifest := metadata["assets"].([]any)[0].(map[string]any)
+			manifest["bytes"], manifest["sha256"] = len(original), fmt.Sprintf("%x", sha256.Sum256(original))
+			canvas, err := saveCanvasMetadata(t, 41, metadata, []string{"file:" + canvasFixtureAsset, string(original)})
+			require.NoError(t, err)
+			loaded, err := service.GetGalleryCanvas(ctx, 41, canvas.ID)
+			require.NoError(t, err)
+			assert.Equal(t, canvas.Document, loaded.Document)
+			document := loaded.Document
+			assert.Equal(t, float64(12), document["settings"].(map[string]any)["frameCount"])
+			assert.Equal(t, float64(120), document["settings"].(map[string]any)["frameDurationMs"])
+
+			for index, malformed := range [][]byte{original[:len(original)-1], original[:len(original)-8], []byte("GIF89a")} {
+				_, err := gallerySave(t, 41, "drawing", fmt.Sprintf("bad-gif-%d", index), malformed)
+				assert.Error(t, err, "a truncated animation must not be published")
+			}
+		})
+	}
 }
 
 // galleryLargePNG is a noisy 1536x1024 picture, larger than a thumbnail, whose

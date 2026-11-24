@@ -352,10 +352,31 @@ describe('the canvas setting of the user group', () => {
     })
     // 16:9 at 2K.
     await waitFor(() =>
-      expect(useDrawingStore.getState().settings.size).toBe('2560x1440')
+      expect(useDrawingStore.getState().settings.size).toBe('2048x1152')
     )
     view.unmount()
   })
+
+  it.each([
+    ['auto', ['4K'], '1024x1024'],
+    ['16:9', ['1K'], '2048x1152'],
+    ['auto', ['1K', '2K'], '2880x2880'],
+    ['3024x1296', ['4K'], '2688x1152'],
+  ])(
+    'restores %s to %s restrictions using an explicit permitted size',
+    async (size, disabled, expected) => {
+      startCanvas(869, 'gpt-image-2')
+      useDrawingStore.getState().updateSettings({ size })
+      const view = renderImageOptions(869, ['gpt-image-2'], {
+        default_model: '',
+        disabled_resolutions: disabled,
+      })
+      await waitFor(() =>
+        expect(useDrawingStore.getState().settings.size).toBe(expected)
+      )
+      view.unmount()
+    }
+  )
 
   it('keeps the size it picked when reused settings name a model the group lacks', async () => {
     startCanvas(867)
@@ -383,8 +404,8 @@ describe('the canvas setting of the user group', () => {
 
   it('moves a size carried over from another model off a withheld tier', async () => {
     startCanvas(868, 'gpt-image-2')
-    // DALL·E 3's widest size, which GPT Image 2 renders at 2K.
-    useDrawingStore.getState().updateSettings({ size: '1792x1024' })
+    // An imported 2K canvas can carry a custom size rather than a preset.
+    useDrawingStore.getState().updateSettings({ size: '2048x1024' })
     const view = renderImageOptions(868, ['gpt-image-2'], {
       default_model: '',
       disabled_resolutions: ['2K'],

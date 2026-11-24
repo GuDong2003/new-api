@@ -42,7 +42,7 @@ const assetSchema = z.object({
     .refine(isSafeImageSource),
   width: z.number().int().positive().max(32768),
   height: z.number().int().positive().max(32768),
-  mimeType: z.enum(['image/png', 'image/jpeg', 'image/webp']),
+  mimeType: z.enum(['image/png', 'image/jpeg', 'image/webp', 'image/gif']),
 })
 const nodeSchema = z.object({
   id: z.string().min(1).max(128),

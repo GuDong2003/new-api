@@ -2961,6 +2961,61 @@ func TestContentAuditRecoveryChild(t *testing.T) {
 	require.NoError(t, scanner.Err())
 }
 
+func TestContentAuditImageTaskURLDoesNotBecomeAnImage(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		response string
+		stream   bool
+	}{
+		{
+			name: "async image JSON",
+			response: `{"data":[{"url":"http://127.0.0.1/result.png"}],` +
+				`"result_url":"http://127.0.0.1/result.png",` +
+				`"url":"/pg/images/edits/task_id",` +
+				`"poll_url":"/pg/images/edits/task_id",` +
+				`"status_url":"/pg/images/edits/task_id"}`,
+		},
+		{
+			name:     "root URL in image SSE event",
+			response: "data: {\"url\":\"http://127.0.0.1/result.png\"}\n\n",
+			stream:   true,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			r, _, _ := contentAuditTestRuntime(t)
+			var request bytes.Buffer
+			form := multipart.NewWriter(&request)
+			for _, name := range []string{"first.png", "second.png"} {
+				part, err := form.CreateFormFile("image[]", name)
+				require.NoError(t, err)
+				_, err = part.Write([]byte(name))
+				require.NoError(t, err)
+			}
+			require.NoError(t, form.WriteField("prompt", "replace the character"))
+			require.NoError(t, form.Close())
+
+			_, job := contentAuditServeCaptured(
+				t,
+				r,
+				"/pg/images/edits",
+				form.FormDataContentType(),
+				request.Bytes(),
+				[]byte(test.response),
+				test.stream,
+				false,
+			)
+			require.NotNil(t, job)
+			r.runJob(context.Background(), job)
+
+			page, err := ReadContentAuditImagePage(context.Background(), job.record.AuditID, -1, 20)
+			require.NoError(t, err)
+			require.EqualValues(t, 1, page.Total)
+			require.Len(t, page.Items, 1)
+			assert.Equal(t, "http://127.0.0.1/result.png", page.Items[0].Address)
+		})
+	}
+}
+
 func TestContentAuditResultURLSurvivesTextLimit(t *testing.T) {
 	memory := &contentAuditMemory{}
 	images := &contentAuditImages{budget: memory, enabled: true}

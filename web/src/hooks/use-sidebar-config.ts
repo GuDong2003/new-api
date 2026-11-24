@@ -100,6 +100,7 @@ const URL_TO_CONFIG_MAP: Record<string, { section: string; module: string }> = {
   '/content-audit': { section: 'admin', module: 'contentAudit' },
   '/system-info': { section: 'admin', module: 'systemInfo' },
   '/task-plugins': { section: 'admin', module: 'taskPlugins' },
+  '/request-processing': { section: 'admin', module: 'requestProcessing' },
   '/system-settings': { section: 'admin', module: 'setting' },
   '/system-settings/site': { section: 'admin', module: 'setting' },
 }

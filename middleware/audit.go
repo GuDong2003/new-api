@@ -315,5 +315,9 @@ func finishAccessTokenAudit(c *gin.Context) {
 	}
 	audit.entry.Status = audit.writer.Status()
 	audit.entry.Success = auditResponseSuccess(audit.entry.Status, audit.writer.body.Bytes())
+	if _, exists := c.Get(string(constant.ContextKeyLogExportSucceeded)); exists {
+		// An export can fail after its 200 status and several JSON lines were sent.
+		audit.entry.Success = audit.entry.Status < 400 && common.GetContextKeyBool(c, constant.ContextKeyLogExportSucceeded)
+	}
 	model.RecordAuditLog(c, audit.entry)
 }

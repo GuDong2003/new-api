@@ -31,6 +31,34 @@ function streamOf(chunks: string[]): ReadableStream<Uint8Array> {
 }
 
 describe('OpenAI image responses', () => {
+  it.each([
+    ['R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==', 'png', 'image/gif'],
+    ['iVBORw0KGgoAAAANSUhEUg==', 'gif', 'image/png'],
+  ])(
+    'recognizes actual base64 image bytes instead of requested %s',
+    (b64, format, mimeType) => {
+      expect(
+        parseImageResponse({ data: [{ b64_json: b64 }] }, format)[0]
+      ).toMatchObject({
+        src: `data:${mimeType};base64,${b64}`,
+        mimeType,
+      })
+    }
+  )
+
+  it('uses the stored original MIME type for a task artifact URL', () => {
+    expect(
+      parseImageResponse(
+        {
+          data: [
+            { url: 'https://example.com/original', mime_type: 'image/gif' },
+          ],
+        },
+        'png'
+      )[0].mimeType
+    ).toBe('image/gif')
+  })
+
   it('uses the returned MIME type for base64 images and preserves revised prompts', () => {
     expect(
       parseImageResponse(

@@ -77,6 +77,63 @@ function canvasImage(
 
 beforeEach(() => useDrawingStore.getState().initialize(802))
 describe('Canvas documents', () => {
+  it('keeps GIF bytes, transparency and timing when a canvas is exported and imported', () => {
+    const src =
+      'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw=='
+    const settings = {
+      ...DEFAULT_IMAGE_SETTINGS,
+      model: 'gpt-image-2.6',
+      background: 'transparent' as const,
+      outputFormat: 'gif' as const,
+      frameCount: 12,
+      frameDurationMs: 120,
+    }
+    const node = {
+      ...image,
+      data: {
+        ...image.data,
+        settings,
+        asset: {
+          id: 'asset-gif',
+          width: 1,
+          height: 1,
+          name: 'fox.gif',
+          src,
+          mimeType: 'image/gif',
+        },
+      },
+    }
+    const document = parseDrawingDocument({
+      version: 1,
+      nodes: [node],
+      edges: [],
+      viewport: { x: 0, y: 0, zoom: 1 },
+      settings,
+      referenceIds: [],
+      mask: null,
+    })
+    const imported = parseDrawingDocument(
+      JSON.parse(JSON.stringify(serializeDrawingDocument(document)))
+    )
+    expect(imported.nodes[0].data.asset).toMatchObject({
+      src,
+      mimeType: 'image/gif',
+      name: 'fox.gif',
+    })
+    expect(imported.settings).toMatchObject({
+      background: 'transparent',
+      outputFormat: 'gif',
+      frameCount: 12,
+      frameDurationMs: 120,
+    })
+    expect(imported.nodes[0].data.settings).toMatchObject({
+      background: 'transparent',
+      outputFormat: 'gif',
+      frameCount: 12,
+      frameDurationMs: 120,
+    })
+  })
+
   it('arranges two reference images above one generated result', () => {
     const referenceA = canvasImage('reference-a', { x: 900, y: 20 })
     const referenceB = canvasImage('reference-b', { x: 120, y: 640 })

@@ -398,7 +398,7 @@ func validTaskGalleryInput(taskID, artifactKey, source, modelName, prompt, mimeT
 		!utf8.ValidString(modelName) || !utf8.ValidString(prompt) {
 		return false
 	}
-	return mimeType == "" || mimeType == "image/png" || mimeType == "image/jpeg" || mimeType == "image/webp"
+	return mimeType == "" || mimeType == "image/png" || mimeType == "image/jpeg" || mimeType == "image/webp" || mimeType == "image/gif"
 }
 
 func saveTaskGalleryImage(ctx context.Context, user int, metadata GalleryMetadata, normalized []byte, declaredMIME string, writeOriginal func(io.Writer) error) (*model.GalleryImage, error) {

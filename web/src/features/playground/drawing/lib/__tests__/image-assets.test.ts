@@ -134,6 +134,11 @@ describe('image download names', () => {
 
   it.each([
     {
+      prompt: 'A looping fox',
+      mimeType: 'image/gif',
+      name: 'A looping fox-20260927-213005.gif',
+    },
+    {
       prompt: '一只橘猫在窗台上',
       mimeType: 'image/png',
       name: '一只橘猫在窗台上-20260927-213005.png',

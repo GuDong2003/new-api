@@ -33,6 +33,8 @@ import {
 } from '@/components/drawer-layout'
 import { ErrorState } from '@/components/error-state'
 import { LoadingState } from '@/components/loading-state'
+import { PasswordInput } from '@/components/password-input'
+import { PasswordStrength } from '@/components/password-strength'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Combobox } from '@/components/ui/combobox'
@@ -543,10 +545,16 @@ export function UsersMutateDrawer({
                     render={({ field }) => (
                       <FormItem>
                         <FormLabel>{t('Password')}</FormLabel>
-                        <FormControl>
-                          <Input
+                        <FormControl
+                          describedBy={
+                            !isUpdate || field.value
+                              ? 'user-password-strength'
+                              : undefined
+                          }
+                        >
+                          <PasswordInput
                             {...field}
-                            type='password'
+                            autoComplete='new-password'
                             disabled={!canEditSecurity}
                             placeholder={
                               isUpdate
@@ -555,6 +563,11 @@ export function UsersMutateDrawer({
                             }
                           />
                         </FormControl>
+                        <PasswordStrength
+                          id='user-password-strength'
+                          value={field.value ?? ''}
+                          quietWhenEmpty={isUpdate}
+                        />
                         <FormMessage />
                       </FormItem>
                     )}

@@ -1,5 +1,7 @@
 package common
 
+import "strings"
+
 type DatabaseType string
 
 const (
@@ -67,3 +69,15 @@ const SQLiteConcurrencyParams = "_pragma=busy_timeout(30000)&_pragma=journal_mod
 
 // SQLitePath is the DSN for the default SQLite database.
 var SQLitePath = "one-api.db?" + SQLiteConcurrencyParams
+
+const sqliteConcurrencyParams = SQLiteConcurrencyParams
+
+// sqliteDSN turns a SQLITE_PATH value into a DSN. A bare path gets the
+// default concurrency parameters; a value with its own query string is used
+// as given.
+func sqliteDSN(path string) string {
+	if strings.Contains(path, "?") {
+		return path
+	}
+	return path + "?" + sqliteConcurrencyParams
+}

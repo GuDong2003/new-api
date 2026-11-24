@@ -16,20 +16,18 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import {
-  Cancel01Icon,
-  ImageAdd01Icon,
-  PaintBrush01Icon,
-} from '@hugeicons/core-free-icons'
+import { Cancel01Icon, PaintBrush01Icon } from '@hugeicons/core-free-icons'
 import { HugeiconsIcon } from '@hugeicons/react'
 import { useRef } from 'react'
 import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { useDrawingStore } from '@/stores/drawing-store'
 
 import type { ImageAsset } from '../types'
+import { ImageUploadPlaceholder } from './ImageUploadPlaceholder'
 import { MaskOverlay } from './MaskOverlay'
 
 type ReferenceImagesProps = {
@@ -37,6 +35,7 @@ type ReferenceImagesProps = {
   limit?: number
   // Whether the selected model can repaint under a mask.
   maskable?: boolean
+  uploading?: boolean
   onUpload: (files: File[]) => void
   mask?: ImageAsset
   onMaskUpload: (file: File) => void
@@ -46,7 +45,6 @@ type ReferenceImagesProps = {
 
 export function ReferenceImages(props: ReferenceImagesProps) {
   const { t } = useTranslation()
-  const upload = useRef<HTMLInputElement>(null)
   const maskUpload = useRef<HTMLInputElement>(null)
   const nodes = useDrawingStore((state) => state.nodes)
   const ids = useDrawingStore((state) => state.referenceIds)
@@ -68,89 +66,90 @@ export function ReferenceImages(props: ReferenceImagesProps) {
             {references.length}/{limit}
           </span>
         </Label>
-        <Button
-          type='button'
-          variant='ghost'
-          size='sm'
-          disabled={references.length >= limit}
-          onClick={() => upload.current?.click()}
-        >
-          <HugeiconsIcon icon={ImageAdd01Icon} size={15} aria-hidden='true' />
-          {t('Upload')}
-        </Button>
       </div>
-      <input
-        ref={upload}
-        type='file'
-        className='hidden'
-        aria-label={t('Upload reference images')}
-        accept='image/png,image/jpeg,image/webp'
-        multiple
-        onChange={(event) => {
-          props.onUpload([...(event.target.files || [])])
-          event.target.value = ''
-        }}
-      />
-      <div
-        className='flex max-w-full gap-2 overflow-x-auto overflow-y-hidden pb-1'
-        role='list'
-        aria-label={t('Reference images')}
-      >
-        {references.map(({ id, asset }, index) => (
+      <div className='flex max-w-full gap-2 overflow-x-auto overflow-y-hidden pb-1'>
+        {references.length > 0 && (
           <div
-            key={id}
-            className='group bg-muted relative aspect-square w-24 shrink-0 cursor-grab overflow-hidden rounded-lg border active:cursor-grabbing'
-            draggable
-            role='listitem'
-            aria-label={`${t('Reference images')} ${index + 1}: ${asset.name}`}
-            onDragStart={(event) => {
-              event.dataTransfer.effectAllowed = 'move'
-              event.dataTransfer.setData('application/x-new-api-reference', id)
-              event.dataTransfer.setData('text/plain', id)
-            }}
-            onDragOver={(event) => {
-              if (
-                event.dataTransfer.types.includes(
-                  'application/x-new-api-reference'
-                )
-              ) {
-                event.preventDefault()
-                event.dataTransfer.dropEffect = 'move'
-              }
-            }}
-            onDrop={(event) => {
-              event.preventDefault()
-              const sourceId = event.dataTransfer.getData(
-                'application/x-new-api-reference'
-              )
-              if (sourceId) reorderReferences(sourceId, id)
-            }}
+            className='flex shrink-0 gap-2'
+            role='list'
+            aria-label={t('Reference images')}
           >
-            <img
-              src={asset.src}
-              alt={asset.name}
-              className='pointer-events-none size-full object-cover'
-              draggable={false}
-            />
-            {index === 0 && props.mask && props.maskable !== false && (
-              <MaskOverlay mask={props.mask} fit='cover' />
-            )}
-            <span className='bg-background/90 absolute bottom-0 left-0 px-1 text-[10px]'>
-              {index + 1}
-            </span>
-            <Button
-              type='button'
-              size='icon-xs'
-              variant='secondary'
-              className='absolute top-0.5 right-0.5'
-              aria-label={t('Remove reference')}
-              title={t('Remove reference')}
-              onClick={() => toggleReference(id)}
-            >
-              <HugeiconsIcon icon={Cancel01Icon} size={12} aria-hidden='true' />
-            </Button>
+            {references.map(({ id, asset }, index) => (
+              <div
+                key={id}
+                className='group bg-muted relative aspect-square w-24 shrink-0 cursor-grab overflow-hidden rounded-lg border active:cursor-grabbing'
+                draggable
+                role='listitem'
+                aria-label={`${t('Reference images')} ${index + 1}: ${asset.name}`}
+                onDragStart={(event) => {
+                  event.dataTransfer.effectAllowed = 'move'
+                  event.dataTransfer.setData(
+                    'application/x-new-api-reference',
+                    id
+                  )
+                  event.dataTransfer.setData('text/plain', id)
+                }}
+                onDragOver={(event) => {
+                  if (
+                    event.dataTransfer.types.includes(
+                      'application/x-new-api-reference'
+                    )
+                  ) {
+                    event.preventDefault()
+                    event.dataTransfer.dropEffect = 'move'
+                  }
+                }}
+                onDrop={(event) => {
+                  event.preventDefault()
+                  const sourceId = event.dataTransfer.getData(
+                    'application/x-new-api-reference'
+                  )
+                  if (sourceId) reorderReferences(sourceId, id)
+                }}
+              >
+                <img
+                  src={asset.src}
+                  alt={asset.name}
+                  className='pointer-events-none size-full object-cover'
+                  draggable={false}
+                />
+                {index === 0 && props.mask && props.maskable !== false && (
+                  <MaskOverlay mask={props.mask} fit='cover' />
+                )}
+                <span className='bg-background/90 absolute bottom-0 left-0 px-1 text-[10px]'>
+                  {index + 1}
+                </span>
+                <Button
+                  type='button'
+                  size='icon-xs'
+                  variant='secondary'
+                  className='absolute top-0.5 right-0.5'
+                  aria-label={t('Remove reference')}
+                  title={t('Remove reference')}
+                  onClick={() => toggleReference(id)}
+                >
+                  <HugeiconsIcon
+                    icon={Cancel01Icon}
+                    size={12}
+                    aria-hidden='true'
+                  />
+                </Button>
+              </div>
+            ))}
           </div>
-        ))}
+        )}
+        <ImageUploadPlaceholder
+          label={t('Upload reference images')}
+          compact={references.length > 0}
+          disabled={props.uploading || references.length >= limit}
+          onUpload={(files) => {
+            if (files.length > limit - references.length) {
+              toast.error(t('Too many reference images for this model.'))
+              return
+            }
+            props.onUpload(files)
+          }}
+        />
       </div>
       {references.length > 0 && props.maskable !== false && (
         <>

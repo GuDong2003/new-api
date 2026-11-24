@@ -168,7 +168,7 @@ func streamContentAuditImage(ctx context.Context, client *http.Client, raw strin
 	if err != nil {
 		return errContentAuditImage
 	}
-	request.Header.Set("Accept", "image/jpeg, image/png, image/webp")
+	request.Header.Set("Accept", "image/jpeg, image/png, image/webp, image/gif")
 	request.Header.Set("Accept-Encoding", "identity")
 	request.Header.Set("User-Agent", "new-api-content-audit/1")
 	response, err := client.Do(request)
@@ -180,7 +180,7 @@ func streamContentAuditImage(ctx context.Context, client *http.Client, raw strin
 		return errContentAuditImage
 	}
 	*contentType, _, err = mime.ParseMediaType(response.Header.Get("Content-Type"))
-	if err != nil || (*contentType != "image/png" && *contentType != "image/jpeg" && *contentType != "image/webp") {
+	if err != nil || (*contentType != "image/png" && *contentType != "image/jpeg" && *contentType != "image/webp" && *contentType != "image/gif") {
 		return errContentAuditFile
 	}
 	n, err := io.CopyBuffer(target, response.Body, make([]byte, contentAuditOriginalBlock))
@@ -216,12 +216,18 @@ func (s *contentAuditStore) validateOriginalImage(ctx context.Context, state *mo
 		format = "image/jpeg"
 	} else if string(header[:4]) == "RIFF" && string(header[8:12]) == "WEBP" {
 		format = "image/webp"
+	} else if string(header[:6]) == "GIF87a" || string(header[:6]) == "GIF89a" {
+		format = "image/gif"
 	}
 	if format == "" || (declared != "" && declared != format) {
 		return "", errContentAuditFile
 	}
 	buffer := make([]byte, contentAuditOriginalBlock)
 	switch format {
+	case "image/gif":
+		if validateGIFContainer(r) != nil {
+			return "", errContentAuditFile
+		}
 	case "image/png":
 		_, _ = r.Discard(8)
 		first, pixels, done := true, false, false

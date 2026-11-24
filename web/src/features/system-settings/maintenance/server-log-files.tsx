@@ -20,18 +20,8 @@ import { useCallback, useEffect, useId, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
+import { ConfirmDialog } from '@/components/confirm-dialog'
 import { Alert, AlertDescription } from '@/components/ui/alert'
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -81,6 +71,7 @@ export function ServerLogFiles() {
   const [serverLogCleanupMode, setServerLogCleanupMode] = useState('by_count')
   const [serverLogCleanupValue, setServerLogCleanupValue] = useState(10)
   const [serverLogCleanupLoading, setServerLogCleanupLoading] = useState(false)
+  const [showConfirmDialog, setShowConfirmDialog] = useState(false)
 
   const fetchServerLogInfo = useCallback(async () => {
     try {
@@ -112,6 +103,7 @@ export function ServerLogFiles() {
         `/api/performance/logs?mode=${serverLogCleanupMode}&value=${serverLogCleanupValue}`
       )
       if (res.data.success) {
+        setShowConfirmDialog(false)
         const { deleted_count, freed_bytes } = res.data.data
         toast.success(
           t('Cleaned up {{count}} log files, freed {{size}}', {
@@ -229,53 +221,39 @@ export function ServerLogFiles() {
                   className='w-[120px]'
                 />
               </div>
-              <AlertDialog>
-                <AlertDialogTrigger
-                  render={
-                    <Button
-                      type='button'
-                      variant='destructive'
-                      size='sm'
-                      disabled={serverLogCleanupLoading}
-                    />
-                  }
-                >
-                  {serverLogCleanupLoading
-                    ? t('Cleaning...')
-                    : t('Clean Up Log Files')}
-                </AlertDialogTrigger>
-                <AlertDialogContent>
-                  <AlertDialogHeader>
-                    <AlertDialogTitle>
-                      {t('Confirm log file cleanup?')}
-                    </AlertDialogTitle>
-                    <AlertDialogDescription>
-                      {serverLogCleanupMode === 'by_count'
-                        ? t(
-                            'Only the last {{value}} log files will be retained; the rest will be deleted.',
-                            {
-                              value: serverLogCleanupValue,
-                            }
-                          )
-                        : t(
-                            'Log files older than {{value}} days will be deleted.',
-                            {
-                              value: serverLogCleanupValue,
-                            }
-                          )}
-                    </AlertDialogDescription>
-                  </AlertDialogHeader>
-                  <AlertDialogFooter>
-                    <AlertDialogCancel>{t('Cancel')}</AlertDialogCancel>
-                    <AlertDialogAction
-                      variant='destructive'
-                      onClick={cleanupServerLogFiles}
-                    >
-                      {t('Confirm Cleanup')}
-                    </AlertDialogAction>
-                  </AlertDialogFooter>
-                </AlertDialogContent>
-              </AlertDialog>
+              <Button
+                type='button'
+                variant='destructive'
+                size='sm'
+                disabled={serverLogCleanupLoading}
+                onClick={() => setShowConfirmDialog(true)}
+              >
+                {serverLogCleanupLoading
+                  ? t('Cleaning...')
+                  : t('Clean Up Log Files')}
+              </Button>
+              <ConfirmDialog
+                open={showConfirmDialog}
+                onOpenChange={setShowConfirmDialog}
+                title={t('Confirm log file cleanup?')}
+                desc={
+                  serverLogCleanupMode === 'by_count'
+                    ? t(
+                        'Only the last {{value}} log files will be retained; the rest will be deleted.',
+                        { value: serverLogCleanupValue }
+                      )
+                    : t(
+                        'Log files older than {{value}} days will be deleted.',
+                        {
+                          value: serverLogCleanupValue,
+                        }
+                      )
+                }
+                destructive
+                isLoading={serverLogCleanupLoading}
+                confirmText={t('Confirm Cleanup')}
+                handleConfirm={cleanupServerLogFiles}
+              />
             </div>
           </div>
         ) : (

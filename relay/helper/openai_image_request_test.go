@@ -55,6 +55,51 @@ func TestLegacyDalleValidationAndPricesRemainCompatible(t *testing.T) {
 	}
 }
 
+func TestImageGIFParameters(t *testing.T) {
+	for _, format := range []string{"json", "multipart"} {
+		t.Run(format, func(t *testing.T) {
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			if format == "json" {
+				c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/edits", bytes.NewBufferString(`{"model":"gpt-image-2.6","prompt":"a looping fox","output_format":"gif","frame_count":12,"frame_duration_ms":120}`))
+				c.Request.Header.Set("Content-Type", "application/json")
+			} else {
+				var body bytes.Buffer
+				writer := multipart.NewWriter(&body)
+				for name, value := range map[string]string{"model": "gpt-image-2.6", "prompt": "a looping fox", "output_format": "gif", "frame_count": "12", "frame_duration_ms": "120"} {
+					require.NoError(t, writer.WriteField(name, value))
+				}
+				require.NoError(t, writer.Close())
+				c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/edits", &body)
+				c.Request.Header.Set("Content-Type", writer.FormDataContentType())
+			}
+			request, err := GetAndValidOpenAIImageRequest(c, relayconstant.RelayModeImagesEdits)
+			require.NoError(t, err)
+			encoded, err := common.Marshal(request)
+			require.NoError(t, err)
+			var fields map[string]any
+			require.NoError(t, common.Unmarshal(encoded, &fields))
+			assert.Equal(t, "gif", fields["output_format"])
+			assert.Equal(t, float64(12), fields["frame_count"])
+			assert.Equal(t, float64(120), fields["frame_duration_ms"])
+			assert.Equal(t, float64(1), request.GetTokenCountMeta().BillingRatios["n"])
+		})
+	}
+
+	for _, fields := range []string{
+		`"frame_count":1`, `"frame_count":17`, `"frame_count":2.5`,
+		`"frame_duration_ms":0`, `"frame_duration_ms":2001`,
+		`"stream":true`, `"partial_images":1`, `"output_compression":0`,
+	} {
+		t.Run(fields, func(t *testing.T) {
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", bytes.NewBufferString(`{"model":"gpt-image-2.6","output_format":"gif",`+fields+`}`))
+			c.Request.Header.Set("Content-Type", "application/json")
+			_, err := GetAndValidOpenAIImageRequest(c, relayconstant.RelayModeImagesGenerations)
+			assert.Error(t, err)
+		})
+	}
+}
+
 // TestGetAndValidOpenAIImageRequestMultipartStream verifies multipart image
 // edit parsing: the stream field is parsed and validated, and the request body
 // stays replayable for the upstream request.

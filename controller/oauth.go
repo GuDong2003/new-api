@@ -801,6 +801,7 @@ func prepareOAuthUser(provider oauth.Provider, oauthUser *oauth.OAuthUser, affil
 	if affiliateCode != "" {
 		inviterId, _ = model.GetUserIdByAffCode(affiliateCode)
 	}
+	user.InviterId = inviterId
 	return user, inviterId, nil
 }
 

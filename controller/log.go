@@ -5,6 +5,7 @@ import (
 	"strconv"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
@@ -40,15 +41,22 @@ func logFilterFromQuery(c *gin.Context, admin bool) model.LogFilter {
 // the longest log time range. A missing start reaches back the whole range, and
 // time after now does not count toward it.
 func limitLogTimeRange(startTimestamp int64, endTimestamp int64) (int64, error) {
+	if startTimestamp < 0 || endTimestamp < 0 {
+		return 0, common.NewMessage("Invalid parameters")
+	}
+	if endTimestamp != 0 && endTimestamp < startTimestamp {
+		return 0, common.NewMessage("End time must be after start time")
+	}
 	maxRange := operation_setting.GetLogSetting().MaxRangeSeconds()
 	end := common.GetTimestamp()
 	if endTimestamp != 0 {
 		end = min(end, endTimestamp)
 	}
+	earliest := max(end-maxRange, 0)
 	if startTimestamp == 0 {
-		return end - maxRange, nil
+		return earliest, nil
 	}
-	if end-startTimestamp > maxRange {
+	if startTimestamp < earliest {
 		return 0, common.NewMessage("The time range cannot exceed {{days}} days", map[string]any{"days": maxRange / (24 * 60 * 60)})
 	}
 	return startTimestamp, nil
@@ -113,6 +121,7 @@ func ExportUserLogs(c *gin.Context) {
 // one export at a time, and every export stays within the longest log time
 // range.
 func exportLogs(c *gin.Context, all bool) {
+	common.SetContextKey(c, constant.ContextKeyLogExportSucceeded, false)
 	filter := logFilterFromQuery(c, all)
 	startTimestamp, err := limitLogTimeRange(filter.StartTimestamp, filter.EndTimestamp)
 	if err != nil {
@@ -167,6 +176,7 @@ func exportLogs(c *gin.Context, all bool) {
 		return
 	}
 	common.ApiSuccess(c, gin.H{"count": count})
+	common.SetContextKey(c, constant.ContextKeyLogExportSucceeded, ctx.Err() == nil && len(c.Errors) == 0)
 }
 
 // Deprecated: SearchAllLogs 已废弃，前端未使用该接口。

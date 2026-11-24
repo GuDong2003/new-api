@@ -16,6 +16,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { useAuthStore } from '@/stores/auth-store'
+
 import { PlaygroundChat } from './components/chat/playground-chat'
 import { PlaygroundInput } from './components/input/playground-input'
 import {
@@ -26,6 +28,11 @@ import {
 } from './hooks'
 
 export function Playground() {
+  const userId = useAuthStore((state) => state.auth.user?.id ?? null)
+  return userId === null ? null : <PlaygroundConversation key={userId} />
+}
+
+function PlaygroundConversation() {
   const {
     config,
     parameterEnabled,

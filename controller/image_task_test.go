@@ -31,7 +31,6 @@ import (
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
-	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/setting/system_setting"
@@ -65,12 +64,12 @@ func TestImageTaskSubmissionUsesAutomaticallySelectedChannel(t *testing.T) {
 	previousDB := model.DB
 	previousDatabase := common.MainDatabaseType()
 	previousRedisEnabled := common.RedisEnabled
-	previousCountToken, previousSensitive := constant.CountToken, setting.CheckSensitiveEnabled
+	previousCountToken := constant.CountToken
 	previousMaxBody := constant.MaxRequestBodyMB
 	previousLog, previousBatch := common.LogConsumeEnabled, common.BatchUpdateEnabled
 	previousFreePreConsume := operation_setting.GetQuotaSetting().EnableFreeModelPreConsume
 	previousPrices := ratio_setting.ModelPrice2JSONString()
-	constant.CountToken, setting.CheckSensitiveEnabled = false, false
+	constant.CountToken = false
 	constant.MaxRequestBodyMB = 128
 	common.LogConsumeEnabled, common.BatchUpdateEnabled = false, false
 	operation_setting.GetQuotaSetting().EnableFreeModelPreConsume = false
@@ -81,7 +80,7 @@ func TestImageTaskSubmissionUsesAutomaticallySelectedChannel(t *testing.T) {
 		model.DB = previousDB
 		common.SetMainDatabaseType(previousDatabase)
 		common.RedisEnabled = previousRedisEnabled
-		constant.CountToken, setting.CheckSensitiveEnabled = previousCountToken, previousSensitive
+		constant.CountToken = previousCountToken
 		constant.MaxRequestBodyMB = previousMaxBody
 		common.LogConsumeEnabled, common.BatchUpdateEnabled = previousLog, previousBatch
 		operation_setting.GetQuotaSetting().EnableFreeModelPreConsume = previousFreePreConsume
@@ -1372,12 +1371,12 @@ func newImageRelayFixture(t *testing.T, upstream http.HandlerFunc) *imageRelayFi
 	previousDB := model.DB
 	previousDatabase := common.MainDatabaseType()
 	previousRedisEnabled := common.RedisEnabled
-	previousCountToken, previousSensitive := constant.CountToken, setting.CheckSensitiveEnabled
+	previousCountToken := constant.CountToken
 	previousMaxBody := constant.MaxRequestBodyMB
 	previousLog, previousBatch := common.LogConsumeEnabled, common.BatchUpdateEnabled
 	previousFreePreConsume := operation_setting.GetQuotaSetting().EnableFreeModelPreConsume
 	previousPrices := ratio_setting.ModelPrice2JSONString()
-	constant.CountToken, setting.CheckSensitiveEnabled = false, false
+	constant.CountToken = false
 	constant.MaxRequestBodyMB = 128
 	common.LogConsumeEnabled, common.BatchUpdateEnabled = false, false
 	operation_setting.GetQuotaSetting().EnableFreeModelPreConsume = false
@@ -1396,7 +1395,7 @@ func newImageRelayFixture(t *testing.T, upstream http.HandlerFunc) *imageRelayFi
 		model.DB = previousDB
 		common.SetMainDatabaseType(previousDatabase)
 		common.RedisEnabled = previousRedisEnabled
-		constant.CountToken, setting.CheckSensitiveEnabled = previousCountToken, previousSensitive
+		constant.CountToken = previousCountToken
 		constant.MaxRequestBodyMB = previousMaxBody
 		common.LogConsumeEnabled, common.BatchUpdateEnabled = previousLog, previousBatch
 		operation_setting.GetQuotaSetting().EnableFreeModelPreConsume = previousFreePreConsume

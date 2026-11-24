@@ -310,6 +310,10 @@ export function SidebarModulesSection({
         title: t('Task Plugins'),
         description: t('Manage installed task plugins and their platforms.'),
       },
+      requestProcessing: {
+        title: t('Request processing'),
+        description: t('Manage request processing plugins.'),
+      },
     },
   }
   const formDefaults = useMemo(() => config, [config])

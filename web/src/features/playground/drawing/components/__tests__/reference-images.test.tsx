@@ -16,6 +16,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { toast } from 'sonner'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { useDrawingStore } from '@/stores/drawing-store'
@@ -52,6 +54,177 @@ describe('ReferenceImages', () => {
     useDrawingStore.getState().addNodes([imageNode('A'), imageNode('B')])
     useDrawingStore.getState().setReferences(['A', 'B'])
   })
+
+  it('offers an empty upload placeholder that can be opened with the keyboard and reused', async () => {
+    useDrawingStore.getState().setReferences([])
+    const onUpload = vi.fn()
+    render(
+      <ReferenceImages
+        onUpload={onUpload}
+        onMaskUpload={vi.fn()}
+        onClearMask={vi.fn()}
+        onDrawMask={vi.fn()}
+      />
+    )
+    const user = userEvent.setup()
+    const button = screen.getByRole('button', {
+      name: 'Upload reference images',
+    })
+    expect(within(button).getByText('Upload reference images')).toBeVisible()
+    expect(button).toHaveAccessibleDescription(
+      'Drop images here or click to upload PNG, JPEG or WebP'
+    )
+    const input = screen.getByLabelText('Upload reference images', {
+      selector: 'input',
+    })
+    const openPicker = vi.spyOn(input as HTMLInputElement, 'click')
+    await user.tab()
+    expect(button).toHaveFocus()
+    await user.keyboard('{Enter}')
+    expect(openPicker).toHaveBeenCalledOnce()
+
+    const file = new File(['image'], 'reference.png', { type: 'image/png' })
+    await user.upload(input, file)
+    expect(onUpload).toHaveBeenLastCalledWith([file])
+    expect(input).toHaveValue('')
+    await user.upload(input, file)
+    expect(onUpload).toHaveBeenCalledTimes(2)
+  })
+
+  it('replaces the empty placeholder with the uploaded reference and restores it after removing the last reference', async () => {
+    useDrawingStore.getState().setReferences([])
+    render(
+      <ReferenceImages
+        onUpload={() => useDrawingStore.getState().setReferences(['A'])}
+        onMaskUpload={vi.fn()}
+        onClearMask={vi.fn()}
+        onDrawMask={vi.fn()}
+      />
+    )
+    fireEvent.drop(
+      screen.getByRole('button', { name: 'Upload reference images' }),
+      {
+        dataTransfer: {
+          files: [new File(['image'], 'A.png', { type: 'image/png' })],
+          types: ['Files'],
+        },
+      }
+    )
+
+    expect(screen.getByRole('img', { name: 'A.png' })).toBeVisible()
+    expect(screen.queryByText('Upload reference images')).toBeNull()
+    expect(screen.queryByText('Drop images here or click to upload')).toBeNull()
+    expect(screen.queryByText('PNG, JPEG or WebP')).toBeNull()
+    const addButton = screen.getByRole('button', {
+      name: 'Upload reference images',
+    })
+    expect(addButton).toBeEnabled()
+    expect(addButton).toHaveClass('size-24')
+    const input = screen.getByLabelText('Upload reference images', {
+      selector: 'input',
+    })
+    const openPicker = vi.spyOn(input as HTMLInputElement, 'click')
+    const user = userEvent.setup()
+    addButton.focus()
+    await user.keyboard('{Enter}')
+    expect(openPicker).toHaveBeenCalledOnce()
+
+    await user.click(screen.getByRole('button', { name: 'Remove reference' }))
+    expect(screen.queryByRole('img', { name: 'A.png' })).toBeNull()
+    expect(screen.getByText('Upload reference images')).toBeVisible()
+    expect(
+      screen.getByText('Drop images here or click to upload')
+    ).toBeVisible()
+    expect(screen.getByText('PNG, JPEG or WebP')).toBeVisible()
+  })
+
+  it('accepts dropped files through the compact add button without bubbling to another importer', () => {
+    const onUpload = vi.fn()
+    const parentDrop = vi.fn()
+    render(
+      <div onDrop={parentDrop}>
+        <ReferenceImages
+          onUpload={onUpload}
+          onMaskUpload={vi.fn()}
+          onClearMask={vi.fn()}
+          onDrawMask={vi.fn()}
+        />
+      </div>
+    )
+    const files = [
+      new File(['image'], 'reference.webp', { type: 'image/webp' }),
+    ]
+    const placeholder = screen.getByRole('button', {
+      name: 'Upload reference images',
+    })
+    expect(screen.queryByText('Drop images here or click to upload')).toBeNull()
+    const dataTransfer = { files, types: ['Files'], dropEffect: 'none' }
+    fireEvent.dragOver(placeholder, { dataTransfer })
+    expect(dataTransfer.dropEffect).toBe('copy')
+    fireEvent.drop(placeholder, { dataTransfer })
+    expect(onUpload).toHaveBeenCalledExactlyOnceWith(files)
+    expect(parentDrop).not.toHaveBeenCalled()
+  })
+
+  it('rejects a dropped batch larger than the remaining reference slots', () => {
+    const onUpload = vi.fn()
+    const errorToast = vi.spyOn(toast, 'error')
+    render(
+      <ReferenceImages
+        limit={3}
+        onUpload={onUpload}
+        onMaskUpload={vi.fn()}
+        onClearMask={vi.fn()}
+        onDrawMask={vi.fn()}
+      />
+    )
+    const files = ['C', 'D'].map(
+      (name) => new File(['image'], `${name}.png`, { type: 'image/png' })
+    )
+    fireEvent.drop(
+      screen.getByRole('button', { name: 'Upload reference images' }),
+      {
+        dataTransfer: { files, types: ['Files'] },
+      }
+    )
+    expect(onUpload).not.toHaveBeenCalled()
+    expect(errorToast).toHaveBeenCalledWith(
+      'Too many reference images for this model.'
+    )
+  })
+
+  it.each([
+    { limit: 2, uploading: false },
+    { limit: 16, uploading: true },
+  ])(
+    'blocks picker and drops when the limit is $limit and uploading is $uploading',
+    (props) => {
+      const onUpload = vi.fn()
+      render(
+        <ReferenceImages
+          {...props}
+          onUpload={onUpload}
+          onMaskUpload={vi.fn()}
+          onClearMask={vi.fn()}
+          onDrawMask={vi.fn()}
+        />
+      )
+      const button = screen.getByRole('button', {
+        name: 'Upload reference images',
+      })
+      expect(button).toBeDisabled()
+      expect(
+        screen.getByLabelText('Upload reference images', { selector: 'input' })
+      ).toBeDisabled()
+      fireEvent.drop(button, {
+        dataTransfer: {
+          files: [new File(['image'], 'C.png', { type: 'image/png' })],
+          types: ['Files'],
+        },
+      })
+      expect(onUpload).not.toHaveBeenCalled()
+    }
+  )
 
   it('reorders the horizontal reference list when one image is dropped on another', () => {
     render(

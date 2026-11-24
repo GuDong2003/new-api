@@ -1,6 +1,7 @@
 package operation_setting
 
 import (
+	"math"
 	"strconv"
 
 	"github.com/QuantumNous/new-api/common"
@@ -33,7 +34,12 @@ func GetLogSetting() *LogSetting {
 }
 
 func (s *LogSetting) MaxRangeSeconds() int64 {
-	return int64(max(s.MaxRangeDays, 1)) * 24 * 60 * 60
+	const secondsPerDay = 24 * 60 * 60
+	days := int64(max(s.MaxRangeDays, 1))
+	if days > math.MaxInt64/secondsPerDay {
+		return math.MaxInt64
+	}
+	return days * secondsPerDay
 }
 
 func ValidateLogMaxRangeDays(value string) error {

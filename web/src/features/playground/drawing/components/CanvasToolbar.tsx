@@ -19,14 +19,13 @@ For commercial licensing, please contact support@quantumnous.com
 import {
   ArrangeIcon,
   Cursor01Icon,
-  Delete02Icon,
-  Download04Icon,
+  Delete01Icon,
+  Download03Icon,
   HandPointingLeft01Icon,
-  ImageAdd01Icon,
-  RedoIcon,
-  Settings02Icon,
-  UndoIcon,
-  Upload01Icon,
+  Redo03Icon,
+  Settings05Icon,
+  Undo03Icon,
+  Upload03Icon,
 } from '@hugeicons/core-free-icons'
 import { HugeiconsIcon } from '@hugeicons/react'
 import { useRef } from 'react'
@@ -48,14 +47,12 @@ type CanvasToolbarProps = {
   onArrange: () => void
   compact: boolean
   busy?: boolean
-  onUpload?: (files: File[]) => void
   onImport?: (file: File) => void
   onClear?: () => void
 }
 
 export function CanvasToolbar(props: CanvasToolbarProps) {
   const { t } = useTranslation()
-  const upload = useRef<HTMLInputElement>(null)
   const importFile = useRef<HTMLInputElement>(null)
   return (
     <>
@@ -66,7 +63,7 @@ export function CanvasToolbar(props: CanvasToolbarProps) {
           size='sm'
           onClick={props.onSettings}
         >
-          <HugeiconsIcon icon={Settings02Icon} size={15} aria-hidden='true' />
+          <HugeiconsIcon icon={Settings05Icon} size={15} aria-hidden='true' />
           {t('Generate')}
         </Button>
       )}
@@ -117,7 +114,7 @@ export function CanvasToolbar(props: CanvasToolbarProps) {
         disabled={!props.canUndo}
         onClick={props.onUndo}
       >
-        <HugeiconsIcon icon={UndoIcon} size={16} aria-hidden='true' />
+        <HugeiconsIcon icon={Undo03Icon} size={16} aria-hidden='true' />
       </Button>
       <Button
         type='button'
@@ -128,22 +125,9 @@ export function CanvasToolbar(props: CanvasToolbarProps) {
         disabled={!props.canRedo}
         onClick={props.onRedo}
       >
-        <HugeiconsIcon icon={RedoIcon} size={16} aria-hidden='true' />
+        <HugeiconsIcon icon={Redo03Icon} size={16} aria-hidden='true' />
       </Button>
       <Separator orientation='vertical' className='mx-1 h-5' />
-      {props.onUpload && (
-        <Button
-          type='button'
-          variant='ghost'
-          size='sm'
-          disabled={props.busy}
-          onClick={() => upload.current?.click()}
-        >
-          <HugeiconsIcon icon={ImageAdd01Icon} size={16} aria-hidden='true' />
-          <span className='hidden sm:inline'>{t('Add images')}</span>
-          <span className='sr-only sm:hidden'>{t('Add images')}</span>
-        </Button>
-      )}
       {props.onImport && (
         <Button
           type='button'
@@ -154,7 +138,7 @@ export function CanvasToolbar(props: CanvasToolbarProps) {
           aria-label={t('Import canvas')}
           title={t('Import canvas')}
         >
-          <HugeiconsIcon icon={Upload01Icon} size={16} aria-hidden='true' />
+          <HugeiconsIcon icon={Upload03Icon} size={16} aria-hidden='true' />
         </Button>
       )}
       <Button
@@ -166,7 +150,7 @@ export function CanvasToolbar(props: CanvasToolbarProps) {
         aria-label={t('Export canvas')}
         title={t('Export canvas')}
       >
-        <HugeiconsIcon icon={Download04Icon} size={16} aria-hidden='true' />
+        <HugeiconsIcon icon={Download03Icon} size={16} aria-hidden='true' />
       </Button>
       {props.onClear && (
         <Button
@@ -178,22 +162,8 @@ export function CanvasToolbar(props: CanvasToolbarProps) {
           aria-label={t('Clear canvas')}
           title={t('Clear canvas')}
         >
-          <HugeiconsIcon icon={Delete02Icon} size={16} aria-hidden='true' />
+          <HugeiconsIcon icon={Delete01Icon} size={16} aria-hidden='true' />
         </Button>
-      )}
-      {props.onUpload && (
-        <input
-          ref={upload}
-          type='file'
-          className='hidden'
-          accept='image/png,image/jpeg,image/webp'
-          multiple
-          aria-label={t('Add images')}
-          onChange={(event) => {
-            props.onUpload?.([...(event.target.files || [])])
-            event.target.value = ''
-          }}
-        />
       )}
       {props.onImport && (
         <input

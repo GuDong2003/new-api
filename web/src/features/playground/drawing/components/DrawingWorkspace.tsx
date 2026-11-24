@@ -81,6 +81,7 @@ import { CanvasViewportControls } from './CanvasViewportControls'
 import { DrawingSettings } from './DrawingSettings'
 import { ImageCanvasNode } from './ImageCanvasNode'
 import { ImagePreview } from './ImagePreview'
+import { ImageUploadPlaceholder } from './ImageUploadPlaceholder'
 import { MaskEditor } from './MaskEditor'
 
 import '@xyflow/react/dist/style.css'
@@ -193,6 +194,7 @@ export function DrawingWorkspace(props: { userId: number }) {
     <DrawingSettings
       userId={props.userId}
       pendingCount={pendingCount}
+      uploading={files.busy}
       onGenerate={submit}
       onCancel={() => cancel()}
       onUploadReferences={(uploaded) => {
@@ -280,9 +282,6 @@ export function DrawingWorkspace(props: { userId: number }) {
           count={nodes.length}
           onUndo={() => useDrawingStore.getState().undo()}
           onRedo={() => useDrawingStore.getState().redo()}
-          onUpload={(uploaded) => {
-            void files.addImages(uploaded, insertionPoint())
-          }}
           onImport={(file) => {
             void files.importCanvas(file)
           }}
@@ -531,8 +530,16 @@ export function DrawingWorkspace(props: { userId: number }) {
                     )}
                   </EmptyDescription>
                 </EmptyHeader>
-                {compact && (
-                  <EmptyContent>
+                <EmptyContent>
+                  <ImageUploadPlaceholder
+                    label={t('Upload images')}
+                    disabled={files.busy}
+                    className='pointer-events-auto'
+                    onUpload={(uploaded) => {
+                      void files.addImages(uploaded, insertionPoint())
+                    }}
+                  />
+                  {compact && (
                     <Button
                       type='button'
                       className='pointer-events-auto'
@@ -540,8 +547,8 @@ export function DrawingWorkspace(props: { userId: number }) {
                     >
                       {t('Create an image')}
                     </Button>
-                  </EmptyContent>
-                )}
+                  )}
+                </EmptyContent>
                 <p className='text-muted-foreground text-xs'>
                   {t(
                     'Scroll to zoom · Space + drag to pan · Shift + drag to select'

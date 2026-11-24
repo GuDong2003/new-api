@@ -203,6 +203,7 @@ type contentAuditJSON struct {
 	image         *contentAuditImageInput
 	images        *contentAuditImages
 	group         int64
+	streaming     bool
 	finished      bool
 	hasCandidate  bool
 }
@@ -287,7 +288,7 @@ func (p *contentAuditJSON) imageResult() bool {
 	if p.images == nil || (p.images.protocol != "" && p.images.protocol != "openai_images") {
 		return false
 	}
-	if len(p.stack) == 1 {
+	if len(p.stack) == 1 && p.streaming {
 		return true
 	} // image SSE result/partial-image event
 	return len(p.stack) == 3 && p.stack[1].field == "data" && p.stack[1].object == nil
@@ -903,6 +904,7 @@ func newContentAuditResponse(limit int, images *contentAuditImages) *contentAudi
 func (r *contentAuditResponse) write(data []byte, stream bool) {
 	r.observed = min(int64(math.MaxInt64-len(data)), r.observed) + int64(len(data))
 	r.stream = stream
+	r.json.streaming = stream
 	if !stream {
 		_, _ = r.json.Write(data)
 		return
@@ -979,6 +981,7 @@ func (r *contentAuditResponse) finishEvent() {
 		}
 	}
 	r.json = newContentAuditJSON(max(64, r.limit-r.stored), r.images)
+	r.json.streaming = r.stream
 	r.event = ""
 	r.dataPrefix = r.dataPrefix[:0]
 	r.dataSeen = false

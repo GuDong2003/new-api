@@ -271,7 +271,12 @@ describe('Image generation jobs', () => {
     client.clear()
   })
 
-  it('tracks streamed previews and decoding, then resets progress when retrying the failed attempt', async () => {
+  it('tracks direct fallback previews and decoding, then resets progress when retrying the failed attempt', async () => {
+    galleryUsage = {
+      ...usage,
+      can_save: false,
+      reason: 'Gallery storage limit reached.',
+    }
     const now = vi.spyOn(Date, 'now').mockReturnValue(100000)
     let stream: ReadableStreamDefaultController<Uint8Array>
     vi.mocked(api.post).mockResolvedValueOnce({
@@ -296,7 +301,6 @@ describe('Image generation jobs', () => {
           ...DEFAULT_IMAGE_SETTINGS,
           model: 'gpt-image-1',
           prompt: 'A cup',
-          stream: true,
         },
         { x: 0, y: 0 }
       )
@@ -308,6 +312,14 @@ describe('Image generation jobs', () => {
       previewCount: 0,
     })
     await waitFor(() => expect(api.post).toHaveBeenCalledOnce())
+    expect(galleryRequests).toEqual([
+      expect.objectContaining({ required_images: 1 }),
+    ])
+    expect(api.post).toHaveBeenCalledWith(
+      '/pg/images/generations',
+      expect.anything(),
+      expect.not.objectContaining({ params: expect.anything() })
+    )
     await act(async () => {
       stream.enqueue(
         new TextEncoder().encode(

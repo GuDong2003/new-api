@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 import { Blob as NodeBlob } from 'node:buffer'
 import { webcrypto } from 'node:crypto'
 
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, renderHook } from '@testing-library/react'
 import {
   AxiosError,
@@ -24,6 +25,7 @@ import {
   type InternalAxiosRequestConfig,
 } from 'axios'
 import { IDBFactory, IDBObjectStore } from 'fake-indexeddb'
+import { createElement, type ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { logout } from '@/features/auth/api'
@@ -69,10 +71,12 @@ import { login, required, response, usage } from './fixtures'
 
 const identity = { userId: 813, sessionId: 'gallery-session' }
 const adapter = api.defaults.adapter
+let client: QueryClient
 let requests: InternalAxiosRequestConfig[]
 let full = false
 let remote: CanvasRecord | null
 beforeEach(async () => {
+  client = new QueryClient()
   vi.stubGlobal('indexedDB', new IDBFactory())
   vi.stubGlobal('Blob', NodeBlob)
   vi.stubGlobal('crypto', webcrypto)
@@ -173,6 +177,7 @@ afterEach(() => {
   stopCanvasEditors(identity)
   cancelCanvasSession(identity)
   useAuthStore.getState().auth.reset()
+  client.clear()
   api.defaults.adapter = adapter
   vi.useRealTimers()
   vi.unstubAllGlobals()
@@ -415,6 +420,168 @@ it('persists full pause and prevents manual, leave and logout publications', asy
   expect(requests.filter((r) => r.url?.endsWith('/usage'))).toHaveLength(1)
 })
 
+it.each([
+  { availableImages: 1, canSave: true },
+  { availableImages: 0, canSave: false },
+])(
+  'rechecks only missing cloud originals with $availableImages image slots remaining',
+  async ({ availableImages, canSave }) => {
+    const canvas = await createCanvasProject(identity, 'drawing')
+    await startCanvasEditor(identity, 'drawing')
+    addOriginal()
+    await flushLocalEditors(identity)
+    await syncCanvas(identity, canvas.id, 'manual')
+    addOriginal(targetId)
+    await flushLocalEditors(identity)
+    await updateCanvasUserState(813, (state) => ({
+      ...state,
+      cloudPause: {
+        reason: 'Gallery storage limit reached.',
+        requiredBytes: 103951870,
+        requiredImages: 109,
+        notified: true,
+        lastQuotaCheck: Date.now(),
+      },
+    }))
+    const cloud = api.defaults.adapter as AxiosAdapter
+    api.defaults.adapter = async (config) => {
+      if (!config.url?.endsWith('/usage')) return cloud(config)
+      requests.push(config)
+      const allowed =
+        config.params.required_images <= availableImages &&
+        config.params.required_bytes <= 20000
+      return response(config, {
+        ...usage,
+        can_save: allowed,
+        reason: allowed ? '' : 'Gallery storage limit reached.',
+        available_images: availableImages,
+        available_bytes: 20000,
+      })
+    }
+
+    const budget = await checkCanvasCapacity(identity, true)
+
+    expect(budget?.can_save).toBe(canSave)
+    const capacity = required(
+      [...requests].reverse().find((config) => config.url?.endsWith('/usage'))
+    )
+    expect(capacity.params.required_images).toBe(1)
+    expect(capacity.params.required_bytes).toBeLessThan(20000)
+    expect(
+      (await readCanvasAssets(813, canvas.id)).map((asset) => asset.id)
+    ).toEqual([sourceId, targetId])
+    if (!canSave) {
+      expect(posts()).toHaveLength(1)
+      expect((await readCanvasUserState(813)).cloudPause).toMatchObject({
+        requiredImages: 1,
+        requiredBytes: capacity.params.required_bytes,
+        notified: true,
+      })
+      return
+    }
+    expect((await readCanvasUserState(813)).cloudPause).toBeNull()
+    expect(posts()).toHaveLength(2)
+    expect(remote?.assets.map((asset) => asset.id)).toEqual([
+      sourceId,
+      targetId,
+    ])
+    const publication = required(posts().at(-1)).data as FormData
+    expect(publication.has(`file:${sourceId}`)).toBe(false)
+    expect(publication.has(`file:${targetId}`)).toBe(true)
+    const saved = required(await loadLocalCanvas(813, canvas.id))
+    expect(saved.cloudSavedRevision).toBe(saved.revision)
+  }
+)
+
+it.each([false, true])(
+  'recovers an obsolete pause after a lost response with missing cloud originals: %s',
+  async (missingOriginal) => {
+    const canvas = await createCanvasProject(identity, 'drawing')
+    await startCanvasEditor(identity, 'drawing')
+    addOriginal()
+    await flushLocalEditors(identity)
+    const cloud = api.defaults.adapter as AxiosAdapter
+    api.defaults.adapter = async (config) => {
+      const result = await cloud(config)
+      if (config.method === 'post') {
+        throw new AxiosError('Response lost', 'ERR_NETWORK', config)
+      }
+      return result
+    }
+    await syncCanvas(identity, canvas.id, 'manual')
+    expect((await loadLocalCanvas(813, canvas.id))?.cloudSavedRevision).toBe(0)
+    if (missingOriginal) required(remote).assets = []
+    await updateCanvasUserState(813, (state) => ({
+      ...state,
+      cloudPause: {
+        reason: 'Gallery storage limit reached.',
+        requiredBytes: 103951870,
+        requiredImages: 109,
+        notified: true,
+        lastQuotaCheck: Date.now(),
+      },
+    }))
+    api.defaults.adapter = async (config) => {
+      if (!config.url?.endsWith('/usage')) return cloud(config)
+      requests.push(config)
+      const availableImages = missingOriginal ? 1 : 0
+      const availableBytes = missingOriginal ? 20000 : 0
+      const allowed =
+        config.params.required_images <= availableImages &&
+        config.params.required_bytes <= availableBytes
+      return response(config, {
+        ...usage,
+        can_save: allowed,
+        reason: allowed ? '' : 'Gallery storage limit reached.',
+        available_images: availableImages,
+        available_bytes: availableBytes,
+      })
+    }
+
+    await checkCanvasCapacity(identity, true)
+
+    expect((await readCanvasUserState(813)).cloudPause).toBeNull()
+    expect(posts()).toHaveLength(missingOriginal ? 2 : 1)
+    if (missingOriginal) {
+      const publication = required(posts().at(-1)).data as FormData
+      expect(publication.has(`file:${sourceId}`)).toBe(true)
+    }
+    expect(
+      (await readCanvasAssets(813, canvas.id)).map((asset) => asset.id)
+    ).toEqual([sourceId])
+    const saved = required(await loadLocalCanvas(813, canvas.id))
+    expect(saved.cloudSavedRevision).toBe(saved.revision)
+  }
+)
+
+it('keeps the pause and retry interval when the current cloud originals cannot be checked', async () => {
+  const canvas = await createCanvasProject(identity, 'drawing')
+  await startCanvasEditor(identity, 'drawing')
+  addOriginal()
+  await flushLocalEditors(identity)
+  full = true
+  await syncCanvas(identity, canvas.id, 'manual')
+  const cloud = api.defaults.adapter as AxiosAdapter
+  api.defaults.adapter = async (config) => {
+    if (config.url === `/api/gallery/canvases/${canvas.id}`) {
+      requests.push(config)
+      throw new AxiosError('Offline', 'ERR_NETWORK', config)
+    }
+    return cloud(config)
+  }
+
+  await expect(checkCanvasCapacity(identity, true)).rejects.toMatchObject({
+    code: 'ERR_NETWORK',
+  })
+
+  expect((await readCanvasUserState(813)).cloudPause).not.toBeNull()
+  expect(posts()).toHaveLength(0)
+  expect(await readCanvasAssets(813, canvas.id)).toHaveLength(1)
+  const attempted = requests.length
+  await checkCanvasCapacity(identity)
+  expect(requests).toHaveLength(attempted)
+})
+
 it('checks the pending budget after a deletion and resumes only with enough capacity', async () => {
   const canvas = await createCanvasProject(identity, 'drawing')
   await saveLocalCanvas(
@@ -433,10 +600,9 @@ it('checks the pending budget after a deletion and resumes only with enough capa
   }))
   full = true
   await checkCanvasCapacity(identity, true)
-  expect(requests.at(-1)?.params).toMatchObject({
-    required_bytes: 9000,
-    required_images: 2,
-  })
+  expect(requests.at(-1)?.params.required_images).toBe(0)
+  expect(requests.at(-1)?.params.required_bytes).toBeGreaterThan(0)
+  expect(requests.at(-1)?.params.required_bytes).toBeLessThan(9000)
   await syncCanvas(identity, canvas.id, 'manual')
   expect(posts()).toHaveLength(0)
   full = false
@@ -1678,7 +1844,10 @@ describe('a canvas another device saves too', () => {
       ) as CanvasSaveMetadata
       return (metadata.document.nodes as StoredNode[]).at(-1)
     }
-    const hook = renderHook(useImageGeneration)
+    const hook = renderHook(useImageGeneration, {
+      wrapper: (props: { children: ReactNode }) =>
+        createElement(QueryClientProvider, { client }, props.children),
+    })
 
     act(() => {
       hook.result.current.generate(

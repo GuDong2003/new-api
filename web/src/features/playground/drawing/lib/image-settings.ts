@@ -58,16 +58,15 @@ export const imageSettingsSchema = z.object({
     ])
     .default('auto'),
   n: z.number().int().min(1).max(10).default(1),
-  background: z.enum(['auto', 'transparent', 'opaque']).default('auto'),
-  outputFormat: z.enum(['png', 'jpeg', 'webp']).default('png'),
+  background: z.enum(['auto', 'transparent', 'opaque']).default('opaque'),
+  outputFormat: z.enum(['png', 'jpeg', 'webp', 'gif']).default('png'),
+  frameCount: z.number().int().min(2).max(16).default(9),
+  frameDurationMs: z.number().int().min(20).max(2000).default(200),
   outputCompression: z.number().int().min(0).max(100).default(100),
   moderation: z.enum(['auto', 'low']).default('auto'),
   responseFormat: z.enum(['b64_json', 'url']).default('b64_json'),
   style: z.enum(['vivid', 'natural']).default('vivid'),
   inputFidelity: z.enum(['default', 'high', 'low']).default('default'),
-  stream: z.boolean().default(false),
-  partialImages: z.number().int().min(0).max(3).default(1),
-  user: z.string().max(512).default(''),
   nsfw: z.boolean().default(false),
   // Tag prompting: NovelAI and Alibaba's image models.
   generationMode: z.enum(['description', 'tags']).default('description'),
@@ -189,6 +188,10 @@ function isLegacyGptImageModel(model: string): boolean {
   )
 }
 
+export function supportsImageAnimation(model: string): boolean {
+  return /(^|[/.:_-])gpt-image-2\.6(?:[/.:_-]|$)/i.test(model.trim())
+}
+
 /**
  * GPT Image 2 and later accept any ratio and tier from the preset table, while
  * gpt-image-1 and the ChatGPT alias are limited to the official fixed sizes.
@@ -268,7 +271,8 @@ export function requiresReferenceImages(model: string): boolean {
 }
 
 /** Among Alibaba's models only the Wanx image editor repaints under a mask. */
-export function supportsImageMask(model: string): boolean {
+export function supportsImageMask(model: string, format = 'png'): boolean {
+  if (format === 'gif') return false
   if (getImageModelFamily(model) !== 'alibaba') return true
   return getAlibabaImageModel(model)?.mask ?? false
 }
@@ -279,26 +283,6 @@ export function supportsImageMask(model: string): boolean {
  */
 export function getMaxImageSeed(model: string): number {
   return getImageModelFamily(model) === 'alibaba' ? 2147483647 : 4294967295
-}
-
-/**
- * Whether the model can push the image as it renders. DALL·E and the providers
- * modelled on it only answer once the image is finished.
- */
-export function supportsImageStreaming(model: string): boolean {
-  const family = getImageModelFamily(model)
-  return family === 'gpt-image' || family === 'nano-banana'
-}
-
-/**
- * `user` is an OpenAI field for attributing a request to an end user. Gemini
- * has no equivalent, so Nano Banana has nothing to carry it.
- */
-export function supportsImageUserIdentifier(model: string): boolean {
-  const family = getImageModelFamily(model)
-  return (
-    family !== 'nano-banana' && family !== 'novelai' && family !== 'alibaba'
-  )
 }
 
 /**
@@ -316,6 +300,7 @@ function isNanoBananaV2(model: string): boolean {
 export function getImageAspectRatios(
   model: string
 ): readonly ImageAspectRatio[] {
+  if (supportsImageSizePresetTable(model)) return GPT_IMAGE_ASPECT_RATIOS
   if (isNanoBananaV2(model)) return IMAGE_ASPECT_RATIOS
   return IMAGE_ASPECT_RATIOS.filter(
     (ratio) => !PANORAMIC_IMAGE_ASPECT_RATIOS.includes(ratio)
@@ -347,15 +332,28 @@ const PANORAMIC_IMAGE_ASPECT_RATIOS: readonly ImageAspectRatio[] = [
 ]
 export const IMAGE_RESOLUTIONS = ['1K', '2K', '4K'] as const
 
-export type ImageAspectRatio = (typeof IMAGE_ASPECT_RATIOS)[number]
+export type ImageAspectRatio = (typeof IMAGE_ASPECT_RATIOS)[number] | '9:21'
 export type ImageResolution = (typeof IMAGE_RESOLUTIONS)[number]
 
-/**
- * The provider's recommended size for each ratio and tier. Exact pixels are not
- * honoured anyway — a request is rendered at the model's own size for the tier,
- * keeping only the ratio — so these are the values the provider itself
- * publishes rather than anything derived from a formula.
- */
+export const IMAGE_RESOLUTION_MAX_DIMENSIONS: Record<ImageResolution, number> =
+  {
+    '1K': 1536,
+    '2K': 2800,
+    '4K': 3840,
+  }
+
+const GPT_IMAGE_ASPECT_RATIOS: readonly ImageAspectRatio[] = [
+  '1:1',
+  '2:3',
+  '3:2',
+  '4:3',
+  '3:4',
+  '16:9',
+  '9:16',
+  '21:9',
+  '9:21',
+]
+
 /**
  * A tier may omit ratios the model cannot render, but 1:1 is mandatory: it is
  * the size every model falls back to when it lacks the requested ratio.
@@ -366,6 +364,47 @@ type ImagePresetSizes = Record<
 >
 
 const GPT_IMAGE_PRESET_SIZES: ImagePresetSizes = {
+  '1K': {
+    '1:1': '1024x1024',
+    '2:3': '1024x1536',
+    '3:2': '1536x1024',
+    '4:3': '1024x768',
+    '3:4': '768x1024',
+    '16:9': '1536x864',
+    '9:16': '864x1536',
+    // These panorama sizes were verified against upstream 1K billing.
+    '21:9': '1456x624',
+    '9:21': '624x1456',
+  },
+  '2K': {
+    '1:1': '2048x2048',
+    '2:3': '1360x2048',
+    '3:2': '2048x1360',
+    '4:3': '2048x1536',
+    '3:4': '1536x2048',
+    '16:9': '2048x1152',
+    '9:16': '1152x2048',
+    '21:9': '2688x1152',
+    '9:21': '1152x2688',
+  },
+  '4K': {
+    '1:1': '2880x2880',
+    '2:3': '2336x3520',
+    '3:2': '3520x2336',
+    '4:3': '3312x2480',
+    '3:4': '2480x3312',
+    '16:9': '3840x2160',
+    '9:16': '2160x3840',
+    '21:9': '3840x1648',
+    '9:21': '1648x3840',
+    // Saved legacy ratios still need sizes in the requested tier.
+    '5:4': '3200x2560',
+    '4:5': '2560x3200',
+  },
+}
+
+// Saved canvases retain their previous tier and ratio, including 4:5 and 5:4.
+const LEGACY_GPT_IMAGE_PRESET_SIZES: ImagePresetSizes = {
   '1K': {
     '1:1': '1024x1024',
     '2:3': '1024x1536',
@@ -470,21 +509,74 @@ export function getImagePresetSize(
   resolution: ImageResolution,
   model: string
 ): string {
-  return (
-    imagePresetTable(model)[resolution][aspectRatio] ??
-    GPT_IMAGE_PRESET_SIZES[resolution]['1:1']
-  )
+  const sizes = imagePresetTable(model)[resolution]
+  const size = sizes[aspectRatio]
+  if (size) return size
+  if (getImageModelFamily(model) !== 'nano-banana') {
+    return (
+      LEGACY_GPT_IMAGE_PRESET_SIZES[resolution][aspectRatio] ?? sizes['1:1']
+    )
+  }
+  return sizes['1:1']
 }
 
-/**
- * Read the billed tier a pixel size falls into. Fixed-size models have no
- * preset to look up, so the thresholds mirror how the provider infers a tier
- * from the longest side.
- */
-export function getImageResolutionTier(size: string): ImageResolution {
+/** A bare ratio remembers automatic resolution without losing the ratio. */
+export function getAutomaticImageAspectRatio(
+  size: string,
+  model: string
+): ImageAspectRatio | undefined {
+  if (!supportsImageSizePresets(model)) return undefined
+  // Saved GPT ratios stay usable when switching to automatic resolution.
+  if (
+    getImageModelFamily(model) === 'gpt-image' &&
+    (size === '4:5' || size === '5:4')
+  ) {
+    return size
+  }
+  return getImageAspectRatios(model).find((ratio) => ratio === size)
+}
+
+// Saved canvases and retries can still carry the retired 1K panorama sizes.
+export function normalizeGptImagePanoramaSize(
+  size: string,
+  model: string,
+  withheld: readonly string[]
+): string {
+  if (
+    !supportsImageSizePresetTable(model) ||
+    !withheld.includes('2K') ||
+    withheld.includes('1K')
+  ) {
+    return size
+  }
+  if (size === '2016x864' || size === '1904x816') {
+    return getImagePresetSize('21:9', '1K', model)
+  }
+  if (size === '864x2016' || size === '816x1904') {
+    return getImagePresetSize('9:21', '1K', model)
+  }
+  return size
+}
+
+/** Automatic resolution uses the model's 1K preset at the request boundary. */
+export function resolveImageRequestSize(size: string, model: string): string {
+  const ratio = getAutomaticImageAspectRatio(size, model)
+  return ratio ? getImagePresetSize(ratio, '1K', model) : size
+}
+
+/** Classify custom pixel sizes by their longest side; presets use their table. */
+export function getImageResolutionTier(
+  size: string,
+  model: string
+): ImageResolution {
   const longest = Math.max(...size.split('x').map(Number))
-  if (!Number.isFinite(longest) || longest <= 1600) return '1K'
-  if (longest <= 2800) return '2K'
+  const max1K = supportsImageSizePresetTable(model)
+    ? IMAGE_RESOLUTION_MAX_DIMENSIONS['1K']
+    : 1600
+  if (!Number.isFinite(longest) || longest <= max1K) {
+    return '1K'
+  }
+  if (longest <= IMAGE_RESOLUTION_MAX_DIMENSIONS['2K']) return '2K'
   return '4K'
 }
 
@@ -496,6 +588,30 @@ export function getImageSizePreset(
     for (const aspectRatio of getImageAspectRatios(model)) {
       if (getImagePresetSize(aspectRatio, resolution, model) === size) {
         return { aspectRatio, resolution }
+      }
+    }
+  }
+  if (getImageModelFamily(model) === 'gpt-image') {
+    if (size === '2016x864' || size === '1904x816') {
+      return { aspectRatio: '21:9', resolution: '2K' }
+    }
+    if (size === '864x2016' || size === '816x1904') {
+      return { aspectRatio: '9:21', resolution: '2K' }
+    }
+    for (const resolution of IMAGE_RESOLUTIONS) {
+      for (const [aspectRatio, pixels] of Object.entries(
+        LEGACY_GPT_IMAGE_PRESET_SIZES[resolution]
+      )) {
+        const ratio = aspectRatio as ImageAspectRatio
+        if (
+          pixels === size ||
+          getImagePresetSize(ratio, resolution, model) === size
+        ) {
+          return {
+            aspectRatio: ratio,
+            resolution: getImageResolutionTier(size, model),
+          }
+        }
       }
     }
   }
@@ -520,6 +636,28 @@ export function nearestOfferedResolution(
     nearestDistance = distance
   })
   return nearest
+}
+
+/** Canvas-only tier restrictions; public image requests keep their semantics. */
+export function getAllowedImageSize(
+  size: string,
+  model: string,
+  withheld: readonly string[]
+): string {
+  if (!withheld.length || !supportsImageSizePresets(model)) return size
+  const automaticRatio = getAutomaticImageAspectRatio(size, model)
+  if (size === 'auto' || automaticRatio) {
+    return getImagePresetSize(
+      automaticRatio ?? '1:1',
+      nearestOfferedResolution('1K', withheld),
+      model
+    )
+  }
+  const preset = getImageSizePreset(size, model)
+  const tier = preset?.resolution ?? getImageResolutionTier(size, model)
+  const offered = nearestOfferedResolution(tier, withheld)
+  if (offered === tier) return size
+  return getImagePresetSize(preset?.aspectRatio ?? '1:1', offered, model)
 }
 
 export function getImageQualities(model: string): string[] {
@@ -551,9 +689,22 @@ export function settingsForImageModel(
   model: string
 ): z.infer<typeof imageSettingsSchema> {
   const next = { ...DEFAULT_IMAGE_SETTINGS, ...settings, model }
+  // Old runtime settings can outlive the schema that originally parsed them.
+  for (const field of ['stream', 'partialImages', 'user']) {
+    Reflect.deleteProperty(next, field)
+  }
   const family = getImageModelFamily(model)
   const classified = classifyImageModelFamily(model)
   if (classified) next.generationMode = getImageGenerationMode(classified)
+  if (next.outputFormat === 'gif' && !supportsImageAnimation(model)) {
+    next.outputFormat = 'png'
+  }
+  if (family === 'gpt-image') {
+    if (next.background === 'auto') next.background = 'opaque'
+    if (next.background === 'transparent' && next.outputFormat === 'jpeg') {
+      next.outputFormat = 'png'
+    }
+  }
   next.n = Math.min(next.n, getMaxImagesPerRequest(model))
   if (family === 'novelai') {
     // NovelAI sizes the image from its width and height and only generates.
@@ -583,11 +734,20 @@ export function settingsForImageModel(
   if (!sizes.includes(next.size) && !supportsImageSizePresets(model)) {
     next.size = sizes.includes('1024x1024') ? '1024x1024' : sizes[0]
   }
+  // Automatic resolution can retain a ratio only when the new model supports it.
+  if (
+    supportsImageSizePresets(model) &&
+    next.size.includes(':') &&
+    !getAutomaticImageAspectRatio(next.size, model)
+  ) {
+    next.size = getImagePresetSize('1:1', '1K', model)
+  }
   // Preset-only families have no free-form pixel entry, so a size carried over
   // from a custom-size model must land back on a preset the toggles can show.
   if (
     family === 'nano-banana' &&
     next.size !== 'auto' &&
+    !getAutomaticImageAspectRatio(next.size, model) &&
     !getImageSizePreset(next.size, model)
   ) {
     next.size = getImagePresetSize('1:1', '1K', model)
@@ -619,6 +779,12 @@ export function validateImageSettings(
     return "The prompt mentions a reference image that this request does not send. Remove the mention or insert the image again; to change a canvas image's prompt, use Reuse prompt and settings."
   }
   const family = getImageModelFamily(settings.model)
+  if (
+    settings.outputFormat === 'gif' &&
+    !supportsImageAnimation(settings.model)
+  ) {
+    return 'This model does not support GIF output.'
+  }
   if (family === 'novelai') {
     return validateNovelAIImageSettings(settings)
   }
@@ -655,26 +821,21 @@ export function validateImageSettings(
   if (qualities.length && !qualities.includes(settings.quality)) {
     return 'Choose a quality supported by this model.'
   }
+  const size = resolveImageRequestSize(settings.size, settings.model)
   if (
     !supportsImageSizePresets(settings.model) &&
-    !getImageSizes(settings.model).includes(settings.size)
+    !getImageSizes(settings.model).includes(size)
   ) {
     return 'Choose a size supported by this model.'
   }
-  if (
-    settings.size !== 'auto' &&
-    !/^[1-9]\d{1,4}x[1-9]\d{1,4}$/.test(settings.size)
-  ) {
+  if (size !== 'auto' && !/^[1-9]\d{1,4}x[1-9]\d{1,4}$/.test(size)) {
     return 'Enter a valid width and height.'
   }
-  if (
-    family === 'gpt-image' &&
-    !getImageSizes(settings.model).includes(settings.size)
-  ) {
+  if (family === 'gpt-image' && !getImageSizes(settings.model).includes(size)) {
     if (isLegacyGptImageModel(settings.model)) {
       return 'Choose a size supported by this model.'
     }
-    const [width, height] = settings.size.split('x').map(Number)
+    const [width, height] = size.split('x').map(Number)
     if (
       width % 16 ||
       height % 16 ||
@@ -690,7 +851,7 @@ export function validateImageSettings(
     settings.background === 'transparent' &&
     settings.outputFormat === 'jpeg'
   ) {
-    return 'Transparent backgrounds require PNG or WebP.'
+    return 'JPEG does not support transparent backgrounds.'
   }
   if (family === 'dall-e-2' && settings.prompt.length > 1000) {
     return 'DALL·E 2 prompts must be 1,000 characters or fewer.'
@@ -758,15 +919,6 @@ function validateAlibabaImageSettings(
   return null
 }
 
-// A streamed request is watched on its open connection and keeps returning
-// partial previews. Everything else is submitted as a durable gateway task, and
-// one task carries exactly one image.
-export function usesImageTask(
-  settings: z.infer<typeof imageSettingsSchema>
-): boolean {
-  return buildImagePayload(settings).stream !== true
-}
-
 /** Whether the gateway answers with the images themselves rather than links. */
 export function returnsInlineImages(
   settings: z.infer<typeof imageSettingsSchema>
@@ -808,29 +960,27 @@ export function buildImagePayload(
     prompt: settings.prompt.trim(),
     group: settings.group,
     n: settings.n,
-    size: settings.size,
+    size: resolveImageRequestSize(settings.size, settings.model),
   }
   // Gemini describes its output entirely through the size, so a model with no
   // quality of its own sends none rather than an invented one.
   if (getImageQualities(settings.model).length) {
     payload.quality = settings.quality
   }
-  // Gemini has no end-user identifier to attach a request to.
-  if (supportsImageUserIdentifier(settings.model) && settings.user.trim()) {
-    payload.user = settings.user.trim()
-  }
-  if (supportsImageStreaming(settings.model)) payload.stream = settings.stream
   // Only Grok reads nsfw; other providers reject or ignore the unknown field.
   if (family === 'grok-imagine') payload.nsfw = settings.nsfw
   if (family === 'gpt-image') {
-    payload.background = settings.background
+    payload.background =
+      settings.background === 'auto' ? 'opaque' : settings.background
     payload.output_format = settings.outputFormat
     payload.moderation = settings.moderation
-    if (settings.outputFormat !== 'png') {
+    if (settings.outputFormat === 'jpeg' || settings.outputFormat === 'webp') {
       payload.output_compression = settings.outputCompression
     }
-    // Partial frames are an OpenAI extension to the stream.
-    if (settings.stream) payload.partial_images = settings.partialImages
+    if (settings.outputFormat === 'gif') {
+      payload.frame_count = settings.frameCount
+      payload.frame_duration_ms = settings.frameDurationMs
+    }
     if (settings.mode === 'edit' && settings.inputFidelity !== 'default') {
       payload.input_fidelity = settings.inputFidelity
     }

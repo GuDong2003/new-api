@@ -193,10 +193,19 @@ export function getSyncExpressionPricing(
             `${conditionLabels[condition.var]} ${condition.op} ${Number(condition.value).toLocaleString()}`
         )
         .join(' ∧ '),
-      lines: fields.map((field) => ({
-        label: t(field.shortLabel),
-        value: formatSyncPriceAmount(Number(tier[field.tierField]), currency),
-      })),
+      lines: fields.flatMap((field) =>
+        field.tierField
+          ? [
+              {
+                label: t(field.shortLabel),
+                value: formatSyncPriceAmount(
+                  Number(tier[field.tierField]),
+                  currency
+                ),
+              },
+            ]
+          : []
+      ),
     })),
   }
 }

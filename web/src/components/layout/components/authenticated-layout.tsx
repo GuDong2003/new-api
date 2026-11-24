@@ -75,6 +75,9 @@ export function AuthenticatedLayout(props: AuthenticatedLayoutProps) {
     }
     previousIdentity.current = { userId, sessionId }
   }, [sessionId, userId])
+  const signedIn = useAuthStore((s) => !!s.auth.user)
+  // Unmount pages on sign-out, otherwise their queries refetch and toast "Session expired!" / "invalid access token"
+  if (!signedIn) return null
 
   return (
     <LayoutProvider>

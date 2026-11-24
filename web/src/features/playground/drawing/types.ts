@@ -79,6 +79,7 @@ export type ImageResponse = {
     b64_json?: string
     url?: string
     revised_prompt?: string
+    mime_type?: string
     gallery_image_id?: string
   }[]
   output_format?: string

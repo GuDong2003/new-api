@@ -21,13 +21,8 @@ import { HugeiconsIcon } from '@hugeicons/react'
 import { useFormContext, useWatch } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 
-import {
-  Accordion,
-  AccordionContent,
-  AccordionItem,
-  AccordionTrigger,
-} from '@/components/ui/accordion'
 import { Button } from '@/components/ui/button'
+import { FieldGroup } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
@@ -277,87 +272,74 @@ export function TagParameterFields(props: TagParameterFieldsProps) {
         {count}
       </div>
       {seed}
-      <Accordion>
-        <AccordionItem value='advanced'>
-          <AccordionTrigger className='py-2 text-xs'>
-            {t('Advanced settings')}
-          </AccordionTrigger>
-          <AccordionContent className='space-y-3 pt-2'>
-            <label className='flex items-center justify-between gap-3 text-sm'>
-              <span>{t('Quality tags')}</span>
-              <Switch
-                checked={settings.qualityToggle}
-                onCheckedChange={(checked) =>
-                  change({ qualityToggle: checked })
-                }
-              />
-            </label>
-            {settings.qualityToggle && (
-              <div className='space-y-1.5'>
-                <Label htmlFor='drawing-quality-tier'>
-                  {t('Quality tag preset')}
-                </Label>
-                <NativeSelect
-                  id='drawing-quality-tier'
-                  className='w-full'
-                  {...form.register('qualityTier')}
-                >
-                  <NativeSelectOption value='standard'>
-                    {t('Standard')}
-                  </NativeSelectOption>
-                  <NativeSelectOption value='light'>
-                    {t('Lightweight')}
-                  </NativeSelectOption>
-                </NativeSelect>
-              </div>
-            )}
-            <div className='space-y-1.5'>
-              <Label htmlFor='drawing-uc-preset'>
-                {t('Undesired content preset')}
-              </Label>
-              <NativeSelect
-                id='drawing-uc-preset'
-                className='w-full'
-                {...form.register('ucPreset')}
-              >
-                <NativeSelectOption value='none'>
-                  {t('None')}
-                </NativeSelectOption>
-                <NativeSelectOption value='heavy'>
-                  {t('Heavy')}
-                </NativeSelectOption>
-                <NativeSelectOption value='light'>
-                  {t('Lightweight')}
-                </NativeSelectOption>
-                <NativeSelectOption value='humanFocus'>
-                  {t('Human focus')}
-                </NativeSelectOption>
-              </NativeSelect>
-            </div>
-            <label className='flex items-center justify-between gap-3 text-sm'>
-              <span>{t('SMEA')}</span>
-              <Switch
-                checked={settings.smea}
-                onCheckedChange={(checked) => change({ smea: checked })}
-              />
-            </label>
-            <label className='flex items-center justify-between gap-3 text-sm'>
-              <span>{t('SMEA dynamic')}</span>
-              <Switch
-                checked={settings.smeaDyn}
-                onCheckedChange={(checked) => change({ smeaDyn: checked })}
-              />
-            </label>
-            <label className='flex items-center justify-between gap-3 text-sm'>
-              <span>{t('Decrisp')}</span>
-              <Switch
-                checked={settings.decrisp}
-                onCheckedChange={(checked) => change({ decrisp: checked })}
-              />
-            </label>
-          </AccordionContent>
-        </AccordionItem>
-      </Accordion>
+      <FieldGroup className='gap-3'>
+        <label className='flex items-center justify-between gap-3 text-sm'>
+          <span>{t('Quality tags')}</span>
+          <Switch
+            checked={settings.qualityToggle}
+            onCheckedChange={(checked) => change({ qualityToggle: checked })}
+          />
+        </label>
+        {settings.qualityToggle && (
+          <div className='space-y-1.5'>
+            <Label htmlFor='drawing-quality-tier'>
+              {t('Quality tag preset')}
+            </Label>
+            <NativeSelect
+              id='drawing-quality-tier'
+              className='w-full'
+              {...form.register('qualityTier')}
+            >
+              <NativeSelectOption value='standard'>
+                {t('Standard')}
+              </NativeSelectOption>
+              <NativeSelectOption value='light'>
+                {t('Lightweight')}
+              </NativeSelectOption>
+            </NativeSelect>
+          </div>
+        )}
+        <div className='space-y-1.5'>
+          <Label htmlFor='drawing-uc-preset'>
+            {t('Undesired content preset')}
+          </Label>
+          <NativeSelect
+            id='drawing-uc-preset'
+            className='w-full'
+            {...form.register('ucPreset')}
+          >
+            <NativeSelectOption value='none'>{t('None')}</NativeSelectOption>
+            <NativeSelectOption value='heavy'>{t('Heavy')}</NativeSelectOption>
+            <NativeSelectOption value='light'>
+              {t('Lightweight')}
+            </NativeSelectOption>
+            <NativeSelectOption value='humanFocus'>
+              {t('Human focus')}
+            </NativeSelectOption>
+          </NativeSelect>
+        </div>
+        <label className='flex items-center justify-between gap-3 text-sm'>
+          <span>{t('SMEA')}</span>
+          <Switch
+            checked={settings.smea}
+            onCheckedChange={(checked) => change({ smea: checked })}
+          />
+        </label>
+        <label className='flex items-center justify-between gap-3 text-sm'>
+          <span>{t('SMEA dynamic')}</span>
+          <Switch
+            checked={settings.smeaDyn}
+            onCheckedChange={(checked) => change({ smeaDyn: checked })}
+          />
+        </label>
+        <label className='flex items-center justify-between gap-3 text-sm'>
+          <span>{t('Decrisp')}</span>
+          <Switch
+            checked={settings.decrisp}
+            onCheckedChange={(checked) => change({ decrisp: checked })}
+          />
+        </label>
+      </FieldGroup>
     </div>
   )
 }

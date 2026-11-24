@@ -66,7 +66,7 @@ export function SyncPriceCell(props: {
           <div className='space-y-2'>
             {parsed.tiers.map((tier) => (
               <div
-                key={`${tier.label}|${tier.condition}`}
+                key={`${tier.label}:${tier.condition}`}
                 className='space-y-1'
               >
                 {parsed.tiers.length > 1 && (

@@ -7,12 +7,12 @@ import (
 	"fmt"
 	"mime"
 	"net/http"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/MoeForge/moego/regexp"
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
@@ -347,6 +347,7 @@ func initTaskArtifactAdaptor(task *model.Task) (relaychannel.TaskAdaptor, error)
 	adaptor.Init(&relaycommon.RelayInfo{
 		ChannelMeta: &relaycommon.ChannelMeta{
 			ChannelType:     channelModel.Type,
+			ChannelId:       channelModel.Id,
 			ChannelBaseUrl:  baseURL,
 			ApiKey:          pluginKey,
 			ChannelSetting:  channelModel.GetSetting(),
