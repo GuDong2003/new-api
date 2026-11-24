@@ -206,57 +206,63 @@ func TestModelSquareGroupVisibility(t *testing.T) {
 				t.Skip("set " + dialect.env + " to run this database")
 			}
 			db := modelManagementDB(t, dialect.kind, os.Getenv(dialect.env))
-			require.NoError(t, setting.UpdateUserUsableGroupsByJSONString(`{"default":"Public"}`))
-			require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(`{"default":1,"internal":2}`))
+			require.NoError(t, setting.UpdateUserUsableGroupsByJSONString(`{"square-visible-test":"Public"}`))
+			require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(`{"square-visible-test":1,"square-private-test":2}`))
 			require.NoError(t, db.Create(&[]model.Ability{
-				{Model: "shared", Group: "default", ChannelId: 1, Enabled: true},
-				{Model: "shared", Group: "internal", ChannelId: 1, Enabled: true},
-				{Model: "private-only", Group: "internal", ChannelId: 1, Enabled: true},
-				{Model: "wildcard", Group: "all", ChannelId: 1, Enabled: true},
-				{Model: "wildcard", Group: "internal", ChannelId: 1, Enabled: true},
+				{Model: "square-shared-model-test", Group: "square-visible-test", ChannelId: 1, Enabled: true},
+				{Model: "square-shared-model-test", Group: "square-private-test", ChannelId: 1, Enabled: true},
+				{Model: "square-private-model-test", Group: "square-private-test", ChannelId: 1, Enabled: true},
+				{Model: "square-wildcard-model-test", Group: "all", ChannelId: 1, Enabled: true},
+				{Model: "square-wildcard-model-test", Group: "square-private-test", ChannelId: 1, Enabled: true},
 			}).Error)
 			model.InvalidatePricingCache()
 			t.Cleanup(model.InvalidatePricingCache)
 
 			guest := pricingByModelName(modelSquareData[[]model.Pricing](t, GetPricing, "/api/pricing", ""))
-			assert.Equal(t, []string{"default"}, guest["shared"].EnableGroup)
-			assert.Equal(t, []string{"all"}, guest["wildcard"].EnableGroup)
-			assert.NotContains(t, guest, "private-only")
-			member := pricingByModelName(modelSquareData[[]model.Pricing](t, GetPricing, "/api/pricing", "internal"))
-			assert.ElementsMatch(t, []string{"default", "internal"}, member["shared"].EnableGroup)
-			assert.Equal(t, []string{"internal"}, member["private-only"].EnableGroup)
+			assert.Equal(t, []string{"square-visible-test"}, guest["square-shared-model-test"].EnableGroup)
+			assert.Equal(t, []string{"all"}, guest["square-wildcard-model-test"].EnableGroup)
+			assert.NotContains(t, guest, "square-private-model-test")
+			member := pricingByModelName(modelSquareData[[]model.Pricing](t, GetPricing, "/api/pricing", "square-private-test"))
+			assert.ElementsMatch(t, []string{"square-visible-test", "square-private-test"}, member["square-shared-model-test"].EnableGroup)
+			assert.Equal(t, []string{"square-private-test"}, member["square-private-model-test"].EnableGroup)
 
 			require.NoError(t, db.AutoMigrate(&model.PerfMetric{}))
 			ts := time.Now().Add(-time.Hour).Unix()
 			require.NoError(t, db.Create(&[]model.PerfMetric{
-				{ModelName: "shared", Group: "default", BucketTs: ts, RequestCount: 1, SuccessCount: 1},
-				{ModelName: "shared", Group: "internal", BucketTs: ts, RequestCount: 1},
-				{ModelName: "private-only", Group: "internal", BucketTs: ts, RequestCount: 1},
+				{ModelName: "square-shared-model-test", Group: "square-visible-test", BucketTs: ts, RequestCount: 1, SuccessCount: 1},
+				{ModelName: "square-shared-model-test", Group: "square-private-test", BucketTs: ts, RequestCount: 1},
+				{ModelName: "square-private-model-test", Group: "square-private-test", BucketTs: ts, RequestCount: 1},
 			}).Error)
-			const detailPath = "/api/perf-metrics?model=shared"
-			const summaryPath = "/api/perf-metrics/summary?recent_model=private-only"
+			const detailPath = "/api/perf-metrics?model=square-shared-model-test"
+			const summaryPath = "/api/perf-metrics/summary?recent_model=square-private-model-test"
 			detail := modelSquareData[perfmetrics.QueryResult](t, GetPerfMetrics, detailPath, "")
 			require.Len(t, detail.Groups, 1)
-			assert.Equal(t, "default", detail.Groups[0].Group)
-			denied := modelSquareData[perfmetrics.QueryResult](t, GetPerfMetrics, detailPath+"&group=internal", "")
+			assert.Equal(t, "square-visible-test", detail.Groups[0].Group)
+			denied := modelSquareData[perfmetrics.QueryResult](t, GetPerfMetrics, detailPath+"&group=square-private-test", "")
 			assert.Empty(t, denied.Groups)
 			summary := modelSquareData[perfmetrics.SummaryAllResult](t, GetPerfMetricsSummary, summaryPath, "")
 			require.Len(t, summary.Models, 1)
-			assert.Equal(t, "shared", summary.Models[0].ModelName)
+			assert.Equal(t, "square-shared-model-test", summary.Models[0].ModelName)
 			assert.Equal(t, 100.0, summary.Models[0].SuccessRate)
-			assert.NotContains(t, summary.RecentSuccessSeries, "private-only")
-			allowed := modelSquareData[perfmetrics.QueryResult](t, GetPerfMetrics, detailPath+"&group=internal", "internal")
+			assert.NotContains(t, summary.RecentSuccessSeries, "square-private-model-test")
+			allowed := modelSquareData[perfmetrics.QueryResult](t, GetPerfMetrics, detailPath+"&group=square-private-test", "square-private-test")
 			require.Len(t, allowed.Groups, 1)
-			assert.Equal(t, "internal", allowed.Groups[0].Group)
+			assert.Equal(t, "square-private-test", allowed.Groups[0].Group)
 
 			require.NoError(t, setting.UpdateUserUsableGroupsByJSONString(`{}`))
 			assert.Empty(t, modelSquareData[[]model.Pricing](t, GetPricing, "/api/pricing", ""))
 			assert.Empty(t, modelSquareData[perfmetrics.QueryResult](t, GetPerfMetrics, detailPath, "").Groups)
 			assert.Empty(t, modelSquareData[perfmetrics.SummaryAllResult](t, GetPerfMetricsSummary, summaryPath, "").Models)
 			dashboard := modelSquareData[perfmetrics.SummaryAllResult](t, GetDashboardPerfMetricsSummary, "/api/data/perf-metrics/summary", "")
-			assert.Len(t, dashboard.Models, 2)
-			require.NotNil(t, dashboard.Summary)
-			assert.Equal(t, 33.33, dashboard.Summary.SuccessRate)
+			// The dashboard includes all groups and may include observations from
+			// other tests. Check the two models owned by this fixture.
+			dashboardRates := make(map[string]float64, len(dashboard.Models))
+			for _, item := range dashboard.Models {
+				dashboardRates[item.ModelName] = item.SuccessRate
+			}
+			assert.Contains(t, dashboardRates, "square-private-model-test")
+			assert.Equal(t, 50.0, dashboardRates["square-shared-model-test"])
+			assert.Zero(t, dashboardRates["square-private-model-test"])
 		})
 	}
 }
