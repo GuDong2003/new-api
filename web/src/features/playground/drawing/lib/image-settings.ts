@@ -59,7 +59,8 @@ export const imageSettingsSchema = z.object({
     .default('auto'),
   n: z.number().int().min(1).max(10).default(1),
   background: z.enum(['auto', 'transparent', 'opaque']).default('opaque'),
-  outputFormat: z.enum(['png', 'jpeg', 'webp', 'gif']).default('png'),
+  outputFormat: z.enum(['png', 'jpeg', 'webp', 'gif', 'svg']).default('png'),
+  complexity: z.enum(['low', 'medium', 'high']).default('high'),
   frameCount: z.number().int().min(2).max(16).default(9),
   frameDurationMs: z.number().int().min(20).max(2000).default(200),
   outputCompression: z.number().int().min(0).max(100).default(100),
@@ -145,6 +146,7 @@ export function normalizeStoredImageSettings(
   if (stored.generationMode !== 'tags') {
     for (const field of TAG_SETTING_FIELDS) delete stored[field]
   }
+  if (stored.outputFormat !== 'svg') delete stored.complexity
   // Parsing a stored document restores the defaults of the omitted fields.
   return stored as z.infer<typeof imageSettingsSchema>
 }
@@ -188,8 +190,25 @@ function isLegacyGptImageModel(model: string): boolean {
   )
 }
 
-export function supportsImageAnimation(model: string): boolean {
+export function isGPTImage26(model: string): boolean {
   return /(^|[/.:_-])gpt-image-2\.6(?:[/.:_-]|$)/i.test(model.trim())
+}
+
+export function supportsSVGOutput(
+  model: string,
+  mode: 'generate' | 'edit'
+): boolean {
+  return mode === 'generate' && isGPTImage26(model)
+}
+
+export function settingsForImageOutput(
+  settings: z.infer<typeof imageSettingsSchema>
+): z.infer<typeof imageSettingsSchema> {
+  if (settings.outputFormat !== 'svg') return settings
+  if (!supportsSVGOutput(settings.model, settings.mode)) {
+    return { ...settings, outputFormat: 'png' }
+  }
+  return settings.n === 1 ? settings : { ...settings, n: 1 }
 }
 
 /**
@@ -234,7 +253,8 @@ export const MAX_PRESET_PROMPT_CHARACTERS = 4000
  * and the video-style models only ever return one, so a batch would leave the
  * extra canvas nodes waiting for images that never arrive.
  */
-export function getMaxImagesPerRequest(model: string): number {
+export function getMaxImagesPerRequest(model: string, format = 'png'): number {
+  if (format === 'svg') return 1
   const family = getImageModelFamily(model)
   if (family === 'dall-e-3' || family === 'imagen' || family === 'seedream') {
     return 1
@@ -272,7 +292,7 @@ export function requiresReferenceImages(model: string): boolean {
 
 /** Among Alibaba's models only the Wanx image editor repaints under a mask. */
 export function supportsImageMask(model: string, format = 'png'): boolean {
-  if (format === 'gif') return false
+  if (format === 'gif' || format === 'svg') return false
   if (getImageModelFamily(model) !== 'alibaba') return true
   return getAlibabaImageModel(model)?.mask ?? false
 }
@@ -688,7 +708,11 @@ export function settingsForImageModel(
   settings: Partial<z.infer<typeof imageSettingsSchema>>,
   model: string
 ): z.infer<typeof imageSettingsSchema> {
-  const next = { ...DEFAULT_IMAGE_SETTINGS, ...settings, model }
+  const next = settingsForImageOutput({
+    ...DEFAULT_IMAGE_SETTINGS,
+    ...settings,
+    model,
+  })
   // Old runtime settings can outlive the schema that originally parsed them.
   for (const field of ['stream', 'partialImages', 'user']) {
     Reflect.deleteProperty(next, field)
@@ -696,7 +720,7 @@ export function settingsForImageModel(
   const family = getImageModelFamily(model)
   const classified = classifyImageModelFamily(model)
   if (classified) next.generationMode = getImageGenerationMode(classified)
-  if (next.outputFormat === 'gif' && !supportsImageAnimation(model)) {
+  if (next.outputFormat === 'gif' && !isGPTImage26(model)) {
     next.outputFormat = 'png'
   }
   if (family === 'gpt-image') {
@@ -705,7 +729,7 @@ export function settingsForImageModel(
       next.outputFormat = 'png'
     }
   }
-  next.n = Math.min(next.n, getMaxImagesPerRequest(model))
+  next.n = Math.min(next.n, getMaxImagesPerRequest(model, next.outputFormat))
   if (family === 'novelai') {
     // NovelAI sizes the image from its width and height and only generates.
     next.size = `${next.width}x${next.height}`
@@ -779,11 +803,14 @@ export function validateImageSettings(
     return "The prompt mentions a reference image that this request does not send. Remove the mention or insert the image again; to change a canvas image's prompt, use Reuse prompt and settings."
   }
   const family = getImageModelFamily(settings.model)
-  if (
-    settings.outputFormat === 'gif' &&
-    !supportsImageAnimation(settings.model)
-  ) {
+  if (settings.outputFormat === 'gif' && !isGPTImage26(settings.model)) {
     return 'This model does not support GIF output.'
+  }
+  if (
+    settings.outputFormat === 'svg' &&
+    !supportsSVGOutput(settings.model, settings.mode)
+  ) {
+    return 'SVG output requires GPT Image 2.6 in Text to image mode.'
   }
   if (family === 'novelai') {
     return validateNovelAIImageSettings(settings)
@@ -794,7 +821,9 @@ export function validateImageSettings(
   if (family === 'dall-e-3' && settings.n !== 1) {
     return 'DALL·E 3 supports one image per request.'
   }
-  if (settings.n > getMaxImagesPerRequest(settings.model)) {
+  if (
+    settings.n > getMaxImagesPerRequest(settings.model, settings.outputFormat)
+  ) {
     return 'This model supports one image per request.'
   }
   // Runes, not UTF-16 units: a surrogate pair counts once upstream.
@@ -844,6 +873,13 @@ export function validateImageSettings(
       Math.max(width, height) > 3840
     ) {
       return 'Custom dimensions must be multiples of 16, at most 3840 pixels per side, with a 1:3 to 3:1 aspect ratio.'
+    }
+    const pixels = width * height
+    if (
+      settings.outputFormat === 'svg' &&
+      (pixels < 655360 || pixels > 8294400)
+    ) {
+      return 'SVG dimensions must have 655,360 to 8,294,400 total pixels.'
     }
   }
   if (
@@ -980,6 +1016,9 @@ export function buildImagePayload(
     if (settings.outputFormat === 'gif') {
       payload.frame_count = settings.frameCount
       payload.frame_duration_ms = settings.frameDurationMs
+    }
+    if (settings.outputFormat === 'svg') {
+      payload.complexity = settings.complexity
     }
     if (settings.mode === 'edit' && settings.inputFidelity !== 'default') {
       payload.input_fidelity = settings.inputFidelity

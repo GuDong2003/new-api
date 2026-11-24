@@ -23,6 +23,7 @@ import {
   imageDownloadName,
   imageSourceToAsset,
 } from '../image-assets'
+import { parseImageResponse } from '../image-stream'
 
 class TestImage extends EventTarget {
   naturalWidth = 512
@@ -33,6 +34,86 @@ class TestImage extends EventTarget {
 afterEach(() => vi.unstubAllGlobals())
 
 describe('image source assets', () => {
+  it('keeps the provider SVG bytes and viewBox dimensions through download', async () => {
+    const svg =
+      '<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 64"><path d="M0 0h128v64H0z"/></svg>'
+    const [result] = parseImageResponse(
+      { data: [{ b64_json: btoa(svg) }] },
+      'svg'
+    )
+    const asset = await imageSourceToAsset(
+      result.src,
+      'fox.svg',
+      result.mimeType
+    )
+    expect(asset).toMatchObject({
+      width: 128,
+      height: 64,
+      mimeType: 'image/svg+xml',
+    })
+    const file = await imageAssetToFile(asset)
+    expect(file.name).toBe(`${asset.id}.svg`)
+    expect(new TextDecoder().decode(await file.arrayBuffer())).toBe(svg)
+    expect(imageDownloadName('A fox', 0, file.type)).toMatch(/\.svg$/)
+  })
+
+  it('keeps a linked SVG with a UTF-8 content type downloadable as SVG', async () => {
+    const svg =
+      '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="16"><rect width="32" height="16"/></svg>'
+    const mimeType = 'image/svg+xml;charset=utf-8'
+    const url = 'https://images.example/original.svg'
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(svg, {
+            headers: { 'Content-Type': mimeType },
+          })
+      )
+    )
+    const [result] = parseImageResponse(
+      { data: [{ url, mime_type: mimeType }] },
+      'svg'
+    )
+    const asset = await imageSourceToAsset(
+      result.src,
+      'fox.svg',
+      result.mimeType
+    )
+    const file = await imageAssetToFile(asset)
+    expect(file.type).toBe('image/svg+xml')
+    expect(new TextDecoder().decode(await file.arrayBuffer())).toBe(svg)
+  })
+
+  it('rejects a raster response to an SVG generation', () => {
+    expect(() =>
+      parseImageResponse(
+        {
+          output_format: 'png',
+          data: [{ b64_json: 'iVBORw0KGgoAAAANSUhEUg==' }],
+        },
+        'svg'
+      )
+    ).toThrow('The upstream provider did not return an SVG image.')
+  })
+
+  it.each([
+    '<script />',
+    '<use href="https://example.com/vector.svg#shape" />',
+  ])(
+    'rejects active SVG content before adopting the original (%s)',
+    async (element) => {
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 64">${element}</svg>`
+      await expect(
+        imageSourceToAsset(
+          `data:image/svg+xml;base64,${btoa(svg)}`,
+          'invalid.svg',
+          'image/svg+xml'
+        )
+      ).rejects.toThrow('The image response is invalid.')
+    }
+  )
+
   it('rejects an invalid data image when the browser cannot decode it', async () => {
     const images: TestImage[] = []
     vi.stubGlobal(

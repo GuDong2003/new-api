@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -159,7 +160,7 @@ func newContentAuditImageClient() *http.Client {
 	return &http.Client{Transport: transport, Timeout: 12 * time.Second, CheckRedirect: contentAuditImageRedirect}
 }
 
-func streamContentAuditImage(ctx context.Context, client *http.Client, raw string, target io.Writer, contentType *string) error {
+func streamContentAuditImage(ctx context.Context, client *http.Client, raw string, target io.Writer, contentType *string, extraTypes ...string) error {
 	u, err := contentAuditImageURL(raw)
 	if err != nil {
 		return err
@@ -168,7 +169,8 @@ func streamContentAuditImage(ctx context.Context, client *http.Client, raw strin
 	if err != nil {
 		return errContentAuditImage
 	}
-	request.Header.Set("Accept", "image/jpeg, image/png, image/webp, image/gif")
+	acceptedTypes := append([]string{"image/jpeg", "image/png", "image/webp", "image/gif"}, extraTypes...)
+	request.Header.Set("Accept", strings.Join(acceptedTypes, ", "))
 	request.Header.Set("Accept-Encoding", "identity")
 	request.Header.Set("User-Agent", "new-api-content-audit/1")
 	response, err := client.Do(request)
@@ -180,7 +182,7 @@ func streamContentAuditImage(ctx context.Context, client *http.Client, raw strin
 		return errContentAuditImage
 	}
 	*contentType, _, err = mime.ParseMediaType(response.Header.Get("Content-Type"))
-	if err != nil || (*contentType != "image/png" && *contentType != "image/jpeg" && *contentType != "image/webp" && *contentType != "image/gif") {
+	if err != nil || !slices.Contains(acceptedTypes, *contentType) {
 		return errContentAuditFile
 	}
 	n, err := io.CopyBuffer(target, response.Body, make([]byte, contentAuditOriginalBlock))

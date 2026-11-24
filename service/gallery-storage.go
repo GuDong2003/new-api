@@ -243,7 +243,20 @@ func validateGalleryOriginal(root, id string, size int64) (string, int, int, err
 	}
 	defer f.Close()
 	config, format, err := image.DecodeConfig(f)
-	if err != nil || config.Width < 1 || config.Height < 1 || (format != "png" && format != "jpeg" && format != "webp" && format != "gif") {
+	if err != nil {
+		if size > maxGallerySVGSize {
+			return "", 0, 0, model.ErrGalleryInvalid
+		}
+		if _, err = f.Seek(0, io.SeekStart); err != nil {
+			return "", 0, 0, model.ErrGalleryInvalid
+		}
+		width, height, err := staticSVGDimensions(f)
+		if err != nil {
+			return "", 0, 0, err
+		}
+		return gallerySVGMIMEType, width, height, nil
+	}
+	if config.Width < 1 || config.Height < 1 || (format != "png" && format != "jpeg" && format != "webp" && format != "gif") {
 		return "", 0, 0, model.ErrGalleryInvalid
 	}
 	if _, err = f.Seek(0, io.SeekStart); err != nil {
@@ -394,6 +407,10 @@ func (b *galleryThumbnailBuffer) Write(data []byte) (int, error) {
 func makeGalleryThumbnail(ctx context.Context, root string, record *model.GalleryImage) ([]byte, bool, error) {
 	if ctx.Err() != nil {
 		return nil, false, model.ErrGallerySave
+	}
+	if record.MIMEType == gallerySVGMIMEType {
+		// The validated vector can also serve as its own preview.
+		return nil, false, nil
 	}
 	if record.Bytes > 16<<20 || record.Width > 8192 || record.Height > 8192 || int64(record.Width)*int64(record.Height) > 16777216 {
 		return nil, false, nil

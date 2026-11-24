@@ -20,6 +20,7 @@ import { MarkerType, type Connection, type Edge } from '@xyflow/react'
 
 import type { DrawingNode } from '../types'
 import { getMaxReferenceImages } from './image-settings'
+import { SVG_IMAGE_MIME_TYPE } from './svg-image'
 
 export function getAvailableReferenceNodes(
   nodes: DrawingNode[],
@@ -29,7 +30,9 @@ export function getAvailableReferenceNodes(
     const node = nodes.find(
       (item) => item.id === id && item.data.status === 'complete'
     )
-    return node?.data.asset ? [node] : []
+    return node?.data.asset && node.data.asset.mimeType !== SVG_IMAGE_MIME_TYPE
+      ? [node]
+      : []
   })
 }
 
@@ -42,6 +45,7 @@ export function canConnectReference(
   const target = nodes.find((node) => node.id === connection.target)
   if (
     !source?.data.asset ||
+    source.data.asset.mimeType === SVG_IMAGE_MIME_TYPE ||
     source.data.status !== 'complete' ||
     !target ||
     target.data.status === 'pending'

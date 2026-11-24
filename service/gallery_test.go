@@ -534,6 +534,70 @@ func TestGalleryAnimatedGIFRoundTrip(t *testing.T) {
 	}
 }
 
+func TestGalleryVectorSVGRoundTrip(t *testing.T) {
+	const svg = `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 8">
+  <defs><linearGradient id="paint"><stop stop-color="#f80"/></linearGradient></defs>
+  <path d="M0 0h16v8H0z" fill="url(#paint)"/>
+</svg>`
+	dialects := map[string]gorm.Dialector{"sqlite": sqlite.Open(filepath.Join(t.TempDir(), "gallery.db"))}
+	if dsn := os.Getenv("GALLERY_TEST_MYSQL_DSN"); dsn != "" {
+		dialects["mysql"] = mysql.Open(dsn)
+	}
+	if dsn := os.Getenv("GALLERY_TEST_POSTGRES_DSN"); dsn != "" {
+		dialects["postgres"] = postgres.Open(dsn)
+	}
+	for name, dialect := range dialects {
+		t.Run(name, func(t *testing.T) {
+			galleryFixture(t, dialect)
+			ctx := t.Context()
+			saved, err := service.SaveTaskGalleryImage(ctx, 41, "task_svg", "image-0", "gpt-image-2.6-flare", "a fox icon", "image/svg+xml", strings.NewReader(svg))
+			require.NoError(t, err)
+			assert.Equal(t, "image/svg+xml", saved.MIMEType)
+			assert.Equal(t, 16, saved.Width)
+			assert.Equal(t, 8, saved.Height)
+			preview, previewType := readGalleryImage(t, 41, saved.ID, true)
+			assert.Equal(t, svg, string(preview))
+			assert.Equal(t, "image/svg+xml", previewType)
+
+			metadata := canvasSaveMetadata(t)
+			doc := metadata["document"].(map[string]any)
+			settings := doc["settings"].(map[string]any)
+			settings["model"], settings["outputFormat"], settings["complexity"] = "gpt-image-2.6-flare", "svg", "medium"
+			asset := doc["nodes"].([]any)[0].(map[string]any)["data"].(map[string]any)["asset"].(map[string]any)
+			asset["name"], asset["mimeType"] = "fox.svg", "image/svg+xml"
+			manifest := metadata["assets"].([]any)[0].(map[string]any)
+			manifest["bytes"], manifest["sha256"] = len(svg), fmt.Sprintf("%x", sha256.Sum256([]byte(svg)))
+			canvas, err := saveCanvasMetadata(t, 41, metadata, []string{"file:" + canvasFixtureAsset, svg})
+			require.NoError(t, err)
+			loaded, err := service.GetGalleryCanvas(ctx, 41, canvas.ID)
+			require.NoError(t, err)
+			loadedSettings := loaded.Document["settings"].(map[string]any)
+			assert.Equal(t, "svg", loadedSettings["outputFormat"])
+			assert.Equal(t, "medium", loadedSettings["complexity"])
+			assert.Equal(t, canvas.Document, loaded.Document)
+
+			response := httptest.NewRecorder()
+			web, _ := gin.CreateTestContext(response)
+			web.Set("id", 41)
+			web.Params = gin.Params{{Key: "id", Value: canvasFixtureAsset}}
+			web.Request = httptest.NewRequest(http.MethodGet, "/images/"+canvasFixtureAsset+"/file", nil)
+			controller.GetGalleryFile(web)
+			require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+			assert.Equal(t, "image/svg+xml", response.Header().Get("Content-Type"))
+			assert.Contains(t, response.Header().Get("Content-Disposition"), ".svg")
+			assert.Contains(t, response.Header().Get("Content-Security-Policy"), "sandbox")
+			assert.Equal(t, svg, response.Body.String())
+
+			for _, element := range []string{`<script/>`, `<use href="https://example.com/external.svg#a"/>`, `<style>@import "theme.css";</style>`} {
+				markup := `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="8">` + element + `</svg>`
+				_, err := gallerySave(t, 41, "drawing", "invalid-svg", []byte(markup))
+				assert.ErrorIs(t, err, model.ErrGalleryInvalid)
+			}
+		})
+	}
+}
+
 // galleryLargePNG is a noisy 1536x1024 picture, larger than a thumbnail, whose
 // right half is fully transparent when transparent is set. Noise keeps its PNG
 // thumbnail larger than a JPEG one would be.

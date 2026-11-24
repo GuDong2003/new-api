@@ -282,7 +282,7 @@ func SaveGalleryImage(ctx context.Context, user int, reader *multipart.Reader) (
 		if err == nil && len(rawURL) <= 8192 {
 			client := newContentAuditImageClient()
 			var declared string
-			err = streamContentAuditImage(ctx, client, string(rawURL), writer, &declared)
+			err = streamContentAuditImage(ctx, client, string(rawURL), writer, &declared, gallerySVGMIMEType)
 			client.CloseIdleConnections()
 		} else {
 			err = model.ErrGalleryInvalid
@@ -382,7 +382,7 @@ func SaveTaskGalleryImageFromURLWithSource(ctx context.Context, user int, taskID
 		client := newContentAuditImageClient()
 		defer client.CloseIdleConnections()
 		var declared string
-		return streamContentAuditImage(ctx, client, rawURL, writer, &declared)
+		return streamContentAuditImage(ctx, client, rawURL, writer, &declared, gallerySVGMIMEType)
 	})
 }
 
@@ -398,7 +398,12 @@ func validTaskGalleryInput(taskID, artifactKey, source, modelName, prompt, mimeT
 		!utf8.ValidString(modelName) || !utf8.ValidString(prompt) {
 		return false
 	}
-	return mimeType == "" || mimeType == "image/png" || mimeType == "image/jpeg" || mimeType == "image/webp" || mimeType == "image/gif"
+	switch mimeType {
+	case "", "image/png", "image/jpeg", "image/webp", "image/gif", gallerySVGMIMEType:
+		return true
+	default:
+		return false
+	}
 }
 
 func saveTaskGalleryImage(ctx context.Context, user int, metadata GalleryMetadata, normalized []byte, declaredMIME string, writeOriginal func(io.Writer) error) (*model.GalleryImage, error) {

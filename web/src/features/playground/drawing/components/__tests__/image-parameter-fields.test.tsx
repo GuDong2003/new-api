@@ -116,7 +116,7 @@ describe('Image parameter fields', () => {
     expect(
       screen.getByRole('group', { name: 'Image output format' })
     ).toHaveAccessibleDescription(
-      'GPT Image 2.6 offers PNG, JPEG, WebP and GIF output. GIF availability depends on the model and provider.'
+      'GIF and SVG availability depends on the upstream provider.'
     )
     expect(
       screen.getByText(
@@ -150,6 +150,63 @@ describe('Image parameter fields', () => {
     ).not.toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Generate' }))
     expect(onSubmit.mock.lastCall?.[0]).not.toHaveProperty('frame_count')
+  })
+
+  it('submits 2.6 text to image SVG as one image with the selected complexity and transparency', async () => {
+    const onSubmit = vi.fn()
+    render(
+      <ResolutionForm
+        settings={{
+          model: 'openai/gpt-image-2.6-sunburst',
+          n: 3,
+          outputFormat: 'gif',
+          background: 'transparent',
+          frameCount: 12,
+        }}
+        onSubmit={onSubmit}
+      />
+    )
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: 'SVG' }))
+    const complexity = screen.getByRole('combobox', {
+      name: 'Image complexity',
+    })
+    expect(complexity).toHaveValue('high')
+    await user.selectOptions(complexity, 'medium')
+    expect(
+      screen.queryByRole('spinbutton', { name: 'Image count' })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('spinbutton', { name: 'GIF frame count' })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('spinbutton', { name: 'Output compression' })
+    ).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Generate' }))
+    expect(onSubmit.mock.lastCall?.[0]).toEqual(
+      expect.objectContaining({
+        n: 1,
+        output_format: 'svg',
+        complexity: 'medium',
+        background: 'transparent',
+      })
+    )
+    expect(onSubmit.mock.lastCall?.[0]).not.toHaveProperty('frame_count')
+    expect(onSubmit.mock.lastCall?.[0]).not.toHaveProperty('output_compression')
+  })
+
+  it.each([
+    { model: 'gpt-image-2.6-flare', mode: 'edit' as const },
+    { model: 'gpt-image-2.5-sunburst', mode: 'generate' as const },
+    { model: 'chatgpt-image-latest', mode: 'generate' as const },
+  ])('does not offer SVG for $model in $mode mode', (settings) => {
+    render(<ResolutionForm settings={settings} />)
+    expect(
+      screen.queryByRole('button', { name: 'SVG' })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('combobox', { name: 'Image complexity' })
+    ).not.toBeInTheDocument()
   })
 
   it('keeps GIF unavailable on a 2.5 model', () => {

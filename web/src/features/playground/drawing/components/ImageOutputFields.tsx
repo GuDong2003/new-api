@@ -32,7 +32,7 @@ import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 
-import { supportsImageAnimation } from '../lib/image-settings'
+import { isGPTImage26, supportsSVGOutput } from '../lib/image-settings'
 import type { ImageSettings } from '../types'
 
 const OUTPUT_FORMATS = [
@@ -40,6 +40,7 @@ const OUTPUT_FORMATS = [
   { value: 'jpeg', label: 'JPEG' },
   { value: 'webp', label: 'WebP' },
   { value: 'gif', label: 'GIF' },
+  { value: 'svg', label: 'SVG' },
 ] as const
 
 export type ImageOutputSettings = Pick<
@@ -52,14 +53,20 @@ export function ImageOutputFields(props: {
 }) {
   const { t } = useTranslation()
   const form = useFormContext<ImageSettings>()
-  const [background, outputFormat, model] = useWatch({
+  const [background, outputFormat, model, mode] = useWatch({
     control: form.control,
-    name: ['background', 'outputFormat', 'model'],
+    name: ['background', 'outputFormat', 'model', 'mode'],
   })
-  const animationSupported = supportsImageAnimation(model)
-  const formats = OUTPUT_FORMATS.filter(
-    (option) => option.value !== 'gif' || animationSupported
-  )
+  const animationSupported = isGPTImage26(model)
+  const svgSupported = supportsSVGOutput(model, mode)
+  const formats = OUTPUT_FORMATS.filter((option) => {
+    if (option.value === 'gif') return animationSupported
+    if (option.value === 'svg') return svgSupported
+    return true
+  })
+  let formatColumns = 'grid-cols-3'
+  if (svgSupported) formatColumns = 'grid-cols-5'
+  else if (animationSupported) formatColumns = 'grid-cols-4'
   const transparent = background === 'transparent'
   const [jpegWarning, setJpegWarning] = useState(false)
   const warningId = useId()
@@ -77,6 +84,10 @@ export function ImageOutputFields(props: {
   ) => {
     form.setValue('background', next.background, { shouldDirty: true })
     form.setValue('outputFormat', next.outputFormat, { shouldDirty: true })
+    if (next.outputFormat === 'svg') {
+      form.setValue('n', 1, { shouldDirty: true })
+      form.clearErrors('n')
+    }
     form.clearErrors('root')
     setJpegWarning(false)
     props.onChange?.({
@@ -159,11 +170,7 @@ export function ImageOutputFields(props: {
           variant='outline'
           size='sm'
           spacing={1}
-          className={
-            formats.length === 4
-              ? 'grid w-full grid-cols-4 gap-1.5'
-              : 'grid w-full grid-cols-3 gap-1.5'
-          }
+          className={`grid w-full gap-1.5 ${formatColumns}`}
         >
           {formats.map((option) => (
             <ToggleGroupItem key={option.value} value={option.value}>
@@ -173,8 +180,13 @@ export function ImageOutputFields(props: {
         </ToggleGroup>
         {animationSupported && (
           <FieldDescription id={formatDescriptionId}>
-            {t(
-              'GPT Image 2.6 offers PNG, JPEG, WebP and GIF output. GIF availability depends on the model and provider.'
+            {svgSupported
+              ? t('GIF and SVG availability depends on the upstream provider.')
+              : t(
+                  'GPT Image 2.6 offers PNG, JPEG, WebP and GIF output. GIF availability depends on the model and provider.'
+                )}
+            {outputFormat === 'svg' && (
+              <> {t('SVG generates one image per request.')}</>
             )}
           </FieldDescription>
         )}

@@ -100,6 +100,39 @@ func TestImageGIFParameters(t *testing.T) {
 	}
 }
 
+func TestPlaygroundSVGImageRequest(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		mode   int
+		path   string
+		fields string
+		valid  bool
+	}{
+		{"single text generation", relayconstant.RelayModeImagesGenerations, "/pg/images/generations", `,"n":1,"size":"auto","quality":"xhigh","background":"transparent","complexity":"medium"`, true},
+		{"image edit", relayconstant.RelayModeImagesEdits, "/pg/images/edits", "", false},
+		{"batch", relayconstant.RelayModeImagesGenerations, "/pg/images/generations", `,"n":2`, false},
+		{"streaming", relayconstant.RelayModeImagesGenerations, "/pg/images/generations", `,"stream":true`, false},
+		{"partial images", relayconstant.RelayModeImagesGenerations, "/pg/images/generations", `,"partial_images":1`, false},
+		{"compression", relayconstant.RelayModeImagesGenerations, "/pg/images/generations", `,"output_compression":0`, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			body := `{"model":"gpt-image-2.6-flare","prompt":"a fox icon","output_format":"svg"` + test.fields + "}"
+			c.Request = httptest.NewRequest(http.MethodPost, test.path, bytes.NewBufferString(body))
+			c.Request.Header.Set("Content-Type", "application/json")
+			request, err := GetAndValidOpenAIImageRequest(c, test.mode)
+			if !test.valid {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			encoded, err := common.Marshal(request)
+			require.NoError(t, err)
+			assert.JSONEq(t, body, string(encoded))
+		})
+	}
+}
+
 // TestGetAndValidOpenAIImageRequestMultipartStream verifies multipart image
 // edit parsing: the stream field is parsed and validated, and the request body
 // stays replayable for the upstream request.

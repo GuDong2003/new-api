@@ -131,7 +131,8 @@ func normalizeCanvasSettings(kind string, input map[string]any) (map[string]any,
 		canvasDocumentField{name: "quality", typeName: "string", values: []string{"auto", "low", "medium", "high", "xhigh", "max", "standard", "hd", "1k", "2k", "4k"}, fallback: "auto"},
 		canvasDocumentField{name: "n", typeName: "integer", min: 1, max: 10, fallback: float64(1)},
 		canvasDocumentField{name: "background", typeName: "string", values: []string{"auto", "transparent", "opaque"}, fallback: "auto"},
-		canvasDocumentField{name: "outputFormat", typeName: "string", values: []string{"png", "jpeg", "webp", "gif"}, fallback: "png"},
+		canvasDocumentField{name: "outputFormat", typeName: "string", values: []string{"png", "jpeg", "webp", "gif", "svg"}, fallback: "png"},
+		canvasDocumentField{name: "complexity", typeName: "string", values: []string{"low", "medium", "high"}, optional: true},
 		canvasDocumentField{name: "frameCount", typeName: "integer", min: 2, max: 16, optional: true},
 		canvasDocumentField{name: "frameDurationMs", typeName: "integer", min: 20, max: 2000, optional: true},
 		canvasDocumentField{name: "outputCompression", typeName: "integer", max: 100, fallback: float64(100)},
@@ -174,7 +175,7 @@ func normalizeCanvasAsset(input any, assets *[]GalleryCanvasAssetRef, seen map[s
 		{name: "name", typeName: "string", max: 512},
 		{name: "width", typeName: "integer", min: 1, max: 32768},
 		{name: "height", typeName: "integer", min: 1, max: 32768},
-		{name: "mimeType", typeName: "string", values: []string{"image/png", "image/jpeg", "image/webp", "image/gif"}},
+		{name: "mimeType", typeName: "string", values: []string{"image/png", "image/jpeg", "image/webp", "image/gif", gallerySVGMIMEType}},
 	})
 	if err != nil {
 		return nil, err

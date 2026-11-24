@@ -78,8 +78,7 @@ func ReadGalleryOriginal(c *gin.Context) {
 		galleryAPIError(c, model.ErrGalleryUnavailable)
 		return
 	}
-	c.Header("Cache-Control", "private, no-store")
-	c.Header("X-Content-Type-Options", "nosniff")
+	setStoredImageHeaders(c, mime)
 	c.Header("Content-Disposition", `attachment; filename="`+imageFilename("original", mime)+`"`)
 	// No success headers are committed before acquisition and full validation.
 	c.DataFromReader(http.StatusOK, info.Size(), mime, file, nil)
@@ -175,10 +174,17 @@ func GetGalleryFile(c *gin.Context) {
 		galleryAPIError(c, model.ErrGalleryUnavailable)
 		return
 	}
-	c.Header("Cache-Control", "private, no-store")
-	c.Header("X-Content-Type-Options", "nosniff")
+	setStoredImageHeaders(c, mime)
 	c.Header("Content-Disposition", `inline; filename="`+imageFilename("gallery-image", mime)+`"`)
 	c.DataFromReader(http.StatusOK, info.Size(), mime, f, nil)
+}
+
+func setStoredImageHeaders(c *gin.Context, mimeType string) {
+	c.Header("Cache-Control", "private, no-store")
+	c.Header("X-Content-Type-Options", "nosniff")
+	if mimeType == "image/svg+xml" {
+		c.Header("Content-Security-Policy", "sandbox; default-src 'none'; style-src 'unsafe-inline'")
+	}
 }
 
 // imageFilename names a served image for whoever saves it. A browser saves a
@@ -194,6 +200,8 @@ func imageFilename(name, mimeType string) string {
 		return name + ".webp"
 	case "image/gif":
 		return name + ".gif"
+	case "image/svg+xml":
+		return name + ".svg"
 	}
 	return name
 }

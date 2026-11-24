@@ -20,6 +20,11 @@ import { CANVAS_ASSET_ID } from '@/features/gallery/lib/canvas-document'
 
 import type { ImageResponse, ImageResult } from '../types'
 import { IMAGE_MIME_TYPES, isSafeImageSource } from './image-assets'
+import {
+  isSVGImageType,
+  SVG_FORMAT_MISMATCH,
+  SVG_IMAGE_MIME_TYPE,
+} from './svg-image'
 
 export function parseImageResult(
   item: {
@@ -31,11 +36,13 @@ export function parseImageResult(
   },
   format = 'png'
 ): ImageResult {
-  let mimeType = ['jpeg', 'webp', 'gif'].includes(format)
-    ? `image/${format}`
-    : 'image/png'
-  if (item.mime_type && IMAGE_MIME_TYPES.includes(item.mime_type)) {
-    mimeType = item.mime_type
+  let mimeType = format === 'svg' ? SVG_IMAGE_MIME_TYPE : 'image/png'
+  if (['jpeg', 'webp', 'gif'].includes(format)) mimeType = `image/${format}`
+  const declaredType = item.mime_type
+  if (declaredType && isSVGImageType(declaredType)) {
+    mimeType = SVG_IMAGE_MIME_TYPE
+  } else if (declaredType && IMAGE_MIME_TYPES.includes(declaredType)) {
+    mimeType = declaredType
   }
   if (item.b64_json) {
     // Probe only the signature; decoding the full image would duplicate a
@@ -65,6 +72,9 @@ export function parseImageResult(
   if (!src || !isSafeImageSource(src)) {
     throw new Error('The image response is invalid.')
   }
+  if (format === 'svg' && mimeType !== SVG_IMAGE_MIME_TYPE) {
+    throw new Error(SVG_FORMAT_MISMATCH)
+  }
   return {
     src,
     mimeType,
@@ -86,7 +96,10 @@ export function parseImageResponse(
     throw new Error('The server returned no images.')
   }
   return response.data.map((item) =>
-    parseImageResult(item, response.output_format || format)
+    parseImageResult(
+      item,
+      format === 'svg' ? format : response.output_format || format
+    )
   )
 }
 
@@ -147,7 +160,10 @@ export async function readImageStream(
         ) {
           continue
         }
-        const image = parseImageResult(event, event.output_format || format)
+        const image = parseImageResult(
+          event,
+          format === 'svg' ? format : event.output_format || format
+        )
         const index = event.image_index ?? event.output_index ?? completed.size
         if (!Number.isInteger(index) || index < 0 || index > 9) {
           throw new Error('The image response is invalid.')

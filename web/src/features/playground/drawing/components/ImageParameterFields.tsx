@@ -90,6 +90,10 @@ export function ImageParameterFields(props: {
   const form = useFormContext<ImageSettings>()
   const settings = useWatch({ control: form.control }) as ImageSettings
   const family = getImageModelFamily(settings.model)
+  const maxImages = getMaxImagesPerRequest(
+    settings.model,
+    settings.outputFormat
+  )
   const qualities = getImageQualities(settings.model)
   const qualityOptions = QUALITY_OPTIONS.filter((option) =>
     family === 'gpt-image'
@@ -156,17 +160,27 @@ export function ImageParameterFields(props: {
           onChange={props.onOutputChange}
         />
       )}
-      {(getMaxImagesPerRequest(settings.model) > 1 ||
-        family !== 'gpt-image') && (
+      {settings.outputFormat === 'svg' && (
+        <ParameterSelect
+          name='complexity'
+          label='Image complexity'
+          options={[
+            { value: 'low', label: 'Low' },
+            { value: 'medium', label: 'Medium' },
+            { value: 'high', label: 'High' },
+          ]}
+        />
+      )}
+      {(maxImages > 1 || family !== 'gpt-image') && (
         <div className='grid grid-cols-2 gap-3'>
-          {getMaxImagesPerRequest(settings.model) > 1 && (
+          {maxImages > 1 && (
             <div className='space-y-1.5'>
               <Label htmlFor='drawing-n'>{t('Image count')}</Label>
               <Input
                 id='drawing-n'
                 type='number'
                 min={1}
-                max={getMaxImagesPerRequest(settings.model)}
+                max={maxImages}
                 step={1}
                 aria-invalid={Boolean(form.formState.errors.n)}
                 {...form.register('n', { valueAsNumber: true })}

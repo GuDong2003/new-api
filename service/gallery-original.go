@@ -45,7 +45,7 @@ func downloadGalleryOriginal(ctx context.Context, user int, raw string, client *
 		return nil, "", nil, err
 	}
 	declared := ""
-	err = streamContentAuditImage(ctx, client, raw, writer, &declared)
+	err = streamContentAuditImage(ctx, client, raw, writer, &declared, gallerySVGMIMEType)
 	closeErr := writer.Close()
 	if err != nil || closeErr != nil || ctx.Err() != nil {
 		cleanup()

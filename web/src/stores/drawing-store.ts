@@ -33,6 +33,7 @@ import {
   DEFAULT_IMAGE_SETTINGS,
   imageSettingsSchema,
   settingsForImageModel,
+  settingsForImageOutput,
 } from '@/features/playground/drawing/lib/image-settings'
 import {
   canConnectReference,
@@ -151,7 +152,7 @@ function syncModeAfterReferenceChange(
   nextCount: number
 ): ImageSettings {
   if (previousCount === 0 && nextCount > 0) {
-    return { ...settings, mode: 'edit' }
+    return settingsForImageOutput({ ...settings, mode: 'edit' })
   }
   if (previousCount > 0 && nextCount === 0) {
     return { ...settings, mode: 'generate' }
@@ -317,7 +318,10 @@ export const useDrawingStore = create<DrawingState>((set, get) => ({
                   ...(node.data.referenceIds || []),
                   connection.source,
                 ],
-                settings: { ...node.data.settings, mode: 'edit' },
+                settings: settingsForImageOutput({
+                  ...node.data.settings,
+                  mode: 'edit',
+                }),
                 mask: node.data.referenceIds?.length
                   ? node.data.mask
                   : undefined,
@@ -491,7 +495,7 @@ export const useDrawingStore = create<DrawingState>((set, get) => ({
     }),
   updateSettings: (settings) =>
     set((state) => {
-      const next = { ...state.settings, ...settings }
+      const next = settingsForImageOutput({ ...state.settings, ...settings })
       return {
         settings: next,
         // Reusing another mode's settings leaves the current mode remembered.
@@ -557,10 +561,7 @@ export const useDrawingStore = create<DrawingState>((set, get) => ({
       }
       if (
         state.referenceIds.length >= 16 ||
-        !state.nodes.some(
-          (node) =>
-            node.id === id && node.data.asset && node.data.status === 'complete'
-        )
+        getAvailableReferenceNodes(state.nodes, [id]).length === 0
       ) {
         return state
       }
@@ -583,16 +584,11 @@ export const useDrawingStore = create<DrawingState>((set, get) => ({
   // appending, as an upload does, moves no mention.
   setReferences: (ids) =>
     set((state) => {
-      const referenceIds = [...new Set(ids)]
-        .filter((id) =>
-          state.nodes.some(
-            (node) =>
-              node.id === id &&
-              node.data.status === 'complete' &&
-              node.data.asset
-          )
-        )
+      const referenceIds = getAvailableReferenceNodes(state.nodes, [
+        ...new Set(ids),
+      ])
         .slice(0, 16)
+        .map((node) => node.id)
       return {
         referenceIds,
         mask: state.mask?.referenceId === referenceIds[0] ? state.mask : null,

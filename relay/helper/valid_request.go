@@ -322,6 +322,21 @@ func GetAndValidOpenAIImageRequest(c *gin.Context, relayMode int) (*dto.ImageReq
 	if err := imageRequest.ValidateAnimation(); err != nil {
 		return nil, err
 	}
+	if strings.HasPrefix(c.Request.URL.Path, "/pg/images/") {
+		var outputFormat string
+		if common.Unmarshal(imageRequest.OutputFormat, &outputFormat) == nil && outputFormat == "svg" {
+			if relayMode != relayconstant.RelayModeImagesGenerations {
+				return nil, errors.New("SVG output is available for text to image generation only")
+			}
+			if *imageRequest.N != 1 {
+				return nil, errors.New("SVG generation requires n=1")
+			}
+			if (imageRequest.Stream != nil && *imageRequest.Stream) ||
+				len(imageRequest.PartialImages) != 0 || len(imageRequest.OutputCompression) != 0 {
+				return nil, errors.New("SVG generation requires a non-streaming request without partial_images or output_compression")
+			}
+		}
+	}
 
 	// Provider parameters can override the top-level count. Validate before
 	// pricing so malformed multipliers return a client error, not a pricing

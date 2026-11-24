@@ -487,8 +487,7 @@ func TaskArtifactContent(c *gin.Context) {
 			writeTaskArtifactError(c, http.StatusNotFound, "artifact_not_found", "Task or artifact not found")
 			return
 		}
-		c.Header("Cache-Control", "private, no-store")
-		c.Header("X-Content-Type-Options", "nosniff")
+		setStoredImageHeaders(c, mimeType)
 		c.Header("Content-Disposition", taskImageDisposition(task, artifactKey, mimeType))
 		c.DataFromReader(http.StatusOK, info.Size(), mimeType, file, nil)
 		return

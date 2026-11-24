@@ -41,6 +41,7 @@ import {
   normalizeStoredImageSettings,
   resolveImageRequestSize,
   settingsForImageModel,
+  settingsForImageOutput,
   validateImageSettings,
 } from '../image-settings'
 
@@ -50,6 +51,49 @@ const settings = {
   prompt: 'A blue ceramic cup',
 }
 describe('OpenAI image parameters', () => {
+  it('restores SVG settings on 2.6 and gives model or mode changes a valid output format', () => {
+    const vector = imageSettingsSchema.parse({
+      ...settings,
+      model: 'gpt-image-2.6-flare',
+      outputFormat: 'svg',
+      complexity: 'low',
+      n: 4,
+    })
+    const restored = normalizeStoredImageSettings(vector)
+    expect(restored).toMatchObject({
+      outputFormat: 'svg',
+      complexity: 'low',
+      n: 1,
+    })
+    expect(settingsForImageModel(restored, 'gpt-image-2.5')).toMatchObject({
+      outputFormat: 'png',
+      prompt: vector.prompt,
+    })
+    expect(settingsForImageOutput({ ...restored, mode: 'edit' })).toMatchObject(
+      {
+        mode: 'edit',
+        outputFormat: 'png',
+        prompt: vector.prompt,
+      }
+    )
+  })
+
+  it.each([
+    ['auto', true],
+    ['1536x864', true],
+    ['768x768', false],
+    ['3072x3072', false],
+  ])('enforces the 2.6 SVG size range for %s', (size, valid) => {
+    const vector = imageSettingsSchema.parse({
+      ...settings,
+      model: 'gpt-image-2.6-sunburst',
+      outputFormat: 'svg',
+      size,
+    })
+    expect(validateImageSettings(vector, 0) === null).toBe(valid)
+    if (valid) expect(buildImagePayload(vector).size).toBe(size)
+  })
+
   it('sends transparent GIF timing without still-image compression', () => {
     const animated = imageSettingsSchema.parse({
       ...settings,

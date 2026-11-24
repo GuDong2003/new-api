@@ -17,16 +17,23 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import type { ImageAsset } from '../types'
+import {
+  isSVGImageType,
+  readSVGImage,
+  SVG_FORMAT_MISMATCH,
+  SVG_IMAGE_MIME_TYPE,
+} from './svg-image'
 
 export const MAX_IMAGE_BYTES = 50 * 1024 * 1024
 /** A whole request may reach MAX_IMAGE_BYTES, but one reference may not. */
 export const MAX_REFERENCE_IMAGE_BYTES = 20 * 1024 * 1024
-export const IMAGE_MIME_TYPES = [
+const REFERENCE_MIME_TYPES = [
   'image/png',
   'image/jpeg',
   'image/webp',
   'image/gif',
 ]
+export const IMAGE_MIME_TYPES = [...REFERENCE_MIME_TYPES, SVG_IMAGE_MIME_TYPE]
 
 /**
  * Safe to keep: a picture that will still resolve after this tab is gone, which
@@ -34,7 +41,9 @@ export const IMAGE_MIME_TYPES = [
  */
 export function isSafeImageSource(source: string): boolean {
   if (
-    /^data:image\/(?:png|jpeg|webp|gif);base64,[a-zA-Z0-9+/=\s]+$/.test(source)
+    /^data:image\/(?:png|jpeg|webp|gif|svg\+xml);base64,[a-zA-Z0-9+/=\s]+$/.test(
+      source
+    )
   ) {
     return true
   }
@@ -73,6 +82,33 @@ export async function imageSourceToAsset(
     throw new Error('The image response is invalid.')
   }
   signal?.throwIfAborted()
+  if (mimeType === SVG_IMAGE_MIME_TYPE) {
+    let blob: Blob
+    try {
+      blob = await readImageBlob(source, signal)
+    } catch {
+      signal?.throwIfAborted()
+      const original =
+        /^https?:\/\//i.test(source) && (await readOriginal?.(source))
+      if (!original) {
+        throw new Error('The returned image could not be downloaded.')
+      }
+      if (!isSVGImageType(original.mimeType)) {
+        throw new Error(SVG_FORMAT_MISMATCH)
+      }
+      blob = await readImageBlob(original.src, signal)
+      source = original.src
+    }
+    const dimensions = await readSVGImage(blob)
+    signal?.throwIfAborted()
+    return {
+      id: crypto.randomUUID(),
+      name: name.slice(0, 512),
+      src: source,
+      mimeType,
+      ...dimensions,
+    }
+  }
   let shown = true
   const dimensions = await new Promise<{ width: number; height: number }>(
     (resolve, reject) => {
@@ -124,7 +160,7 @@ export async function imageSourceToAsset(
 }
 
 export async function imageFileToAsset(file: File): Promise<ImageAsset> {
-  if (!IMAGE_MIME_TYPES.includes(file.type)) {
+  if (!REFERENCE_MIME_TYPES.includes(file.type)) {
     throw new Error('Choose a PNG, JPEG, WebP or GIF image.')
   }
   if (file.size > MAX_IMAGE_BYTES) {
@@ -139,14 +175,14 @@ export async function imageFileToAsset(file: File): Promise<ImageAsset> {
   return imageSourceToAsset(source, file.name, file.type)
 }
 
-export async function imageAssetToFile(
-  asset: ImageAsset,
+async function readImageBlob(
+  source: string,
   signal?: AbortSignal
-): Promise<File> {
-  if (!isReadableImageSource(asset.src)) {
+): Promise<Blob> {
+  if (!isReadableImageSource(source)) {
     throw new Error('The image response is invalid.')
   }
-  const response = await fetch(asset.src, {
+  const response = await fetch(source, {
     signal,
     credentials: 'omit',
     referrerPolicy: 'no-referrer',
@@ -156,19 +192,29 @@ export async function imageAssetToFile(
       'The reference image could not be read. Try uploading it again.'
     )
   }
-  const blob = await response.blob()
-  if (!IMAGE_MIME_TYPES.includes(blob.type)) {
+  return response.blob()
+}
+
+export async function imageAssetToFile(
+  asset: ImageAsset,
+  signal?: AbortSignal
+): Promise<File> {
+  const blob = await readImageBlob(asset.src, signal)
+  const svg =
+    asset.mimeType === SVG_IMAGE_MIME_TYPE || isSVGImageType(blob.type)
+  if (!svg && !IMAGE_MIME_TYPES.includes(blob.type)) {
     throw new Error('Choose a PNG, JPEG, WebP or GIF image.')
   }
   if (blob.size > MAX_IMAGE_BYTES) {
     throw new Error('Each reference image must be smaller than 50 MB.')
   }
-  const extension = blob.type.split('/')[1]
+  if (svg) await readSVGImage(blob)
+  const extension = svg ? 'svg' : blob.type.split('/')[1]
   // Materialize the bytes before constructing the File. In some runtimes (notably
   // Bun + jsdom), a Blob from another realm is stringified as "[object Blob]"
   // when passed directly as a File part instead of being copied as binary data.
   return new File([await blob.arrayBuffer()], `${asset.id}.${extension}`, {
-    type: blob.type,
+    type: svg ? SVG_IMAGE_MIME_TYPE : blob.type,
   })
 }
 
@@ -177,6 +223,7 @@ const IMAGE_EXTENSIONS: Record<string, string> = {
   'image/jpeg': 'jpg',
   'image/webp': 'webp',
   'image/gif': 'gif',
+  [SVG_IMAGE_MIME_TYPE]: 'svg',
 }
 
 /**

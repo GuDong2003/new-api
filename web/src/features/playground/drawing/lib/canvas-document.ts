@@ -27,7 +27,7 @@ import {
   CANVAS_NODE_HEIGHT as DEFAULT_NODE_HEIGHT,
   CANVAS_NODE_WIDTH as DEFAULT_NODE_WIDTH,
 } from './canvas-geometry'
-import { isSafeImageSource } from './image-assets'
+import { IMAGE_MIME_TYPES, isSafeImageSource } from './image-assets'
 import {
   imageSettingsSchema,
   normalizeStoredImageSettings,
@@ -42,7 +42,7 @@ const assetSchema = z.object({
     .refine(isSafeImageSource),
   width: z.number().int().positive().max(32768),
   height: z.number().int().positive().max(32768),
-  mimeType: z.enum(['image/png', 'image/jpeg', 'image/webp', 'image/gif']),
+  mimeType: z.enum(IMAGE_MIME_TYPES),
 })
 const nodeSchema = z.object({
   id: z.string().min(1).max(128),

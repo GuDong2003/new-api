@@ -35,6 +35,7 @@ import {
   type ImagePayload,
 } from './lib/image-settings'
 import { parseImageResponse, readImageStream } from './lib/image-stream'
+import { SVG_IMAGE_MIME_TYPE } from './lib/svg-image'
 import type {
   ImageAsset,
   ImageResponse,
@@ -135,6 +136,9 @@ export async function generateImages(
     const files = await Promise.all(
       options.references.map((asset) => readImage(asset, options.signal))
     )
+    if (files.some((file) => file.type === SVG_IMAGE_MIME_TYPE)) {
+      throw new Error('Choose a PNG, JPEG, WebP or GIF image.')
+    }
     if (
       getImageModelFamily(options.settings.model) === 'dall-e-2' &&
       (files[0].type !== 'image/png' ||

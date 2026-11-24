@@ -49,6 +49,7 @@ import {
 } from '../lib/canvas-geometry'
 import { downloadBlob, imageDownloadName } from '../lib/image-assets'
 import { getMaxReferenceImages } from '../lib/image-settings'
+import { SVG_IMAGE_MIME_TYPE } from '../lib/svg-image'
 import type { DrawingNode } from '../types'
 import {
   ImageGenerationElapsed,
@@ -83,7 +84,8 @@ export const ImageCanvasNode = memo(function ImageCanvasNode(
     props.isConnectable &&
     !pending &&
     getMaxReferenceImages(props.data.settings.model) > 0
-  const canReference = props.isConnectable && complete && Boolean(asset)
+  const svg = asset?.mimeType === SVG_IMAGE_MIME_TYPE
+  const canReference = props.isConnectable && complete && Boolean(asset) && !svg
   return (
     <>
       <NodeResizer
@@ -294,7 +296,7 @@ export const ImageCanvasNode = memo(function ImageCanvasNode(
                 <span className='truncate'>{t('Collect result')}</span>
               </Button>
             )}
-            {!failed && !collectable && (
+            {!failed && !collectable && !svg && (
               <Button
                 type='button'
                 size='sm'
